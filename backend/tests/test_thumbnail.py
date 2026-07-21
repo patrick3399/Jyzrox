@@ -114,7 +114,10 @@ def _make_pil_mocks(width=100, height=100):
     mock_pil_img.size = (width, height)
 
     mock_rgb = MagicMock()
-    mock_rgb.copy.return_value = MagicMock()
+    mock_rgb.height = height
+    mock_thumb = MagicMock()
+    mock_thumb.height = height
+    mock_rgb.copy.return_value = mock_thumb
 
     mock_rgba = MagicMock()
     mock_rgba.size = (min(width, 100), min(height, 100))
@@ -130,6 +133,7 @@ def _make_pil_mocks(width=100, height=100):
 
     mock_pil_module = MagicMock()
     mock_pil_module.Image = mock_image_cls
+    mock_pil_module.ImageOps.exif_transpose.side_effect = lambda image: image
 
     return mock_pil_img, mock_pil_module
 
@@ -204,6 +208,33 @@ class TestGenerateSingleThumbnail:
 
     def _thumb_dir(self, tmp_path):
         return tmp_path / "thumbs" / SHA[:2] / SHA[2:4] / SHA
+
+    async def test_long_image_variants_use_fixed_width_tiers(self, tmp_path):
+        """Long images must not collapse below their advertised srcset width."""
+        from PIL import Image as PILImage
+
+        from worker.thumbnail import generate_single_thumbnail
+
+        blob = _make_blob(media_type="image")
+        src = tmp_path / "long.png"
+        PILImage.new("RGB", (100, 1000), "white").save(src)
+        td = self._thumb_dir(tmp_path)
+
+        with patch("worker.thumbnail.thumb_dir", return_value=td):
+            assert await generate_single_thumbnail(blob, src) is True
+
+        with PILImage.open(td / "thumb_160.webp") as thumbnail:
+            assert thumbnail.size == (100, 1000)  # small originals are never upscaled
+
+        larger_src = tmp_path / "larger-long.png"
+        PILImage.new("RGB", (200, 1000), "white").save(larger_src)
+        other_td = tmp_path / "other-thumbs"
+        other_blob = _make_blob(media_type="image")
+        other_blob.sha256 = "f" * 64
+        with patch("worker.thumbnail.thumb_dir", return_value=other_td):
+            assert await generate_single_thumbnail(other_blob, larger_src) is True
+        with PILImage.open(other_td / "thumb_160.webp") as thumbnail:
+            assert thumbnail.size == (160, 800)
 
     async def test_nonexistent_source_file_returns_false(self, tmp_path):
         """A src path that does not exist should return False immediately."""
@@ -307,6 +338,7 @@ class TestGenerateSingleThumbnail:
         # Pre-create all three thumb files so dest.exists() returns True
         for size in (160, 360, 720):
             (td / f"thumb_{size}.webp").write_bytes(b"existing")
+        (td / ".thumbnail-version").write_text("2", encoding="ascii")
 
         _, mock_pil_module = _make_pil_mocks(100, 100)
         mock_imagehash = _make_imagehash_mock("0000000000000000")
@@ -631,6 +663,7 @@ class TestBlobNeedsThumbnail:
         td.mkdir(parents=True)
         for size in (160, 360, 720):
             (td / f"thumb_{size}.webp").write_bytes(b"x")
+        (td / ".thumbnail-version").write_text("2", encoding="ascii")
         return td
 
     def test_none_blob_returns_false(self):

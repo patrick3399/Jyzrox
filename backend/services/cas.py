@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from db.models import Blob
 
+THUMBNAIL_SIZES = (160, 360, 720)
+THUMBNAIL_VERSION = 2
+THUMBNAIL_VERSION_FILENAME = ".thumbnail-version"
+
 
 def cas_path(sha256: str, ext: str) -> Path:
     """Return the CAS filesystem path for a blob.
@@ -108,9 +112,37 @@ def thumb_dir(sha256: str) -> Path:
     return Path(settings.data_thumbs_path) / sha256[:2] / sha256[2:4] / sha256
 
 
-def thumb_url(sha256: str) -> str:
-    """Return the 160px thumbnail URL."""
-    return f"/media/thumbs/{sha256[:2]}/{sha256[2:4]}/{sha256}/thumb_160.webp"
+def thumbnails_complete(sha256: str) -> bool:
+    """Return whether every current-version thumbnail tier exists."""
+    return thumbnails_complete_at(thumb_dir(sha256))
+
+
+def thumbnails_complete_at(directory: Path) -> bool:
+    """Return whether a thumbnail directory contains a complete current set."""
+    try:
+        version = int((directory / THUMBNAIL_VERSION_FILENAME).read_text(encoding="ascii").strip())
+    except OSError, ValueError:
+        return False
+    return version == THUMBNAIL_VERSION and all(
+        (directory / f"thumb_{size}.webp").is_file() for size in THUMBNAIL_SIZES
+    )
+
+
+def thumb_url(sha256: str, size: int = 160) -> str:
+    """Return a URL for one of the pre-generated thumbnail width tiers."""
+    if size not in THUMBNAIL_SIZES:
+        raise ValueError(f"Unsupported thumbnail size: {size}")
+    return f"/media/thumbs/{sha256[:2]}/{sha256[2:4]}/{sha256}/thumb_{size}.webp"
+
+
+def thumb_variants(sha256: str) -> dict[str, str]:
+    """Return every responsive thumbnail candidate for a blob."""
+    return {str(size): thumb_url(sha256, size) for size in THUMBNAIL_SIZES}
+
+
+def thumb_srcset(sha256: str) -> str:
+    """Return a width-descriptor srcset for local thumbnail candidates."""
+    return ", ".join(f"{thumb_url(sha256, size)} {size}w" for size in THUMBNAIL_SIZES)
 
 
 async def store_blob(
@@ -235,7 +267,23 @@ async def create_library_symlink(source: str, source_id: str, filename: str, blo
         link.symlink_to(os.path.relpath(target, link_dir))
 
 
-async def decrement_ref_count(sha256: str, session: AsyncSession) -> None:
-    """Decrement the ref_count of a blob by 1."""
-    stmt = update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count - 1)
+async def adjust_ref_count(sha256: str, delta: int, session: AsyncSession) -> None:
+    """Adjust a Blob reference count when Image rows are attached or detached."""
+    if delta == 0:
+        return
+    stmt = update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count + delta)
     await session.execute(stmt)
+
+
+async def increment_ref_count(sha256: str, session: AsyncSession, amount: int = 1) -> None:
+    """Increment a Blob reference count for newly attached Image rows."""
+    if amount < 0:
+        raise ValueError("amount must be non-negative")
+    await adjust_ref_count(sha256, amount, session)
+
+
+async def decrement_ref_count(sha256: str, session: AsyncSession, amount: int = 1) -> None:
+    """Decrement a Blob reference count for detached Image rows."""
+    if amount < 0:
+        raise ValueError("amount must be non-negative")
+    await adjust_ref_count(sha256, -amount, session)

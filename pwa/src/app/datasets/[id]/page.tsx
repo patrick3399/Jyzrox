@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { AppImage } from '@/components/AppImage'
 import { Pagination } from '@/components/Pagination'
 import { useLocale } from '@/components/LocaleProvider'
 import {
@@ -633,7 +634,7 @@ function DatasetDetailInner() {
               className="group overflow-hidden rounded-lg border border-vault-border bg-vault-card"
             >
               <div className="relative aspect-square bg-vault-bg">
-                <img
+                <AppImage
                   src={image.thumb_url}
                   alt={image.filename}
                   className="h-full w-full object-cover"

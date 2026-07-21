@@ -11,6 +11,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
+import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
 
 export default function ReadingListPage() {
@@ -72,8 +73,9 @@ export default function ReadingListPage() {
               onClick={() => router.push(galleryHref(g.source, g.source_id))}
             >
               {g.cover_thumb && (
-                <img
+                <AppImage
                   src={g.cover_thumb}
+                  sizes="48px"
                   alt=""
                   className="w-12 h-16 object-cover rounded bg-vault-input shrink-0"
                 />

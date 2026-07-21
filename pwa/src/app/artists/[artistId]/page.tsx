@@ -9,6 +9,7 @@ import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { Pagination } from '@/components/Pagination'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { AppImage } from '@/components/AppImage'
 import { t } from '@/lib/i18n'
 import { galleryHref } from '@/lib/galleryRoutes'
 import { useLocale } from '@/components/LocaleProvider'
@@ -258,7 +259,7 @@ export default function ArtistDetailPage() {
                 >
                   <div className="aspect-[3/4] bg-vault-bg relative overflow-hidden">
                     {gallery.cover_thumb ? (
-                      <img
+                      <AppImage
                         src={gallery.cover_thumb}
                         alt={gallery.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -325,7 +326,7 @@ export default function ArtistDetailPage() {
                       title={t('artists.fromGallery', { title: image.gallery_title })}
                     >
                       {image.thumb_path ? (
-                        <img
+                        <AppImage
                           src={image.thumb_path}
                           alt={image.filename ?? ''}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"

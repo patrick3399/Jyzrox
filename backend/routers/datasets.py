@@ -24,7 +24,7 @@ from db.models import (
     Tag,
 )
 from services.caption_engine import caption_engine_registry
-from services.cas import thumb_url
+from services.cas import thumb_srcset, thumb_url
 
 router = APIRouter(tags=["datasets"])
 _member = require_role("member")
@@ -461,7 +461,9 @@ def _evaluate_filters(rows: list, config: DatasetFilterConfig) -> tuple[list[tup
         if reason is None and config.phash_distance is not None:
             if blob.phash_int is None:
                 unknown_phash += 1
-            elif any(_phash_distance(blob.phash_int, previous) <= config.phash_distance for previous in retained_phashes):
+            elif any(
+                _phash_distance(blob.phash_int, previous) <= config.phash_distance for previous in retained_phashes
+            ):
                 reason = "phash_duplicate"
             else:
                 retained_phashes.append(blob.phash_int)
@@ -586,6 +588,7 @@ async def get_dataset(
             "height": blob.height,
             "caption": image.caption,
             "thumb_url": thumb_url(blob.sha256),
+            "thumb_srcset": thumb_srcset(blob.sha256),
             "state": member.state,
             "source": member.source,
             "exclusion_reason": member.exclusion_reason,

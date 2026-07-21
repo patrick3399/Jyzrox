@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +29,8 @@ from core.local_patterns import (
 )
 from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
-from db.models import Blob, Gallery, Image, ImportConflict, LibraryPath
-from services.cas import create_library_symlink, store_blob
+from db.models import Gallery, Image, ImportConflict, LibraryPath
+from services.cas import create_library_symlink, increment_ref_count, store_blob
 from services.image_magic import validate_image_magic
 
 router = APIRouter(tags=["import"])
@@ -109,7 +109,7 @@ async def import_web_clip(
         await db.flush()
         image = Image(gallery_id=gallery.id, page_num=1, filename=file.filename, blob_sha256=sha256)
         db.add(image)
-        await db.execute(update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count + 1))
+        await increment_ref_count(sha256, db)
         await db.commit()
         await create_library_symlink("webclip", source_id, file.filename or f"clip{suffix}", blob)
         await emit_safe(

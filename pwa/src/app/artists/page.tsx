@@ -10,6 +10,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { AppImage } from '@/components/AppImage'
 import { getSourceStyle } from '@/lib/galleryUtils'
 import { useInfiniteFollowedArtists, useCheckArtistUpdates } from '@/hooks/useFollowedArtists'
 import { toast } from 'sonner'
@@ -232,7 +233,7 @@ function ArtistsPageInner() {
                 >
                   <div className="aspect-square bg-vault-bg relative overflow-hidden">
                     {a.cover_thumb ? (
-                      <img
+                      <AppImage
                         src={a.cover_thumb}
                         alt={a.artist_name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -296,7 +297,7 @@ function ArtistsPageInner() {
                 >
                   <div className="aspect-square bg-vault-bg relative overflow-hidden">
                     {a.cover_thumb || a.artist_avatar ? (
-                      <img
+                      <AppImage
                         src={a.cover_thumb || a.artist_avatar || ''}
                         alt={a.artist_name ?? a.artist_id}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"

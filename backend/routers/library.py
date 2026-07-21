@@ -62,6 +62,7 @@ from services.cas import (
     library_url,
     thumb_dir,
 )
+from services.cas import thumb_srcset as cas_thumb_srcset
 from services.cas import thumb_url as cas_thumb_url
 from services.gallery_lifecycle import (
     hard_delete_galleries as _hard_delete_galleries,
@@ -517,6 +518,7 @@ def _i_browse(img: Image) -> dict:
         "width": blob.width if blob else None,
         "height": blob.height if blob else None,
         "thumb_path": _thumb_url(blob),
+        "thumb_srcset": _thumb_srcset(blob),
         "file_path": _to_url(blob),
         "thumbhash": blob.thumbhash if blob else None,
         "media_type": blob.media_type if blob else "image",
@@ -966,6 +968,7 @@ async def list_artist_images(
                 "height": blob.height if blob else None,
                 "file_path": _to_url(blob),
                 "thumb_path": _thumb_url(blob),
+                "thumb_srcset": _thumb_srcset(blob),
                 "file_size": blob.file_size if blob else None,
                 "file_hash": blob.sha256 if blob else None,
                 "media_type": blob.media_type if blob else "image",
@@ -1171,6 +1174,7 @@ async def list_gallery_files(
                 "file_size": f["file_size"],
                 "media_type": blob.media_type if blob else "image",
                 "thumb_path": _thumb_url(blob),
+                "thumb_srcset": _thumb_srcset(blob),
                 "file_path": _to_url(blob),
                 "is_symlink": f["is_symlink"],
                 "is_broken": f["is_broken"],
@@ -2060,7 +2064,7 @@ async def _restore_image_row(db: AsyncSession, gallery: Gallery, img: Image) -> 
     return active_count
 
 
-@router.post("/galleries/{source}/{source_id}/delete-image")
+@router.post("/galleries/{source}/{source_id}/delete-image", deprecated=True)
 async def delete_gallery_image(
     source: str,
     source_id: str,
@@ -2090,7 +2094,7 @@ async def delete_gallery_image(
 
     remaining_pages = await _hide_image_row(db, gallery, img)
     await db.commit()
-    return {"status": "ok", "remaining_pages": remaining_pages}
+    return {"status": "ok", "action": "hidden", "remaining_pages": remaining_pages}
 
 
 @router.post("/images/{image_id}/hide")
@@ -2575,6 +2579,7 @@ async def find_similar_images(
                 "filename": r.filename,
                 "file_path": _row_to_url(r),
                 "thumb_path": cas_thumb_url(r.sha256),
+                "thumb_srcset": cas_thumb_srcset(r.sha256),
                 "phash": r.phash,
                 "distance": r.distance,
             }
@@ -2729,6 +2734,11 @@ def _thumb_url(blob) -> str | None:
     return cas_thumb_url(blob.sha256)
 
 
+def _thumb_srcset(blob) -> str | None:
+    """Return all responsive thumbnail candidates when a base thumb exists."""
+    return cas_thumb_srcset(blob.sha256) if _thumb_url(blob) else None
+
+
 async def _get_or_404_by_source(db: AsyncSession, source: str, source_id: str, auth: dict | None = None) -> Gallery:
     """Fetch a gallery by (source, source_id) with optional access filter. Raises 404 if not found."""
     source_id = unquote(source_id)
@@ -2812,6 +2822,7 @@ def _i(img: Image) -> dict:
         "height": blob.height if blob else None,
         "file_path": _to_url(blob),
         "thumb_path": _thumb_url(blob),
+        "thumb_srcset": _thumb_srcset(blob),
         "file_size": blob.file_size if blob else None,
         "file_hash": blob.sha256 if blob else None,
         "media_type": blob.media_type if blob else "image",

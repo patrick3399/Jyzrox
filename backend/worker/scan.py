@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import text, update
+from sqlalchemy import text
 from sqlalchemy.sql import select
 
 import core.queue
@@ -23,11 +23,14 @@ from db.models import Blob, ExcludedBlob, Gallery, Image, LibraryPath
 from services.cas import (
     create_library_symlink,
     decrement_ref_count,
+    increment_ref_count,
     library_dir,
     resolve_blob_path,
     store_blob,
     thumb_dir,
+    thumbnails_complete_at,
 )
+from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run, _sha256
 
@@ -70,7 +73,7 @@ def _cover_image_for_gallery(
 
 
 def _has_thumb_160(blob: Blob) -> bool:
-    return (thumb_dir(blob.sha256) / "thumb_160.webp").exists()
+    return thumbnails_complete_at(thumb_dir(blob.sha256))
 
 
 async def _get_library_specs(session, *, monitored_only: bool = False) -> list[_LibrarySpec]:
@@ -186,7 +189,6 @@ async def rescan_library_job(ctx: dict) -> dict:
     N+1 query problem that arises with per-gallery SELECT FROM images.
     """
     import json as _json
-    import shutil
     from collections import Counter, defaultdict
 
     from sqlalchemy.orm import selectinload
@@ -297,10 +299,6 @@ async def rescan_library_job(ctx: dict) -> dict:
                                 img.id,
                                 str(src),
                             )
-                            # Remove thumbnail directory immediately (filesystem op)
-                            td = thumb_dir(blob.sha256)
-                            if td.exists():
-                                shutil.rmtree(str(td), ignore_errors=True)
                             shas_to_decrement.append(blob.sha256)
                             images_to_delete.append(img.id)
                             removed += 1
@@ -349,17 +347,8 @@ async def rescan_library_job(ctx: dict) -> dict:
                 # images referencing the same sha (each missing image = -1).
                 if shas_to_decrement:
                     sha_counts = Counter(shas_to_decrement)
-                    unique_shas = list(sha_counts.keys())
-                    decrements = [sha_counts[s] for s in unique_shas]
-                    await session.execute(
-                        text("""
-                            UPDATE blobs SET ref_count = ref_count - v.n
-                            FROM (SELECT unnest(:shas ::text[]) AS sha,
-                                         unnest(:ns ::int[])  AS n) v
-                            WHERE blobs.sha256 = v.sha
-                        """),
-                        {"shas": unique_shas, "ns": decrements},
-                    )
+                    for sha256, count in sha_counts.items():
+                        await decrement_ref_count(sha256, session, count)
 
                 # Batch delete orphaned/missing images
                 if images_to_delete:
@@ -376,6 +365,9 @@ async def rescan_library_job(ctx: dict) -> dict:
                     )
 
                 await session.commit()
+
+                if shas_to_decrement:
+                    await cleanup_unreferenced_thumbnails(session, shas_to_decrement)
 
                 # Enqueue thumbnail jobs outside the transaction
                 for gid in galleries_needing_cover_thumbs:
@@ -466,8 +458,6 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         )
         excluded_set: set[str] = set(excluded_rows)
 
-        import shutil
-
         from sqlalchemy.orm import selectinload
 
         images = (
@@ -488,6 +478,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         missing_thumb = False
         missing_cover_thumb = False
         removed = 0
+        removed_blob_sha256s: list[str] = []
         cover_image = _cover_image_for_gallery(gallery, images, excluded_set)
         for img in images:
             blob = img.blob
@@ -503,11 +494,8 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                     img.id,
                     str(src),
                 )
-                # Delete thumbnail directory before removing the DB record
-                td = thumb_dir(blob.sha256)
-                if td.exists():
-                    shutil.rmtree(str(td), ignore_errors=True)
                 await decrement_ref_count(blob.sha256, session)
+                removed_blob_sha256s.append(blob.sha256)
                 await session.delete(img)
                 removed += 1
                 continue
@@ -597,9 +585,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
 
                 if inserted is not None:
                     # New Image row created — increment blob ref_count.
-                    await session.execute(
-                        update(Blob).where(Blob.sha256 == file_hash).values(ref_count=Blob.ref_count + 1)
-                    )
+                    await increment_ref_count(file_hash, session)
                 new_files_added += 1
                 missing_thumb = True  # New file needs a thumbnail.
                 if max_page == 1 or get_display_config(gallery.source or "").cover_page == "last":
@@ -631,17 +617,17 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 missing_cover_thumb = True
 
         if gallery.pages == 0 and gallery.import_mode == "link":
-            # All source files are gone — clean up blob ref-counts and thumbnail dirs
+            # All source files are gone — clean up blob references. Shared
+            # thumbnails are removed only after the committed Image changes.
             # Use final_images (already queried above) — re-querying returns empty because
             # images were deleted in Step 1 and flushed, causing the blob leak.
             for rim in final_images:
                 if rim.blob:
-                    td = thumb_dir(rim.blob.sha256)
-                    if td.exists():
-                        shutil.rmtree(str(td), ignore_errors=True)
                     await decrement_ref_count(rim.blob.sha256, session)
+                    removed_blob_sha256s.append(rim.blob.sha256)
             await session.delete(gallery)
             await session.commit()
+            await cleanup_unreferenced_thumbnails(session, removed_blob_sha256s)
             logger.info("[rescan_gallery] gallery_id=%d removed (link mode, all files gone)", gallery_id)
             return {"status": "removed", "gallery_id": gallery_id, "removed": removed, "added": 0, "pages": 0}
 
@@ -652,6 +638,9 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         gallery.last_scanned_at = datetime.now(UTC)
 
         await session.commit()
+
+        if removed_blob_sha256s:
+            await cleanup_unreferenced_thumbnails(session, removed_blob_sha256s)
 
     if missing_thumb:
         if missing_cover_thumb:

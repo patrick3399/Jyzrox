@@ -766,6 +766,7 @@ export default function GalleryDetailPage() {
                 src={images[0].thumb_path}
                 alt={gallery.title}
                 className="w-40 h-56 object-cover rounded"
+                sizes="160px"
               />
             ) : (
               <div className="w-40 h-56 bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
@@ -1517,6 +1518,7 @@ export default function GalleryDetailPage() {
                         src={image.thumb_path}
                         alt=""
                         className="h-12 w-9 object-cover rounded border border-vault-border"
+                        sizes="36px"
                       />
                     )}
                     <div className="flex flex-col min-w-0">

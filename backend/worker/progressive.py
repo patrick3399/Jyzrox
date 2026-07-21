@@ -6,7 +6,6 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import select
@@ -15,10 +14,18 @@ import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
-from db.models import Blob, ExcludedBlob, Gallery, Image
+from db.models import ExcludedBlob, Gallery, Image
 from plugins.models import GalleryImportData
-from services.cas import create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
+from services.cas import (
+    create_library_symlink,
+    decrement_ref_count,
+    increment_ref_count,
+    library_dir,
+    store_blob,
+    thumb_dir,
+)
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
+from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
 
@@ -632,9 +639,7 @@ class ProgressiveImporter:
 
                 if inserted is not None:
                     # New Image row was created — increment blob ref_count now.
-                    await session.execute(
-                        update(Blob).where(Blob.sha256 == final_sha256).values(ref_count=Blob.ref_count + 1)
-                    )
+                    await increment_ref_count(final_sha256, session)
                     self._known_sha256s.add(final_sha256)
                     self._known_filenames.add(file_path.name)
                     if source_item_id:
@@ -941,14 +946,11 @@ class ProgressiveImporter:
             # Delete gallery — CASCADE removes images, gallery_tags, read_progress
             await session.delete(gallery)
             await session.commit()
-
-            # Determine which blobs are now unreferenced (safe to remove thumbs)
-            zero_ref_sha256s: set[str] = set()
-            if blob_sha256s:
-                zero_ref_result = await session.execute(
-                    select(Blob.sha256).where(Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0)
-                )
-                zero_ref_sha256s = set(zero_ref_result.scalars().all())
+            zero_ref_sha256s = await cleanup_unreferenced_thumbnails(
+                session,
+                blob_sha256s,
+                directory_resolver=thumb_dir,
+            )
 
         logger.info(
             "[progressive] cleanup: deleted gallery_id=%d blobs=%d zero_ref=%d",
@@ -967,15 +969,6 @@ class ProgressiveImporter:
                     except OSError as exc:
                         logger.warning("[progressive] failed to remove library dir %s: %s", lib_dir, exc)
 
-            # Only remove thumbnail directories for blobs that are no longer referenced
-            for sha256 in zero_ref_sha256s:
-                td = thumb_dir(sha256)
-                if td.exists():
-                    try:
-                        shutil.rmtree(str(td), ignore_errors=True)
-                    except OSError as exc:
-                        logger.warning("[progressive] failed to remove thumb dir %s: %s", td, exc)
-
         try:
             await asyncio.to_thread(_delete_filesystem)
         except Exception as exc:
@@ -989,7 +982,6 @@ class ProgressiveImporter:
         restores the pre-run gallery snapshot. The gallery row and its prior
         images survive.
         """
-        import shutil
 
         for task in self._tasks:
             task.cancel()
@@ -1033,13 +1025,11 @@ class ProgressiveImporter:
             ).scalar_one()
             gallery.pages = count
             await session.commit()
-
-            zero_ref_sha256s: set[str] = set()
-            if removed_shas:
-                zero_ref_result = await session.execute(
-                    select(Blob.sha256).where(Blob.sha256.in_(removed_shas), Blob.ref_count <= 0)
-                )
-                zero_ref_sha256s = set(zero_ref_result.scalars().all())
+            zero_ref_sha256s = await cleanup_unreferenced_thumbnails(
+                session,
+                removed_shas,
+                directory_resolver=thumb_dir,
+            )
 
         logger.info(
             "[progressive] partial-run cleanup: gallery_id=%d kept, removed_images=%d zero_ref=%d",
@@ -1057,13 +1047,6 @@ class ProgressiveImporter:
                         (lib_dir / name).unlink(missing_ok=True)
                     except OSError as exc:
                         logger.warning("[progressive] failed to remove symlink %s: %s", lib_dir / name, exc)
-            for sha256 in zero_ref_sha256s:
-                td = thumb_dir(sha256)
-                if td.exists():
-                    try:
-                        shutil.rmtree(str(td), ignore_errors=True)
-                    except OSError as exc:
-                        logger.warning("[progressive] failed to remove thumb dir %s: %s", td, exc)
 
         try:
             await asyncio.to_thread(_remove_run_artifacts)

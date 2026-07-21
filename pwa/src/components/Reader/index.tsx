@@ -22,6 +22,7 @@ import {
 import VideoPlayer from './VideoPlayer'
 import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
+import { AppImage } from '@/components/AppImage'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
 
 // ── URL resolver ──────────────────────────────────────────────────────
@@ -1394,10 +1395,11 @@ function ThumbnailStrip({
                 {spriteStyle ? (
                   <div style={spriteStyle} />
                 ) : thumbSrc ? (
-                  <img
+                  <AppImage
                     src={thumbSrc}
                     alt={`Thumb ${img.pageNum}`}
                     className="h-full w-full object-cover"
+                    sizes="60px"
                   />
                 ) : (
                   <div className="h-full w-full bg-neutral-800 flex items-center justify-center">

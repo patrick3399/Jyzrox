@@ -50,6 +50,7 @@ export interface GalleryImage {
   height: number | null
   file_path: string | null
   thumb_path: string | null
+  thumb_srcset?: string | null
   file_size: number | null
   file_hash: string | null
   media_type: 'image' | 'video' | 'gif'
@@ -82,6 +83,7 @@ export interface BrowseImage {
   width: number | null
   height: number | null
   thumb_path: string | null
+  thumb_srcset?: string | null
   file_path: string | null
   thumbhash: string | null
   media_type: 'image' | 'video' | 'gif'
@@ -583,6 +585,7 @@ export interface DatasetImage {
   height: number | null
   caption: string | null
   thumb_url: string
+  thumb_srcset?: string | null
   state: 'included' | 'excluded'
   source: 'gallery' | 'collection' | 'manual' | 'tag_query'
   exclusion_reason:
@@ -886,6 +889,7 @@ export interface LibraryFile {
   file_size: number | null
   media_type: string
   thumb_path: string | null
+  thumb_srcset?: string | null
   file_path: string | null
   is_symlink: boolean
   is_broken: boolean
@@ -906,6 +910,7 @@ export interface DedupStats {
 export interface RelationshipBlob {
   sha256: string
   thumb_url: string | null
+  thumb_srcset?: string | null
   image_url: string | null
   width: number | null
   height: number | null

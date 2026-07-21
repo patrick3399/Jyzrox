@@ -9,6 +9,7 @@ import { galleryHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
+import { AppImage } from '@/components/AppImage'
 import type { Gallery, DownloadJob } from '@/lib/types'
 import { loadDashboardConfig, DASHBOARD_LINKS_CONFIG_KEY } from '@/components/DashboardLinksConfig'
 import { passesFeatureFlag } from '@/lib/pageRegistry'
@@ -115,7 +116,7 @@ function GalleryThumb({ gallery }: { gallery: Gallery }) {
     <Link href={galleryHref(gallery.source, gallery.source_id)} className="group block">
       <div className="aspect-[2/3] bg-vault-card rounded-lg overflow-hidden border border-vault-border group-hover:border-vault-border-hover transition-colors relative">
         {gallery.cover_thumb ? (
-          <img
+          <AppImage
             src={gallery.cover_thumb}
             alt={gallery.title || 'Untitled'}
             className="w-full h-full object-cover"

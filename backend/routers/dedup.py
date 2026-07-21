@@ -15,7 +15,7 @@ from core.auth import require_role
 from core.database import async_session
 from core.keys import cursor_hmac_key
 from db.models import Blob, BlobRelationship, Image
-from services.cas import cas_url, thumb_url
+from services.cas import adjust_ref_count, cas_url, thumb_srcset, thumb_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["dedup"])
@@ -59,6 +59,7 @@ def _blob_detail(blob: Blob) -> dict:
         "height": blob.height,
         "file_size": blob.file_size,
         "thumb_url": thumb_url(blob.sha256),
+        "thumb_srcset": thumb_srcset(blob.sha256),
         "image_url": cas_url(blob.sha256, blob.extension),
     }
 
@@ -192,12 +193,8 @@ async def keep_blob(
 
         # Adjust ref_counts by the actual number of remapped images
         if remapped > 0:
-            await session.execute(
-                update(Blob).where(Blob.sha256 == discard_sha).values(ref_count=Blob.ref_count - remapped)
-            )
-            await session.execute(
-                update(Blob).where(Blob.sha256 == keep_sha).values(ref_count=Blob.ref_count + remapped)
-            )
+            await adjust_ref_count(discard_sha, -remapped, session)
+            await adjust_ref_count(keep_sha, remapped, session)
 
         await session.execute(
             update(BlobRelationship).where(BlobRelationship.id == pair_id).values(relationship="resolved")

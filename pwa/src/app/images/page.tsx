@@ -8,6 +8,7 @@ import { useLibrarySources, useGalleryCategories } from '@/hooks/useGalleries'
 import { useThumbhash } from '@/hooks/useThumbhash'
 import { useLongPress } from '@/hooks/useLongPress'
 import { JustifiedGrid } from '@/components/JustifiedGrid'
+import { AppImage } from '@/components/AppImage'
 import { TimelineScrubber } from '@/components/TimelineScrubber'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
@@ -345,7 +346,7 @@ function ImageBrowserInner() {
             />
           )}
           {/* Actual image */}
-          <img
+          <AppImage
             src={img.thumb_path || ''}
             alt=""
             loading="lazy"

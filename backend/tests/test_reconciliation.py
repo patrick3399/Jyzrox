@@ -476,9 +476,12 @@ class TestReconciliationJob:
         ]
 
         session = _make_session_ctx(execute_side_effects=execute_returns)
+        durability_events: list[str] = []
+        session.commit.side_effect = lambda: durability_events.append("commit")
 
         fake_cas_file = MagicMock(spec=Path)
         fake_cas_file.exists.return_value = True
+        fake_cas_file.unlink.side_effect = lambda: durability_events.append("unlink")
         fake_td = MagicMock(spec=Path)
         fake_td.exists.return_value = False
 
@@ -497,6 +500,7 @@ class TestReconciliationJob:
         assert result["status"] == "done"
         assert result["orphan_blobs_cleaned"] == 1
         fake_cas_file.unlink.assert_called_once()
+        assert durability_events.index("commit") < durability_events.index("unlink")
 
     async def test_drifted_ref_counts_corrected(self, tmp_path):
         """Blobs with ref_count<=0 but actual_refs>0 should have ref_count corrected."""

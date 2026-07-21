@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # Consistent 64-character hex sha256 used throughout
 SHA = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 
@@ -342,6 +344,26 @@ class TestThumbUrl:
         result = thumb_url(SHA)
 
         assert isinstance(result, str)
+
+    def test_thumb_url_supports_responsive_width_tiers(self):
+        from services.cas import thumb_url
+
+        assert thumb_url(SHA, 360).endswith("/thumb_360.webp")
+        assert thumb_url(SHA, 720).endswith("/thumb_720.webp")
+
+    def test_thumb_url_rejects_unknown_tier(self):
+        from services.cas import thumb_url
+
+        with pytest.raises(ValueError, match="Unsupported thumbnail size"):
+            thumb_url(SHA, 999)
+
+    def test_thumb_srcset_lists_all_static_candidates(self):
+        from services.cas import thumb_srcset
+
+        srcset = thumb_srcset(SHA)
+        assert "thumb_160.webp 160w" in srcset
+        assert "thumb_360.webp 360w" in srcset
+        assert "thumb_720.webp 720w" in srcset
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 import json
 import os
-import shutil
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,8 +12,16 @@ from sqlalchemy.sql import select
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import Blob, Gallery, Image
-from services.cas import OWNER_MARKER_FILENAME, cas_path, create_library_symlink, safe_source_id, thumb_dir
+from services.cas import (
+    OWNER_MARKER_FILENAME,
+    cas_path,
+    create_library_symlink,
+    decrement_ref_count,
+    safe_source_id,
+    thumb_dir,
+)
 from services.library_sidecar import SIDECAR_FILENAME, sidecar_payload_from_gallery, write_gallery_sidecar
+from services.thumbnail_lifecycle import remove_thumbnail_dirs_sync
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
 
@@ -110,6 +118,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         "repaired_galleries": 0,
         "sidecars_written": 0,
         "cas_orphans_removed": 0,
+        "thumbnail_orphans_removed": 0,
     }
 
     lib_base = Path(settings.data_library_path)
@@ -245,10 +254,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
 
             if dead_image_ids:
                 # Batch decrement ref_counts
-                await session.execute(
-                    text("UPDATE blobs SET ref_count = ref_count - 1 WHERE sha256 = ANY(:shas)"),
-                    {"shas": dead_blob_shas},
-                )
+                for sha256, count in Counter(dead_blob_shas).items():
+                    await decrement_ref_count(sha256, session, count)
                 # Batch delete images
                 await session.execute(
                     text("DELETE FROM images WHERE id = ANY(:ids)"),
@@ -396,7 +403,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 FROM blobs b
                 LEFT JOIN images i ON i.blob_sha256 = b.sha256
                 GROUP BY b.sha256, b.extension, b.storage, b.external_path, b.ref_count
-                HAVING b.ref_count != COUNT(i.id)
+                HAVING COUNT(i.id) = 0 OR b.ref_count != COUNT(i.id)
             """)
             )
         ).all()
@@ -430,7 +437,16 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             chunk = truly_orphaned[chunk_start : chunk_start + _BLOB_CHUNK]
             chunk_shas = [r.sha256 for r in chunk]
 
-            # Delete CAS files and thumb dirs first (filesystem ops)
+            # Commit the authoritative DB deletion before removing bytes.  A
+            # crash can therefore leave only row-less orphan files (repaired by
+            # Phase 4), never a live Blob row pointing at bytes deleted before
+            # its transaction committed (HR-003).
+            await session.execute(
+                text("DELETE FROM blobs WHERE sha256 = ANY(:shas)"),
+                {"shas": chunk_shas},
+            )
+            await session.commit()
+
             for row in chunk:
                 cas_file = cas_path(row.sha256, row.extension)
                 if cas_file.exists():
@@ -439,16 +455,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                     except OSError as exc:
                         logger.warning("[reconcile] failed to delete CAS file %s: %s", cas_file, exc)
 
-                td = thumb_dir(row.sha256)
-                if td.exists():
-                    shutil.rmtree(str(td), ignore_errors=True)
-
-            # Batch delete blob records
-            await session.execute(
-                text("DELETE FROM blobs WHERE sha256 = ANY(:shas)"),
-                {"shas": chunk_shas},
-            )
-            await session.commit()
+            remove_thumbnail_dirs_sync(chunk_shas, directory_resolver=thumb_dir)
 
             stats["orphan_blobs_cleaned"] += len(chunk)
             processed_p3 += len(chunk)
@@ -518,6 +525,57 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 logger.warning("[reconcile] failed to delete orphan CAS file %s: %s", path, exc)
 
         logger.info("[reconcile] Phase 4 done: removed %d row-less CAS files", stats["cas_orphans_removed"])
+
+    # A DB-first orphan-Blob deletion may crash before filesystem cleanup.
+    # Remove the corresponding row-less thumbnail directories on the next run.
+    thumbs_setting = getattr(settings, "data_thumbs_path", None)
+    if isinstance(thumbs_setting, str):
+        thumbs_base = Path(thumbs_setting)
+        if thumbs_base.exists():
+            cutoff = datetime.now(UTC).timestamp() - _CAS_ORPHAN_MIN_AGE_SECONDS
+            thumb_candidates: list[tuple[str, Path]] = []
+            for d1 in os.scandir(str(thumbs_base)):
+                if not d1.is_dir(follow_symlinks=False):
+                    continue
+                for d2 in os.scandir(d1.path):
+                    if not d2.is_dir(follow_symlinks=False):
+                        continue
+                    for sha_entry in os.scandir(d2.path):
+                        if not sha_entry.is_dir(follow_symlinks=False):
+                            continue
+                        try:
+                            if sha_entry.stat().st_mtime > cutoff:
+                                continue
+                        except OSError:
+                            continue
+                        thumb_candidates.append((sha_entry.name, Path(sha_entry.path)))
+
+            orphan_thumb_paths: list[Path] = []
+            if thumb_candidates:
+                try:
+                    async with AsyncSessionLocal() as session:
+                        for chunk_start in range(0, len(thumb_candidates), _BLOB_CHUNK):
+                            chunk = thumb_candidates[chunk_start : chunk_start + _BLOB_CHUNK]
+                            chunk_shas = [sha for sha, _ in chunk]
+                            existing = set(
+                                (await session.execute(select(Blob.sha256).where(Blob.sha256.in_(chunk_shas))))
+                                .scalars()
+                                .all()
+                            )
+                            orphan_thumb_paths.extend(path for sha, path in chunk if sha not in existing)
+                except Exception as exc:
+                    logger.warning(
+                        "[reconcile] Thumbnail orphan cleanup aborted, keeping directories: %s",
+                        exc,
+                    )
+                    orphan_thumb_paths = []
+
+            orphan_thumb_map = {path.name: path for path in orphan_thumb_paths}
+            if orphan_thumb_map:
+                stats["thumbnail_orphans_removed"] += remove_thumbnail_dirs_sync(
+                    orphan_thumb_map,
+                    directory_resolver=orphan_thumb_map.__getitem__,
+                )
 
     await _cron_record(ctx, "reconciliation", "ok")
 

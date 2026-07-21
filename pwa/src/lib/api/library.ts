@@ -348,6 +348,7 @@ export const library = {
       filename: string
       file_path: string
       thumb_path: string | null
+      thumb_srcset?: string | null
       phash: string
       distance: number
     }>

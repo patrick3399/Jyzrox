@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { useCollection, useUpdateCollection, useRemoveGalleryFromCollection } from '@/hooks/useCollections'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { AppImage } from '@/components/AppImage'
 import { Pagination } from '@/components/Pagination'
 import { t } from '@/lib/i18n'
 import { galleryHref } from '@/lib/galleryRoutes'
@@ -186,7 +187,7 @@ function CollectionDetailInner() {
               >
                 <div className="aspect-[3/4] bg-vault-bg overflow-hidden">
                   {g.cover_thumb ? (
-                    <img
+                    <AppImage
                       src={g.cover_thumb}
                       alt={g.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"

@@ -9,6 +9,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
+import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
 
 function daysRemaining(deletedAt: string, retentionDays: number = 30): number {
@@ -135,8 +136,9 @@ export default function TrashPage() {
               className="bg-vault-card border border-vault-border rounded-lg p-3 flex items-center gap-3"
             >
               {g.cover_thumb && (
-                <img
+                <AppImage
                   src={g.cover_thumb}
+                  sizes="48px"
                   alt=""
                   className="w-12 h-16 object-cover rounded bg-vault-input shrink-0"
                 />

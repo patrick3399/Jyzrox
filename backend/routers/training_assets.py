@@ -10,15 +10,15 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image as PILImage
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import gallery_access_filter, require_role
 from core.config import settings
 from core.database import get_db
 from core.events import EventType, emit_safe
-from db.models import Blob, Dataset, Gallery, GeneratedImageMetadata, Image, LoraModel
-from services.cas import create_library_symlink, store_blob
+from db.models import Dataset, Gallery, GeneratedImageMetadata, Image, LoraModel
+from services.cas import create_library_symlink, increment_ref_count, store_blob
 
 router = APIRouter(tags=["training-assets"])
 _member = require_role("member")
@@ -235,7 +235,7 @@ async def import_comfyui_png(
                 workflow_json=workflow_json,
             )
         )
-        await db.execute(update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count + 1))
+        await increment_ref_count(sha256, db)
         await db.commit()
         await create_library_symlink("comfyui", source_id, "generated.png", blob)
         await emit_safe(

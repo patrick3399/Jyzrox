@@ -35,6 +35,7 @@ import {
 import { toast } from 'sonner'
 
 import { SkeletonGrid } from '@/components/Skeleton'
+import { AppImage } from '@/components/AppImage'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useWorkbenchKeyboard } from '@/hooks/useWorkbenchKeyboard'
 import { api } from '@/lib/api'
@@ -410,7 +411,7 @@ function SelectableCard({
         {preview && isVideo ? (
           <video src={preview} muted preload="metadata" className="h-full w-full object-cover" />
         ) : preview ? (
-          <img src={preview} alt="" className="h-full w-full object-cover" />
+          <AppImage src={preview} alt="" className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center text-vault-text-muted">
             {isFolder ? <Folder size={48} strokeWidth={1.25} /> : <ImageIcon size={44} strokeWidth={1.25} />}
@@ -474,7 +475,7 @@ function GalleryFileItem({
         className={`flex w-full items-center gap-3 border-b border-vault-border px-3 py-2 text-left outline-none transition-colors hover:bg-vault-card-hover ${focused ? 'bg-vault-accent/10 ring-2 ring-inset ring-vault-accent' : ''}`}
       >
         <span className="flex h-16 w-24 shrink-0 overflow-hidden rounded-md bg-vault-bg-secondary sm:h-20 sm:w-28">
-          {file.thumb_path ? <img src={file.thumb_path} alt="" loading="lazy" className="h-full w-full object-contain" /> : <span className="flex h-full w-full items-center justify-center text-vault-text-muted"><FileImage size={28} /></span>}
+          {file.thumb_path ? <AppImage src={file.thumb_path} alt="" loading="lazy" className="h-full w-full object-contain" sizes="112px" /> : <span className="flex h-full w-full items-center justify-center text-vault-text-muted"><FileImage size={28} /></span>}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-vault-text" title={file.filename}>{file.filename}</span>
@@ -498,7 +499,7 @@ function GalleryFileItem({
       onDoubleClick={coarse ? undefined : onOpen}
       className={`overflow-hidden rounded-lg border border-vault-border bg-vault-card text-left outline-none ${focused ? 'ring-2 ring-vault-accent ring-offset-2 ring-offset-vault-bg' : ''}`}
     >
-      {file.thumb_path ? <img src={file.thumb_path} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" /> : <span className="flex aspect-[4/3] items-center justify-center"><FileImage size={40} /></span>}
+      {file.thumb_path ? <AppImage src={file.thumb_path} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" /> : <span className="flex aspect-[4/3] items-center justify-center"><FileImage size={40} /></span>}
       <span className="block truncate p-2 text-xs text-vault-text" title={file.filename}>{file.filename}</span>
     </button>
   )
@@ -1311,7 +1312,7 @@ export function ExplorerWorkbench() {
           {layout === 'finder' && activeItem && (
             <div className="hidden h-[42%] min-h-[240px] items-center justify-center border-b border-vault-border bg-black/20 p-5 lg:flex">
               {'id' in activeItem ? (
-                activeItem.cover_thumb ? <img src={activeItem.cover_thumb} alt="" className="h-full max-w-full object-contain" /> : <Folder size={80} strokeWidth={1} className="text-vault-text-muted" />
+                activeItem.cover_thumb ? <AppImage src={activeItem.cover_thumb} alt="" className="h-full max-w-full object-contain" /> : <Folder size={80} strokeWidth={1} className="text-vault-text-muted" />
               ) : activeItem.kind === 'media' ? (
                 /\.(mp4|webm)$/i.test(activeItem.name)
                   ? <video controls src={api.explorer.physicalPreviewUrl(physicalId, activeItem.path)} className="h-full max-w-full" />

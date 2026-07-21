@@ -172,6 +172,8 @@ class TestProgressiveImporterCleanup:
         await _insert_blob(db_session, sha_b, ref_count=1)
         await _insert_image(db_session, gallery_id, 1, sha_a)
         await _insert_image(db_session, gallery_id, 2, sha_b)
+        shared_gallery_id = await _insert_gallery(db_session, source_id="shared_001")
+        await _insert_image(db_session, shared_gallery_id, 1, sha_a)
 
         importer = ProgressiveImporter(db_job_id=None, user_id=None)
         importer.gallery_id = gallery_id

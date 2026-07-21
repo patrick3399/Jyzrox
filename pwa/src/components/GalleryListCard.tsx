@@ -159,6 +159,7 @@ export function GalleryListCard({
               alt={gallery.title}
               className="w-full h-full object-cover"
               loading="lazy"
+              sizes="88px"
               fallbackClassName="w-full h-full bg-vault-input"
             />
           ) : (

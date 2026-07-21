@@ -80,13 +80,7 @@ describe('AppImage', () => {
     expect(container.querySelector('picture')).toBeNull()
   })
 
-  it('does not route pre-generated /media/thumbs/ thumbnails through imgproxy', () => {
-    // Regression: thumb_160.webp is already a tiny optimized thumbnail. Routing
-    // it through imgproxy bought negligible bytes while adding a cold-cache AVIF
-    // encode and a /media/image auth subrequest per tile — the overhead that
-    // made the library grid load slower than serving the static thumb. It must
-    // render as a plain <img> pointing at the original thumb, with no <picture>
-    // srcset variants.
+  it('uses static responsive variants without routing thumbnails through imgproxy', () => {
     const { container } = render(
       <AppImage src="/media/thumbs/aa/bb/hash/thumb_160.webp" alt="Thumb" sizes="50vw" />,
     )
@@ -95,5 +89,26 @@ describe('AppImage', () => {
     const img = container.querySelector('img')
     expect(img).not.toBeNull()
     expect(img).toHaveAttribute('src', '/media/thumbs/aa/bb/hash/thumb_160.webp')
+    expect(img).toHaveAttribute(
+      'srcset',
+      '/media/thumbs/aa/bb/hash/thumb_160.webp 160w, /media/thumbs/aa/bb/hash/thumb_360.webp 360w, /media/thumbs/aa/bb/hash/thumb_720.webp 720w',
+    )
+    expect(img).toHaveAttribute('sizes', '50vw')
+  })
+
+  it('falls back to the 160px thumbnail when a responsive candidate fails', () => {
+    render(
+      <AppImage
+        src="/media/thumbs/aa/bb/hash/thumb_160.webp"
+        alt="Thumb"
+        fallback={<span>Unavailable</span>}
+      />,
+    )
+
+    const image = screen.getByRole('img', { name: 'Thumb' })
+    fireEvent.error(image)
+    expect(screen.getByRole('img', { name: 'Thumb' })).not.toHaveAttribute('srcset')
+    fireEvent.error(screen.getByRole('img', { name: 'Thumb' }))
+    expect(screen.getByText('Unavailable')).toBeInTheDocument()
   })
 })

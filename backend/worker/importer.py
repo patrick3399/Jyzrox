@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, text, update
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
@@ -16,8 +16,8 @@ import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
-from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, ImportConflict, Tag
-from services.cas import create_library_symlink, store_blob, thumb_dir
+from db.models import ExcludedBlob, Gallery, GalleryTag, Image, ImportConflict, Tag
+from services.cas import create_library_symlink, increment_ref_count, store_blob, thumb_dir, thumbnails_complete_at
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from services.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
 from worker.constants import (
@@ -288,9 +288,7 @@ async def import_job(
                 # Only increment ref_count for blobs that got a new Image row.
                 sha_counts = Counter(row.blob_sha256 for row in inserted_rows)
                 for sha, count in sha_counts.items():
-                    await session.execute(
-                        update(Blob).where(Blob.sha256 == sha).values(ref_count=Blob.ref_count + count)
-                    )
+                    await increment_ref_count(sha, session, count)
 
         actual_pages = (
             await session.execute(
@@ -592,8 +590,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
                 continue
             if sha256 in known_sha256s:
-                td = thumb_dir(sha256)
-                if any(not (td / f"thumb_{size}.webp").exists() for size in (160, 360, 720)):
+                if not thumbnails_complete_at(thumb_dir(sha256)):
                     existing_missing_thumb = True
                     logger.debug(
                         "[local_import] gallery_id=%d: existing page %s missing thumbnail(s)",
@@ -630,7 +627,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
             if inserted is not None:
                 # New Image row created — increment blob ref_count.
-                await session.execute(update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count + 1))
+                await increment_ref_count(sha256, session)
                 # Symlink only for rows the DB actually represents (edge case #48)
                 await create_library_symlink(gallery_source, gallery_source_id, f.name, blob)
                 processed += 1

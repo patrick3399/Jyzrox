@@ -739,6 +739,7 @@ class TestLocalImportJob:
         td.mkdir()
         for size in (160, 360, 720):
             (td / f"thumb_{size}.webp").write_bytes(b"x")
+        (td / ".thumbnail-version").write_text("2", encoding="ascii")
 
         s1, s2, s3 = _make_local_import_sessions(test_sha)
 

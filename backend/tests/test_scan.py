@@ -10,6 +10,20 @@ Filesystem operations are mocked via patch on resolve_blob_path / thumb_dir.
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _mock_shared_thumbnail_cleanup():
+    """Mock-DB scan tests do not model the lifecycle service's extra query."""
+    with patch(
+        "worker.scan.cleanup_unreferenced_thumbnails",
+        new_callable=AsyncMock,
+        return_value=set(),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -338,6 +352,7 @@ class TestRescanLibraryJob:
             patch("worker.scan.AsyncSessionLocal", return_value=session),
             patch("worker.scan.resolve_blob_path", return_value=existing_path),
             patch("worker.scan.thumb_dir", return_value=thumb_path),
+            patch("worker.scan.thumbnails_complete_at", return_value=False),
             patch("core.watcher.watcher_instance", None),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -428,6 +443,7 @@ class TestRescanLibraryJob:
             patch("worker.scan.AsyncSessionLocal", return_value=session),
             patch("worker.scan.resolve_blob_path", return_value=existing_path),
             patch("worker.scan.thumb_dir", return_value=thumb_path),
+            patch("worker.scan.thumbnails_complete_at", return_value=True),
             patch("core.watcher.watcher_instance", None),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):

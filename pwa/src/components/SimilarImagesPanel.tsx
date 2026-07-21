@@ -5,6 +5,7 @@ import { X, Loader2, ImageIcon } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import Link from 'next/link'
+import { AppImage } from '@/components/AppImage'
 
 function toMediaUrl(path: string): string {
   if (path.startsWith('/data/gallery/')) return path.replace('/data/gallery/', '/media/')
@@ -64,7 +65,7 @@ export function SimilarImagesPanel({ imageId, onClose }: { imageId: number; onCl
                   href={`/library/local/${img.gallery_id}`}
                   className="group relative aspect-square rounded-lg overflow-hidden bg-vault-input border border-vault-border hover:border-vault-accent transition-colors"
                 >
-                  <img
+                  <AppImage
                     src={toMediaUrl(img.thumb_path || img.file_path)}
                     alt={img.filename}
                     className="w-full h-full object-cover"

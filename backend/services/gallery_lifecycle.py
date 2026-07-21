@@ -17,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.redis_client import get_redis
-from db.models import Blob, Gallery, Image
-from services.cas import decrement_ref_count, library_dir, thumb_dir
+from db.models import Gallery, Image
+from services.cas import decrement_ref_count, library_dir
+from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ async def invalidate_sources_cache() -> None:
         pass
 
 
-def _delete_filesystem_sync(galleries: list, zero_ref_sha256s: set[str]) -> int:
+def _delete_library_dirs_sync(galleries: list) -> int:
     deleted = 0
     for g in galleries:
         lib_dir = library_dir(g.source, g.source_id)
@@ -43,14 +44,6 @@ def _delete_filesystem_sync(galleries: list, zero_ref_sha256s: set[str]) -> int:
                 deleted += 1
             except OSError as exc:
                 logger.warning("[hard_delete] failed to remove library dir %s: %s", lib_dir, exc)
-    for sha256 in zero_ref_sha256s:
-        td = thumb_dir(sha256)
-        if td.exists():
-            try:
-                shutil.rmtree(str(td), ignore_errors=True)
-                deleted += 1
-            except OSError as exc:
-                logger.warning("[hard_delete] failed to remove thumb dir %s: %s", td, exc)
     return deleted
 
 
@@ -72,15 +65,10 @@ async def hard_delete_galleries(db: AsyncSession, galleries: list[Gallery]) -> d
 
     await invalidate_sources_cache()
 
-    zero_ref_sha256s: set[str] = set()
-    if blob_sha256s:
-        zero_ref_result = await db.execute(
-            select(Blob.sha256).where(Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0)
-        )
-        zero_ref_sha256s = set(zero_ref_result.scalars().all())
-
     try:
-        deleted_count = await asyncio.to_thread(_delete_filesystem_sync, galleries, zero_ref_sha256s)
+        deleted_count = await asyncio.to_thread(_delete_library_dirs_sync, galleries)
+        zero_ref_sha256s = await cleanup_unreferenced_thumbnails(db, blob_sha256s)
+        deleted_count += len(zero_ref_sha256s)
     except Exception as exc:
         logger.warning("[hard_delete] cleanup failed: %s", exc)
         deleted_count = 0

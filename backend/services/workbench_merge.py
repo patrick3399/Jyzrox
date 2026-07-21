@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
@@ -30,6 +30,7 @@ from db.models import (
     UserRating,
     UserReadingList,
 )
+from services.cas import increment_ref_count
 from services.workbench_metadata import load_writable_galleries, metadata_json_value
 
 MERGE_SCALAR_FIELDS = frozenset(
@@ -318,9 +319,7 @@ async def _copy_images(
                 )
                 db.add(copied)
                 await db.flush()
-                await db.execute(
-                    update(Blob).where(Blob.sha256 == source_image.blob_sha256).values(ref_count=Blob.ref_count + 1)
-                )
+                await increment_ref_count(source_image.blob_sha256, db)
                 target_image = copied
                 target_by_sha[copied.blob_sha256] = copied
                 target_blobs[copied.blob_sha256] = source_blob

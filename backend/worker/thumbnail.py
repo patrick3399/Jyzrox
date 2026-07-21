@@ -16,7 +16,14 @@ from sqlalchemy.sql import select
 from core.database import AsyncSessionLocal
 from core.gallery_helpers import select_cover_image
 from db.models import Gallery, Image
-from services.cas import resolve_blob_path, thumb_dir
+from services.cas import (
+    THUMBNAIL_SIZES,
+    THUMBNAIL_VERSION,
+    THUMBNAIL_VERSION_FILENAME,
+    resolve_blob_path,
+    thumb_dir,
+    thumbnails_complete_at,
+)
 from worker.constants import logger
 from worker.helpers import env_int
 from worker.thumbhash_utils import encode_pil_thumbhash
@@ -27,8 +34,6 @@ try:
     _PILImage.MAX_IMAGE_PIXELS = 50_000_000  # edge case #110: decompression bomb cap
 except ImportError:
     pass
-
-THUMBNAIL_SIZES = (160, 360, 720)
 
 _thumbnail_semaphore: asyncio.Semaphore | None = None
 _thumbnail_semaphore_size: int | None = None
@@ -88,6 +93,33 @@ def _atomic_save_webp(image, dest: Path) -> None:
         os.replace(tmp, dest)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _current_thumbnail_version(td: Path) -> bool:
+    try:
+        return int((td / THUMBNAIL_VERSION_FILENAME).read_text(encoding="ascii").strip()) == THUMBNAIL_VERSION
+    except OSError, ValueError:
+        return False
+
+
+def _write_thumbnail_version(td: Path) -> None:
+    destination = td / THUMBNAIL_VERSION_FILENAME
+    temporary = _unique_tmp_path(destination)
+    try:
+        temporary.write_text(str(THUMBNAIL_VERSION), encoding="ascii")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _resize_width_tier(image, size: int):
+    """Downscale to a width tier while preserving the complete aspect ratio."""
+    thumbnail = image.copy()
+    # Passing the source height as the vertical bound makes width the only
+    # limiting dimension without upscaling small originals.  The resulting
+    # files can therefore be used with standard HTML width descriptors.
+    thumbnail.thumbnail((size, thumbnail.height), _PILImage.Resampling.LANCZOS)
+    return thumbnail
 
 
 def _encode_thumbhash(pil) -> str | None:
@@ -252,6 +284,7 @@ def _generate_single_thumbnail_sync(
 
     td = thumb_dir(sha256)
     td.mkdir(parents=True, exist_ok=True)
+    current_version = _current_thumbnail_version(td)
     is_zip_animation = zipfile.is_zipfile(src)
     if media_type == "video" or src.suffix.lower() == ".gif" or is_zip_animation:
         preview = _ensure_preview(src, td)
@@ -269,13 +302,16 @@ def _generate_single_thumbnail_sync(
 
             with PILImage.open(tmp_frame) as pil:
                 rgb = pil.convert("RGB")
+                wrote_thumbnail = False
                 for size in THUMBNAIL_SIZES:
                     dest = td / f"thumb_{size}.webp"
-                    if dest.exists():
+                    if current_version and dest.exists():
                         continue
-                    thumb = rgb.copy()
-                    thumb.thumbnail((size, size * 2), PILImage.LANCZOS)
+                    thumb = _resize_width_tier(rgb, size)
                     _atomic_save_webp(thumb, dest)
+                    wrote_thumbnail = True
+                if wrote_thumbnail or not current_version:
+                    _write_thumbnail_version(td)
 
                 return _ThumbnailResult(
                     width=meta["width"],
@@ -292,20 +328,25 @@ def _generate_single_thumbnail_sync(
     # Image files
     try:
         import imagehash
+        from PIL import ImageOps
 
-        with PILImage.open(src) as pil:
+        with PILImage.open(src) as source_image:
+            pil = ImageOps.exif_transpose(source_image)
             phash = str(imagehash.phash(pil))
             phash_values = _phash_parts(phash)
             thumbhash = _encode_thumbhash(pil)
 
             rgb = pil.convert("RGB")
+            wrote_thumbnail = False
             for size in THUMBNAIL_SIZES:
                 dest = td / f"thumb_{size}.webp"
-                if dest.exists():
+                if current_version and dest.exists():
                     continue
-                thumb = rgb.copy()
-                thumb.thumbnail((size, size * 2), PILImage.LANCZOS)
+                thumb = _resize_width_tier(rgb, size)
                 _atomic_save_webp(thumb, dest)
+                wrote_thumbnail = True
+            if wrote_thumbnail or not current_version:
+                _write_thumbnail_version(td)
 
             return _ThumbnailResult(
                 width=pil.size[0],
@@ -355,8 +396,7 @@ def _cover_first(images: list[Image], cover_page: str) -> list[Image]:
 def _blob_needs_thumbnail(blob) -> bool:
     if blob is None:
         return False
-    td = thumb_dir(blob.sha256)
-    if any(not (td / f"thumb_{size}.webp").exists() for size in THUMBNAIL_SIZES):
+    if not thumbnails_complete_at(thumb_dir(blob.sha256)):
         return True
     if blob.width is None or blob.height is None or blob.thumbhash is None:
         return True

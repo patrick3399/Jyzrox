@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { AppImage } from '@/components/AppImage'
 import type { RelationshipItem } from '@/lib/types'
 
 interface RelationshipCardProps {
@@ -106,7 +107,12 @@ export function RelationshipCard({
                 onClick={() => clickUrl && onImageClick(clickUrl)}
               >
                 {blob.thumb_url ? (
-                  <img src={blob.thumb_url} alt="" className="w-full h-full object-cover" />
+                  <AppImage
+                    src={blob.thumb_url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    sizes="(max-width: 640px) 50vw, 320px"
+                  />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-vault-text-muted text-xs">
                     {t('dedup.noPreview')}

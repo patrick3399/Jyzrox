@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ImgHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ImgHTMLAttributes, type ReactNode } from 'react'
 
 type AppImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt'> & {
   src?: string | null
@@ -10,6 +10,8 @@ type AppImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt'> & 
 }
 
 const RESPONSIVE_WIDTHS = [320, 640, 960]
+const THUMBNAIL_WIDTHS = [160, 360, 720]
+const THUMBNAIL_FILENAME_RE = /\/thumb_(?:160|360|720)\.webp(?:\?.*)?$/
 
 // imgproxy's plain source form (`/plain/local:///path`) contains the `local:///`
 // triple slash, which nginx (merge_slashes on, the default) collapses to
@@ -42,6 +44,13 @@ export function responsiveImageSrcSet(src: string, format: 'avif' | 'webp'): str
   return variants.length ? variants.join(', ') : undefined
 }
 
+export function thumbnailImageSrcSet(src: string): string | undefined {
+  if (!src.startsWith('/media/thumbs/') || !THUMBNAIL_FILENAME_RE.test(src)) return undefined
+  return THUMBNAIL_WIDTHS.map(
+    (width) => `${src.replace(THUMBNAIL_FILENAME_RE, `/thumb_${width}.webp`)} ${width}w`,
+  ).join(', ')
+}
+
 export function AppImage({
   src,
   alt,
@@ -49,15 +58,32 @@ export function AppImage({
   fallbackClassName,
   className,
   onError,
+  onLoad,
   ...props
 }: AppImageProps) {
   const [failed, setFailed] = useState(false)
   const [optimizedFailed, setOptimizedFailed] = useState(false)
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
 
   useEffect(() => {
     setFailed(false)
     setOptimizedFailed(false)
+    setMeasuredWidth(null)
   }, [src])
+
+  useLayoutEffect(() => {
+    const image = imageRef.current
+    if (!image || typeof ResizeObserver === 'undefined') return
+    const updateWidth = () => {
+      const width = Math.ceil(image.getBoundingClientRect().width)
+      if (width > 0) setMeasuredWidth((current) => (current === width ? current : width))
+    }
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(image)
+    return () => observer.disconnect()
+  }, [src, failed, optimizedFailed])
 
   if (!src || failed) {
     return (
@@ -74,14 +100,29 @@ export function AppImage({
 
   const avifSrcSet = responsiveImageSrcSet(src, 'avif')
   const webpSrcSet = responsiveImageSrcSet(src, 'webp')
-  const hasOptimizedSources = Boolean(avifSrcSet || webpSrcSet)
+  const thumbnailSrcSet = thumbnailImageSrcSet(src)
+  const hasPictureSources = Boolean(avifSrcSet || webpSrcSet)
+  const hasOptimizedSources = Boolean(hasPictureSources || thumbnailSrcSet)
+  const responsiveSizes =
+    props.sizes ??
+    (measuredWidth ? `${measuredWidth}px` : props.loading === 'lazy' ? 'auto, 200px' : '200px')
   const image = (
     <img
       {...props}
+      ref={imageRef}
       src={src}
+      srcSet={!optimizedFailed ? (props.srcSet ?? thumbnailSrcSet) : undefined}
+      sizes={props.sizes ?? (thumbnailSrcSet ? responsiveSizes : undefined)}
       alt={alt}
       className={className}
       decoding={props.decoding ?? 'async'}
+      onLoad={(event) => {
+        if (thumbnailSrcSet && !props.sizes) {
+          const width = Math.ceil(event.currentTarget.getBoundingClientRect().width)
+          if (width > 0) setMeasuredWidth((current) => (current === width ? current : width))
+        }
+        onLoad?.(event)
+      }}
       onError={(event) => {
         if (hasOptimizedSources && !optimizedFailed) {
           setOptimizedFailed(true)
@@ -93,7 +134,7 @@ export function AppImage({
     />
   )
 
-  if (!hasOptimizedSources || optimizedFailed) return image
+  if (!hasPictureSources || optimizedFailed) return image
 
   return (
     <picture>

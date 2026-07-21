@@ -7,14 +7,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from PIL import Image as PILImage
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from core.database import AsyncSessionLocal
 from core.events import EventType, emit_safe
-from db.models import Blob, Gallery, Image
+from db.models import Gallery, Image
 from plugins.registry import plugin_registry
-from services.cas import create_library_symlink, resolve_blob_path, store_blob
+from services.cas import create_library_symlink, increment_ref_count, resolve_blob_path, store_blob
 from worker.helpers import _sha256
 
 logger = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ async def _replace_processed_image(
     session.add(replacement)
     await session.flush()
     current.replaced_by_image_id = replacement.id
-    await session.execute(update(Blob).where(Blob.sha256 == output_sha256).values(ref_count=Blob.ref_count + 1))
+    await increment_ref_count(output_sha256, session)
     await session.commit()
 
     if replacement.filename:

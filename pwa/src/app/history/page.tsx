@@ -7,6 +7,7 @@ import { galleryHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { AppImage } from '@/components/AppImage'
 import { toast } from 'sonner'
 import { X, Trash2, Clock } from 'lucide-react'
 import type { BrowseHistoryItem } from '@/lib/types'
@@ -57,7 +58,7 @@ function HistoryCard({
         {/* Thumbnail */}
         <div className="aspect-[3/4] bg-vault-input overflow-hidden">
           {thumbSrc ? (
-            <img
+            <AppImage
               src={thumbSrc}
               alt={item.title}
               className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"

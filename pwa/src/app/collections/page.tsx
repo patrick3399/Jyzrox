@@ -6,6 +6,7 @@ import { Plus, Pencil, Trash2, FolderHeart, Image as ImageIcon, Check, X } from 
 import { toast } from 'sonner'
 import { useCollections, useCreateCollection, useUpdateCollection, useDeleteCollection } from '@/hooks/useCollections'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { AppImage } from '@/components/AppImage'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import type { Collection } from '@/lib/types'
@@ -44,7 +45,7 @@ function CollectionCard({
         aria-label={collection.name}
       >
         {collection.cover_thumb ? (
-          <img
+          <AppImage
             src={collection.cover_thumb}
             alt={collection.name}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
