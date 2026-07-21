@@ -83,6 +83,21 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* App-like control surfaces may own long-press interactions. Keep this class
+   opt-in so text content and form controls retain native selection/callouts. */
+.app-touch-controls,
+.app-touch-controls * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.app-touch-controls a,
+.app-touch-controls img,
+.app-touch-controls svg {
+  -webkit-user-drag: none;
+}
+
 .safe-main-pt {
   padding-top: 0;
 }

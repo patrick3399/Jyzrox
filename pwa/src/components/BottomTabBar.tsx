@@ -106,8 +106,9 @@ export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBar
 
   return (
     <nav
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-vault-card border-t border-vault-border flex"
+      className="app-touch-controls lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-vault-card border-t border-vault-border flex"
       style={{ paddingBottom: 'var(--sab)', height: 'calc(4rem + var(--sab))' }}
+      onContextMenu={(event) => event.preventDefault()}
     >
       {tabs.map(({ href, labelKey, icon: Icon }) => {
         const isActive = pathname === href || (href !== '/' && pathname.startsWith(href))

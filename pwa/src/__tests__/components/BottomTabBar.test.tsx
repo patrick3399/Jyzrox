@@ -55,4 +55,14 @@ describe('BottomTabBar tab memory', () => {
     expect(pushMock).toHaveBeenCalledWith('/pixiv')
     expect(getTabHref('/pixiv')).toBe('/pixiv')
   })
+
+  it('suppresses native long-press callouts on the app control surface', () => {
+    render(<BottomTabBar onMoreClick={() => {}} />)
+    const navigation = screen.getByRole('navigation')
+    expect(navigation).toHaveClass('app-touch-controls')
+
+    const contextMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    fireEvent(navigation, contextMenu)
+    expect(contextMenu.defaultPrevented).toBe(true)
+  })
 })
