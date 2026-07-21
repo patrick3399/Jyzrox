@@ -1,6 +1,8 @@
 'use client'
 
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react'
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 type ScrollPositionRestoreOptions = {
   scrollY: number | null
@@ -24,7 +26,9 @@ export function useScrollPositionRestore({
 }: ScrollPositionRestoreOptions) {
   const restoredKeyRef = useRef<string | null>(null)
 
-  useEffect(() => {
+  // Use a layout effect so restoration wins the same navigation phase in which
+  // Next applies its own scroll handling.
+  useIsomorphicLayoutEffect(() => {
     if (!isReady || scrollY === null || !Number.isFinite(scrollY)) return
     if (restoredKeyRef.current === restoreKey) return
     restoredKeyRef.current = restoreKey
@@ -94,7 +98,11 @@ export function useScrollRestore<T = unknown>(
   // Continuous scroll capture (persist + ready only). Gated on isReady so that
   // inactive instances (e.g. non-active pixiv sub-tabs) don't overwrite their
   // own key with the active tab's scrollY.
-  useEffect(() => {
+  // This must clean up during the layout phase. On a push navigation Next can
+  // reset window.scrollY before passive cleanups run; leaving the listener alive
+  // until then lets that synthetic reset overwrite the saved Library position
+  // with 0 just before the page unmounts.
+  useIsomorphicLayoutEffect(() => {
     if (!persist || !isReady) return
     let raf = 0
     const onScroll = () => {

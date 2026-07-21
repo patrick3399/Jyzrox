@@ -9,7 +9,8 @@
  *   Enter            — calls onEnter with the current focusedIndex
  *   Escape           — resets focusedIndex to null
  *   enabled=false    — keydowns are ignored entirely
- *   totalItems reset — focusedIndex resets to null when totalItems changes
+ *   totalItems update — append preserves focus, shrink resets it
+ *   restored viewport — first key starts from a visible item instead of index 0
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -193,5 +194,73 @@ describe('useGridKeyboard', () => {
     })
 
     expect(result.current.focusedIndex).toBeNull()
+  })
+
+  it('test_useGridKeyboard_infinite_scroll_append_preserves_focusedIndex', () => {
+    let totalItems = 9
+    const { result, rerender } = renderHook(() =>
+      useGridKeyboard({ totalItems, colCount: 3, onEnter }),
+    )
+
+    act(() => {
+      simulateKeydown('ArrowDown') // 0
+      simulateKeydown('ArrowDown') // 3
+      simulateKeydown('ArrowDown') // 6
+    })
+    expect(result.current.focusedIndex).toBe(6)
+
+    totalItems = 18
+    act(() => {
+      rerender()
+    })
+
+    expect(result.current.focusedIndex).toBe(6)
+    act(() => {
+      simulateKeydown('ArrowDown')
+    })
+    expect(result.current.focusedIndex).toBe(9)
+  })
+
+  it('test_useGridKeyboard_after_back_navigation_starts_from_visible_item', () => {
+    const { result } = renderHook(() =>
+      useGridKeyboard({ totalItems: 48, colCount: 3, onEnter }),
+    )
+    const offscreen = document.createElement('div')
+    const visible = document.createElement('div')
+    vi.spyOn(offscreen, 'getBoundingClientRect').mockReturnValue({
+      top: -300,
+      bottom: -100,
+    } as DOMRect)
+    vi.spyOn(visible, 'getBoundingClientRect').mockReturnValue({
+      top: 120,
+      bottom: 320,
+    } as DOMRect)
+
+    act(() => {
+      result.current.registerElement(21, offscreen)
+      result.current.registerElement(24, visible)
+      simulateKeydown('ArrowDown')
+    })
+
+    expect(result.current.focusedIndex).toBe(24)
+  })
+
+  it('restores the exact entered gallery before moving to its neighbor', () => {
+    const { result } = renderHook(() =>
+      useGridKeyboard({
+        totalItems: 48,
+        colCount: 3,
+        onEnter,
+        restoreFocusedIndex: 25,
+      }),
+    )
+
+    expect(result.current.focusedIndex).toBe(25)
+    act(() => {
+      simulateKeydown('ArrowRight')
+      simulateKeydown('Enter')
+    })
+
+    expect(onEnter).toHaveBeenCalledWith(26)
   })
 })

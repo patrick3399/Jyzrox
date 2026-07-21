@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { createElement, useLayoutEffect } from 'react'
+import { render, renderHook, act } from '@testing-library/react'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
@@ -281,6 +282,42 @@ describe('useScrollRestore — persist mode', () => {
 
     expect(mockAddEventListener).not.toHaveBeenCalled()
     expect(mockRemoveItem).toHaveBeenCalledWith('browse-page')
+  })
+
+  it('removes the outgoing scroll listener before the incoming route layout phase', () => {
+    const scrollListeners = new Set<() => void>()
+    mockAddEventListener.mockImplementation((type: string, listener: () => void) => {
+      if (type === 'scroll') scrollListeners.add(listener)
+    })
+    mockRemoveEventListener.mockImplementation((type: string, listener: () => void) => {
+      if (type === 'scroll') scrollListeners.delete(listener)
+    })
+    mockGetItem.mockReturnValue(JSON.stringify({ scrollY: 640, pages: [{ id: 1 }] }))
+
+    function SavedView() {
+      useScrollRestore<{ id: number }>('feed-key', true, { persist: true })
+      return null
+    }
+
+    function IncomingRoute() {
+      useLayoutEffect(() => {
+        // Next applies its scroll reset while mounting the incoming route. Any
+        // outgoing passive listener still attached here would bank this 0.
+        Object.defineProperty(globalThis.window, 'scrollY', { value: 0, configurable: true })
+        scrollListeners.forEach((listener) => listener())
+      }, [])
+      return null
+    }
+
+    const view = render(createElement(SavedView))
+    mockSetItem.mockClear()
+    view.rerender(createElement(IncomingRoute))
+
+    expect(scrollListeners.size).toBe(0)
+    expect(mockSetItem).not.toHaveBeenCalledWith(
+      'feed-key',
+      JSON.stringify({ scrollY: 0, pages: [{ id: 1 }] }),
+    )
   })
 })
 

@@ -41,6 +41,11 @@ import {
   getLibraryGridGap,
 } from '@/lib/libraryLayout'
 import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
+import {
+  clearLibraryKeyboardTarget,
+  consumeLibraryKeyboardTarget,
+  saveLibraryKeyboardTarget,
+} from '@/lib/libraryKeyboardState'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -179,6 +184,12 @@ function LibraryContent() {
     () => (searchItems ? searchItems.map(mapSearchItemToGallery) : []),
     [searchItems],
   )
+  const [keyboardReturnGalleryId] = useState(() => consumeLibraryKeyboardTarget(rawQuery))
+  const keyboardReturnIndex = useMemo(() => {
+    if (keyboardReturnGalleryId === null) return null
+    const index = displayGalleries.findIndex((gallery) => gallery.id === keyboardReturnGalleryId)
+    return index >= 0 ? index : null
+  }, [displayGalleries, keyboardReturnGalleryId])
 
   const handleFavoriteToggle = useCallback(
     async (gallery: Gallery) => {
@@ -236,9 +247,11 @@ function LibraryContent() {
   const { focusedIndex, registerElement } = useGridKeyboard({
     totalItems: displayGalleries.length,
     colCount,
+    restoreFocusedIndex: keyboardReturnIndex,
     onEnter: (i) => {
       const g = displayGalleries[i]
       if (g) {
+        saveLibraryKeyboardTarget(rawQuery, g.id)
         saveScroll(searchData ?? [])
         router.push(galleryHref(g.source, g.source_id))
       }
@@ -588,6 +601,7 @@ function LibraryContent() {
                 gallery={gallery}
                 thumbUrl={gallery.cover_thumb ?? undefined}
                 onClick={() => {
+                  clearLibraryKeyboardTarget()
                   saveScroll(searchData ?? [])
                   router.push(galleryHref(gallery.source, gallery.source_id))
                 }}
