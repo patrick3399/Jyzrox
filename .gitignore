@@ -55,10 +55,9 @@ AGENTS.md
 # Codex session artifacts
 .codex
 
-# Local-only docs (durable via operator backup, see docs/ref/INDEX.md)
-docs/ref/
-docs/adr/
-docs/security-model.md
+# Local-only docs. The SMB storage runbook is the only tracked docs/ file.
+docs/*
+!docs/smb-storage.md
 
 # Project meta (not needed for build)
 TODO.md
