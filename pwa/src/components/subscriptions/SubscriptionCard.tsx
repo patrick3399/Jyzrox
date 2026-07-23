@@ -53,75 +53,61 @@ export function timeAgo(iso: string | null): string {
 
 // ── Sub-components ───────────────────────────────────────────────────
 
-function JobStatusBadge({ job, galleryHref }: { job: DownloadJob; galleryHref: string | null }) {
+function JobStatusBadge({ job, hasGalleryTitle }: { job: DownloadJob; hasGalleryTitle: boolean }) {
+  let status: React.ReactNode = null
+
   if (job.status === 'running') {
     const downloaded = job.progress?.downloaded ?? 0
     const total = job.progress?.total
     const pct = total ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
-    const title = job.progress?.title
-    return (
-      <div className="mt-2">
-        {title && galleryHref && (
-          <Link
-            href={galleryHref}
-            className="text-[10px] text-vault-accent hover:underline truncate block mb-1"
-          >
-            {title}
-          </Link>
-        )}
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 bg-vault-border rounded-full overflow-hidden">
-            {total ? (
-              <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                style={{ width: `${pct}%` }}
-              />
-            ) : (
-              <div className="h-full bg-blue-500/30 rounded-full overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/60 to-transparent animate-[shimmer_1.5s_infinite]" />
-              </div>
-            )}
-          </div>
-          <span className="text-[10px] text-vault-text-muted whitespace-nowrap">
-            {downloaded}
-            {total ? ` / ${total}` : ''} {t('queue.files')}
-          </span>
+    status = (
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1.5 bg-vault-border rounded-full overflow-hidden">
+          {total ? (
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          ) : (
+            <div className="h-full bg-blue-500/30 rounded-full overflow-hidden relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/60 to-transparent animate-[shimmer_1.5s_infinite]" />
+            </div>
+          )}
         </div>
+        <span className="text-[10px] text-vault-text-muted whitespace-nowrap">
+          {downloaded}
+          {total ? ` / ${total}` : ''} {t('queue.files')}
+        </span>
       </div>
     )
-  }
-  if (job.status === 'done') {
-    return (
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+  } else if (job.status === 'done') {
+    status = (
+      <div className="flex items-center gap-1.5 text-[10px]">
         <CheckCircle size={12} className="text-green-400" />
         <span className="text-green-400">{t('subscriptions.downloadComplete')}</span>
-        {galleryHref && (
-          <Link href={galleryHref} className="text-vault-accent hover:underline ml-1">
-            {t('subscriptions.viewGallery')}
-          </Link>
-        )}
       </div>
     )
-  }
-  if (job.status === 'failed') {
-    return (
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+  } else if (job.status === 'failed') {
+    status = (
+      <div className="flex items-center gap-1.5 text-[10px]">
         <AlertCircle size={12} className="text-red-400" />
         <span className="text-red-400 truncate" title={job.error || undefined}>
           {job.error || t('subscriptions.downloadFailed')}
         </span>
       </div>
     )
-  }
-  if (job.status === 'queued') {
-    return (
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-vault-text-muted">
+  } else if (job.status === 'queued') {
+    status = (
+      <div className="flex items-center gap-1.5 text-[10px] text-vault-text-muted">
         <Download size={10} />
         <span>{t('subscriptions.queued')}</span>
       </div>
     )
   }
-  return null
+
+  if (!status) return null
+
+  return <div className={hasGalleryTitle ? 'mt-1' : 'mt-2'}>{status}</div>
 }
 
 function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
@@ -161,6 +147,7 @@ export function SubscriptionCard({
   const [nameValue, setNameValue] = useState('')
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
   const galleryHref = subscriptionGalleryHref(sub, latestJob)
+  const galleryTitle = sub.gallery_title?.trim() || latestJob?.progress?.title?.trim()
 
   useEffect(() => {
     if (!showMoveMenu) return
@@ -260,8 +247,22 @@ export function SubscriptionCard({
           {sub.last_error}
         </p>
       )}
-      {latestJob && <JobStatusBadge job={latestJob} galleryHref={galleryHref} />}
-      {galleryHref && (!latestJob || !['running', 'done'].includes(latestJob.status)) && (
+      {galleryTitle &&
+        (galleryHref ? (
+          <Link
+            href={galleryHref}
+            className="mt-2 block truncate text-xs font-medium text-vault-accent hover:underline"
+            title={galleryTitle}
+          >
+            {galleryTitle}
+          </Link>
+        ) : (
+          <p className="mt-2 truncate text-xs font-medium text-vault-text" title={galleryTitle}>
+            {galleryTitle}
+          </p>
+        ))}
+      {latestJob && <JobStatusBadge job={latestJob} hasGalleryTitle={Boolean(galleryTitle)} />}
+      {galleryHref && !galleryTitle && (
         <Link
           href={galleryHref}
           className="mt-1.5 inline-block text-[10px] text-vault-accent hover:underline"

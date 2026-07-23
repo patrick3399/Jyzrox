@@ -140,6 +140,36 @@ class TestListSubscriptions:
         assert resp.status_code == 200
         assert len(resp.json()["subscriptions"]) <= 2
 
+    async def test_list_subscriptions_returns_current_gallery_title_without_job(self, client, db_session):
+        """Old subscriptions use the current Gallery title even after linked jobs are gone."""
+        await _ensure_user(db_session)
+        url = f"https://example.com/artist/{uuid.uuid4().hex[:8]}"
+        sub_id = await _insert_subscription(db_session, url=url, name="Old Subscription")
+        gallery_id = (
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries (source, source_id, source_url, title) "
+                    "VALUES ('gallery_dl', :source_id, :url, 'Original Gallery') RETURNING id"
+                ),
+                {"source_id": uuid.uuid4().hex, "url": url},
+            )
+        ).scalar_one()
+        await db_session.commit()
+
+        first = await client.get("/api/subscriptions/")
+        first_sub = next(item for item in first.json()["subscriptions"] if item["id"] == sub_id)
+        assert first_sub["gallery_title"] == "Original Gallery"
+
+        await db_session.execute(
+            text("UPDATE galleries SET title = 'Renamed Gallery' WHERE id = :gallery_id"),
+            {"gallery_id": gallery_id},
+        )
+        await db_session.commit()
+
+        second = await client.get("/api/subscriptions/")
+        second_sub = next(item for item in second.json()["subscriptions"] if item["id"] == sub_id)
+        assert second_sub["gallery_title"] == "Renamed Gallery"
+
 
 # ---------------------------------------------------------------------------
 # POST /api/subscriptions/

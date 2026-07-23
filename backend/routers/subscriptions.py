@@ -122,6 +122,7 @@ def _serialize_subscription(s, gallery: Gallery | None = None) -> dict:
         data["gallery_id"] = gallery.id
         data["gallery_source"] = gallery.source
         data["gallery_source_id"] = gallery.source_id
+        data["gallery_title"] = gallery.title
     return data
 
 

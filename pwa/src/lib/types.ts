@@ -850,6 +850,7 @@ export interface Subscription {
   gallery_id?: number | null
   gallery_source?: string | null
   gallery_source_id?: string | null
+  gallery_title?: string | null
 }
 
 // ── File Explorer ────────────────────────────────────────────────────
