@@ -352,7 +352,7 @@ function SinglePageView({
 }: SinglePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Center tap zone: delay toggle to prevent double-tap from also toggling overlay.
-  // isDoubleTapRef is set by usePinchZoom's native touchstart listener (fires before any click),
+  // isDoubleTapRef is set by usePinchZoom's native touchend listener (fires before any click),
   // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
   const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const isDoubleTapRef = useRef(false)
@@ -361,7 +361,7 @@ function SinglePageView({
     containerRef as React.RefObject<HTMLElement | null>,
     currentPage,
     () => {
-      // Called synchronously when double-tap detected — before click fires
+      // Called synchronously when double-tap is confirmed — before click fires
       isDoubleTapRef.current = true
       clearTimeout(centerTapTimerRef.current)
       centerTapTimerRef.current = undefined
@@ -692,7 +692,7 @@ function DoublePageView({
 }: DoublePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Center tap zone: delay toggle to prevent double-tap from also toggling overlay.
-  // isDoubleTapRef is set by usePinchZoom's native touchstart listener (fires before any click),
+  // isDoubleTapRef is set by usePinchZoom's native touchend listener (fires before any click),
   // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
   const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const isDoubleTapRef = useRef(false)
@@ -701,7 +701,7 @@ function DoublePageView({
     containerRef as React.RefObject<HTMLElement | null>,
     currentPage,
     () => {
-      // Called synchronously when double-tap detected — before click fires
+      // Called synchronously when double-tap is confirmed — before click fires
       isDoubleTapRef.current = true
       clearTimeout(centerTapTimerRef.current)
       centerTapTimerRef.current = undefined
