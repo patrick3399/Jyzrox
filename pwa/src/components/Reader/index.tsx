@@ -24,6 +24,7 @@ import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { AppImage } from '@/components/AppImage'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
+import { getSpriteThumbnailStyle } from './thumbnailSprite'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -1344,35 +1345,29 @@ function ThumbnailStrip({
                 const spriteUrl = parts[0]
                 const ox = Number(parts[1])
                 const cellW = Number(parts[2]) || 200
-                const _cellH = Number(parts[3]) || 300
+                const cellH = Number(parts[3]) || 300
                 const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
                 const naturalSize = spriteNaturalSizes[proxyUrl]
-                // cellH from EH HTML is the DISPLAY div height, not the sprite
-                // cell height. All cells share one row (height = sprite height).
-                // Use cover semantics so the cell always fills the thumbnail.
-                const trueCellH = naturalSize?.h ?? 300
-                const scale = Math.max(thumbW / cellW, thumbH / trueCellH)
-                const scaledOx = Math.abs(ox) * scale
-                const scaledCellW = cellW * scale
-                // Horizontally: center-crop if cell wider than thumb, else center with padding
-                const cropX = scaledCellW > thumbW ? (scaledCellW - thumbW) / 2 : 0
-                // Vertically: the sprite is taller than the cell. Find where
-                // this cell sits vertically — EH sprites are single-row (cells
-                // side by side, same top), so the Y offset is 0 in the cell's
-                // local frame. But the sprite may be taller than cellH after
-                // scaling, so center vertically.
-                const scaledSpriteH = naturalSize ? naturalSize.h * scale : thumbH
-                const cropY = scaledSpriteH > thumbH ? (scaledSpriteH - thumbH) / 2 : 0
-                const bgW = naturalSize ? naturalSize.w * scale : undefined
-                const bgSize =
-                  bgW != null ? `${bgW}px ${scaledSpriteH}px` : `auto ${scaledSpriteH}px`
-                spriteStyle = {
-                  backgroundImage: `url(${proxyUrl})`,
-                  backgroundPosition: `-${scaledOx + cropX}px -${cropY}px`,
-                  backgroundSize: bgSize,
-                  backgroundRepeat: 'no-repeat',
-                  width: '100%',
-                  height: '100%',
+                if (naturalSize) {
+                  const geometry = getSpriteThumbnailStyle({
+                    offsetX: ox,
+                    cellWidth: cellW,
+                    cellHeight: cellH,
+                    spriteWidth: naturalSize.w,
+                    spriteHeight: naturalSize.h,
+                    frameWidth: thumbW,
+                    frameHeight: thumbH,
+                  })
+                  if (geometry) {
+                    spriteStyle = {
+                      backgroundImage: `url(${proxyUrl})`,
+                      backgroundPosition: geometry.backgroundPosition,
+                      backgroundSize: geometry.backgroundSize,
+                      backgroundRepeat: 'no-repeat',
+                      width: '100%',
+                      height: '100%',
+                    }
+                  }
                 }
               } else {
                 thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
