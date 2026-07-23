@@ -1327,6 +1327,7 @@ const zhTW: Record<string, string> = {
   'common.copy': '複製',
   'common.remove': '移除',
   'common.delete': '刪除',
+  'common.more': '更多',
   'common.favorite': '收藏',
   'common.contextMenu': '內容選單',
   'common.imageContextMenu': '圖片內容選單',

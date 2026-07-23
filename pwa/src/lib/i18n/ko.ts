@@ -1466,6 +1466,7 @@ const ko: Record<string, string> = {
   'common.copy': '복사',
   'common.remove': '제거',
   'common.delete': '삭제',
+  'common.more': '더 보기',
   'common.favorite': '즐겨찾기',
   'common.contextMenu': '컨텍스트 메뉴',
   'common.imageContextMenu': '이미지 컨텍스트 메뉴',

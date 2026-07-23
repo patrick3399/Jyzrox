@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import type { DownloadJob, Subscription } from '@/lib/types'
 import { SubscriptionCard } from '@/components/subscriptions/SubscriptionCard'
 
@@ -104,5 +104,20 @@ describe('SubscriptionCard job gallery title', () => {
 
     expect(screen.getByRole('link', { name: 'Renamed gallery' })).toBeInTheDocument()
     expect(screen.queryByText('Always visible gallery')).not.toBeInTheDocument()
+  })
+
+  it('keeps low-frequency actions collapsed behind the compact more control', () => {
+    renderCard(makeJob('done'))
+
+    expect(screen.getByRole('button', { name: 'Download Now' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'URL' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Force re-scan' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+
+    expect(screen.getByRole('link', { name: 'URL' })).toHaveAttribute('href', sub.url)
+    expect(screen.getByRole('button', { name: 'Force re-scan' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Subscription Feed' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
   })
 })

@@ -1409,6 +1409,7 @@ const zhCN: Record<string, string> = {
   'common.copy': '复制',
   'common.remove': '移除',
   'common.delete': '删除',
+  'common.more': '更多',
   'common.favorite': '收藏',
   'common.contextMenu': '上下文菜单',
   'common.imageContextMenu': '图片上下文菜单',

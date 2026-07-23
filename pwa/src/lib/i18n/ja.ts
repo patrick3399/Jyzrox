@@ -1628,6 +1628,7 @@ const ja: Record<string, string> = {
   'common.copy': 'コピー',
   'common.remove': '削除',
   'common.delete': '削除',
+  'common.more': 'その他',
   'common.favorite': 'お気に入り',
   'common.contextMenu': 'コンテキストメニュー',
   'common.imageContextMenu': '画像のコンテキストメニュー',

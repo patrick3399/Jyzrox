@@ -1461,6 +1461,7 @@ const en: Record<string, string> = {
   'common.copy': 'Copy',
   'common.remove': 'Remove',
   'common.delete': 'Delete',
+  'common.more': 'More',
   'common.favorite': 'Favorite',
   'common.contextMenu': 'Context menu',
   'common.imageContextMenu': 'Image context menu',

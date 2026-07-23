@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   AlertCircle,
   CheckCircle,
   Download,
   ExternalLink,
+  MoreHorizontal,
   Rss,
   ScanSearch,
   Trash2,
@@ -53,7 +54,7 @@ export function timeAgo(iso: string | null): string {
 
 // ── Sub-components ───────────────────────────────────────────────────
 
-function JobStatusBadge({ job, hasGalleryTitle }: { job: DownloadJob; hasGalleryTitle: boolean }) {
+function JobStatusBadge({ job }: { job: DownloadJob }) {
   let status: React.ReactNode = null
 
   if (job.status === 'running') {
@@ -107,7 +108,7 @@ function JobStatusBadge({ job, hasGalleryTitle }: { job: DownloadJob; hasGallery
 
   if (!status) return null
 
-  return <div className={hasGalleryTitle ? 'mt-1' : 'mt-2'}>{status}</div>
+  return status
 }
 
 function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
@@ -142,72 +143,67 @@ export function SubscriptionCard({
   onRename: (sub: Subscription, name: string) => void
   checkingId: number | null
 }) {
-  const [showMoveMenu, setShowMoveMenu] = useState(false)
+  const [showActions, setShowActions] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState('')
-  const moveMenuRef = useRef<HTMLDivElement | null>(null)
   const galleryHref = subscriptionGalleryHref(sub, latestJob)
   const galleryTitle = sub.gallery_title?.trim() || latestJob?.progress?.title?.trim()
-
-  useEffect(() => {
-    if (!showMoveMenu) return
-    function handleClick(e: MouseEvent) {
-      if (moveMenuRef.current && !moveMenuRef.current.contains(e.target as Node)) {
-        setShowMoveMenu(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [showMoveMenu])
+  const isRunning = latestJob?.status === 'running'
 
   return (
-    <div className="bg-vault-bg border border-vault-border/50 rounded-lg p-3 overflow-hidden">
+    <div className="bg-vault-bg border border-vault-border/50 rounded-lg p-3">
       {/* Top row: name + badges on left, toggle on right */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5 mb-1">
-            {editingName ? (
-              <input
-                autoFocus
-                value={nameValue}
-                placeholder={t('subscriptions.namePlaceholder')}
-                onChange={(e) => setNameValue(e.target.value)}
-                onBlur={() => {
-                  const next = nameValue.trim()
-                  if (next !== (sub.name ?? '')) onRename(sub, next)
-                  setEditingName(false)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') e.currentTarget.blur()
-                  if (e.key === 'Escape') setEditingName(false)
-                }}
-                className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setNameValue(sub.name ?? '')
-                  setEditingName(true)
-                }}
-                className="min-w-0 text-left text-sm font-medium text-vault-text break-all cursor-pointer hover:text-vault-accent transition-colors"
-                title={t('subscriptions.editName')}
-              >
-                {sub.name || sub.url}
-              </button>
-            )}
-            {sourceBadge(sub.source)}
-            {!sub.enabled && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted shrink-0">
-                {t('subscriptions.disabled')}
-              </span>
-            )}
-          </div>
-          {sub.name && <p className="text-xs text-vault-text-muted truncate mb-1">{sub.url}</p>}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameValue}
+              placeholder={t('subscriptions.namePlaceholder')}
+              onChange={(e) => setNameValue(e.target.value)}
+              onBlur={() => {
+                const next = nameValue.trim()
+                if (next !== (sub.name ?? '')) onRename(sub, next)
+                setEditingName(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+                if (e.key === 'Escape') setEditingName(false)
+              }}
+              className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setNameValue(sub.name ?? '')
+                setEditingName(true)
+              }}
+              className="min-w-0 max-w-full truncate text-left text-sm font-medium text-vault-text cursor-pointer hover:text-vault-accent transition-colors"
+              title={t('subscriptions.editName')}
+            >
+              {sub.name || sub.url}
+            </button>
+          )}
+          {sourceBadge(sub.source)}
+          <button
+            onClick={() => onAutoDownloadToggle(sub)}
+            className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
+            title={
+              sub.auto_download
+                ? t('subscriptions.autoDownloadOn')
+                : t('subscriptions.autoDownloadOff')
+            }
+          >
+            {t('subscriptions.autoDownload')}
+          </button>
         </div>
 
         <button
           onClick={() => onToggle(sub)}
+          role="switch"
+          aria-checked={sub.enabled}
+          aria-label={sub.name || sub.url}
           className={`relative w-9 h-5 rounded-full transition-colors shrink-0 mt-0.5 ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
         >
           <span
@@ -216,147 +212,147 @@ export function SubscriptionCard({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
-        <button
-          onClick={() => onAutoDownloadToggle(sub)}
-          className={`px-1.5 py-0.5 rounded transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
-          title={
-            sub.auto_download
-              ? t('subscriptions.autoDownloadOn')
-              : t('subscriptions.autoDownloadOff')
-          }
-        >
-          {t('subscriptions.autoDownload')}
-        </button>
-        {sub.last_checked_at && (
-          <span
-            className={
-              sub.last_status === 'ok'
-                ? 'text-emerald-400'
-                : sub.last_status === 'failed'
-                  ? 'text-red-400'
-                  : undefined
-            }
-          >
-            {t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}
-          </span>
-        )}
-      </div>
+      {/* Gallery identity + compact terminal status */}
+      {(galleryTitle || galleryHref || (latestJob && !isRunning)) && (
+        <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <div className="min-w-0 flex-1 basis-48">
+            {galleryTitle && galleryHref ? (
+              <Link
+                href={galleryHref}
+                className="block truncate text-xs font-medium text-vault-accent hover:underline"
+                title={galleryTitle}
+              >
+                {galleryTitle}
+              </Link>
+            ) : galleryTitle ? (
+              <p className="truncate text-xs font-medium text-vault-text" title={galleryTitle}>
+                {galleryTitle}
+              </p>
+            ) : galleryHref ? (
+              <Link href={galleryHref} className="text-xs text-vault-accent hover:underline">
+                {t('subscriptions.viewGallery')}
+              </Link>
+            ) : null}
+          </div>
+          {latestJob && !isRunning && (
+            <div className="min-w-0 max-w-full shrink-0">
+              <JobStatusBadge job={latestJob} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Running progress and errors expand only while relevant. */}
+      {latestJob && isRunning && (
+        <div className="mt-1">
+          <JobStatusBadge job={latestJob} />
+        </div>
+      )}
       {sub.last_error && !latestJob && (
-        <p className="text-[10px] text-red-400 mt-1 truncate" title={sub.last_error}>
+        <p className="mt-1 truncate text-[10px] text-red-400" title={sub.last_error}>
           {sub.last_error}
         </p>
       )}
-      {galleryTitle &&
-        (galleryHref ? (
-          <Link
-            href={galleryHref}
-            className="mt-2 block truncate text-xs font-medium text-vault-accent hover:underline"
-            title={galleryTitle}
+
+      {/* Compact footer: recency on the left, frequent actions on the right. */}
+      <div className="mt-2 flex min-h-7 items-center justify-between gap-2 border-t border-vault-border/50 pt-2">
+        <span
+          className={`min-w-0 truncate text-[10px] ${
+            sub.last_status === 'ok'
+              ? 'text-emerald-400'
+              : sub.last_status === 'failed'
+                ? 'text-red-400'
+                : 'text-vault-text-muted'
+          }`}
+        >
+          {sub.last_checked_at
+            ? `${t('subscriptions.lastChecked')}: ${timeAgo(sub.last_checked_at)}`
+            : t('settings.tasks.never')}
+        </span>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            onClick={() => onCheck(sub)}
+            disabled={checkingId === sub.id}
+            className="rounded p-1.5 text-vault-text-muted transition-colors hover:text-emerald-400 disabled:opacity-60"
+            title={t('subscriptions.downloadNow')}
+            aria-label={t('subscriptions.downloadNow')}
           >
-            {galleryTitle}
-          </Link>
-        ) : (
-          <p className="mt-2 truncate text-xs font-medium text-vault-text" title={galleryTitle}>
-            {galleryTitle}
-          </p>
-        ))}
-      {latestJob && <JobStatusBadge job={latestJob} hasGalleryTitle={Boolean(galleryTitle)} />}
-      {galleryHref && !galleryTitle && (
-        <Link
-          href={galleryHref}
-          className="mt-1.5 inline-block text-[10px] text-vault-accent hover:underline"
-        >
-          {t('subscriptions.viewGallery')}
-        </Link>
-      )}
-
-      {/* Bottom action row */}
-      <div className="flex items-center gap-0.5 mt-2 pt-2 border-t border-vault-border/50">
-        <button
-          onClick={() => onCheck(sub)}
-          disabled={checkingId === sub.id}
-          className="p-1.5 rounded text-vault-text-muted hover:text-emerald-400 transition-colors disabled:opacity-60"
-          title={t('subscriptions.downloadNow')}
-          aria-label={t('subscriptions.downloadNow')}
-        >
-          <Download size={14} className={checkingId === sub.id ? 'animate-pulse' : ''} />
-        </button>
-        <button
-          onClick={() => onBackfill(sub)}
-          disabled={checkingId === sub.id}
-          className="p-1.5 rounded text-vault-text-muted hover:text-amber-400 transition-colors disabled:opacity-60"
-          title={t('subscriptions.backfill')}
-          aria-label={t('subscriptions.backfillTitle')}
-        >
-          <ScanSearch size={14} />
-        </button>
-        <a
-          href={sub.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="p-1.5 rounded text-vault-text-muted hover:text-vault-text transition-colors"
-        >
-          <ExternalLink size={14} />
-        </a>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(
-              `${window.location.origin}/api/rss/subscriptions/${sub.id}?token=YOUR_API_TOKEN`,
-            )
-            toast.success(t('rss.copied'))
-          }}
-          className="p-1.5 rounded text-vault-text-muted hover:text-orange-400 transition-colors"
-          title={t('rss.subscriptionFeed')}
-        >
-          <Rss size={14} />
-        </button>
-
-        {/* Move to group dropdown */}
-        {groups.length > 0 && (
-          <div className="relative" ref={moveMenuRef}>
-            <button
-              onClick={() => setShowMoveMenu(!showMoveMenu)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
-              title={t('subscriptions.moveTo')}
-            >
-              <Users size={14} />
-            </button>
-            {showMoveMenu && (
-              <div className="absolute left-0 bottom-full mb-1 z-20 bg-vault-card border border-vault-border rounded-lg shadow-lg py-1 min-w-[140px]">
-                <button
-                  onClick={() => {
-                    onMoveToGroup(sub, null)
-                    setShowMoveMenu(false)
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-vault-bg transition-colors ${sub.group_id === null ? 'text-vault-accent' : 'text-vault-text-muted'}`}
-                >
-                  {t('subscriptions.noGroup')}
-                </button>
-                {groups.map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => {
-                      onMoveToGroup(sub, g.id)
-                      setShowMoveMenu(false)
-                    }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-vault-bg transition-colors truncate ${sub.group_id === g.id ? 'text-vault-accent' : 'text-vault-text-muted'}`}
-                  >
-                    {g.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        <button
-          onClick={() => onDelete(sub)}
-          className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors ml-auto"
-        >
-          <Trash2 size={14} />
-        </button>
+            <Download size={14} className={checkingId === sub.id ? 'animate-pulse' : ''} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowActions((value) => !value)}
+            className={`rounded p-1.5 transition-colors ${showActions ? 'bg-vault-border text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+            title={t('common.more')}
+            aria-label={t('common.more')}
+            aria-expanded={showActions}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </div>
       </div>
+
+      {showActions && (
+        <div className="mt-2 grid grid-cols-2 gap-1 border-t border-vault-border/50 pt-2 text-xs">
+          <button
+            onClick={() => onBackfill(sub)}
+            disabled={checkingId === sub.id}
+            className="flex items-center gap-1.5 rounded px-2 py-1.5 text-vault-text-muted transition-colors hover:bg-vault-card hover:text-amber-400 disabled:opacity-60"
+          >
+            <ScanSearch size={13} />
+            {t('subscriptions.backfill')}
+          </button>
+          <a
+            href={sub.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded px-2 py-1.5 text-vault-text-muted transition-colors hover:bg-vault-card hover:text-vault-text"
+          >
+            <ExternalLink size={13} />
+            {t('subscriptions.url')}
+          </a>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(
+                `${window.location.origin}/api/rss/subscriptions/${sub.id}?token=YOUR_API_TOKEN`,
+              )
+              toast.success(t('rss.copied'))
+            }}
+            className="flex items-center gap-1.5 rounded px-2 py-1.5 text-vault-text-muted transition-colors hover:bg-vault-card hover:text-orange-400"
+          >
+            <Rss size={13} />
+            {t('rss.subscriptionFeed')}
+          </button>
+          <button
+            onClick={() => onDelete(sub)}
+            className="flex items-center gap-1.5 rounded px-2 py-1.5 text-vault-text-muted transition-colors hover:bg-red-900/20 hover:text-red-400"
+          >
+            <Trash2 size={13} />
+            {t('common.delete')}
+          </button>
+          {groups.length > 0 && (
+            <label className="col-span-2 mt-1 flex items-center gap-2 border-t border-vault-border/50 pt-2 text-vault-text-muted">
+              <Users size={13} className="shrink-0" />
+              <span className="shrink-0">{t('subscriptions.moveTo')}</span>
+              <select
+                value={sub.group_id ?? ''}
+                onChange={(event) => {
+                  onMoveToGroup(sub, event.target.value ? Number(event.target.value) : null)
+                  setShowActions(false)
+                }}
+                className="min-w-0 flex-1 rounded border border-vault-border bg-vault-input px-2 py-1 text-xs text-vault-text"
+              >
+                <option value="">{t('subscriptions.noGroup')}</option>
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
     </div>
   )
 }
