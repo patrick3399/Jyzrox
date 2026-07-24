@@ -32,14 +32,13 @@ from plugins.models import (
     PluginMeta,
     SiteInfo,
 )
+from services.media_formats import IMAGE_EXTENSIONS as _IMAGE_EXTS
+from services.media_formats import VIDEO_EXTENSIONS as _VIDEO_EXTS
 
 logger = logging.getLogger(__name__)
 
 _POST_RE = re.compile(r"(?:https?://)?(?:(?:www\.)?fanbox\.cc/@[\w-]+/|[\w-]+\.fanbox\.cc/)posts/(\d+)", re.I)
 _CREATOR_RE = re.compile(r"(?:https?://)?(?:([\w-]+)\.fanbox\.cc|(?:www\.)?fanbox\.cc/@([\w-]+))/?$", re.I)
-_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv"}
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
-
 
 def _cookies(credentials: dict | str | None) -> dict[str, str]:
     if isinstance(credentials, str):

@@ -9,9 +9,9 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
-logger = logging.getLogger(__name__)
+from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_EXTS
 
-_SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
+logger = logging.getLogger(__name__)
 
 
 def _event_path(path: str | bytes) -> Path:

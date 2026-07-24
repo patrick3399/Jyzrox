@@ -30,11 +30,10 @@ from services.cas import (
     thumb_dir,
     thumbnails_complete_at,
 )
+from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_MEDIA_EXTS
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run, _sha256
-
-_SUPPORTED_MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
 
 
 @dataclass(frozen=True)

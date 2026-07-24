@@ -1828,7 +1828,7 @@ const ko: Record<string, string> = {
   'dedup.scanResume': '재개',
   'dedup.scanStop': '중지',
   'dedup.scanSignalFailed': '명령 전송 실패',
-  'dedup.tier0Note': '티어 0 (SHA256 정확한 일치)은 가져오기 시 항상 활성화됩니다.',
+  'dedup.tier0Note': '티어 0: 바이트가 동일한 파일은 저장 공간을 공유하며 Gallery 페이지는 자동으로 삭제되지 않습니다.',
   'dedup.processing': '처리 중',
   'dedup.pending': '대기 중',
   'dedup.tierComplete': '완료',

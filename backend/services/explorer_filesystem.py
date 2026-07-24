@@ -11,8 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import LibraryPath
-
-MEDIA_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"})
+from services.media_formats import MEDIA_EXTENSIONS
 
 
 async def get_enabled_library_root(db: AsyncSession, library_id: int) -> tuple[LibraryPath, Path]:
@@ -125,7 +124,7 @@ def detect_media_type(path: Path) -> str | None:
         brand = head[8:12]
         if brand in {b"avif", b"avis", b"heic", b"heix", b"mif1"}:
             return "image/avif" if brand in {b"avif", b"avis"} else "image/heic"
-        return "video/mp4"
+        return "video/quicktime" if path.suffix.lower() == ".mov" else "video/mp4"
     if head.startswith(b"\x1aE\xdf\xa3"):
         return "video/webm"
     return None

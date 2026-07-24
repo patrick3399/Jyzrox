@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from db.models import Blob
+from services.media_formats import media_type_for_extension
 
 THUMBNAIL_SIZES = (160, 360, 720)
 THUMBNAIL_VERSION = 2
@@ -163,15 +164,9 @@ async def store_blob(
     ext = file_path.suffix.lower()  # e.g., '.jpg'
     file_size = file_path.stat().st_size
 
-    # Determine media type from extension
-    video_exts = {".mp4", ".webm", ".mkv", ".avi"}
-    gif_exts = {".gif"}
-    if ext in video_exts:
-        media_type = "video"
-    elif ext in gif_exts:
-        media_type = "gif"
-    else:
-        media_type = "image"
+    media_type = media_type_for_extension(ext)
+    if media_type is None:
+        raise ValueError(f"Unsupported media extension: {ext}")
 
     # Upsert blob record FIRST so the filesystem write below can use the
     # canonical extension: identical bytes arriving under a different filename

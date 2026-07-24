@@ -7,11 +7,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import Blob, BlobRelationship, Image
+from db.models import Blob, BlobRelationship
 from worker.dedup_helpers import (
     DedupProgress,
+    PhashBKTree,
     _classify_pair,
-    _scan_candidates,
+    _pair_context_scope,
+    _scan_indexed_candidates,
 )
 
 logger = logging.getLogger("worker.dedup_scan")
@@ -20,7 +22,7 @@ logger = logging.getLogger("worker.dedup_scan")
 async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     """Orchestrate all dedup tiers with real-time progress tracking.
 
-    mode='pending' — process unprocessed blobs only (skip already-seen pairs)
+    mode='pending' — query only blobs not yet scanned at the active threshold
     mode='reset'   — DELETE all blob_relationships first, then full re-scan
     """
     r = get_redis()
@@ -37,6 +39,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     if mode == "reset":
         async with async_session() as session:
             await session.execute(delete(BlobRelationship))
+            await session.execute(update(Blob).values(dedup_scanned_threshold=None))
             await session.commit()
         logger.info("dedup_scan_job: reset — all relationships cleared")
 
@@ -54,43 +57,64 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
             select(
                 Blob.sha256,
                 Blob.phash_int,
-                Blob.phash_q0,
-                Blob.phash_q1,
-                Blob.phash_q2,
-                Blob.phash_q3,
+                Blob.dedup_scanned_threshold,
             )
             .where(Blob.phash_int.isnot(None))
             .order_by(Blob.sha256)
         )
         blobs = result.all()
 
-    total_blobs = len(blobs)
-    logger.info("Tier 1 start, threshold=%d, blobs=%d", threshold, total_blobs)
+    scan_blobs = [
+        blob
+        for blob in blobs
+        if mode == "reset"
+        or not isinstance(blob.dedup_scanned_threshold, int)
+        or blob.dedup_scanned_threshold < threshold
+    ]
+    index = PhashBKTree(blobs)
+    total_blobs = len(scan_blobs)
+    logger.info("Tier 1 indexed start, threshold=%d, scan_blobs=%d, indexed_blobs=%d", threshold, total_blobs, len(blobs))
     await progress.start(mode, total=total_blobs, tier=1)
 
     total_inserted = 0
     pairs_batch: list[dict] = []
+    pair_keys: set[tuple[str, str]] = set()
+    scanned_batch: list[str] = []
 
     async def _flush() -> None:
         nonlocal total_inserted
-        if not pairs_batch:
+        if not pairs_batch and not scanned_batch:
             return
         async with async_session() as session:
-            stmt = pg_insert(BlobRelationship).values(pairs_batch)
-            stmt = stmt.on_conflict_do_nothing(constraint="uq_blob_pair")
-            res = await session.execute(stmt)
+            inserted = 0
+            if pairs_batch:
+                stmt = pg_insert(BlobRelationship).values(pairs_batch)
+                stmt = stmt.on_conflict_do_nothing(constraint="uq_blob_pair")
+                res = await session.execute(stmt)
+                inserted = int(getattr(res, "rowcount", 0) or 0)
+            if scanned_batch:
+                await session.execute(
+                    update(Blob)
+                    .where(Blob.sha256.in_(scanned_batch))
+                    .values(dedup_scanned_threshold=threshold)
+                )
             await session.commit()
-            total_inserted += res.rowcount or 0
+            total_inserted += inserted
         pairs_batch.clear()
+        pair_keys.clear()
+        scanned_batch.clear()
 
-    for i in range(total_blobs):
-        a = blobs[i]
-        # Index-based scan (no slicing) — see worker.dedup_helpers._scan_candidates.
-        for b, dist in _scan_candidates(blobs, i, threshold):
+    for a in scan_blobs:
+        for b, dist in _scan_indexed_candidates(index, a, threshold):
+            sha_a, sha_b = sorted((a.sha256, b.sha256))
+            pair_key = (sha_a, sha_b)
+            if pair_key in pair_keys:
+                continue
+            pair_keys.add(pair_key)
             pairs_batch.append(
                 {
-                    "sha_a": a.sha256,
-                    "sha_b": b.sha256,
+                    "sha_a": sha_a,
+                    "sha_b": sha_b,
                     "hamming_dist": dist,
                     "relationship": "needs_t2",
                     "tier": 1,
@@ -100,6 +124,9 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
             if len(pairs_batch) >= 1000:
                 await _flush()
 
+        scanned_batch.append(a.sha256)
+        if len(scanned_batch) >= 250:
+            await _flush()
         await progress.report(1)
         signal = await progress.check_signal()
         if signal == "pause":
@@ -123,18 +150,22 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     opencv_enabled = opencv_raw == b"1"
 
     async with async_session() as session:
-        count_result = await session.execute(select(func.count()).where(BlobRelationship.relationship == "needs_t2"))
+        count_result = await session.execute(
+            select(func.count()).where(BlobRelationship.relationship.in_(("needs_t2", "same_gallery_only")))
+        )
         needs_t2_count = count_result.scalar_one()
 
     await progress.advance_tier(2, total=needs_t2_count)
-    logger.info("Tier 2 start, needs_t2=%d", needs_t2_count)
+    logger.info("Tier 2 start, candidates_to_evaluate=%d", needs_t2_count)
 
     t2_processed = 0
+    last_t2_id = 0
     while True:
         async with async_session() as session:
             result = await session.execute(
                 select(BlobRelationship)
-                .where(BlobRelationship.relationship == "needs_t2")
+                .where(BlobRelationship.relationship.in_(("needs_t2", "same_gallery_only")))
+                .where(BlobRelationship.id > last_t2_id)
                 .order_by(BlobRelationship.id)
                 .limit(200)
             )
@@ -142,6 +173,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
 
         if not pairs:
             break
+        last_t2_id = pairs[-1].id
 
         for pair in pairs:
             async with async_session() as session:
@@ -154,27 +186,33 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                     await session.execute(
                         update(BlobRelationship)
                         .where(BlobRelationship.id == pair.id)
-                        .values(relationship="resolved", tier=2)
+                        .values(relationship="resolved", context_scope="unreferenced", tier=2)
                     )
                     await session.commit()
                     continue
 
-                # Blobs in the same gallery are intentional variants; auto-whitelist.
-                same_gal_subq = (
-                    select(Image.gallery_id)
-                    .where(Image.blob_sha256 == pair.sha_a)
-                    .where(Image.gallery_id.in_(select(Image.gallery_id).where(Image.blob_sha256 == pair.sha_b)))
-                    .limit(1)
-                    .exists()
-                )
-                same_gal = (await session.execute(select(same_gal_subq))).scalar()
-
-                if same_gal:
-                    logger.info("same_gallery_variant: pair %d", pair.id)
+                context_scope = await _pair_context_scope(session, pair.sha_a, pair.sha_b)
+                if context_scope == "same_gallery_only":
+                    logger.info("same_gallery_only: pair %d", pair.id)
                     await session.execute(
                         update(BlobRelationship)
                         .where(BlobRelationship.id == pair.id)
-                        .values(relationship="whitelisted", reason="same_gallery_variant", tier=2)
+                        .values(
+                            relationship="same_gallery_only",
+                            context_scope=context_scope,
+                            reason="same_gallery_variant",
+                            suggested_keep=None,
+                            tier=2,
+                        )
+                    )
+                    await session.commit()
+                    t2_processed += 1
+                    continue
+                if context_scope == "unreferenced":
+                    await session.execute(
+                        update(BlobRelationship)
+                        .where(BlobRelationship.id == pair.id)
+                        .values(relationship="resolved", context_scope=context_scope, reason="unreferenced", tier=2)
                     )
                     await session.commit()
                     t2_processed += 1
@@ -188,6 +226,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                     .where(BlobRelationship.id == pair.id)
                     .values(
                         relationship=next_rel,
+                        context_scope=context_scope,
                         suggested_keep=keep,
                         reason=reason,
                         tier=2,

@@ -1570,7 +1570,7 @@ const zhCN: Record<string, string> = {
   'dedup.emptyDoneDesc': '没有待审核的重复项。',
   'dedup.emptyNotEnabled': '请启用第一层级',
   'dedup.emptyNotEnabledDesc': '开启感知哈希检测以查找相似图片。',
-  'dedup.tier0Note': '第 0 层（SHA256 精确匹配）始终在导入时启用。',
+  'dedup.tier0Note': '第 0 层：内容完全相同的文件会共享一份存储；不会自动移除 Gallery 中的页面。',
   'dedup.tier1': '第 1 层 — 感知哈希',
   'dedup.tier1Desc': '使用感知哈希检测视觉上相似的图片。',
   'dedup.tier2': '第 2 层 — 启发式',

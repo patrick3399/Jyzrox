@@ -2,7 +2,12 @@
 
 import logging
 
+from services import media_formats as _media_formats
 from services.image_magic import IMAGE_MAGIC as _IMAGE_MAGIC  # noqa: F401
+
+_IMAGE_EXTS = _media_formats.IMAGE_EXTENSIONS
+_VIDEO_EXTS = _media_formats.VIDEO_EXTENSIONS
+_MEDIA_EXTS = _media_formats.MEDIA_EXTENSIONS
 
 logger = logging.getLogger("worker")
 
@@ -23,10 +28,6 @@ SUB_CHECK_SPACING_RANGE_S = (2.0, 8.0)  # randomized delay between sub checks
 # of a long job must pass an explicit timeout. Group checks may run
 # jitter + GROUP_MAX_DURATION, plus margin.
 GROUP_JOB_TIMEOUT = GROUP_MAX_DURATION + GROUP_START_JITTER_MAX_S + 120
-
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
-_VIDEO_EXTS = {".mp4", ".webm", ".mov"}
-_MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS
 
 # _IMAGE_MAGIC is aliased above from services.image_magic (single source of
 # truth); kept as a private name here for backward compatibility with

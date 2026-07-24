@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS blobs (
     phash_q1      SMALLINT,
     phash_q2      SMALLINT,
     phash_q3      SMALLINT,
+    dedup_scanned_threshold SMALLINT,
     extension     TEXT NOT NULL,
     storage       TEXT NOT NULL DEFAULT 'cas',
     external_path TEXT,
@@ -65,6 +66,8 @@ CREATE INDEX IF NOT EXISTS idx_blobs_phash_q0 ON blobs(phash_q0) WHERE phash_q0 
 CREATE INDEX IF NOT EXISTS idx_blobs_phash_q1 ON blobs(phash_q1) WHERE phash_q1 IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_blobs_phash_q2 ON blobs(phash_q2) WHERE phash_q2 IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_blobs_phash_q3 ON blobs(phash_q3) WHERE phash_q3 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_dedup_scanned_threshold
+    ON blobs(dedup_scanned_threshold) WHERE phash_int IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS images (
     id              BIGSERIAL PRIMARY KEY,
@@ -578,6 +581,7 @@ CREATE TABLE IF NOT EXISTS blob_relationships (
     reason          TEXT,
     diff_score      FLOAT,
     diff_type       TEXT,
+    context_scope   TEXT,
     tier            SMALLINT NOT NULL DEFAULT 1,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

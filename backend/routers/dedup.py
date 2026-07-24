@@ -89,6 +89,7 @@ async def get_dedup_stats(_: dict = Depends(_admin)):
         "total_blobs": total_blobs,
         "needs_t2": counts.get("needs_t2", 0),
         "needs_t3": counts.get("needs_t3", 0),
+        "same_gallery_only": counts.get("same_gallery_only", 0),
         "pending_review": counts.get("quality_conflict", 0) + counts.get("variant", 0),
         "whitelisted": counts.get("whitelisted", 0),
         "resolved": counts.get("resolved", 0),

@@ -1783,7 +1783,7 @@ const ja: Record<string, string> = {
   'dedup.scanResume': '再開',
   'dedup.scanStop': '停止',
   'dedup.scanSignalFailed': 'コマンドの送信に失敗しました',
-  'dedup.tier0Note': 'Tier 0（SHA256完全一致）はインポート時に常に有効です。',
+  'dedup.tier0Note': 'Tier 0：バイト単位で同一のファイルはストレージを共有し、Gallery のページは自動削除されません。',
   'dedup.processing': '処理中',
   'dedup.pending': '待機中',
   'dedup.tierComplete': '完了',

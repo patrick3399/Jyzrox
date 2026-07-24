@@ -32,13 +32,14 @@ from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
 from db.models import Gallery, Image, ImportConflict, LibraryPath
 from services.cas import create_library_symlink, increment_ref_count, store_blob
 from services.image_magic import validate_image_magic
+from services.media_formats import IMAGE_EXTENSIONS as _SUPPORTED_IMAGE_EXTS
+from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_EXTS
 
 router = APIRouter(tags=["import"])
 
 _member = require_role("member")
 _admin = require_role("admin")
 
-_SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
 _WEB_CLIP_MAX_BYTES = 50 * 1024 * 1024
 
 
@@ -70,7 +71,7 @@ async def import_web_clip(
     db: AsyncSession = Depends(get_db),
 ):
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in _SUPPORTED_EXTS - {".mp4", ".webm"}:
+    if suffix not in _SUPPORTED_IMAGE_EXTS:
         raise HTTPException(status_code=400, detail="Web clip must be a supported image")
     temp = Path(settings.data_training_path) / "web-clips" / f".{uuid.uuid4().hex}{suffix}"
     temp.parent.mkdir(parents=True, exist_ok=True)

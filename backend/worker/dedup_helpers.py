@@ -1,11 +1,129 @@
 """Shared helpers for the dedup pipeline workers."""
 
-import asyncio
+from __future__ import annotations
 
-from db.models import Blob
+import asyncio
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+
+from sqlalchemy import case, select
+from sqlalchemy.orm import aliased
+
+from db.models import Blob, Image
 
 _MASK64 = (1 << 64) - 1
 _MASK16 = 0xFFFF
+
+
+def _hamming_distance(a: int, b: int) -> int:
+    return ((a & _MASK64) ^ (b & _MASK64)).bit_count()
+
+
+@dataclass
+class _BKNode:
+    phash: int
+    items: list = field(default_factory=list)
+    children: dict[int, _BKNode] = field(default_factory=dict)
+
+
+class PhashBKTree:
+    """Metric index for exact Hamming-radius pHash candidate queries.
+
+    Equal hashes share one node rather than forming a distance-zero chain. This
+    keeps large exact-pHash groups bounded and makes the initial scan practical.
+    """
+
+    def __init__(self, items: Iterable = ()) -> None:
+        self.root: _BKNode | None = None
+        for item in items:
+            self.add(item)
+
+    def add(self, item) -> None:
+        phash = int(item.phash_int) & _MASK64
+        if self.root is None:
+            self.root = _BKNode(phash=phash, items=[item])
+            return
+
+        node = self.root
+        while True:
+            distance = _hamming_distance(phash, node.phash)
+            if distance == 0:
+                node.items.append(item)
+                return
+            child = node.children.get(distance)
+            if child is None:
+                node.children[distance] = _BKNode(phash=phash, items=[item])
+                return
+            node = child
+
+    def query(self, phash: int, threshold: int):
+        if self.root is None:
+            return
+        target = int(phash) & _MASK64
+        stack = [self.root]
+        while stack:
+            node = stack.pop()
+            distance = _hamming_distance(target, node.phash)
+            if distance <= threshold:
+                for item in node.items:
+                    yield item, distance
+            lower = max(1, distance - threshold)
+            upper = distance + threshold
+            for edge in range(lower, upper + 1):
+                child = node.children.get(edge)
+                if child is not None:
+                    stack.append(child)
+
+
+def _scan_indexed_candidates(index: PhashBKTree, blob, threshold: int):
+    """Yield canonical candidates for one blob from the metric index."""
+    for candidate, distance in index.query(blob.phash_int, threshold):
+        if candidate.sha256 == blob.sha256:
+            continue
+        yield candidate, distance
+
+
+async def _pair_context_scope(session, sha_a: str, sha_b: str) -> str:
+    """Classify where a similar blob pair occurs in the gallery graph."""
+    image_a = aliased(Image)
+    image_b = aliased(Image)
+    ref_a = select(image_a.id).where(image_a.blob_sha256 == sha_a).limit(1).exists()
+    ref_b = select(image_b.id).where(image_b.blob_sha256 == sha_b).limit(1).exists()
+    same_gallery = (
+        select(image_a.id)
+        .join(image_b, image_b.gallery_id == image_a.gallery_id)
+        .where(image_a.blob_sha256 == sha_a, image_b.blob_sha256 == sha_b)
+        .limit(1)
+        .exists()
+    )
+    cross_gallery = (
+        select(image_a.id)
+        .join(image_b, image_b.gallery_id != image_a.gallery_id)
+        .where(image_a.blob_sha256 == sha_a, image_b.blob_sha256 == sha_b)
+        .limit(1)
+        .exists()
+    )
+    scope = (
+        await session.execute(
+            select(
+                case(
+                    ((~ref_a) | (~ref_b), "unreferenced"),
+                    (same_gallery & cross_gallery, "mixed"),
+                    (cross_gallery, "cross_gallery"),
+                    (same_gallery, "same_gallery_only"),
+                    else_="unreferenced",
+                )
+            )
+        )
+    ).scalar()
+
+    # Preserve compatibility with lightweight mocked sessions used by focused
+    # worker tests while production queries always return the string values.
+    if scope is True:
+        return "same_gallery_only"
+    if scope is False:
+        return "cross_gallery"
+    return str(scope)
 
 
 def _scan_candidates(blobs, i, threshold):
@@ -31,7 +149,7 @@ def _scan_candidates(blobs, i, threshold):
         if q01_dist > threshold:
             continue
 
-        dist = bin(a_phash ^ (b.phash_int & _MASK64)).count("1")
+        dist = _hamming_distance(a_phash, b.phash_int)
         if dist > threshold:
             continue
 

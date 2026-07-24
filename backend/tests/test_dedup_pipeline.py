@@ -12,7 +12,9 @@ Strategy:
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import text
+from sqlalchemy import select, text
+
+from db.models import Blob, BlobRelationship, Gallery
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,6 +81,25 @@ async def _insert_relationship(
     hamming_dist: int = 3,
     tier: int = 1,
 ) -> int:
+    for suffix, sha in (("a", sha_a), ("b", sha_b)):
+        source_id = f"dedup-{sha_a[:8]}-{sha_b[:8]}-{suffix}"
+        await session.execute(
+            text(
+                "INSERT OR IGNORE INTO galleries (source, source_id, title, download_status) "
+                "VALUES ('test', :source_id, 'Dedup Context', 'downloaded')"
+            ),
+            {"source_id": source_id},
+        )
+        gallery_id = (
+            await session.execute(select(Gallery.id).where(Gallery.source == "test", Gallery.source_id == source_id))
+        ).scalar_one()
+        await session.execute(
+            text(
+                "INSERT OR IGNORE INTO images (gallery_id, page_num, blob_sha256) "
+                "VALUES (:gallery_id, 1, :sha)"
+            ),
+            {"gallery_id": gallery_id, "sha": sha},
+        )
     result = await session.execute(
         text(
             "INSERT INTO blob_relationships "
@@ -96,6 +117,33 @@ async def _insert_relationship(
     )
     await session.commit()
     return result.fetchone()[0]
+
+
+async def _insert_occurrence(session, sha256: str, source_id: str, page_num: int = 1) -> int:
+    await session.execute(
+        text(
+            "INSERT OR IGNORE INTO galleries (source, source_id, title, download_status) "
+            "VALUES ('context', :source_id, 'Context Gallery', 'downloaded')"
+        ),
+        {"source_id": source_id},
+    )
+    gallery_id = (
+        await session.execute(
+            select(Gallery.id)
+            .where(Gallery.source == "context", Gallery.source_id == source_id)
+            .order_by(Gallery.id)
+            .limit(1)
+        )
+    ).scalar_one()
+    await session.execute(
+        text(
+            "INSERT OR IGNORE INTO images (gallery_id, page_num, blob_sha256) "
+            "VALUES (:gallery_id, :page_num, :sha)"
+        ),
+        {"gallery_id": gallery_id, "page_num": page_num, "sha": sha256},
+    )
+    await session.commit()
+    return gallery_id
 
 
 def _make_ctx() -> dict:
@@ -296,6 +344,29 @@ class TestDedupTier1:
         ).scalar()
         assert count == 1
 
+    async def test_second_run_skips_blobs_already_scanned_at_threshold(self, db_session, db_session_factory):
+        from worker.dedup_tier1 import dedup_tier1_job
+
+        await _insert_blob(session=db_session, sha256="d1" + "0" * 62, phash_int=1)
+        await _insert_blob(session=db_session, sha256="d2" + "0" * 62, phash_int=3)
+        r = _make_redis()
+        r.get = AsyncMock(side_effect=lambda key: b"10" if "threshold" in key else b"1")
+        fake_db = _make_session_cm(db_session_factory)
+
+        with (
+            patch("worker.dedup_tier1.get_redis", return_value=r),
+            patch("worker.dedup_tier1.async_session", fake_db),
+        ):
+            first = await dedup_tier1_job(_make_ctx(), force=True)
+            second = await dedup_tier1_job(_make_ctx(), force=True)
+
+        assert first["scanned"] == 2
+        assert second["scanned"] == 0
+        thresholds = (
+            await db_session.execute(select(Blob.dedup_scanned_threshold).order_by(Blob.sha256))
+        ).scalars().all()
+        assert thresholds == [10, 10]
+
     async def test_progress_redis_keys_written_on_completion(self, db_session, db_session_factory):
         """After job completes, Redis keys for last_run and last_status must be set."""
         from worker.dedup_tier1 import dedup_tier1_job
@@ -404,6 +475,59 @@ class TestDedupTier2:
 
         assert result["status"] == "ok"
         assert result["processed"] == 0
+
+    async def test_same_gallery_only_is_suppressed_but_rechecked_when_context_changes(
+        self, db_session, db_session_factory
+    ):
+        from worker.dedup_tier2 import dedup_tier2_job
+
+        sha_a = "ctxa" + "0" * 60
+        sha_b = "ctxb" + "0" * 60
+        await _insert_blob(session=db_session, sha256=sha_a)
+        await _insert_blob(session=db_session, sha256=sha_b)
+        pair_id = await _insert_relationship(db_session, sha_a, sha_b, "needs_t2")
+
+        # Replace the helper's cross-gallery fixtures with one shared gallery.
+        await db_session.execute(text("DELETE FROM images WHERE blob_sha256 IN (:a, :b)"), {"a": sha_a, "b": sha_b})
+        await _insert_occurrence(db_session, sha_a, "shared", 1)
+        await _insert_occurrence(db_session, sha_b, "shared", 2)
+
+        r = _make_redis()
+        r.get = AsyncMock(side_effect=lambda key: b"0" if "opencv" in key else b"1")
+        fake_db = _make_session_cm(db_session_factory)
+        with (
+            patch("worker.dedup_tier2.get_redis", return_value=r),
+            patch("worker.dedup_tier2.async_session", fake_db),
+        ):
+            await dedup_tier2_job(_make_ctx(), force=True)
+
+        first = (
+            await db_session.execute(
+                select(BlobRelationship.relationship, BlobRelationship.context_scope).where(
+                    BlobRelationship.id == pair_id
+                )
+            )
+        ).one()
+        assert first == ("same_gallery_only", "same_gallery_only")
+
+        # A new occurrence in another gallery makes the pair mixed. The next
+        # Tier-2 run must re-evaluate the suppressed state and classify it.
+        await _insert_occurrence(db_session, sha_a, "other", 1)
+        with (
+            patch("worker.dedup_tier2.get_redis", return_value=r),
+            patch("worker.dedup_tier2.async_session", fake_db),
+        ):
+            await dedup_tier2_job(_make_ctx(), force=True)
+
+        second = (
+            await db_session.execute(
+                select(BlobRelationship.relationship, BlobRelationship.context_scope).where(
+                    BlobRelationship.id == pair_id
+                )
+            )
+        ).one()
+        assert second[0] in ("quality_conflict", "variant")
+        assert second[1] == "mixed"
 
     async def test_heuristic_higher_resolution_classify(self, db_session, db_session_factory):
         """Blob with much higher resolution must produce quality_conflict/higher_resolution."""

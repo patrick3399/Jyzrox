@@ -511,9 +511,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     if not src_path.is_dir():
         return {"status": "failed", "error": f"not a directory: {source_dir}"}
 
-    _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
-    _VIDEO_EXTS = {".mp4", ".webm"}
-    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS]
+    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
     # Validate magic bytes for image files; pass video files through without magic check
     files_validated = []
     skipped_magic = 0

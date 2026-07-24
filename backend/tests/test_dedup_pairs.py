@@ -18,6 +18,32 @@ class _Blob:
         self.phash_q1 = q1
 
 
+def test_bk_tree_matches_brute_force_hamming_radius():
+    from worker.dedup_helpers import PhashBKTree, _hamming_distance
+
+    blobs = [_Blob(f"sha-{i}", (i * 0x9E3779B97F4A7C15) & ((1 << 64) - 1), 0, 0) for i in range(200)]
+    index = PhashBKTree(blobs)
+
+    for query in blobs[::17]:
+        for threshold in (0, 5, 10):
+            expected = {
+                blob.sha256
+                for blob in blobs
+                if _hamming_distance(query.phash_int, blob.phash_int) <= threshold
+            }
+            actual = {blob.sha256 for blob, _distance in index.query(query.phash_int, threshold)}
+            assert actual == expected
+
+
+def test_bk_tree_groups_equal_hashes_without_losing_items():
+    from worker.dedup_helpers import PhashBKTree
+
+    blobs = [_Blob(f"same-{i}", 1234, 0, 0) for i in range(20)]
+    matches = list(PhashBKTree(blobs).query(1234, 0))
+
+    assert {blob.sha256 for blob, distance in matches if distance == 0} == {blob.sha256 for blob in blobs}
+
+
 class _SliceForbiddenList(list):
     """A list that raises if sliced — proves the scan never copies the blob list."""
 

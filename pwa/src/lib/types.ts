@@ -903,6 +903,7 @@ export interface DedupStats {
   total_blobs: number // blobs with phash
   needs_t2: number
   needs_t3: number
+  same_gallery_only: number
   pending_review: number
   whitelisted: number
   resolved: number

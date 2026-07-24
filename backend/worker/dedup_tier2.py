@@ -7,8 +7,8 @@ from sqlalchemy import select, update
 from core.database import async_session
 from core.redis_client import get_redis
 from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
-from db.models import Blob, BlobRelationship, Image
-from worker.dedup_helpers import _classify_pair, _now_iso
+from db.models import Blob, BlobRelationship
+from worker.dedup_helpers import _classify_pair, _now_iso, _pair_context_scope
 from worker.helpers import _cron_record, _cron_should_run
 
 logger = logging.getLogger("worker.dedup_tier2")
@@ -17,7 +17,9 @@ logger = logging.getLogger("worker.dedup_tier2")
 async def dedup_tier2_job(ctx: dict, force: bool = False) -> dict:
     """Classify needs_t2 pairs using resolution/file-size heuristics.
 
-    Reads pairs with relationship='needs_t2' and moves them to:
+    Reads new pairs plus context-suppressed pairs that need re-evaluation.
+    Same-gallery-only occurrences remain suppressed without becoming a global
+    whitelist. Cross-gallery and mixed-context pairs move to:
     - 'needs_t3'       if OpenCV is enabled (defer to Tier 3 for pixel validation)
     - 'quality_conflict' / 'variant'  otherwise (send directly to review queue)
     """
@@ -52,11 +54,13 @@ async def _classify_pending_pairs() -> dict:
 
     total_processed = 0
 
+    last_id = 0
     while True:
         async with async_session() as session:
             result = await session.execute(
                 select(BlobRelationship)
-                .where(BlobRelationship.relationship == "needs_t2")
+                .where(BlobRelationship.relationship.in_(("needs_t2", "same_gallery_only")))
+                .where(BlobRelationship.id > last_id)
                 .order_by(BlobRelationship.id)
                 .limit(200)
             )
@@ -64,6 +68,7 @@ async def _classify_pending_pairs() -> dict:
 
         if not pairs:
             break
+        last_id = pairs[-1].id
 
         for pair in pairs:
             async with async_session() as session:
@@ -76,27 +81,33 @@ async def _classify_pending_pairs() -> dict:
                     await session.execute(
                         update(BlobRelationship)
                         .where(BlobRelationship.id == pair.id)
-                        .values(relationship="resolved", tier=2)
+                        .values(relationship="resolved", context_scope="unreferenced", tier=2)
                     )
                     await session.commit()
                     continue
 
-                # Blobs in the same gallery are intentional variants; auto-whitelist.
-                same_gal_subq = (
-                    select(Image.gallery_id)
-                    .where(Image.blob_sha256 == pair.sha_a)
-                    .where(Image.gallery_id.in_(select(Image.gallery_id).where(Image.blob_sha256 == pair.sha_b)))
-                    .limit(1)
-                    .exists()
-                )
-                same_gal = (await session.execute(select(same_gal_subq))).scalar()
-
-                if same_gal:
-                    logger.info("same_gallery_variant: pair %d", pair.id)
+                context_scope = await _pair_context_scope(session, pair.sha_a, pair.sha_b)
+                if context_scope == "same_gallery_only":
+                    logger.info("same_gallery_only: pair %d", pair.id)
                     await session.execute(
                         update(BlobRelationship)
                         .where(BlobRelationship.id == pair.id)
-                        .values(relationship="whitelisted", reason="same_gallery_variant", tier=2)
+                        .values(
+                            relationship="same_gallery_only",
+                            context_scope=context_scope,
+                            reason="same_gallery_variant",
+                            suggested_keep=None,
+                            tier=2,
+                        )
+                    )
+                    await session.commit()
+                    total_processed += 1
+                    continue
+                if context_scope == "unreferenced":
+                    await session.execute(
+                        update(BlobRelationship)
+                        .where(BlobRelationship.id == pair.id)
+                        .values(relationship="resolved", context_scope=context_scope, reason="unreferenced", tier=2)
                     )
                     await session.commit()
                     total_processed += 1
@@ -110,6 +121,7 @@ async def _classify_pending_pairs() -> dict:
                     .where(BlobRelationship.id == pair.id)
                     .values(
                         relationship=next_rel,
+                        context_scope=context_scope,
                         suggested_keep=keep,
                         reason=reason,
                         tier=2,

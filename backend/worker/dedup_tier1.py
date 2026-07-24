@@ -2,14 +2,14 @@
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.database import async_session
 from core.redis_client import get_redis
 from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 from db.models import Blob, BlobRelationship
-from worker.dedup_helpers import _now_iso, _scan_candidates
+from worker.dedup_helpers import PhashBKTree, _now_iso, _scan_indexed_candidates
 from worker.helpers import _cron_record, _cron_should_run
 
 logger = logging.getLogger("worker.dedup_tier1")
@@ -19,8 +19,9 @@ async def dedup_tier1_job(ctx: dict, force: bool = False) -> dict:
     """Scan all blobs for similar pairs using perceptual hashing.
 
     Writes matching pairs into blob_relationships with relationship='needs_t2'.
-    Uses a pigeonhole pre-filter on pHash quadrants (q0+q1) to skip obviously
-    dissimilar pairs before computing the full 64-bit Hamming distance.
+    A BK-tree provides exact Hamming-radius lookup without traversing every
+    possible pair, while ``dedup_scanned_threshold`` makes repeated runs
+    incremental and re-scans only when the configured radius grows.
     """
     defn = CONFIGURABLE_TASK_DEFS["dedup_tier1"]
     if not force and not await _cron_should_run(ctx, defn.task_id, defn.default_cron, defn.default_enabled):
@@ -50,46 +51,68 @@ async def _scan_all_blobs() -> dict:
 
     total_inserted = 0
 
-    # Load ALL blobs with phash into memory once — eliminates N individual DB queries
+    # Build the metric index once, but query only blobs that have not previously
+    # been scanned at this threshold. A higher threshold re-queues older blobs;
+    # lowering it does not destroy existing review decisions.
     async with async_session() as session:
         result = await session.execute(
             select(
                 Blob.sha256,
                 Blob.phash_int,
-                Blob.phash_q0,
-                Blob.phash_q1,
+                Blob.dedup_scanned_threshold,
             )
             .where(Blob.phash_int.isnot(None))
-            .order_by(Blob.sha256)  # canonical order: blobs[i].sha256 < blobs[j].sha256
+            .order_by(Blob.sha256)
         )
         blobs = result.all()
 
-    total = len(blobs)
-    logger.info("Starting scan, threshold=%d, total_blobs=%d", threshold, total)
+    scan_blobs = [
+        blob
+        for blob in blobs
+        if not isinstance(blob.dedup_scanned_threshold, int) or blob.dedup_scanned_threshold < threshold
+    ]
+    index = PhashBKTree(blobs)
+    total = len(scan_blobs)
+    logger.info("Starting indexed scan, threshold=%d, scan_blobs=%d, indexed_blobs=%d", threshold, total, len(blobs))
 
     pairs_batch: list[dict] = []
+    pair_keys: set[tuple[str, str]] = set()
+    scanned_batch: list[str] = []
 
     async def _flush() -> None:
         nonlocal total_inserted
-        if not pairs_batch:
+        if not pairs_batch and not scanned_batch:
             return
         async with async_session() as session:
-            stmt = pg_insert(BlobRelationship).values(pairs_batch)
-            stmt = stmt.on_conflict_do_nothing(constraint="uq_blob_pair")
-            res = await session.execute(stmt)
+            inserted = 0
+            if pairs_batch:
+                stmt = pg_insert(BlobRelationship).values(pairs_batch)
+                stmt = stmt.on_conflict_do_nothing(constraint="uq_blob_pair")
+                res = await session.execute(stmt)
+                inserted = int(getattr(res, "rowcount", 0) or 0)
+            if scanned_batch:
+                await session.execute(
+                    update(Blob)
+                    .where(Blob.sha256.in_(scanned_batch))
+                    .values(dedup_scanned_threshold=threshold)
+                )
             await session.commit()
-            total_inserted += res.rowcount or 0
+            total_inserted += inserted
         pairs_batch.clear()
+        pair_keys.clear()
+        scanned_batch.clear()
 
-    for i in range(total):
-        a = blobs[i]
-        # Index-based scan (no slicing) — see worker.dedup_helpers._scan_candidates.
-        for b, dist in _scan_candidates(blobs, i, threshold):
-            # sha256 already in ascending order (ORDER BY sha256 above)
+    for a in scan_blobs:
+        for b, dist in _scan_indexed_candidates(index, a, threshold):
+            sha_a, sha_b = sorted((a.sha256, b.sha256))
+            pair_key = (sha_a, sha_b)
+            if pair_key in pair_keys:
+                continue
+            pair_keys.add(pair_key)
             pairs_batch.append(
                 {
-                    "sha_a": a.sha256,
-                    "sha_b": b.sha256,
+                    "sha_a": sha_a,
+                    "sha_b": sha_b,
                     "hamming_dist": dist,
                     "relationship": "needs_t2",
                     "tier": 1,
@@ -98,9 +121,12 @@ async def _scan_all_blobs() -> dict:
 
             if len(pairs_batch) >= 1000:
                 await _flush()
+        scanned_batch.append(a.sha256)
+        if len(scanned_batch) >= 250:
+            await _flush()
 
     await _flush()
     await r.set("cron:dedup_tier1:last_run", _now_iso())
     await r.set("cron:dedup_tier1:last_status", f"inserted={total_inserted}")
     logger.info("Done, new pairs inserted: %d", total_inserted)
-    return {"status": "ok", "inserted": total_inserted}
+    return {"status": "ok", "inserted": total_inserted, "scanned": total}

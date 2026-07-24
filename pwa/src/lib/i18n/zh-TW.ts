@@ -1715,7 +1715,7 @@ const zhTW: Record<string, string> = {
   'dedup.emptyDoneDesc': '沒有待審查的重複圖片。',
   'dedup.emptyNotEnabled': '啟用第一層以開始',
   'dedup.emptyNotEnabledDesc': '開啟感知雜湊偵測以尋找相似圖片。',
-  'dedup.tier0Note': '第 0 層（SHA256 完全比對）在匯入時始終啟用。',
+  'dedup.tier0Note': '第 0 層：內容完全相同的檔案會共用一份儲存空間；不會自動移除 Gallery 中的頁面。',
   'dedup.tier1': '第 1 層 — 感知雜湊',
   'dedup.tier1Desc': '使用感知雜湊偵測視覺上相似的圖片。',
   'dedup.tier2': '第 2 層 — 啟發式',

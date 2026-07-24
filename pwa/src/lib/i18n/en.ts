@@ -1605,7 +1605,7 @@ const en: Record<string, string> = {
   'dedup.scanResume': 'Resume',
   'dedup.scanStop': 'Stop',
   'dedup.scanSignalFailed': 'Failed to send command',
-  'dedup.tier0Note': 'Tier 0 (SHA256 exact match) is always enabled at import time.',
+  'dedup.tier0Note': 'Tier 0: byte-identical files share storage; gallery pages are never removed automatically.',
   'dedup.processing': 'Processing',
   'dedup.pending': 'Pending',
   'dedup.tierComplete': 'Complete',
