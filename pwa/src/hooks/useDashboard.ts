@@ -17,6 +17,9 @@ export function useDashboard() {
     dedupingInterval: 2000,
     focusThrottleInterval: 5000,
   })
+  // SWR's bound mutate is referentially stable; destructure it so the effect
+  // below can depend on it without re-running on every SWR state change.
+  const { mutate } = swr
 
   // Trigger on semaphore_changed or download.* events
   const trigger = lastJobUpdate || (lastEvent?.type === 'semaphore_changed' ? lastEvent : null)
@@ -26,17 +29,16 @@ export function useDashboard() {
     const elapsed = now - lastFiredRef.current
     if (elapsed >= THROTTLE_MS) {
       lastFiredRef.current = now
-      swr.mutate()
+      mutate()
     } else {
       clearTimeout(timerRef.current)
       timerRef.current = setTimeout(() => {
         lastFiredRef.current = Date.now()
-        swr.mutate()
+        mutate()
       }, THROTTLE_MS - elapsed)
     }
     return () => clearTimeout(timerRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trigger])
+  }, [trigger, mutate])
 
   return swr
 }

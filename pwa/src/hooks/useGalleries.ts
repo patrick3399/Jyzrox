@@ -77,8 +77,7 @@ export function useInfiniteLibraryGalleries(
       clearTimeout(timerRef.current)
       timerRef.current = setTimeout(doMutate, LIBRARY_THROTTLE_MS - elapsed)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastJobUpdate])
+  }, [lastJobUpdate, globalMutate])
 
   const { data, error, size, setSize, isValidating: _isValidating, isLoading, mutate } =
     useSWRInfinite<GalleryListResponse>(
@@ -476,8 +475,7 @@ export function useSearchGalleries(
       clearTimeout(timerRef.current)
       timerRef.current = setTimeout(doMutate, SEARCH_THROTTLE_MS - elapsed)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastJobUpdate])
+  }, [lastJobUpdate, globalMutate])
 
   const { data, error, size, setSize, isLoading, mutate } = useSWRInfinite<SearchGalleriesResponse>(
     getKey,
