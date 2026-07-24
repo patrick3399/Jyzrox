@@ -20,7 +20,16 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
-import { Heart, Bookmark, BookmarkCheck, Sparkles, X, Share2, GitMerge, History } from 'lucide-react'
+import {
+  Heart,
+  Bookmark,
+  BookmarkCheck,
+  Sparkles,
+  X,
+  Share2,
+  GitMerge,
+  History,
+} from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -1058,13 +1067,13 @@ export default function GalleryDetailPage() {
                     const result = await api.galleryManagement.createShare(gallery.id, 168, true)
                     const absolute = `${window.location.origin}${result.url}`
                     await navigator.clipboard.writeText(absolute)
-                    toast.success('Share link copied (expires in 7 days, R18 filtered)')
+                    toast.success(t('library.shareCopied'))
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : String(error))
                   }
                 }}
               >
-                <Share2 size={16} /> Share
+                <Share2 size={16} /> {t('library.share')}
               </button>
               <button
                 type="button"
@@ -1072,22 +1081,31 @@ export default function GalleryDetailPage() {
                 onClick={async () => {
                   if (!gallery) return
                   const sharing = await api.galleryManagement.sharing(gallery.id)
-                  const raw = window.prompt('User IDs to grant read access (comma separated)', sharing.permissions.map((item) => item.user_id).join(','))
+                  const raw = window.prompt(
+                    t('library.accessUserIds'),
+                    sharing.permissions.map((item) => item.user_id).join(','),
+                  )
                   if (raw === null) return
-                  const permissions = raw.split(',').map((value) => Number(value.trim())).filter(Number.isInteger).map((user_id) => ({ user_id, can_edit: false }))
-                  const visibility = window.confirm('Use private visibility? Choose Cancel for public visibility.') ? 'private' : 'public'
+                  const permissions = raw
+                    .split(',')
+                    .map((value) => Number(value.trim()))
+                    .filter(Number.isInteger)
+                    .map((user_id) => ({ user_id, can_edit: false }))
+                  const visibility = window.confirm(t('library.privateVisibilityConfirm'))
+                    ? 'private'
+                    : 'public'
                   await api.galleryManagement.updateSharing(gallery.id, { visibility, permissions })
-                  toast.success('Gallery access updated')
+                  toast.success(t('library.accessUpdated'))
                 }}
               >
-                Manage access
+                {t('library.manageAccess')}
               </button>
               <button
                 type="button"
                 className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
                 onClick={() => setVersionsOpen((open) => !open)}
               >
-                <History size={16} /> Versions
+                <History size={16} /> {t('library.versions')}
               </button>
               {versionsOpen && (
                 <button
@@ -1095,15 +1113,15 @@ export default function GalleryDetailPage() {
                   className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
                   onClick={async () => {
                     if (!gallery) return
-                    const value = window.prompt('Gallery ID to link as another version')
+                    const value = window.prompt(t('library.linkVersionPrompt'))
                     const linkedId = Number(value)
                     if (!Number.isInteger(linkedId)) return
                     await api.galleryManagement.linkVersion(gallery.id, linkedId)
                     await mutateVersions()
-                    toast.success('Version linked')
+                    toast.success(t('library.versionLinked'))
                   }}
                 >
-                  <History size={16} /> Link version
+                  <History size={16} /> {t('library.linkVersion')}
                 </button>
               )}
               <button
@@ -1111,22 +1129,30 @@ export default function GalleryDetailPage() {
                 className="flex items-center gap-1.5 rounded border border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-300 hover:bg-red-900/40"
                 onClick={async () => {
                   if (!gallery) return
-                  const value = window.prompt('Gallery ID to merge into this gallery')
+                  const value = window.prompt(t('library.mergeGalleryPrompt'))
                   const sourceGalleryId = Number(value)
-                  if (!Number.isInteger(sourceGalleryId) || !window.confirm('Move all images and user state into this gallery?')) return
+                  if (
+                    !Number.isInteger(sourceGalleryId) ||
+                    !window.confirm(t('library.mergeGalleryConfirm'))
+                  )
+                    return
                   await api.galleryManagement.merge(gallery.id, sourceGalleryId)
                   await Promise.all([mutateGallery(), mutateImages()])
-                  toast.success('Gallery merged')
+                  toast.success(t('library.galleryMerged'))
                 }}
               >
-                <GitMerge size={16} /> Merge
+                <GitMerge size={16} /> {t('library.merge')}
               </button>
             </div>
             {versionsOpen && versionData?.versions && versionData.versions.length > 1 && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-vault-text-muted">Versions:</span>
+                <span className="text-vault-text-muted">{t('library.versions')}:</span>
                 {versionData.versions.map((version) => (
-                  <Link key={version.id} href={`/library/${encodeURIComponent(version.source)}/${encodeURIComponent(version.source_id)}`} className={`rounded border px-2 py-1 ${version.id === gallery.id ? 'border-vault-accent text-vault-accent' : 'border-vault-border text-vault-text-secondary'}`}>
+                  <Link
+                    key={version.id}
+                    href={`/library/${encodeURIComponent(version.source)}/${encodeURIComponent(version.source_id)}`}
+                    className={`rounded border px-2 py-1 ${version.id === gallery.id ? 'border-vault-accent text-vault-accent' : 'border-vault-border text-vault-text-secondary'}`}
+                  >
                     {version.title || `#${version.id}`}
                   </Link>
                 ))}
@@ -1292,17 +1318,17 @@ export default function GalleryDetailPage() {
                     try {
                       const result = await api.saucenao.batch(ids, true, 80)
                       const applied = result.results.filter((item) => item.source_applied).length
-                      toast.success(`Source lookup complete: ${applied} galleries updated`)
+                      toast.success(t('library.sourceLookupComplete', { count: applied }))
                       await mutateGallery()
                     } catch (error) {
                       toast.error(error instanceof Error ? error.message : String(error))
                     }
                   }}
                   disabled={selectedIds.size === 0 || selectedIds.size > 6}
-                  title="Select up to 6 images (SauceNAO free-tier window)"
+                  title={t('library.sourceLookupLimit')}
                   className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-50"
                 >
-                  Find sources ({selectedIds.size})
+                  {t('library.findSources', { count: selectedIds.size })}
                 </button>
                 <button
                   onClick={handleHideSelected}

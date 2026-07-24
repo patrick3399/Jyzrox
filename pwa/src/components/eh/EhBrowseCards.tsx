@@ -11,16 +11,16 @@ import type { EhBrowseGalleryStatus, EhGallery } from '@/lib/types'
 // ── EhViewer category colour system (Material Design, from EhUtils.kt) ──
 
 export const CATEGORY_META: Record<string, { color: string; label: string }> = {
-  doujinshi: { color: '#F44336', label: 'Doujinshi' },
-  manga: { color: '#FF9800', label: 'Manga' },
-  artist_cg: { color: '#FBC02D', label: 'Artist CG' },
-  game_cg: { color: '#4CAF50', label: 'Game CG' },
-  western: { color: '#8BC34A', label: 'Western' },
-  'non-h': { color: '#2196F3', label: 'Non-H' },
-  image_set: { color: '#3F51B5', label: 'Image Set' },
-  cosplay: { color: '#9C27B0', label: 'Cosplay' },
-  asian_porn: { color: '#E91E63', label: 'Asian Porn' },
-  misc: { color: '#9E9E9E', label: 'Misc' },
+  doujinshi: { color: '#F44336', label: 'browse.category.doujinshi' },
+  manga: { color: '#FF9800', label: 'browse.category.manga' },
+  artist_cg: { color: '#FBC02D', label: 'browse.category.artistCg' },
+  game_cg: { color: '#4CAF50', label: 'browse.category.gameCg' },
+  western: { color: '#8BC34A', label: 'browse.category.western' },
+  'non-h': { color: '#2196F3', label: 'browse.category.nonH' },
+  image_set: { color: '#3F51B5', label: 'browse.category.imageSet' },
+  cosplay: { color: '#9C27B0', label: 'browse.category.cosplay' },
+  asian_porn: { color: '#E91E63', label: 'browse.category.asianPorn' },
+  misc: { color: '#9E9E9E', label: 'browse.category.misc' },
 }
 const UNKNOWN_COLOR = '#607D8B'
 
@@ -33,7 +33,10 @@ export function isLightColor(hex: string): boolean {
 
 function getCategoryMeta(category: string) {
   const key = category.toLowerCase().replace(/ /g, '_')
-  return CATEGORY_META[key] ?? { color: UNKNOWN_COLOR, label: category }
+  const meta = CATEGORY_META[key]
+  return meta
+    ? { color: meta.color, label: t(meta.label) }
+    : { color: UNKNOWN_COLOR, label: category }
 }
 
 function formatDate(unix: number) {
@@ -109,7 +112,7 @@ export function ListCard({
               onUploaderClick()
             }}
             className="w-fit text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
-            title={`Search uploader:${gallery.uploader}`}
+            title={t('browse.searchUploader', { uploader: gallery.uploader })}
           >
             {gallery.uploader}
           </button>
@@ -234,7 +237,7 @@ export function GridCard({
               onUploaderClick()
             }}
             className="block max-w-full truncate text-[10px] text-white/60 hover:text-vault-accent"
-            title={`Search uploader:${gallery.uploader}`}
+            title={t('browse.searchUploader', { uploader: gallery.uploader })}
           >
             {gallery.uploader}
           </button>

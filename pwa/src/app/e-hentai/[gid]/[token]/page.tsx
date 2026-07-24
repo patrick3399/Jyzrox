@@ -152,19 +152,6 @@ const FAV_COLORS = [
   '#9C27B0',
   '#E91E63',
 ]
-const FAV_NAMES = [
-  'Favorites 0',
-  'Favorites 1',
-  'Favorites 2',
-  'Favorites 3',
-  'Favorites 4',
-  'Favorites 5',
-  'Favorites 6',
-  'Favorites 7',
-  'Favorites 8',
-  'Favorites 9',
-]
-
 // ── Namespace colours (EhViewer style) ─────────────────────────────────
 
 const NS_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -570,7 +557,7 @@ function EhGalleryDetail() {
                 {gallery.category}
               </span>
               <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
-                {gallery.pages} pages
+                {t('browse.pageCount', { count: gallery.pages })}
               </span>
               {gallerySize && (
                 <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
@@ -579,7 +566,7 @@ function EhGalleryDetail() {
               )}
               {(gallery.torrent_count ?? 0) > 0 && (
                 <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
-                  {gallery.torrent_count} torrents
+                  {t('browse.torrentCount', { count: gallery.torrent_count ?? 0 })}
                 </span>
               )}
               {gallery.uploader && (
@@ -591,7 +578,7 @@ function EhGalleryDetail() {
                     )
                   }
                   className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
-                  title={`Search uploader:${gallery.uploader}`}
+                  title={t('browse.searchUploader', { uploader: gallery.uploader })}
                 >
                   {gallery.uploader}
                 </button>
@@ -668,7 +655,9 @@ function EhGalleryDetail() {
                       rows={2}
                       className="m-2 mb-1 w-[calc(100%-1rem)] resize-none rounded border border-vault-border bg-vault-input px-2 py-1.5 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                     />
-                    {FAV_NAMES.map((name, i) => (
+                    {Array.from({ length: 10 }, (_, i) =>
+                      t('browse.favoriteCategory', { index: i }),
+                    ).map((name, i) => (
                       <button
                         key={i}
                         onClick={() => handleAddFavorite(i)}
@@ -690,7 +679,7 @@ function EhGalleryDetail() {
                           disabled={favSaving}
                           className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-vault-card-hover transition-colors"
                         >
-                          Remove from favorites
+                          {t('browse.removeFromFavorites')}
                         </button>
                       </>
                     )}

@@ -685,8 +685,8 @@ function BookmarksTab({
           onChange={(e) => onRestrictChange(e.target.value)}
           className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
         >
-          <option value="public">{t('browse.rankingAll') || 'Public'}</option>
-          <option value="private">Private</option>
+          <option value="public">{t('pixiv.visibilityPublic')}</option>
+          <option value="private">{t('pixiv.visibilityPrivate')}</option>
         </select>
       </div>
 

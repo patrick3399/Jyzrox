@@ -281,13 +281,14 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
               </label>
               <label className="col-span-2 flex flex-col gap-1">
                 <span className="text-vault-text-secondary text-xs">
-                  {t('admin.sites.sleepRequest')} ({t('admin.sites.seconds')}, e.g. 2 or 1-5)
+                  {t('admin.sites.sleepRequest')} ({t('admin.sites.seconds')},{' '}
+                  {t('admin.sites.sleepRequestExample')})
                 </span>
                 <input
                   type="text"
                   value={form.sleep_request_raw}
                   onChange={(e) => setForm((f) => ({ ...f, sleep_request_raw: e.target.value }))}
-                  placeholder="e.g. 2 or 1-5"
+                  placeholder={t('admin.sites.sleepRequestExample')}
                   className="vault-input rounded-lg px-3 py-2 text-sm"
                 />
               </label>

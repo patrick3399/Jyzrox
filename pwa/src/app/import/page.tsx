@@ -870,12 +870,15 @@ function ZoneC() {
 
 function ConflictPanel() {
   const { data, mutate } = useSWR('import/conflicts', () => api.import_.conflicts())
-  const { data: modeData, mutate: mutateMode } = useSWR('import/conflict-mode', api.import_.conflictMode)
+  const { data: modeData, mutate: mutateMode } = useSWR(
+    'import/conflict-mode',
+    api.import_.conflictMode,
+  )
   const resolve = async (id: number, resolution: 'merge' | 'skip') => {
     try {
       await api.import_.resolveConflict(id, resolution)
       await mutate()
-      toast.success('Conflict resolved')
+      toast.success(t('import.conflicts.resolved'))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     }
@@ -884,30 +887,51 @@ function ConflictPanel() {
     <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-semibold text-vault-text">Import conflicts</h2>
-          <p className="text-xs text-vault-text-muted">Review source paths that already exist in the library.</p>
+          <h2 className="font-semibold text-vault-text">{t('import.conflicts.title')}</h2>
+          <p className="text-xs text-vault-text-muted">{t('import.conflicts.description')}</p>
         </div>
         <select
           className="rounded border border-vault-border bg-vault-bg p-2 text-sm"
           value={modeData?.mode ?? 'manual'}
-          onChange={async (event) => { await api.import_.setConflictMode(event.target.value); await mutateMode() }}
+          onChange={async (event) => {
+            await api.import_.setConflictMode(event.target.value)
+            await mutateMode()
+          }}
         >
-          <option value="manual">Manual review</option>
-          <option value="auto_merge">Auto merge</option>
+          <option value="manual">{t('import.conflicts.manual')}</option>
+          <option value="auto_merge">{t('import.conflicts.autoMerge')}</option>
         </select>
       </div>
       <div className="space-y-2">
         {(data?.conflicts ?? []).map((conflict) => (
           <div key={conflict.id} className="rounded border border-vault-border p-3">
-            <p className="font-medium text-vault-text">{conflict.source}:{conflict.source_id}</p>
-            <p className="break-all text-xs text-vault-text-muted">{String(conflict.incoming.path ?? '')}</p>
+            <p className="font-medium text-vault-text">
+              {conflict.source}:{conflict.source_id}
+            </p>
+            <p className="break-all text-xs text-vault-text-muted">
+              {String(conflict.incoming.path ?? '')}
+            </p>
             <div className="mt-2 flex gap-2">
-              <button className="rounded bg-vault-accent px-3 py-1 text-xs text-white" onClick={() => resolve(conflict.id, 'merge')}>Merge new files</button>
-              <button className="rounded border border-vault-border px-3 py-1 text-xs" onClick={() => resolve(conflict.id, 'skip')}>Skip</button>
+              <button
+                className="rounded bg-vault-accent px-3 py-1 text-xs text-white"
+                onClick={() => resolve(conflict.id, 'merge')}
+              >
+                {t('import.conflicts.mergeFiles')}
+              </button>
+              <button
+                className="rounded border border-vault-border px-3 py-1 text-xs"
+                onClick={() => resolve(conflict.id, 'skip')}
+              >
+                {t('import.conflicts.skip')}
+              </button>
             </div>
           </div>
         ))}
-        {!data?.conflicts.length && <p className="py-6 text-center text-sm text-vault-text-muted">No pending conflicts.</p>}
+        {!data?.conflicts.length && (
+          <p className="py-6 text-center text-sm text-vault-text-muted">
+            {t('import.conflicts.empty')}
+          </p>
+        )}
       </div>
     </section>
   )
@@ -938,11 +962,29 @@ export default function ImportPage() {
       </div>
 
       <div className="mb-4 flex gap-2 border-b border-vault-border">
-        <button className={`px-3 py-2 text-sm ${tab === 'overview' ? 'border-b-2 border-vault-accent text-vault-accent' : 'text-vault-text-muted'}`} onClick={() => setTab('overview')}>Overview</button>
-        <button className={`px-3 py-2 text-sm ${tab === 'conflicts' ? 'border-b-2 border-vault-accent text-vault-accent' : 'text-vault-text-muted'}`} onClick={() => setTab('conflicts')}>Conflicts</button>
+        <button
+          className={`px-3 py-2 text-sm ${tab === 'overview' ? 'border-b-2 border-vault-accent text-vault-accent' : 'text-vault-text-muted'}`}
+          onClick={() => setTab('overview')}
+        >
+          {t('import.overview')}
+        </button>
+        <button
+          className={`px-3 py-2 text-sm ${tab === 'conflicts' ? 'border-b-2 border-vault-accent text-vault-accent' : 'text-vault-text-muted'}`}
+          onClick={() => setTab('conflicts')}
+        >
+          {t('import.conflicts.tab')}
+        </button>
       </div>
 
-      {tab === 'overview' ? <><ZoneA /><ZoneB /><ZoneC /></> : <ConflictPanel />}
+      {tab === 'overview' ? (
+        <>
+          <ZoneA />
+          <ZoneB />
+          <ZoneC />
+        </>
+      ) : (
+        <ConflictPanel />
+      )}
     </div>
   )
 }

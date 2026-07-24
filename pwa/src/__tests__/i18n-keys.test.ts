@@ -144,6 +144,36 @@ describe('i18n key consistency', () => {
     }
   })
 
+  it('fully localized pages do not reintroduce obvious hardcoded UI text', () => {
+    const protectedFiles = [
+      'app/training/page.tsx',
+      'app/stats/page.tsx',
+      'app/share/[token]/page.tsx',
+    ]
+    const allowedText = new Set(['MB'])
+    const violations: string[] = []
+
+    for (const relativeFile of protectedFiles) {
+      const source = fs.readFileSync(path.join(SRC_ROOT, relativeFile), 'utf-8')
+      const patterns: Array<[string, RegExp]> = [
+        ['JSX text', /<[A-Za-z][A-Za-z0-9.]*(?:\s+[^>\n]*[^/\s])?>\s*([A-Za-z][^<{]*?)\s*</g],
+        ['literal UI attribute', /\b(?:placeholder|title|aria-label)=["']([A-Za-z][^"']*)["']/g],
+        ['literal toast', /\btoast\.(?:success|error|info|warning)\(\s*["']([A-Za-z][^"']*)["']/g],
+        ['literal fallback', /\|\|\s*["']([A-Z][^"']*)["']/g],
+      ]
+
+      for (const [kind, pattern] of patterns) {
+        let match: RegExpExecArray | null
+        while ((match = pattern.exec(source)) !== null) {
+          const text = match[1].replace(/\s+/g, ' ').trim()
+          if (!allowedText.has(text)) violations.push(`${relativeFile}: ${kind}: "${text}"`)
+        }
+      }
+    }
+
+    expect(violations).toEqual([])
+  })
+
   it('en.ts has no unused keys (informational)', () => {
     const allReferencedKeys = new Set(keyUsageMap.keys())
     const unused: string[] = []

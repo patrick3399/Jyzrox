@@ -663,7 +663,7 @@ function MetadataDialog({
                   onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
                   className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text disabled:opacity-50"
                 >
-                  <option value="public">public</option><option value="private">private</option>
+                  <option value="public">{t('explorer.visibilityPublic')}</option><option value="private">{t('explorer.visibilityPrivate')}</option>
                 </select>
               ) : (
                 <input

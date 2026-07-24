@@ -81,7 +81,7 @@ export function TagInput({
   return (
     <div className="flex flex-col gap-4">
       <TagField
-        label="Include Tags"
+        label={t('tagInput.includeTags')}
         tags={includeTags}
         variant="include"
         placeholder={t('tagInput.aliasPlaceholder')}
@@ -89,7 +89,7 @@ export function TagInput({
         onRemove={onRemoveInclude}
       />
       <TagField
-        label="Exclude Tags"
+        label={t('tagInput.excludeTags')}
         tags={excludeTags}
         variant="exclude"
         placeholder={t('tagInput.implicationPlaceholder')}

@@ -496,7 +496,7 @@ export default function QueuePage() {
           },
         } : {}),
       })
-      toast.success(`${t('queue.queuedSuccess')} (job: ${result.job_id})`)
+      toast.success(t('queue.queuedSuccessWithJob', { id: result.job_id }))
       setUrlInput('')
       await mutate()
       if (result.warning) {

@@ -1043,7 +1043,7 @@ function ReaderOverlay({
                   onClick={commitJump}
                   className="bg-white text-black rounded px-2 py-1 text-xs font-medium hover:bg-white/90 shrink-0"
                 >
-                  Go
+                  {t('reader.go')}
                 </button>
               </div>
             </>

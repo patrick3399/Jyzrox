@@ -157,10 +157,10 @@ const FAV_COLORS = [
 ]
 
 const CRON_PRESETS = [
-  { label: 'Every hour', value: '0 * * * *' },
-  { label: 'Every 2 hours', value: '0 */2 * * *' },
-  { label: 'Every 6 hours', value: '0 */6 * * *' },
-  { label: 'Daily', value: '0 0 * * *' },
+  { label: 'browse.cron.everyHour', value: '0 * * * *' },
+  { label: 'browse.cron.every2Hours', value: '0 */2 * * *' },
+  { label: 'browse.cron.every6Hours', value: '0 */6 * * *' },
+  { label: 'browse.cron.daily', value: '0 0 * * *' },
 ]
 
 function getInitialViewMode(): ViewMode {
@@ -1029,7 +1029,7 @@ function BrowsePage() {
                     >
                       {CRON_PRESETS.map((p) => (
                         <option key={p.value} value={p.value}>
-                          {p.label}
+                          {t(p.label)}
                         </option>
                       ))}
                     </select>
@@ -1257,7 +1257,7 @@ function BrowsePage() {
                       : undefined
                   }
                 >
-                  {cat.label}
+                  {t(cat.label)}
                 </button>
               )
             })}
@@ -1371,14 +1371,14 @@ function BrowsePage() {
                       className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
                     >
                       <option value="">{t('browse.anyLanguage')}</option>
-                      <option value="english">English</option>
-                      <option value="chinese">Chinese</option>
-                      <option value="japanese">Japanese</option>
-                      <option value="korean">Korean</option>
-                      <option value="spanish">Spanish</option>
-                      <option value="french">French</option>
-                      <option value="german">German</option>
-                      <option value="russian">Russian</option>
+                      <option value="english">{t('browse.language.english')}</option>
+                      <option value="chinese">{t('browse.language.chinese')}</option>
+                      <option value="japanese">{t('browse.language.japanese')}</option>
+                      <option value="korean">{t('browse.language.korean')}</option>
+                      <option value="spanish">{t('browse.language.spanish')}</option>
+                      <option value="french">{t('browse.language.french')}</option>
+                      <option value="german">{t('browse.language.german')}</option>
+                      <option value="russian">{t('browse.language.russian')}</option>
                     </select>
                   </div>
                   <div>
@@ -1492,7 +1492,7 @@ function BrowsePage() {
             </button>
             {Array.from({ length: 10 }, (_, i) => {
               const catData = favCategories.find((c) => c.index === i)
-              const name = catData?.name || `Favorites ${i}`
+              const name = catData?.name || t('browse.favoriteCategory', { index: i })
               const color = FAV_COLORS[i]
               const isActive = filters.favCat === String(i)
               return (
