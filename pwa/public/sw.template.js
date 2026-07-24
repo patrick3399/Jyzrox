@@ -261,6 +261,22 @@ self.addEventListener('fetch', (event) => {
 
   if (requestUrl.origin !== self.location.origin) return;
 
+  // Next.js build assets are content-hashed and already ship with
+  // `Cache-Control: public, max-age=31536000, immutable`. Let the browser's
+  // HTTP cache handle them directly. Routing every boot-critical chunk through
+  // CacheStorage makes iOS standalone launches wait on caches.open()/match()
+  // before hydration can begin, which can add several seconds on a large
+  // origin. The browser HTTP cache still provides the normal immutable-asset
+  // offline path without putting the service worker on the startup hot path.
+  if (requestUrl.pathname.startsWith('/_next/static/')) return;
+
+  // The installed PWA always cold-starts at `/`. On iOS, passing that document
+  // through CacheStorage delays HTML parsing and discovery of Next.js startup
+  // chunks by about six seconds even though the network response completes in
+  // milliseconds. Leave this one navigation to the browser's normal HTTP
+  // stack; other routes retain the page-cache offline fallback below.
+  if (event.request.mode === 'navigate' && requestUrl.pathname === '/') return;
+
   // Authenticated API data is user-specific and must never enter a page cache
   // or be served stale while offline.
   if (requestUrl.pathname.startsWith('/api/')) {
@@ -268,70 +284,75 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Media split by addressing mode:
-  //
-  // - Content-addressed (/media/cas/, /media/thumbs/, /media/image/) are sha256
-  //   capability URLs. The bytes behind one can never change, so revalidating
-  //   buys nothing and cache-first is safe in the single-user-first model.
-  //   Cached private media is cleared explicitly on logout and expires by TTL.
-  // - Everything else (/media/avatars/, /media/libraries/) is path-addressed:
-  //   the same URL can change content or be revoked per-gallery, so it stays
-  //   network-first and revalidates, and a 401/403 is never masked by a
-  //   previously authorized copy.
-  if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
+  // Media is split by addressing mode: content-addressed immutable capability
+  // URLs vs. path-addressed revocable media. See each branch below.
+  if (CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname)) {
+    // Content-addressed media (/media/cas|thumbs|image/) are sha256 capability
+    // URLs served with `Cache-Control: private, immutable`. The bytes behind a
+    // URL never change, so the browser's own HTTP cache already answers repeat
+    // views with no network round-trip — even offline while the immutable entry
+    // is fresh. Gating every image on caches.open(MEDIA_CACHE_NAME) +
+    // cache.match() put CacheStorage on the per-image hot path, and on iOS
+    // standalone those calls add seconds of latency to *each* thumbnail (the
+    // same CacheStorage pathology that stalled the app shell and was fixed for
+    // /_next/static/). So respond straight from fetch() — instant from the HTTP
+    // cache — and keep MEDIA_CACHE_NAME populated in the background so the
+    // explicit offline store and the logout-clear revocation path
+    // (security-model BR-006) stay intact without blocking rendering.
     let backgroundMediaWork = Promise.resolve();
-    const mediaResponse =
-      caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
-        const contentAddressed = CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname);
-        if (contentAddressed) {
-          const cached = await cache.match(event.request);
-          if (cached && cached.status >= 200 && cached.status < 300) {
-            if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
-            await cache.delete(event.request);
-          }
+    const mediaResponse = fetch(event.request)
+      .then((response) => {
+        if (response.status >= 200 && response.status < 300) {
+          // Clone in the same tick the network settles, before the page starts
+          // consuming the body; the actual CacheStorage write runs off the hot
+          // path under waitUntil.
+          const stamped = wrapResponseWithTimestamp(response.clone());
+          backgroundMediaWork = caches
+            .open(MEDIA_CACHE_NAME)
+            .then((cache) => cache.put(event.request, stamped))
+            .then(maybeEnforceMediaCacheLimit, () => {});
         }
-        try {
-          const response = contentAddressed
-            ? await fetch(event.request)
-            : await fetch(event.request, { cache: 'no-cache' });
-          if (response.status >= 200 && response.status < 300) {
-            const stamped = wrapResponseWithTimestamp(response.clone());
-            // The response does not await the write, while waitUntil below
-            // keeps the worker alive long enough for it to finish reliably.
-            backgroundMediaWork = cache
-              .put(event.request, stamped)
-              .then(maybeEnforceMediaCacheLimit, () => {});
-          }
-          return response;
-        } catch (_) {
-          const cached = await cache.match(event.request);
-          if (cached && cached.status >= 200 && cached.status < 300) {
-            if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
-            await cache.delete(event.request);
-          }
-          return new Response('', { status: 503 });
+        return response;
+      })
+      .catch(async () => {
+        // Offline (or HTTP cache miss): fall back to the explicit media store.
+        const cache = await caches.open(MEDIA_CACHE_NAME);
+        const cached = await cache.match(event.request);
+        if (cached && cached.status >= 200 && cached.status < 300) {
+          if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
+          await cache.delete(event.request);
         }
+        return new Response('', { status: 503 });
       });
     event.respondWith(mediaResponse);
     event.waitUntil(mediaResponse.then(() => backgroundMediaWork, () => backgroundMediaWork));
-  } else if (requestUrl.pathname.startsWith('/_next/static/')) {
-    // Immutable, content-hashed build assets (JS/CSS chunks). Cache-first so
-    // the app shell can still hydrate offline — without these a cached page
-    // renders blank. Stored in the build-versioned static cache, which is
-    // purged on the next activate, so stale chunks never linger.
-    event.respondWith(
-      caches.open(CACHE_NAME).then((cache) => {
-        return cache.match(event.request).then((cached) => {
-          if (cached) return cached;
-          return fetch(event.request).then((response) => {
-            if (response.status >= 200 && response.status < 300) {
-              cache.put(event.request, response.clone());
-            }
-            return response;
-          });
-        });
-      })
-    );
+  } else if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
+    // Path-addressed media (/media/avatars/, /media/libraries/): the same URL
+    // can change content or be revoked per-gallery, so it stays network-first
+    // and revalidates, and a 401/403 is never masked by a previously authorized
+    // copy. Unchanged from the pre-split behavior.
+    let backgroundMediaWork = Promise.resolve();
+    const mediaResponse = caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
+      try {
+        const response = await fetch(event.request, { cache: 'no-cache' });
+        if (response.status >= 200 && response.status < 300) {
+          const stamped = wrapResponseWithTimestamp(response.clone());
+          backgroundMediaWork = cache
+            .put(event.request, stamped)
+            .then(maybeEnforceMediaCacheLimit, () => {});
+        }
+        return response;
+      } catch (_) {
+        const cached = await cache.match(event.request);
+        if (cached && cached.status >= 200 && cached.status < 300) {
+          if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
+          await cache.delete(event.request);
+        }
+        return new Response('', { status: 503 });
+      }
+    });
+    event.respondWith(mediaResponse);
+    event.waitUntil(mediaResponse.then(() => backgroundMediaWork, () => backgroundMediaWork));
   } else if (event.request.mode === 'navigate') {
     // Network first for document navigations; fall back to the last rendered
     // page or the static offline document.

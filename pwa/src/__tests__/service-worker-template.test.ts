@@ -76,30 +76,41 @@ describe('service worker request safety', () => {
     // /media/avatars/ and /media/libraries/ name a mutable path, and libraries
     // is authorized per-gallery on every request (services/media_authz.py), so
     // a 401/403 must never be masked by a previously authorized cached copy.
-    // Content-addressed media is exempt — see the cache-first test below.
+    // Content-addressed media is exempt — see the hot-path test below.
     const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
     expect(mediaBranch).toBeGreaterThan(-1)
-    expect(source.indexOf("fetch(event.request, { cache: 'no-cache' })", mediaBranch)).toBeGreaterThan(
-      mediaBranch,
-    )
+    expect(
+      source.indexOf("fetch(event.request, { cache: 'no-cache' })", mediaBranch),
+    ).toBeGreaterThan(mediaBranch)
   })
 
-  it('serves content-addressed media cache-first without revalidating', () => {
-    // Regression (91af972): flipping the whole media branch to network-first
-    // with `cache: 'no-cache'` forced every thumbnail onto the network on every
-    // render, defeating nginx's `immutable`/30d headers. cas/thumbs/image are
-    // sha256 capability URLs — the bytes behind them can never change.
-    // Behavior is covered in service-worker-media-cache.test.ts; this pins the
-    // routing predicate that decides which media is exempt from revalidation.
+  it('keeps content-addressed media off the CacheStorage hot path but still revalidation-free', () => {
+    // iOS cold-start latency fix: gating every immutable image on
+    // caches.open(MEDIA_CACHE_NAME) + cache.match() cost seconds per thumbnail
+    // on iOS standalone (same CacheStorage pathology as the app-shell stall).
+    // Content-addressed media is now answered by a plain fetch() — served from
+    // the browser's immutable HTTP cache, off the CacheStorage hot path — with
+    // CacheStorage populated in the background for offline / logout-clear.
+    // Behavioral coverage is in service-worker-media-cache.test.ts; this pins
+    // the source structure.
     expect(source).toMatch(/const CONTENT_ADDRESSED_MEDIA = .*cas\|thumbs\|image/)
 
-    const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
-    const predicate = source.indexOf('CONTENT_ADDRESSED_MEDIA.test', mediaBranch)
-    const cached = source.indexOf('cache.match(event.request)', predicate)
-    const network = source.indexOf('fetch(event.request)', predicate)
-    expect(predicate).toBeGreaterThan(mediaBranch)
-    expect(cached).toBeGreaterThan(predicate)
-    expect(network).toBeGreaterThan(cached)
+    // The content-addressed branch is routed by pathname and runs before the
+    // generic path-addressed /media/ branch.
+    const caBranch = source.indexOf('CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname)')
+    const pathBranch = source.indexOf("event.request.url.includes('/media/')")
+    expect(caBranch).toBeGreaterThan(-1)
+    expect(caBranch).toBeLessThan(pathBranch)
+
+    // Regression (91af972): must NOT force revalidation. The content-addressed
+    // branch uses a plain fetch(), and cache.match() only appears afterwards as
+    // the offline fallback — never gating the online response.
+    const branchBody = source.slice(caBranch, pathBranch)
+    const network = branchBody.indexOf('fetch(event.request)')
+    const fallbackMatch = branchBody.indexOf('cache.match(event.request)')
+    expect(network).toBeGreaterThan(-1)
+    expect(branchBody).not.toContain("fetch(event.request, { cache: 'no-cache' })")
+    expect(fallbackMatch).toBeGreaterThan(network)
   })
 
   it('never walks the full media cache to enforce its storage budget', () => {
@@ -116,7 +127,9 @@ describe('service worker request safety', () => {
     expect(source.indexOf('maybeEnforceMediaCacheLimit', mediaBranch)).toBeGreaterThan(mediaBranch)
     expect(source).not.toContain('await cache.keys()')
     expect(source).not.toContain('await cache.put(event.request, stamped)')
-    expect(source.indexOf('event.waitUntil(mediaResponse', mediaBranch)).toBeGreaterThan(mediaBranch)
+    expect(source.indexOf('event.waitUntil(mediaResponse', mediaBranch)).toBeGreaterThan(
+      mediaBranch,
+    )
   })
 
   it('rotates the legacy oversized media cache on activation', () => {
@@ -126,17 +139,28 @@ describe('service worker request safety', () => {
     expect(source.slice(activate)).toContain('key !== MEDIA_CACHE_NAME')
   })
 
-  it('caches immutable build assets so the app shell can hydrate offline', () => {
-    // Regression: narrowing the fetch handler to only `mode === 'navigate'`
-    // left /_next/static/* chunks uncached, so offline navigations served a
-    // cached HTML shell with no JS/CSS and rendered blank.
-    const staticBranch = source.indexOf("requestUrl.pathname.startsWith('/_next/static/')")
-    expect(staticBranch).toBeGreaterThan(-1)
+  it('keeps immutable build assets off the service-worker startup hot path', () => {
+    const staticBypass = source.indexOf(
+      "if (requestUrl.pathname.startsWith('/_next/static/')) return;",
+    )
+    expect(staticBypass).toBeGreaterThan(-1)
 
-    // Cache-first: the cached chunk is returned before touching the network.
-    const cacheOpen = source.indexOf('caches.open(CACHE_NAME)', staticBranch)
-    const cacheMatch = source.indexOf('cache.match(event.request)', cacheOpen)
-    expect(cacheOpen).toBeGreaterThan(staticBranch)
-    expect(cacheMatch).toBeGreaterThan(cacheOpen)
+    // The bypass must run before API/media/navigation CacheStorage work and
+    // there must be no later static-asset respondWith branch.
+    const apiBranch = source.indexOf("requestUrl.pathname.startsWith('/api/')")
+    expect(staticBypass).toBeLessThan(apiBranch)
+    expect(source.indexOf("else if (requestUrl.pathname.startsWith('/_next/static/'))")).toBe(-1)
+  })
+
+  it('keeps the installed-app home navigation off the iOS CacheStorage hot path', () => {
+    const homeBypass = source.indexOf(
+      "if (event.request.mode === 'navigate' && requestUrl.pathname === '/') return;",
+    )
+    const pageCacheBranch = source.indexOf("else if (event.request.mode === 'navigate')")
+    const pageCacheOpen = source.indexOf('caches.open(PAGE_CACHE_NAME)', pageCacheBranch)
+
+    expect(homeBypass).toBeGreaterThan(-1)
+    expect(pageCacheBranch).toBeGreaterThan(homeBypass)
+    expect(pageCacheOpen).toBeGreaterThan(pageCacheBranch)
   })
 })

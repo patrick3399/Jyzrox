@@ -21,6 +21,15 @@ interface Harness {
   request: (url: string) => Promise<Response>
   /** Seed the media cache as if the image had already been fetched once. */
   seedMedia: (url: string, bytes?: number) => Promise<void>
+  /**
+   * Prime the browser HTTP cache as if the immutable resource had been fetched
+   * on an earlier visit. A later plain `fetch()` is then served from disk with
+   * no network round trip — exactly how the browser answers an `immutable`
+   * response.
+   */
+  seedHttpCache: (url: string) => void
+  /** Simulate loss of connectivity: uncached `fetch()` calls reject. */
+  setOffline: (offline: boolean) => void
   setStorageUsage: (bytes: number) => void
   /** Let fire-and-forget work (cache writes, eviction sweeps) settle. */
   settle: () => Promise<void>
@@ -36,8 +45,10 @@ function loadServiceWorker(): Harness {
   const stats: Stats = { network: 0, cacheMatch: 0, cacheKeys: 0, cachePut: 0, cacheDeletes: 0 }
   const listeners = new Map<string, (event: unknown) => void>()
   const caches_ = new Map<string, FakeCache>()
+  const httpCache = new Map<string, Response>()
   const pendingWork: Promise<unknown>[] = []
   let storageUsage = 0
+  let offline = false
 
   const keyOf = (req: Request | string) => (typeof req === 'string' ? req : req.url)
 
@@ -86,12 +97,27 @@ function loadServiceWorker(): Harness {
       },
       keys: async () => [...caches_.keys()],
     },
-    fetch: async () => {
+    fetch: async (req: Request | string, opts?: { cache?: string }) => {
+      const url = typeof req === 'string' ? req : req.url
+      // Model the browser HTTP cache: a plain fetch() of an `immutable` resource
+      // seen before is served from disk with no network. A `cache: 'no-cache'`
+      // fetch always revalidates over the network.
+      if (opts?.cache !== 'no-cache') {
+        const hit = httpCache.get(url)
+        if (hit) return hit.clone()
+      }
+      if (offline) throw new TypeError('Failed to fetch')
       stats.network++
-      return new Response('imagebytes', {
+      const res = new Response('imagebytes', {
         status: 200,
-        headers: { 'Content-Length': '10000', 'Content-Type': 'image/webp' },
+        headers: {
+          'Content-Length': '10000',
+          'Content-Type': 'image/webp',
+          'Cache-Control': 'private, immutable',
+        },
       })
+      httpCache.set(url, res.clone())
+      return res.clone()
     },
     indexedDB: { open: () => ({}) },
     navigator: { storage: { estimate: async () => ({ usage: storageUsage, quota: 10 * 1024 ** 3 }) } },
@@ -139,6 +165,18 @@ function loadServiceWorker(): Harness {
       )
       stats.cachePut = 0
     },
+    seedHttpCache(url: string) {
+      httpCache.set(
+        url,
+        new Response('imagebytes', {
+          status: 200,
+          headers: { 'Content-Length': '10000', 'Cache-Control': 'private, immutable' },
+        }),
+      )
+    },
+    setOffline(value: boolean) {
+      offline = value
+    },
     setStorageUsage(bytes: number) {
       storageUsage = bytes
     },
@@ -160,16 +198,46 @@ describe('service worker media cache performance', () => {
     sw = loadServiceWorker()
   })
 
-  it('serves an already-cached immutable image without a network round trip', async () => {
-    // Regression (91af972): the media branch was flipped to network-first with
-    // `cache: 'no-cache'`, so CacheStorage was only read when fetch() threw.
-    // Every thumbnail hit the network on every render, defeating the
-    // `Cache-Control: private, immutable` / 30d headers nginx already sends.
-    // cas/thumbs/image are sha256 content-addressed capability URLs — the bytes
-    // behind a URL can never change, so revalidation buys nothing.
-    await sw.seedMedia(IMG)
+  it('serves a repeat immutable image from the HTTP cache without a network round trip', async () => {
+    // Regression (91af972): the media branch must not force revalidation. The
+    // request uses a plain fetch() (never `cache: 'no-cache'`), so an immutable
+    // resource already in the browser HTTP cache is answered from disk with no
+    // network. cas/thumbs/image are sha256 capability URLs — the bytes behind a
+    // URL can never change, so revalidation buys nothing.
+    sw.seedHttpCache(IMG)
 
     const res = await sw.request(IMG)
+    await sw.settle()
+
+    expect(res.status).toBe(200)
+    expect(sw.stats.network).toBe(0)
+  })
+
+  it('does not read CacheStorage on the online content-addressed hot path', async () => {
+    // The iOS cold-start latency fix: gating every image on
+    // caches.open(MEDIA_CACHE_NAME) + cache.match() added seconds per thumbnail
+    // on iOS standalone. Online, the response must come straight from fetch()
+    // (served by the immutable HTTP cache) with zero CacheStorage reads; the
+    // media store is still populated in the background for offline use.
+    sw.seedHttpCache(IMG)
+
+    await sw.request(IMG)
+    expect(sw.stats.cacheMatch).toBe(0)
+
+    await sw.settle()
+    // Background population keeps the explicit offline store / logout-clear
+    // path (security-model BR-006) intact without blocking rendering.
+    expect(sw.stats.cachePut).toBeGreaterThanOrEqual(1)
+  })
+
+  it('falls back to the media cache for content-addressed media when offline', async () => {
+    // Offline (or HTTP cache miss): fetch() rejects, so the explicit media store
+    // is the fallback and the image still renders.
+    const url = `${ORIGIN}/media/cas/aa/bb.webp`
+    await sw.seedMedia(url)
+    sw.setOffline(true)
+
+    const res = await sw.request(url)
     await sw.settle()
 
     expect(res.status).toBe(200)
