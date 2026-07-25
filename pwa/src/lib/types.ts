@@ -588,13 +588,7 @@ export interface DatasetImage {
   thumb_srcset?: string | null
   state: 'included' | 'excluded'
   source: 'gallery' | 'collection' | 'manual' | 'tag_query'
-  exclusion_reason:
-    | 'manual'
-    | 'min_resolution'
-    | 'aspect_ratio'
-    | 'phash_duplicate'
-    | string
-    | null
+  exclusion_reason: 'manual' | 'min_resolution' | 'aspect_ratio' | 'phash_duplicate' | string | null
 }
 
 export interface DatasetDetail extends Dataset {
@@ -917,11 +911,24 @@ export interface RelationshipBlob {
   width: number | null
   height: number | null
   file_size: number | null
+  extension: string
+  media_type: string
+  occurrences: RelationshipOccurrence[]
+}
+
+export interface RelationshipOccurrence {
+  image_id: number
+  gallery_id: number
+  gallery_title: string | null
+  source: string
+  source_id: string
+  page_num: number
+  filename: string | null
 }
 
 export interface RelationshipItem {
   id: number
-  relationship: 'quality_conflict' | 'variant'
+  relationship: 'needs_review' | 'quality_conflict' | 'variant'
   hamming_dist: number | null
   blob_a: RelationshipBlob
   blob_b: RelationshipBlob
@@ -943,6 +950,10 @@ export interface DedupScanProgress {
   tier?: 1 | 2 | 3
   mode?: 'reset' | 'pending'
   percent?: number
+  last_status?: 'completed' | 'failed' | null
+  last_started?: string | null
+  last_finished?: string | null
+  last_error?: string | null
 }
 
 // ── Rate Limits ───────────────────────────────────────────────────────

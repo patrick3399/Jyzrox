@@ -2,17 +2,19 @@
 
 import logging
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import aliased, joinedload
 
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import Blob, BlobRelationship
 from worker.dedup_helpers import (
+    DEDUP_SCAN_VERSION,
     DedupProgress,
     PhashBKTree,
     _classify_pair,
-    _pair_context_scope,
+    _pair_context_scopes,
     _scan_indexed_candidates,
 )
 
@@ -20,6 +22,15 @@ logger = logging.getLogger("worker.dedup_scan")
 
 
 async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
+    try:
+        return await _dedup_scan_job_impl(ctx, mode)
+    except Exception as exc:
+        await DedupProgress(get_redis()).fail(str(exc))
+        logger.exception("dedup_scan_job failed")
+        raise
+
+
+async def _dedup_scan_job_impl(ctx: dict, mode: str = "pending") -> dict:
     """Orchestrate all dedup tiers with real-time progress tracking.
 
     mode='pending' — query only blobs not yet scanned at the active threshold
@@ -38,10 +49,21 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     # ── Mode: reset ───────────────────────────────────────────────────
     if mode == "reset":
         async with async_session() as session:
-            await session.execute(delete(BlobRelationship))
-            await session.execute(update(Blob).values(dedup_scanned_threshold=None))
+            await session.execute(
+                delete(BlobRelationship).where(
+                    BlobRelationship.decision.is_(None),
+                    BlobRelationship.relationship.notin_(("whitelisted", "resolved")),
+                )
+            )
+            await session.execute(
+                update(Blob).values(
+                    dedup_scanned_threshold=None,
+                    dedup_scanned_phash_int=None,
+                    dedup_scanned_version=None,
+                )
+            )
             await session.commit()
-        logger.info("dedup_scan_job: reset — all relationships cleared")
+        logger.info("dedup_scan_job: reset — automatic relationships cleared; review decisions preserved")
 
     # ── Tier 1 — pHash scan ───────────────────────────────────────────
     enabled = await r.get("setting:dedup_phash_enabled")
@@ -58,6 +80,8 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                 Blob.sha256,
                 Blob.phash_int,
                 Blob.dedup_scanned_threshold,
+                Blob.dedup_scanned_phash_int,
+                Blob.dedup_scanned_version,
             )
             .where(Blob.phash_int.isnot(None))
             .order_by(Blob.sha256)
@@ -70,6 +94,8 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
         if mode == "reset"
         or not isinstance(blob.dedup_scanned_threshold, int)
         or blob.dedup_scanned_threshold < threshold
+        or blob.dedup_scanned_phash_int != blob.phash_int
+        or blob.dedup_scanned_version != DEDUP_SCAN_VERSION
     ]
     index = PhashBKTree(blobs)
     total_blobs = len(scan_blobs)
@@ -96,14 +122,18 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                 await session.execute(
                     update(Blob)
                     .where(Blob.sha256.in_(scanned_batch))
-                    .values(dedup_scanned_threshold=threshold)
+                    .values(
+                        dedup_scanned_threshold=threshold,
+                        dedup_scanned_phash_int=Blob.phash_int,
+                        dedup_scanned_version=DEDUP_SCAN_VERSION,
+                    )
                 )
             await session.commit()
             total_inserted += inserted
         pairs_batch.clear()
-        pair_keys.clear()
         scanned_batch.clear()
 
+    progress_pending = 0
     for a in scan_blobs:
         for b, dist in _scan_indexed_candidates(index, a, threshold):
             sha_a, sha_b = sorted((a.sha256, b.sha256))
@@ -116,7 +146,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                     "sha_a": sha_a,
                     "sha_b": sha_b,
                     "hamming_dist": dist,
-                    "relationship": "needs_t2",
+                    "relationship": "needs_context",
                     "tier": 1,
                 }
             )
@@ -127,7 +157,11 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
         scanned_batch.append(a.sha256)
         if len(scanned_batch) >= 250:
             await _flush()
-        await progress.report(1)
+        progress_pending += 1
+        if progress_pending < 100:
+            continue
+        await progress.report(progress_pending)
+        progress_pending = 0
         signal = await progress.check_signal()
         if signal == "pause":
             await _flush()
@@ -141,22 +175,74 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
             return {"status": "stopped", "tier": 1}
 
     await _flush()
+    if progress_pending:
+        await progress.report(progress_pending)
+        signal = await progress.check_signal()
+        if signal == "pause":
+            resumed = await progress.wait_for_resume()
+            if not resumed:
+                await progress.finish()
+                return {"status": "stopped", "tier": 1}
+        elif signal == "stop":
+            await progress.finish()
+            return {"status": "stopped", "tier": 1}
     logger.info("Tier 1 done, new pairs inserted: %d", total_inserted)
 
-    # ── Tier 2 — heuristic classify ────────────────────────────────────
+    # ── Mandatory occurrence context gate + optional Tier 2 heuristic ─
     heuristic_raw = await r.get("setting:dedup_heuristic_enabled")
     heuristic_enabled = heuristic_raw == b"1"
     opencv_raw = await r.get("setting:dedup_opencv_enabled")
     opencv_enabled = opencv_raw == b"1"
 
+    context_states = (
+        "needs_context",
+        "needs_t2",
+        "same_gallery_only",
+        "needs_review",
+        "quality_conflict",
+        "variant",
+        "needs_t3",
+    )
+    context_blob_a = aliased(Blob)
+    context_blob_b = aliased(Blob)
+    context_is_dirty = or_(
+        BlobRelationship.context_revision_a.is_distinct_from(context_blob_a.occurrence_revision),
+        BlobRelationship.context_revision_b.is_distinct_from(context_blob_b.occurrence_revision),
+    )
+    actionable_context = or_(
+        BlobRelationship.relationship.in_(("needs_context", "needs_t2")),
+        and_(BlobRelationship.relationship == "same_gallery_only", context_is_dirty),
+        and_(
+            BlobRelationship.relationship == "needs_review",
+            or_(context_is_dirty, heuristic_enabled, opencv_enabled),
+        ),
+        and_(BlobRelationship.relationship.in_(("quality_conflict", "variant")), context_is_dirty),
+        and_(
+            BlobRelationship.relationship == "needs_t3",
+            or_(context_is_dirty, not opencv_enabled),
+        ),
+    )
     async with async_session() as session:
         count_result = await session.execute(
-            select(func.count()).where(BlobRelationship.relationship.in_(("needs_t2", "same_gallery_only")))
+            select(func.count())
+            .select_from(BlobRelationship)
+            .join(context_blob_a, context_blob_a.sha256 == BlobRelationship.sha_a)
+            .join(context_blob_b, context_blob_b.sha256 == BlobRelationship.sha_b)
+            .where(
+                BlobRelationship.relationship.in_(context_states),
+                BlobRelationship.decision.is_(None),
+                actionable_context,
+            )
         )
-        needs_t2_count = count_result.scalar_one()
+        context_count = count_result.scalar_one()
 
-    await progress.advance_tier(2, total=needs_t2_count)
-    logger.info("Tier 2 start, candidates_to_evaluate=%d", needs_t2_count)
+    active_stage = 2 if heuristic_enabled else 1
+    await progress.advance_tier(active_stage, total=context_count)
+    logger.info(
+        "Context gate start, candidates=%d, heuristic_enabled=%s",
+        context_count,
+        heuristic_enabled,
+    )
 
     t2_processed = 0
     last_t2_id = 0
@@ -164,76 +250,96 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
         async with async_session() as session:
             result = await session.execute(
                 select(BlobRelationship)
-                .where(BlobRelationship.relationship.in_(("needs_t2", "same_gallery_only")))
+                .join(context_blob_a, context_blob_a.sha256 == BlobRelationship.sha_a)
+                .join(context_blob_b, context_blob_b.sha256 == BlobRelationship.sha_b)
+                .options(
+                    joinedload(BlobRelationship.blob_a),
+                    joinedload(BlobRelationship.blob_b),
+                )
+                .where(
+                    BlobRelationship.relationship.in_(context_states),
+                    BlobRelationship.decision.is_(None),
+                    actionable_context,
+                )
                 .where(BlobRelationship.id > last_t2_id)
                 .order_by(BlobRelationship.id)
-                .limit(200)
+                .limit(500)
             )
-            pairs = list(result.scalars())
+            pairs = list(result.scalars().unique())
+            if not pairs:
+                break
+            last_t2_id = pairs[-1].id
 
-        if not pairs:
-            break
-        last_t2_id = pairs[-1].id
+            context_dirty = [
+                pair
+                for pair in pairs
+                if pair.relationship in ("needs_context", "needs_t2")
+                or pair.context_revision_a != getattr(pair.blob_a, "occurrence_revision", None)
+                or pair.context_revision_b != getattr(pair.blob_b, "occurrence_revision", None)
+            ]
+            context_dirty_ids = {pair.id for pair in context_dirty}
+            scopes = await _pair_context_scopes(session, context_dirty)
 
-        for pair in pairs:
-            async with async_session() as session:
-                blob_a_result = await session.execute(select(Blob).where(Blob.sha256 == pair.sha_a))
-                blob_a = blob_a_result.scalar_one_or_none()
-                blob_b_result = await session.execute(select(Blob).where(Blob.sha256 == pair.sha_b))
-                blob_b = blob_b_result.scalar_one_or_none()
-
+            for pair in pairs:
+                blob_a = pair.blob_a
+                blob_b = pair.blob_b
+                is_context_dirty = pair.id in context_dirty_ids
                 if not blob_a or not blob_b:
-                    await session.execute(
-                        update(BlobRelationship)
-                        .where(BlobRelationship.id == pair.id)
-                        .values(relationship="resolved", context_scope="unreferenced", tier=2)
-                    )
-                    await session.commit()
-                    continue
-
-                context_scope = await _pair_context_scope(session, pair.sha_a, pair.sha_b)
-                if context_scope == "same_gallery_only":
-                    logger.info("same_gallery_only: pair %d", pair.id)
-                    await session.execute(
-                        update(BlobRelationship)
-                        .where(BlobRelationship.id == pair.id)
-                        .values(
-                            relationship="same_gallery_only",
-                            context_scope=context_scope,
-                            reason="same_gallery_variant",
-                            suggested_keep=None,
-                            tier=2,
-                        )
-                    )
-                    await session.commit()
-                    t2_processed += 1
-                    continue
-                if context_scope == "unreferenced":
-                    await session.execute(
-                        update(BlobRelationship)
-                        .where(BlobRelationship.id == pair.id)
-                        .values(relationship="resolved", context_scope=context_scope, reason="unreferenced", tier=2)
-                    )
-                    await session.commit()
+                    pair.relationship = "resolved"
+                    pair.context_scope = "unreferenced"
+                    pair.reason = "unreferenced"
+                    pair.tier = 1
                     t2_processed += 1
                     continue
 
-                rel, keep, reason = _classify_pair(blob_a, blob_b, heuristic_enabled)
-                next_rel = "needs_t3" if opencv_enabled else rel
+                if is_context_dirty:
+                    pair.context_scope = scopes.get(pair.id, "unreferenced")
+                    pair.context_revision_a = blob_a.occurrence_revision
+                    pair.context_revision_b = blob_b.occurrence_revision
 
-                await session.execute(
-                    update(BlobRelationship)
-                    .where(BlobRelationship.id == pair.id)
-                    .values(
-                        relationship=next_rel,
-                        context_scope=context_scope,
-                        suggested_keep=keep,
-                        reason=reason,
-                        tier=2,
-                    )
-                )
-                await session.commit()
-                t2_processed += 1
+                if pair.context_scope == "same_gallery_only":
+                    if is_context_dirty:
+                        pair.relationship = "same_gallery_only"
+                        pair.reason = "same_gallery_variant"
+                        pair.suggested_keep = None
+                        pair.tier = 1
+                        t2_processed += 1
+                    continue
+                if pair.context_scope == "unreferenced":
+                    pair.relationship = "resolved"
+                    pair.reason = "unreferenced"
+                    pair.suggested_keep = None
+                    pair.tier = 1
+                    t2_processed += 1
+                    continue
+
+                if opencv_enabled:
+                    if heuristic_enabled:
+                        _, keep, reason = _classify_pair(blob_a, blob_b, True)
+                        pair.suggested_keep = keep
+                        pair.reason = reason
+                        pair.tier = 2
+                    else:
+                        pair.suggested_keep = None
+                        pair.reason = None
+                        pair.tier = 1
+                    pair.relationship = "needs_t3"
+                    t2_processed += 1
+                elif heuristic_enabled:
+                    rel, keep, reason = _classify_pair(blob_a, blob_b, True)
+                    pair.relationship = rel
+                    pair.suggested_keep = keep
+                    pair.reason = reason
+                    pair.tier = 2
+                    t2_processed += 1
+                elif is_context_dirty:
+                    pair.relationship = "needs_review"
+                    pair.suggested_keep = None
+                    pair.reason = None
+                    pair.tier = 1
+                    t2_processed += 1
+
+            await session.commit()
 
         await progress.report(len(pairs))
         signal = await progress.check_signal()
@@ -241,12 +347,16 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
             resumed = await progress.wait_for_resume()
             if not resumed:
                 await progress.finish()
-                return {"status": "stopped", "tier": 2}
+                return {"status": "stopped", "tier": active_stage}
         elif signal == "stop":
             await progress.finish()
-            return {"status": "stopped", "tier": 2}
+            return {"status": "stopped", "tier": active_stage}
 
-    logger.info("Tier 2 done, processed: %d", t2_processed)
+    logger.info(
+        "Context gate done, changed=%d, heuristic_enabled=%s",
+        t2_processed,
+        heuristic_enabled,
+    )
 
     # ── Tier 3 — OpenCV pixel-diff ─────────────────────────────────────
     if not opencv_enabled:

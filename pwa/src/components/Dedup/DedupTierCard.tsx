@@ -32,6 +32,7 @@ interface Props {
   // Actions
   onStart: (mode: 'reset' | 'pending') => Promise<void>
   onSignal: (signal: 'pause' | 'resume' | 'stop') => Promise<void>
+  showScanControls?: boolean
 }
 
 function Toggle({
@@ -131,6 +132,7 @@ export function DedupTierCard({
   pending,
   onStart,
   onSignal,
+  showScanControls = false,
 }: Props) {
   const [localThreshold, setLocalThreshold] = useState<number>(threshold ?? 0)
 
@@ -264,55 +266,57 @@ export function DedupTierCard({
         </div>
 
         {/* Right: action buttons */}
-        <div className="flex flex-col items-center justify-center gap-2 px-3 py-4 border-l border-vault-border/50 shrink-0">
-          {tierStatus === 'idle' && (
-            <>
-              <ActionButton
-                icon="∞"
-                label={t('dedup.scanReset')}
-                onClick={() => onStart('reset')}
-              />
-              <ActionButton
-                icon="▷"
-                label={t('dedup.scanPending')}
-                onClick={() => onStart('pending')}
-                variant="success"
-              />
-            </>
-          )}
-          {isRunning && (
-            <>
-              <ActionButton
-                icon="⏸"
-                label={t('dedup.scanPause')}
-                onClick={() => onSignal('pause')}
-                variant="warning"
-              />
-              <ActionButton
-                icon="⏹"
-                label={t('dedup.scanStop')}
-                onClick={() => onSignal('stop')}
-                variant="danger"
-              />
-            </>
-          )}
-          {isPaused && (
-            <>
-              <ActionButton
-                icon="▶"
-                label={t('dedup.scanResume')}
-                onClick={() => onSignal('resume')}
-                variant="success"
-              />
-              <ActionButton
-                icon="⏹"
-                label={t('dedup.scanStop')}
-                onClick={() => onSignal('stop')}
-                variant="danger"
-              />
-            </>
-          )}
-        </div>
+        {showScanControls && (
+          <div className="flex flex-col items-center justify-center gap-2 px-3 py-4 border-l border-vault-border/50 shrink-0">
+            {tierStatus === 'idle' && (
+              <>
+                <ActionButton
+                  icon="∞"
+                  label={t('dedup.scanReset')}
+                  onClick={() => onStart('reset')}
+                />
+                <ActionButton
+                  icon="▷"
+                  label={t('dedup.scanPending')}
+                  onClick={() => onStart('pending')}
+                  variant="success"
+                />
+              </>
+            )}
+            {isRunning && (
+              <>
+                <ActionButton
+                  icon="⏸"
+                  label={t('dedup.scanPause')}
+                  onClick={() => onSignal('pause')}
+                  variant="warning"
+                />
+                <ActionButton
+                  icon="⏹"
+                  label={t('dedup.scanStop')}
+                  onClick={() => onSignal('stop')}
+                  variant="danger"
+                />
+              </>
+            )}
+            {isPaused && (
+              <>
+                <ActionButton
+                  icon="▶"
+                  label={t('dedup.scanResume')}
+                  onClick={() => onSignal('resume')}
+                  variant="success"
+                />
+                <ActionButton
+                  icon="⏹"
+                  label={t('dedup.scanStop')}
+                  onClick={() => onSignal('stop')}
+                  variant="danger"
+                />
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

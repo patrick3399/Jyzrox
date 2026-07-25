@@ -22,6 +22,15 @@ function getTierStatus(tier: 1 | 2 | 3, progress: DedupScanProgress, enabled: bo
   return progress.status as TierStatus
 }
 
+function formatDuration(started?: string | null, finished?: string | null): string | null {
+  if (!started || !finished) return null
+  const seconds = Math.max(0, Math.round((Date.parse(finished) - Date.parse(started)) / 1000))
+  if (!Number.isFinite(seconds)) return null
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`
+}
+
 export function DedupSettingsCard() {
   const { data: features, mutate: mutateFeatures } = useDedupSettings()
   const { data: stats } = useDedupStats()
@@ -59,6 +68,7 @@ export function DedupSettingsCard() {
   }
 
   const handleStart = async (mode: 'reset' | 'pending') => {
+    if (mode === 'reset' && !window.confirm(t('dedup.confirmFullRescan'))) return
     try {
       await startScan(mode)
       toast.success(t('dedup.scanQueued'))
@@ -100,6 +110,7 @@ export function DedupSettingsCard() {
   const tier1Status = getTierStatus(1, progress, phashEnabled)
   const tier2Status = getTierStatus(2, progress, heuristicEnabled)
   const tier3Status = getTierStatus(3, progress, opencvEnabled)
+  const lastDuration = formatDuration(progress.last_started, progress.last_finished)
 
   return (
     <div className="space-y-3">
@@ -134,6 +145,7 @@ export function DedupSettingsCard() {
         pending={t1Pending}
         onStart={handleStart}
         onSignal={handleSignal}
+        showScanControls
       />
 
       {/* Tier 2 */}
@@ -184,6 +196,19 @@ export function DedupSettingsCard() {
         onStart={handleStart}
         onSignal={handleSignal}
       />
+      {progress.status === 'idle' && progress.last_finished && (
+        <p
+          className={`px-1 text-xs ${progress.last_status === 'failed' ? 'text-red-400' : 'text-vault-text-muted'}`}
+        >
+          {progress.last_status === 'failed'
+            ? t('dedup.lastRunFailed')
+            : t('dedup.lastRunComplete')}
+          {' · '}
+          {new Date(progress.last_finished).toLocaleString()}
+          {lastDuration ? ` · ${t('dedup.lastRunDuration', { duration: lastDuration })}` : ''}
+          {progress.last_error ? ` · ${progress.last_error}` : ''}
+        </p>
+      )}
     </div>
   )
 }

@@ -12,13 +12,13 @@ from typing import Literal
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 
 from core.auth import require_auth, require_role
 from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import Credential
+from db.models import BlobRelationship, Credential
 from services.cache import dismiss_system_alert, get_system_alerts, push_system_alert
 from services.credential import get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
@@ -678,8 +678,23 @@ async def patch_feature_toggle(
     if feature == "dedup_phash_threshold":
         if req.value is None:
             raise HTTPException(status_code=400, detail="value required for dedup_phash_threshold")
-        await get_redis().set("setting:dedup_phash_threshold", str(req.value))
-        return {"feature": feature, "value": req.value}
+        threshold = int(req.value)
+        if float(req.value) != threshold or not (0 <= threshold <= 20):
+            raise HTTPException(status_code=400, detail="dedup_phash_threshold must be an integer between 0 and 20")
+        from worker.dedup_helpers import AUTO_CANDIDATE_RELATIONSHIPS
+
+        async with async_session() as session:
+            result = await session.execute(
+                delete(BlobRelationship).where(
+                    BlobRelationship.decision.is_(None),
+                    BlobRelationship.relationship.in_(AUTO_CANDIDATE_RELATIONSHIPS),
+                    BlobRelationship.hamming_dist > threshold,
+                )
+            )
+            await session.commit()
+        removed = int(result.rowcount or 0)
+        await get_redis().set("setting:dedup_phash_threshold", str(threshold))
+        return {"feature": feature, "value": threshold, "removed_candidates": removed}
 
     if feature == "dedup_opencv_threshold":
         if req.value is None:

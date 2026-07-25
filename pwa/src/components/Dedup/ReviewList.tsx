@@ -11,6 +11,7 @@ import { api } from '@/lib/api'
 
 const FILTERS = [
   { key: '', label: () => t('dedup.filterAll') },
+  { key: 'needs_review', label: () => t('dedup.filterCandidate') },
   { key: 'quality_conflict', label: () => t('dedup.filterQuality') },
   { key: 'variant', label: () => t('dedup.filterVariant') },
 ]
@@ -26,9 +27,10 @@ export function ReviewList() {
     if (!settingsLoading) void mutate()
   }, [filter, mutate, settingsLoading])
 
-  const handleKeep = async (id: number, keepSha: string) => {
+  const handleKeep = async (id: number, keepSha: string, discardRefs: number) => {
+    if (!window.confirm(t('dedup.confirmGlobalReplace', { count: String(discardRefs) }))) return
     try {
-      await api.dedup.keep(id, keepSha)
+      await api.dedup.keep(id, keepSha, discardRefs)
       toast.success(t('dedup.keptSuccess'))
       mutate()
     } catch {

@@ -2,13 +2,14 @@
 
 import logging
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import aliased, joinedload
 
 from core.database import async_session
 from core.redis_client import get_redis
 from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 from db.models import Blob, BlobRelationship
-from worker.dedup_helpers import _classify_pair, _now_iso, _pair_context_scope
+from worker.dedup_helpers import _classify_pair, _now_iso, _pair_context_scopes
 from worker.helpers import _cron_record, _cron_should_run
 
 logger = logging.getLogger("worker.dedup_tier2")
@@ -48,87 +49,108 @@ async def _classify_pending_pairs() -> dict:
 
     heuristic_raw = await r.get("setting:dedup_heuristic_enabled")
     heuristic_enabled = heuristic_raw == b"1"
+    if not heuristic_enabled:
+        logger.info("heuristic disabled — skip Tier 2")
+        return {"status": "skipped", "reason": "disabled"}
 
     opencv_raw = await r.get("setting:dedup_opencv_enabled")
     opencv_enabled = opencv_raw == b"1"
 
     total_processed = 0
+    context_blob_a = aliased(Blob)
+    context_blob_b = aliased(Blob)
+    context_is_dirty = or_(
+        BlobRelationship.context_revision_a.is_distinct_from(context_blob_a.occurrence_revision),
+        BlobRelationship.context_revision_b.is_distinct_from(context_blob_b.occurrence_revision),
+    )
+    actionable = or_(
+        BlobRelationship.relationship.in_(("needs_context", "needs_t2", "needs_review")),
+        and_(BlobRelationship.relationship == "same_gallery_only", context_is_dirty),
+        and_(BlobRelationship.relationship.in_(("quality_conflict", "variant", "needs_t3")), context_is_dirty),
+        and_(BlobRelationship.relationship == "needs_t3", not opencv_enabled),
+    )
 
     last_id = 0
     while True:
         async with async_session() as session:
             result = await session.execute(
                 select(BlobRelationship)
-                .where(BlobRelationship.relationship.in_(("needs_t2", "same_gallery_only")))
-                .where(BlobRelationship.id > last_id)
-                .order_by(BlobRelationship.id)
-                .limit(200)
-            )
-            pairs = list(result.scalars())
-
-        if not pairs:
-            break
-        last_id = pairs[-1].id
-
-        for pair in pairs:
-            async with async_session() as session:
-                blob_a_result = await session.execute(select(Blob).where(Blob.sha256 == pair.sha_a))
-                blob_a = blob_a_result.scalar_one_or_none()
-                blob_b_result = await session.execute(select(Blob).where(Blob.sha256 == pair.sha_b))
-                blob_b = blob_b_result.scalar_one_or_none()
-
-                if not blob_a or not blob_b:
-                    await session.execute(
-                        update(BlobRelationship)
-                        .where(BlobRelationship.id == pair.id)
-                        .values(relationship="resolved", context_scope="unreferenced", tier=2)
-                    )
-                    await session.commit()
-                    continue
-
-                context_scope = await _pair_context_scope(session, pair.sha_a, pair.sha_b)
-                if context_scope == "same_gallery_only":
-                    logger.info("same_gallery_only: pair %d", pair.id)
-                    await session.execute(
-                        update(BlobRelationship)
-                        .where(BlobRelationship.id == pair.id)
-                        .values(
-                            relationship="same_gallery_only",
-                            context_scope=context_scope,
-                            reason="same_gallery_variant",
-                            suggested_keep=None,
-                            tier=2,
+                .join(context_blob_a, context_blob_a.sha256 == BlobRelationship.sha_a)
+                .join(context_blob_b, context_blob_b.sha256 == BlobRelationship.sha_b)
+                .options(
+                    joinedload(BlobRelationship.blob_a),
+                    joinedload(BlobRelationship.blob_b),
+                )
+                .where(
+                    BlobRelationship.relationship.in_(
+                        (
+                            "needs_context",
+                            "needs_t2",
+                            "needs_review",
+                            "same_gallery_only",
+                            "quality_conflict",
+                            "variant",
+                            "needs_t3",
                         )
                     )
-                    await session.commit()
-                    total_processed += 1
-                    continue
-                if context_scope == "unreferenced":
-                    await session.execute(
-                        update(BlobRelationship)
-                        .where(BlobRelationship.id == pair.id)
-                        .values(relationship="resolved", context_scope=context_scope, reason="unreferenced", tier=2)
-                    )
-                    await session.commit()
-                    total_processed += 1
-                    continue
-
-                rel, keep, reason = _classify_pair(blob_a, blob_b, heuristic_enabled)
-                next_rel = "needs_t3" if opencv_enabled else rel
-
-                await session.execute(
-                    update(BlobRelationship)
-                    .where(BlobRelationship.id == pair.id)
-                    .values(
-                        relationship=next_rel,
-                        context_scope=context_scope,
-                        suggested_keep=keep,
-                        reason=reason,
-                        tier=2,
-                    )
                 )
-                await session.commit()
+                .where(BlobRelationship.decision.is_(None), actionable)
+                .where(BlobRelationship.id > last_id)
+                .order_by(BlobRelationship.id)
+                .limit(500)
+            )
+            pairs = list(result.scalars().unique())
+            if not pairs:
+                break
+            last_id = pairs[-1].id
+            context_dirty = [
+                pair
+                for pair in pairs
+                if pair.relationship in ("needs_context", "needs_t2")
+                or pair.context_revision_a != getattr(pair.blob_a, "occurrence_revision", None)
+                or pair.context_revision_b != getattr(pair.blob_b, "occurrence_revision", None)
+            ]
+            dirty_ids = {pair.id for pair in context_dirty}
+            scopes = await _pair_context_scopes(session, context_dirty)
+
+            for pair in pairs:
+                blob_a = pair.blob_a
+                blob_b = pair.blob_b
+                if not blob_a or not blob_b:
+                    pair.relationship = "resolved"
+                    pair.context_scope = "unreferenced"
+                    pair.reason = "unreferenced"
+                    pair.tier = 1
+                    total_processed += 1
+                    continue
+                if pair.id in dirty_ids:
+                    pair.context_scope = scopes.get(pair.id, "unreferenced")
+                    pair.context_revision_a = blob_a.occurrence_revision
+                    pair.context_revision_b = blob_b.occurrence_revision
+                if pair.context_scope == "same_gallery_only":
+                    if pair.id in dirty_ids:
+                        pair.relationship = "same_gallery_only"
+                        pair.reason = "same_gallery_variant"
+                        pair.suggested_keep = None
+                        pair.tier = 1
+                        total_processed += 1
+                    continue
+                if pair.context_scope == "unreferenced":
+                    pair.relationship = "resolved"
+                    pair.reason = "unreferenced"
+                    pair.suggested_keep = None
+                    pair.tier = 1
+                    total_processed += 1
+                    continue
+
+                rel, keep, reason = _classify_pair(blob_a, blob_b, True)
+                pair.relationship = "needs_t3" if opencv_enabled else rel
+                pair.suggested_keep = keep
+                pair.reason = reason
+                pair.tier = 2
                 total_processed += 1
+
+            await session.commit()
 
     await r.set("cron:dedup_tier2:last_run", _now_iso())
     await r.set("cron:dedup_tier2:last_status", f"processed={total_processed}")

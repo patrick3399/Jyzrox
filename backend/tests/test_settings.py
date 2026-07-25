@@ -466,8 +466,24 @@ class TestFeatureToggles:
         assert resp.status_code == 400
         assert "unknown feature" in resp.json()["detail"].lower()
 
-    async def test_patch_feature_numeric_threshold(self, client, mock_redis):
-        """Patching dedup_phash_threshold should accept a value and return it."""
+    async def test_patch_feature_numeric_threshold(self, client, mock_redis, db_session):
+        """Lowering the threshold removes stale automatic candidates but preserves decisions."""
+        await db_session.execute(
+            text(
+                "INSERT INTO blobs (sha256, file_size, extension) VALUES "
+                "('threshold-a', 1, 'jpg'), ('threshold-b', 1, 'jpg'), "
+                "('threshold-c', 1, 'jpg'), ('threshold-d', 1, 'jpg')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO blob_relationships "
+                "(sha_a, sha_b, hamming_dist, relationship, decision) VALUES "
+                "('threshold-a', 'threshold-b', 9, 'needs_review', NULL), "
+                "('threshold-c', 'threshold-d', 9, 'decided', 'whitelisted')"
+            )
+        )
+        await db_session.commit()
         mock_redis.set = AsyncMock(return_value=True)
         with patch("routers.settings.get_redis", return_value=mock_redis):
             resp = await client.patch(
@@ -478,6 +494,25 @@ class TestFeatureToggles:
         data = resp.json()
         assert data["feature"] == "dedup_phash_threshold"
         assert data["value"] == 8
+        assert data["removed_candidates"] == 1
+        remaining = (
+            await db_session.execute(text("SELECT decision FROM blob_relationships ORDER BY sha_a"))
+        ).scalars().all()
+        assert remaining == ["whitelisted"]
+
+    async def test_patch_feature_phash_threshold_rejects_fractional_or_out_of_range(self, client, mock_redis):
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            fractional = await client.patch(
+                "/api/settings/features/dedup_phash_threshold",
+                json={"value": 3.5},
+            )
+            too_large = await client.patch(
+                "/api/settings/features/dedup_phash_threshold",
+                json={"value": 21},
+            )
+        assert fractional.status_code == 400
+        assert too_large.status_code == 400
 
     async def test_patch_feature_retry_max_retries_out_of_range_returns_400(self, client, mock_redis):
         """retry_max_retries outside [1, 10] should return 400."""

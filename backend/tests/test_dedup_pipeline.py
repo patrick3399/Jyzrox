@@ -12,7 +12,7 @@ Strategy:
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 
 from db.models import Blob, BlobRelationship, Gallery
 
@@ -306,7 +306,7 @@ class TestDedupTier1:
 
         assert result["status"] == "ok"
         count = (
-            await db_session.execute(text("SELECT COUNT(*) FROM blob_relationships WHERE relationship='needs_t2'"))
+            await db_session.execute(text("SELECT COUNT(*) FROM blob_relationships WHERE relationship='needs_context'"))
         ).scalar()
         assert count >= 1
 
@@ -360,8 +360,19 @@ class TestDedupTier1:
             first = await dedup_tier1_job(_make_ctx(), force=True)
             second = await dedup_tier1_job(_make_ctx(), force=True)
 
+        await db_session.execute(
+            update(Blob).where(Blob.sha256 == "d1" + "0" * 62).values(phash_int=7)
+        )
+        await db_session.commit()
+        with (
+            patch("worker.dedup_tier1.get_redis", return_value=r),
+            patch("worker.dedup_tier1.async_session", fake_db),
+        ):
+            after_phash_change = await dedup_tier1_job(_make_ctx(), force=True)
+
         assert first["scanned"] == 2
         assert second["scanned"] == 0
+        assert after_phash_change["scanned"] == 1
         thresholds = (
             await db_session.execute(select(Blob.dedup_scanned_threshold).order_by(Blob.sha256))
         ).scalars().all()
@@ -459,6 +470,17 @@ class TestDedupTier2:
         assert result["status"] == "skipped"
         assert result["reason"] == "disabled"
 
+    async def test_heuristic_disabled_does_not_execute_tier2(self):
+        from worker.dedup_tier2 import dedup_tier2_job
+
+        r = _make_redis()
+        r.get = AsyncMock(side_effect=lambda key: b"0" if "heuristic" in key else b"1")
+
+        with patch("worker.dedup_tier2.get_redis", return_value=r):
+            result = await dedup_tier2_job(_make_ctx(), force=True)
+
+        assert result == {"status": "skipped", "reason": "disabled"}
+
     async def test_no_needs_t2_relationships_returns_zero(self, db_session, db_session_factory):
         """When no needs_t2 pairs exist, processed count must be 0."""
         from worker.dedup_tier2 import dedup_tier2_job
@@ -513,6 +535,11 @@ class TestDedupTier2:
         # A new occurrence in another gallery makes the pair mixed. The next
         # Tier-2 run must re-evaluate the suppressed state and classify it.
         await _insert_occurrence(db_session, sha_a, "other", 1)
+        # SQLite tests do not install the PostgreSQL occurrence trigger.
+        await db_session.execute(
+            update(Blob).where(Blob.sha256 == sha_a).values(occurrence_revision=1)
+        )
+        await db_session.commit()
         with (
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
@@ -1006,7 +1033,152 @@ class TestDedupTier3:
         ).fetchone()
         # score 0.9 >= threshold 0.9 → confirmed similar
         assert row is not None
-        assert row[0] in ("quality_conflict", "variant")
+        assert row[0] == "needs_review"
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator safety contract
+# ---------------------------------------------------------------------------
+
+
+async def test_t1_only_scan_produces_neutral_cross_gallery_review(db_session, db_session_factory):
+    from worker.dedup_scan import dedup_scan_job
+
+    sha_a = "only-t1-a" + "0" * 55
+    sha_b = "only-t1-b" + "0" * 55
+    await _insert_blob(session=db_session, sha256=sha_a, phash_int=42)
+    await _insert_blob(session=db_session, sha256=sha_b, phash_int=42)
+    await _insert_occurrence(db_session, sha_a, "t1-gallery-a", 1)
+    await _insert_occurrence(db_session, sha_b, "t1-gallery-b", 1)
+
+    r = _make_redis()
+
+    async def _get_side(key):
+        if key == "setting:dedup_phash_enabled":
+            return b"1"
+        if key == "setting:dedup_phash_threshold":
+            return b"4"
+        return None
+
+    r.get = AsyncMock(side_effect=_get_side)
+    fake_db = _make_session_cm(db_session_factory)
+    with (
+        patch("worker.dedup_scan.get_redis", return_value=r),
+        patch("worker.dedup_scan.async_session", fake_db),
+    ):
+        result = await dedup_scan_job({}, mode="pending")
+
+    assert result["status"] == "ok"
+    row = (
+        await db_session.execute(
+            select(
+                BlobRelationship.relationship,
+                BlobRelationship.context_scope,
+                BlobRelationship.tier,
+                BlobRelationship.suggested_keep,
+            ).where(BlobRelationship.sha_a == sha_a, BlobRelationship.sha_b == sha_b)
+        )
+    ).one()
+    assert row == ("needs_review", "cross_gallery", 1, None)
+
+
+async def test_full_rescan_preserves_durable_review_decisions(db_session, db_session_factory):
+    from worker.dedup_scan import dedup_scan_job
+
+    sha_a = "decision-a" + "0" * 54
+    sha_b = "decision-b" + "0" * 54
+    await _insert_blob(session=db_session, sha256=sha_a, phash_int=None)
+    await _insert_blob(session=db_session, sha256=sha_b, phash_int=None)
+    pair_id = await _insert_relationship(db_session, sha_a, sha_b, "decided")
+    await db_session.execute(
+        update(BlobRelationship)
+        .where(BlobRelationship.id == pair_id)
+        .values(decision="whitelisted")
+    )
+    await db_session.commit()
+
+    r = _make_redis()
+
+    async def _get_side(key):
+        if key == "setting:dedup_phash_enabled":
+            return b"1"
+        if key == "setting:dedup_phash_threshold":
+            return b"4"
+        return None
+
+    r.get = AsyncMock(side_effect=_get_side)
+    fake_db = _make_session_cm(db_session_factory)
+    with (
+        patch("worker.dedup_scan.get_redis", return_value=r),
+        patch("worker.dedup_scan.async_session", fake_db),
+    ):
+        result = await dedup_scan_job({}, mode="reset")
+
+    assert result["status"] == "ok"
+    decision = (
+        await db_session.execute(
+            select(BlobRelationship.decision).where(BlobRelationship.id == pair_id)
+        )
+    ).scalar_one()
+    assert decision == "whitelisted"
+
+
+async def test_dirty_quality_candidate_reenters_same_gallery_context_gate(db_session, db_session_factory):
+    """A prior T2 label must not bypass same-gallery suppression after references change."""
+    from worker.dedup_scan import dedup_scan_job
+
+    sha_a = "dirty-quality-a" + "0" * 49
+    sha_b = "dirty-quality-b" + "0" * 49
+    await _insert_blob(session=db_session, sha256=sha_a, phash_int=None)
+    await _insert_blob(session=db_session, sha256=sha_b, phash_int=None)
+    await _insert_occurrence(db_session, sha_a, "shared-gallery", 1)
+    await _insert_occurrence(db_session, sha_b, "shared-gallery", 2)
+    pair_id = (
+        await db_session.execute(
+            text(
+                "INSERT INTO blob_relationships "
+                "(sha_a, sha_b, hamming_dist, relationship, tier) "
+                "VALUES (:sha_a, :sha_b, 2, 'quality_conflict', 2) RETURNING id"
+            ),
+            {"sha_a": sha_a, "sha_b": sha_b},
+        )
+    ).scalar_one()
+    await db_session.execute(
+        update(Blob).where(Blob.sha256.in_((sha_a, sha_b))).values(occurrence_revision=1)
+    )
+    await db_session.execute(
+        update(BlobRelationship)
+        .where(BlobRelationship.id == pair_id)
+        .values(context_revision_a=0, context_revision_b=0)
+    )
+    await db_session.commit()
+
+    r = _make_redis()
+
+    async def _get_side(key):
+        if key == "setting:dedup_phash_enabled":
+            return b"1"
+        if key == "setting:dedup_phash_threshold":
+            return b"4"
+        return None
+
+    r.get = AsyncMock(side_effect=_get_side)
+    fake_db = _make_session_cm(db_session_factory)
+    with (
+        patch("worker.dedup_scan.get_redis", return_value=r),
+        patch("worker.dedup_scan.async_session", fake_db),
+    ):
+        result = await dedup_scan_job({}, mode="pending")
+
+    assert result["status"] == "ok"
+    row = (
+        await db_session.execute(
+            select(BlobRelationship.relationship, BlobRelationship.context_scope).where(
+                BlobRelationship.id == pair_id
+            )
+        )
+    ).one()
+    assert row == ("same_gallery_only", "same_gallery_only")
 
 
 # ---------------------------------------------------------------------------

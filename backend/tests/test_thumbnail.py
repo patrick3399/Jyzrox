@@ -829,3 +829,19 @@ class TestThumbnailDecompressionBombLimit:
         assert PILImage.MAX_IMAGE_PIXELS <= 50_000_000, (
             f"PIL.MAX_IMAGE_PIXELS must be <= 50M, got {PILImage.MAX_IMAGE_PIXELS}"
         )
+
+
+def test_changed_phash_invalidates_incremental_dedup_marker():
+    from worker.thumbnail import _apply_thumbnail_result, _ThumbnailResult
+
+    blob = _make_blob()
+    blob.phash_int = 1
+    blob.dedup_scanned_threshold = 4
+    blob.dedup_scanned_phash_int = 1
+    blob.dedup_scanned_version = 1
+
+    _apply_thumbnail_result(blob, _ThumbnailResult(phash="0000000000000002", phash_int=2))
+
+    assert blob.dedup_scanned_threshold is None
+    assert blob.dedup_scanned_phash_int is None
+    assert blob.dedup_scanned_version is None

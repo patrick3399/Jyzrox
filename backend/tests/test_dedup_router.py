@@ -125,6 +125,45 @@ async def test_dedup_review_with_data_returns_items(client, db_session, db_sessi
     assert item["blob_b"]["sha256"] == "sha_b1"
 
 
+async def test_dedup_review_returns_gallery_occurrences(client, db_session, db_session_factory):
+    await _insert_user(db_session)
+    await _insert_blob(db_session, "origin_a")
+    await _insert_blob(db_session, "origin_b")
+    await _insert_relationship(db_session, "origin_a", "origin_b", "needs_review")
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, download_status) "
+            "VALUES ('local', 'origin-gallery', 'Origin Gallery', 'downloaded')"
+        )
+    )
+    gallery_id = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id='origin-gallery'"))
+    ).scalar_one()
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
+            "VALUES (:gallery_id, 7, 'page-7.jpg', 'origin_a')"
+        ),
+        {"gallery_id": gallery_id},
+    )
+    await db_session.commit()
+
+    with patch("routers.dedup.async_session", db_session_factory):
+        resp = await client.get("/api/dedup/review")
+
+    assert resp.status_code == 200
+    occurrence = resp.json()["items"][0]["blob_a"]["occurrences"][0]
+    assert occurrence == {
+        "image_id": occurrence["image_id"],
+        "gallery_id": gallery_id,
+        "gallery_title": "Origin Gallery",
+        "source": "local",
+        "source_id": "origin-gallery",
+        "page_num": 7,
+        "filename": "page-7.jpg",
+    }
+
+
 async def test_dedup_review_filter_by_relationship_type(client, db_session, db_session_factory):
     await _insert_user(db_session)
     await _insert_blob(db_session, "sha_q1")
@@ -186,6 +225,36 @@ async def test_dedup_keep_pair_invalid_sha_returns_400(client, db_session, db_se
     assert resp.status_code == 400
 
 
+async def test_dedup_keep_rejects_stale_global_reference_count(client, db_session, db_session_factory):
+    await _insert_user(db_session)
+    await _insert_blob(db_session, "stale_keep")
+    await _insert_blob(db_session, "stale_discard")
+    pair_id = await _insert_relationship(db_session, "stale_keep", "stale_discard", "needs_review")
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, download_status) "
+            "VALUES ('test', 'stale-gallery', 'Stale Gallery', 'downloaded')"
+        )
+    )
+    gallery_id = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id='stale-gallery'"))
+    ).scalar_one()
+    await db_session.execute(
+        text("INSERT INTO images (gallery_id, page_num, blob_sha256) VALUES (:gid, 1, 'stale_discard')"),
+        {"gid": gallery_id},
+    )
+    await db_session.commit()
+
+    with patch("routers.dedup.async_session", db_session_factory):
+        resp = await client.post(
+            f"/api/dedup/review/{pair_id}/keep",
+            json={"keep_sha": "stale_keep", "expected_discard_refs": 0},
+        )
+
+    assert resp.status_code == 409
+    assert "reference count changed" in resp.json()["detail"].lower()
+
+
 # ---------------------------------------------------------------------------
 # Tests — whitelist pair
 # ---------------------------------------------------------------------------
@@ -204,10 +273,14 @@ async def test_dedup_whitelist_pair_updates_relationship(client, db_session, db_
     assert resp.json()["status"] == "ok"
 
     row = await db_session.execute(
-        text("SELECT relationship FROM blob_relationships WHERE id=:id"),
+        text("SELECT relationship, decision FROM blob_relationships WHERE id=:id"),
         {"id": pair_id},
     )
-    assert row.scalar_one() == "whitelisted"
+    assert row.one() == ("decided", "whitelisted")
+
+    with patch("routers.dedup.async_session", db_session_factory):
+        second = await client.post(f"/api/dedup/review/{pair_id}/whitelist")
+    assert second.status_code == 409
 
 
 async def test_dedup_whitelist_pair_not_found_returns_404(client, db_session, db_session_factory):
@@ -235,10 +308,10 @@ async def test_dedup_dismiss_pair_marks_resolved(client, db_session, db_session_
     assert resp.json()["status"] == "ok"
 
     row = await db_session.execute(
-        text("SELECT relationship FROM blob_relationships WHERE id=:id"),
+        text("SELECT relationship, decision FROM blob_relationships WHERE id=:id"),
         {"id": pair_id},
     )
-    assert row.scalar_one() == "resolved"
+    assert row.one() == ("decided", "dismissed")
 
 
 async def test_dedup_dismiss_pair_not_found_returns_404(client, db_session, db_session_factory):
@@ -489,7 +562,7 @@ async def test_dedup_keep_pair_resolves_relationship_and_returns_200(client, db_
     with patch("routers.dedup.async_session", db_session_factory):
         resp = await client.post(
             f"/api/dedup/review/{pair_id}/keep",
-            json={"keep_sha": "keep_ok_a"},
+            json={"keep_sha": "keep_ok_a", "expected_discard_refs": 1},
         )
 
     assert resp.status_code == 200
@@ -498,7 +571,7 @@ async def test_dedup_keep_pair_resolves_relationship_and_returns_200(client, db_
         text("SELECT relationship FROM blob_relationships WHERE id=:id"),
         {"id": pair_id},
     )
-    assert rel_row.scalar_one() == "resolved"
+    assert rel_row.scalar_one() == "decided"
 
 
 async def test_dedup_keep_pair_remaps_images_from_discard_to_keep(client, db_session, db_session_factory):
@@ -531,7 +604,7 @@ async def test_dedup_keep_pair_remaps_images_from_discard_to_keep(client, db_ses
     with patch("routers.dedup.async_session", db_session_factory):
         resp = await client.post(
             f"/api/dedup/review/{pair_id}/keep",
-            json={"keep_sha": "remap_keep"},
+            json={"keep_sha": "remap_keep", "expected_discard_refs": 2},
         )
 
     assert resp.status_code == 200

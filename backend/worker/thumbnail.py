@@ -375,6 +375,10 @@ def _apply_thumbnail_result(blob, result: _ThumbnailResult) -> None:
     blob.height = result.height
     blob.duration = result.duration
     if result.phash is not None:
+        if blob.phash_int != result.phash_int:
+            blob.dedup_scanned_threshold = None
+            blob.dedup_scanned_phash_int = None
+            blob.dedup_scanned_version = None
         blob.phash = result.phash
         blob.phash_int = result.phash_int
         blob.phash_q0 = result.phash_q0

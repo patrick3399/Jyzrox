@@ -418,8 +418,8 @@ class TestResetMode:
 class TestDedupHelpers:
     """Unit tests for worker/dedup_helpers.py helper functions."""
 
-    def test_classify_pair_heuristic_disabled_returns_quality_conflict(self):
-        """When heuristic is disabled, all pairs are quality_conflict."""
+    def test_classify_pair_heuristic_disabled_returns_neutral_review(self):
+        """Without quality evidence, a similar pair remains a neutral review candidate."""
         from worker.dedup_helpers import _classify_pair
 
         blob_a = MagicMock()
@@ -433,7 +433,7 @@ class TestDedupHelpers:
 
         rel, keep, reason = _classify_pair(blob_a, blob_b, heuristic_enabled=False)
 
-        assert rel == "quality_conflict"
+        assert rel == "needs_review"
         assert keep is None
         assert reason is None
 
@@ -490,18 +490,43 @@ class TestDedupHelpers:
         blob_a.width = 1920
         blob_a.height = 1080
         blob_a.file_size = 5000000  # much larger file
+        blob_a.extension = "jpg"
 
         blob_b = MagicMock()
         blob_b.sha256 = "sha_smallfile"
         blob_b.width = 1920
         blob_b.height = 1080
         blob_b.file_size = 100000
+        blob_b.extension = "jpg"
 
         rel, keep, reason = _classify_pair(blob_a, blob_b, heuristic_enabled=True)
 
         assert rel == "quality_conflict"
         assert keep == "sha_bigfile"
         assert reason == "larger_file"
+
+    def test_classify_pair_does_not_compare_file_size_across_formats(self):
+        """Encoded size is not a quality signal when the formats differ."""
+        from worker.dedup_helpers import _classify_pair
+
+        blob_a = MagicMock(
+            sha256="sha_jpg",
+            width=1920,
+            height=1080,
+            file_size=5_000_000,
+            extension="jpg",
+        )
+        blob_b = MagicMock(
+            sha256="sha_avif",
+            width=1920,
+            height=1080,
+            file_size=100_000,
+            extension="avif",
+        )
+
+        rel, keep, reason = _classify_pair(blob_a, blob_b, heuristic_enabled=True)
+
+        assert (rel, keep, reason) == ("variant", None, None)
 
     def test_classify_pair_equal_sizes_returns_variant(self):
         """Blobs with similar resolution and file size are classified as variant."""
@@ -918,7 +943,15 @@ class TestTier2HeuristicLoop:
         return _make_blob_relationship(sha_a, sha_b, id_=id_, relationship="needs_t2")
 
     async def _run_with_t2_pair(
-        self, pair, blob_a, blob_b, same_gal=False, heuristic=None, opencv=None, extra_redis_gets=None
+        self,
+        pair,
+        blob_a,
+        blob_b,
+        same_gal=False,
+        heuristic=None,
+        opencv=None,
+        extra_redis_gets=None,
+        signal=None,
     ):
         """Helper: run dedup_scan_job with tier 1 returning no pairs and tier 2 having one pair.
 
@@ -944,7 +977,16 @@ class TestTier2HeuristicLoop:
         if extra_redis_gets:
             base_gets.extend(extra_redis_gets)
         mock_redis.get = AsyncMock(side_effect=base_gets)
-        mock_redis.getdel = AsyncMock(return_value=None)
+        mock_redis.getdel = AsyncMock(return_value=signal)
+
+        blob_a.occurrence_revision = 1
+        blob_b.occurrence_revision = 1
+        pair.blob_a = blob_a
+        pair.blob_b = blob_b
+        pair.context_revision_a = None
+        pair.context_revision_b = None
+        pair.context_scope = None
+        pair.decision = None
 
         query_n = {"n": 0}
 
@@ -967,22 +1009,11 @@ class TestTier2HeuristicLoop:
                 r.scalar_one = MagicMock(return_value=1)
             elif n == 3:
                 # tier2 pairs batch fetch → [pair]
-                r.scalars.return_value = MagicMock()
-                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([pair]))
-            elif n == 4:
-                # blob_a fetch
-                r.scalar_one_or_none = MagicMock(return_value=blob_a)
-            elif n == 5:
-                # blob_b fetch
-                r.scalar_one_or_none = MagicMock(return_value=blob_b)
-            elif n == 6:
-                # same_gal exists check
-                r.scalar = MagicMock(return_value=same_gal)
+                r.scalars.return_value.unique.return_value.__iter__ = MagicMock(return_value=iter([pair]))
             else:
-                # n=7: UPDATE; n=8: second pairs fetch → empty (exits loop)
+                # second pairs fetch → empty (exits loop)
                 r.scalar_one = MagicMock(return_value=0)
-                r.scalars.return_value = MagicMock()
-                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+                r.scalars.return_value.unique.return_value.__iter__ = MagicMock(return_value=iter([]))
 
             return r
 
@@ -991,6 +1022,10 @@ class TestTier2HeuristicLoop:
         with (
             patch("worker.dedup_scan.get_redis", return_value=mock_redis),
             patch("worker.dedup_scan.async_session", return_value=session),
+            patch(
+                "worker.dedup_scan._pair_context_scopes",
+                new=AsyncMock(return_value={pair.id: "same_gallery_only" if same_gal else "cross_gallery"}),
+            ),
         ):
             result = await dedup_scan_job({})
 
@@ -1089,78 +1124,13 @@ class TestTier2HeuristicLoop:
 
         The stop signal fires after the first tier-2 batch (one pair) is processed.
         """
-        from worker.dedup_scan import dedup_scan_job
-
         pair = self._make_needs_t2_pair()
         blob_a = _make_blob("sha_t2s_a", phash_int=0x5678, phash_q0=0, phash_q1=0)
         blob_b = _make_blob("sha_t2s_b", phash_int=0x5678, phash_q0=0, phash_q1=0)
-
-        mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(
-            side_effect=[
-                None,
-                b"1",
-                b"10",
-                None,
-                None,
-            ]
-        )
-        # tier1 has 0 blobs so no check_signal in tier1.
-        # tier2 processes 1 pair then calls check_signal → b"stop"
-        mock_redis.getdel = AsyncMock(return_value=b"stop")
-
-        query_n = {"n": 0}
-
-        session = AsyncMock()
-        session.__aenter__ = AsyncMock(return_value=session)
-        session.__aexit__ = AsyncMock(return_value=False)
-        session.commit = AsyncMock()
-
-        async def _execute_side_effect(_stmt, *_args, **_kwargs):
-            query_n["n"] += 1
-            n = query_n["n"]
-            r = MagicMock()
-            # Absolute query index routing:
-            # n=1: tier1 blobs (empty)
-            # n=2: tier2 needs_t2 count (1)
-            # n=3: tier2 pairs fetch (returns [pair])
-            # n=4: blob_a fetch (returns blob_a)
-            # n=5: blob_b fetch (returns blob_b)
-            # n=6: same_gal exists check (False)
-            # n=7: UPDATE relationship
-            # (after the pair loop, check_signal is called → returns stop)
-            if n == 1:
-                r.all = MagicMock(return_value=[])
-                r.scalars.return_value.all.return_value = []
-            elif n == 2:
-                r.scalar_one = MagicMock(return_value=1)
-            elif n == 3:
-                r.scalars.return_value = MagicMock()
-                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([pair]))
-            elif n == 4:
-                r.scalar_one_or_none = MagicMock(return_value=blob_a)
-            elif n == 5:
-                r.scalar_one_or_none = MagicMock(return_value=blob_b)
-            elif n == 6:
-                # same_gal exists check → False
-                r.scalar = MagicMock(return_value=False)
-            else:
-                r.scalar_one = MagicMock(return_value=0)
-                r.scalars.return_value = MagicMock()
-                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
-
-            return r
-
-        session.execute = AsyncMock(side_effect=_execute_side_effect)
-
-        with (
-            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
-            patch("worker.dedup_scan.async_session", return_value=session),
-        ):
-            result = await dedup_scan_job({})
+        result = await self._run_with_t2_pair(pair, blob_a, blob_b, signal=b"stop")
 
         assert result["status"] == "stopped"
-        assert result["tier"] == 2
+        assert result["tier"] == 1
 
 
 # ---------------------------------------------------------------------------

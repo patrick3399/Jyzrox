@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -14,7 +15,7 @@ import core.queue
 from core.auth import require_role
 from core.database import async_session
 from core.keys import cursor_hmac_key
-from db.models import Blob, BlobRelationship, Image
+from db.models import Blob, BlobRelationship, Gallery, Image
 from services.cas import adjust_ref_count, cas_url, thumb_srcset, thumb_url
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ router = APIRouter(tags=["dedup"])
 
 _admin = require_role("admin")
 
-REVIEW_RELATIONSHIPS = {"quality_conflict", "variant"}
+REVIEW_RELATIONSHIPS = {"needs_review", "quality_conflict", "variant"}
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -52,15 +53,18 @@ def _decode_cursor(cursor: str) -> int | None:
 # ── Blob detail helper ────────────────────────────────────────────────
 
 
-def _blob_detail(blob: Blob) -> dict:
+def _blob_detail(blob: Blob, occurrences: list[dict]) -> dict:
     return {
         "sha256": blob.sha256,
         "width": blob.width,
         "height": blob.height,
         "file_size": blob.file_size,
+        "extension": blob.extension,
+        "media_type": blob.media_type,
         "thumb_url": thumb_url(blob.sha256),
         "thumb_srcset": thumb_srcset(blob.sha256),
         "image_url": cas_url(blob.sha256, blob.extension),
+        "occurrences": occurrences,
     }
 
 
@@ -72,7 +76,9 @@ async def get_dedup_stats(_: dict = Depends(_admin)):
     """Return counts by relationship state."""
     async with async_session() as session:
         result = await session.execute(
-            select(BlobRelationship.relationship, func.count().label("cnt")).group_by(BlobRelationship.relationship)
+            select(BlobRelationship.relationship, BlobRelationship.decision, func.count().label("cnt")).group_by(
+                BlobRelationship.relationship, BlobRelationship.decision
+            )
         )
         rows = result.all()
 
@@ -82,17 +88,24 @@ async def get_dedup_stats(_: dict = Depends(_admin)):
         total_blobs = blob_count_result.scalar_one()
 
     counts: dict[str, int] = {}
+    decisions: dict[str, int] = {}
     for row in rows:
-        counts[row.relationship] = row.cnt
+        counts[row.relationship] = counts.get(row.relationship, 0) + row.cnt
+        if row.decision:
+            decisions[row.decision] = decisions.get(row.decision, 0) + row.cnt
 
     return {
         "total_blobs": total_blobs,
-        "needs_t2": counts.get("needs_t2", 0),
+        "needs_t2": counts.get("needs_context", 0) + counts.get("needs_t2", 0),
         "needs_t3": counts.get("needs_t3", 0),
         "same_gallery_only": counts.get("same_gallery_only", 0),
-        "pending_review": counts.get("quality_conflict", 0) + counts.get("variant", 0),
-        "whitelisted": counts.get("whitelisted", 0),
-        "resolved": counts.get("resolved", 0),
+        "pending_review": counts.get("needs_review", 0)
+        + counts.get("quality_conflict", 0)
+        + counts.get("variant", 0),
+        "whitelisted": counts.get("whitelisted", 0) + decisions.get("whitelisted", 0),
+        "resolved": counts.get("resolved", 0)
+        + decisions.get("dismissed", 0)
+        + decisions.get("merged", 0),
     }
 
 
@@ -121,15 +134,39 @@ async def get_dedup_review(
             q = q.where(BlobRelationship.relationship == relationship)
         else:
             q = q.where(BlobRelationship.relationship.in_(REVIEW_RELATIONSHIPS))
+        q = q.where(BlobRelationship.decision.is_(None))
 
         if after_id is not None:
             q = q.where(BlobRelationship.id > after_id)
 
         result = await session.execute(q)
         pairs = list(result.scalars().unique())
+        has_more = len(pairs) > limit
+        pairs = pairs[:limit]
+        shas = {sha for pair in pairs for sha in (pair.sha_a, pair.sha_b)}
+        occurrence_rows = (
+            await session.execute(
+                select(Image, Gallery)
+                .join(Gallery, Gallery.id == Image.gallery_id)
+                .where(Image.blob_sha256.in_(shas))
+                .order_by(Image.blob_sha256, Gallery.id, Image.page_num)
+            )
+        ).all()
 
-    has_more = len(pairs) > limit
-    pairs = pairs[:limit]
+    occurrences: dict[str, list[dict]] = {sha: [] for sha in shas}
+    for image, gallery in occurrence_rows:
+        occurrences.setdefault(image.blob_sha256, []).append(
+            {
+                "image_id": image.id,
+                "gallery_id": gallery.id,
+                "gallery_title": gallery.title,
+                "source": gallery.source,
+                "source_id": gallery.source_id,
+                "page_num": image.page_num,
+                "filename": image.filename,
+            }
+        )
+
     next_cursor = _encode_cursor(pairs[-1].id) if has_more and pairs else None
 
     items = []
@@ -143,8 +180,8 @@ async def get_dedup_review(
                 "reason": pair.reason,
                 "diff_score": pair.diff_score,
                 "diff_type": pair.diff_type,
-                "blob_a": _blob_detail(pair.blob_a),
-                "blob_b": _blob_detail(pair.blob_b),
+                "blob_a": _blob_detail(pair.blob_a, occurrences.get(pair.sha_a, [])),
+                "blob_b": _blob_detail(pair.blob_b, occurrences.get(pair.sha_b, [])),
             }
         )
 
@@ -153,6 +190,7 @@ async def get_dedup_review(
 
 class KeepRequest(BaseModel):
     keep_sha: str
+    expected_discard_refs: int | None = None
 
 
 class ScanStartRequest(BaseModel):
@@ -179,12 +217,26 @@ async def keep_blob(
         pair = result.scalar_one_or_none()
         if not pair:
             raise HTTPException(status_code=404, detail="Pair not found")
+        if pair.relationship not in REVIEW_RELATIONSHIPS or pair.decision is not None:
+            raise HTTPException(status_code=409, detail="Pair is no longer reviewable")
 
         keep_sha = req.keep_sha
         discard_sha = pair.sha_b if keep_sha == pair.sha_a else pair.sha_a
 
         if keep_sha not in (pair.sha_a, pair.sha_b):
             raise HTTPException(status_code=400, detail="keep_sha must be one of the pair")
+        if req.expected_discard_refs is None:
+            raise HTTPException(status_code=400, detail="expected_discard_refs is required")
+
+        ref_count_result = await session.execute(
+            select(func.count()).select_from(Image).where(Image.blob_sha256 == discard_sha)
+        )
+        discard_refs = ref_count_result.scalar_one()
+        if discard_refs != req.expected_discard_refs:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Discard reference count changed: expected {req.expected_discard_refs}, found {discard_refs}",
+            )
 
         # Re-point images from discard_sha to keep_sha
         remap_result = await session.execute(
@@ -198,7 +250,15 @@ async def keep_blob(
             await adjust_ref_count(keep_sha, remapped, session)
 
         await session.execute(
-            update(BlobRelationship).where(BlobRelationship.id == pair_id).values(relationship="resolved")
+            update(BlobRelationship)
+            .where(BlobRelationship.id == pair_id)
+            .values(
+                relationship="decided",
+                decision="merged",
+                decision_keep_sha=keep_sha,
+                decision_by_user_id=_["user_id"],
+                decided_at=datetime.now(UTC),
+            )
         )
         await session.commit()
 
@@ -219,9 +279,18 @@ async def whitelist_pair(
         pair = result.scalar_one_or_none()
         if not pair:
             raise HTTPException(status_code=404, detail="Pair not found")
+        if pair.relationship not in REVIEW_RELATIONSHIPS or pair.decision is not None:
+            raise HTTPException(status_code=409, detail="Pair is no longer reviewable")
 
         await session.execute(
-            update(BlobRelationship).where(BlobRelationship.id == pair_id).values(relationship="whitelisted")
+            update(BlobRelationship)
+            .where(BlobRelationship.id == pair_id)
+            .values(
+                relationship="decided",
+                decision="whitelisted",
+                decision_by_user_id=_["user_id"],
+                decided_at=datetime.now(UTC),
+            )
         )
         await session.commit()
 
@@ -237,7 +306,21 @@ async def get_scan_progress(_: dict = Depends(_admin)):
 
     status_raw = await r.get("dedup:progress:status")
     if status_raw is None:
-        return {"status": "idle"}
+        last_status = await r.get("dedup:progress:last_status")
+        last_started = await r.get("dedup:progress:last_started")
+        last_finished = await r.get("dedup:progress:last_finished")
+        last_error = await r.get("dedup:progress:last_error")
+
+        def _decode(value):
+            return value.decode() if isinstance(value, bytes) else value
+
+        return {
+            "status": "idle",
+            "last_status": _decode(last_status),
+            "last_started": _decode(last_started),
+            "last_finished": _decode(last_finished),
+            "last_error": _decode(last_error),
+        }
 
     status = status_raw.decode() if isinstance(status_raw, bytes) else status_raw
 
@@ -319,9 +402,18 @@ async def dismiss_pair(
         pair = result.scalar_one_or_none()
         if not pair:
             raise HTTPException(status_code=404, detail="Pair not found")
+        if pair.relationship not in REVIEW_RELATIONSHIPS or pair.decision is not None:
+            raise HTTPException(status_code=409, detail="Pair is no longer reviewable")
 
         await session.execute(
-            update(BlobRelationship).where(BlobRelationship.id == pair_id).values(relationship="resolved")
+            update(BlobRelationship)
+            .where(BlobRelationship.id == pair_id)
+            .values(
+                relationship="decided",
+                decision="dismissed",
+                decision_by_user_id=_["user_id"],
+                decided_at=datetime.now(UTC),
+            )
         )
         await session.commit()
 

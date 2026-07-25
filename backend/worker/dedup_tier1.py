@@ -9,7 +9,7 @@ from core.database import async_session
 from core.redis_client import get_redis
 from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 from db.models import Blob, BlobRelationship
-from worker.dedup_helpers import PhashBKTree, _now_iso, _scan_indexed_candidates
+from worker.dedup_helpers import DEDUP_SCAN_VERSION, PhashBKTree, _now_iso, _scan_indexed_candidates
 from worker.helpers import _cron_record, _cron_should_run
 
 logger = logging.getLogger("worker.dedup_tier1")
@@ -18,7 +18,7 @@ logger = logging.getLogger("worker.dedup_tier1")
 async def dedup_tier1_job(ctx: dict, force: bool = False) -> dict:
     """Scan all blobs for similar pairs using perceptual hashing.
 
-    Writes matching pairs into blob_relationships with relationship='needs_t2'.
+    Writes matching pairs into blob_relationships with relationship='needs_context'.
     A BK-tree provides exact Hamming-radius lookup without traversing every
     possible pair, while ``dedup_scanned_threshold`` makes repeated runs
     incremental and re-scans only when the configured radius grows.
@@ -60,6 +60,8 @@ async def _scan_all_blobs() -> dict:
                 Blob.sha256,
                 Blob.phash_int,
                 Blob.dedup_scanned_threshold,
+                Blob.dedup_scanned_phash_int,
+                Blob.dedup_scanned_version,
             )
             .where(Blob.phash_int.isnot(None))
             .order_by(Blob.sha256)
@@ -69,7 +71,10 @@ async def _scan_all_blobs() -> dict:
     scan_blobs = [
         blob
         for blob in blobs
-        if not isinstance(blob.dedup_scanned_threshold, int) or blob.dedup_scanned_threshold < threshold
+        if not isinstance(blob.dedup_scanned_threshold, int)
+        or blob.dedup_scanned_threshold < threshold
+        or blob.dedup_scanned_phash_int != blob.phash_int
+        or blob.dedup_scanned_version != DEDUP_SCAN_VERSION
     ]
     index = PhashBKTree(blobs)
     total = len(scan_blobs)
@@ -94,12 +99,15 @@ async def _scan_all_blobs() -> dict:
                 await session.execute(
                     update(Blob)
                     .where(Blob.sha256.in_(scanned_batch))
-                    .values(dedup_scanned_threshold=threshold)
+                    .values(
+                        dedup_scanned_threshold=threshold,
+                        dedup_scanned_phash_int=Blob.phash_int,
+                        dedup_scanned_version=DEDUP_SCAN_VERSION,
+                    )
                 )
             await session.commit()
             total_inserted += inserted
         pairs_batch.clear()
-        pair_keys.clear()
         scanned_batch.clear()
 
     for a in scan_blobs:
@@ -114,7 +122,7 @@ async def _scan_all_blobs() -> dict:
                     "sha_a": sha_a,
                     "sha_b": sha_b,
                     "hamming_dist": dist,
-                    "relationship": "needs_t2",
+                    "relationship": "needs_context",
                     "tier": 1,
                 }
             )

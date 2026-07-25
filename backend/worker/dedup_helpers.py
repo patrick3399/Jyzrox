@@ -13,6 +13,16 @@ from db.models import Blob, Image
 
 _MASK64 = (1 << 64) - 1
 _MASK16 = 0xFFFF
+DEDUP_SCAN_VERSION = 1
+AUTO_CANDIDATE_RELATIONSHIPS = (
+    "needs_context",
+    "needs_t2",
+    "needs_review",
+    "same_gallery_only",
+    "quality_conflict",
+    "variant",
+    "needs_t3",
+)
 
 
 def _hamming_distance(a: int, b: int) -> int:
@@ -126,6 +136,47 @@ async def _pair_context_scope(session, sha_a: str, sha_b: str) -> str:
     return str(scope)
 
 
+async def _pair_context_scopes(session, pairs) -> dict[int, str]:
+    """Classify a batch of pairs with one occurrence query.
+
+    Context is based only on the set of galleries referencing each blob, so
+    loading ``(blob_sha256, gallery_id)`` once avoids four EXISTS probes and a
+    transaction per relationship.
+    """
+    pair_list = list(pairs)
+    shas = {sha for pair in pair_list for sha in (pair.sha_a, pair.sha_b)}
+    if not shas:
+        return {}
+    rows = (
+        await session.execute(
+            select(Image.blob_sha256, Image.gallery_id)
+            .where(Image.blob_sha256.in_(shas))
+            .distinct()
+        )
+    ).all()
+    galleries: dict[str, set[int]] = {sha: set() for sha in shas}
+    for sha, gallery_id in rows:
+        galleries.setdefault(sha, set()).add(int(gallery_id))
+
+    scopes: dict[int, str] = {}
+    for pair in pair_list:
+        galleries_a = galleries.get(pair.sha_a, set())
+        galleries_b = galleries.get(pair.sha_b, set())
+        if not galleries_a or not galleries_b:
+            scope = "unreferenced"
+        else:
+            has_same = bool(galleries_a & galleries_b)
+            has_cross = any(a != b for a in galleries_a for b in galleries_b)
+            if has_same and has_cross:
+                scope = "mixed"
+            elif has_cross:
+                scope = "cross_gallery"
+            else:
+                scope = "same_gallery_only"
+        scopes[int(pair.id)] = scope
+    return scopes
+
+
 def _scan_candidates(blobs, i, threshold):
     """Yield ``(b, dist)`` for every ``j > i`` whose pHash is within ``threshold``
     Hamming distance of ``blobs[i]``, using a q0/q1 pigeonhole prefilter.
@@ -159,7 +210,7 @@ def _scan_candidates(blobs, i, threshold):
 def _classify_pair(blob_a: Blob, blob_b: Blob, heuristic_enabled: bool) -> tuple[str, str | None, str | None]:
     """Classify a pair by resolution/file-size heuristics."""
     if not heuristic_enabled:
-        return "quality_conflict", None, None
+        return "needs_review", None, None
 
     pixels_a = (blob_a.width or 0) * (blob_a.height or 0)
     pixels_b = (blob_b.width or 0) * (blob_b.height or 0)
@@ -168,10 +219,17 @@ def _classify_pair(blob_a: Blob, blob_b: Blob, heuristic_enabled: bool) -> tuple
         return "quality_conflict", blob_a.sha256, "higher_resolution"
     if pixels_b > pixels_a * 1.10:
         return "quality_conflict", blob_b.sha256, "higher_resolution"
-    if blob_a.file_size > blob_b.file_size * 1.20:
-        return "quality_conflict", blob_a.sha256, "larger_file"
-    if blob_b.file_size > blob_a.file_size * 1.20:
-        return "quality_conflict", blob_b.sha256, "larger_file"
+    # Encoders and formats have very different size/quality trade-offs. File
+    # size is only a weak suggestion when both blobs use the same format.
+    extension_a = (getattr(blob_a, "extension", None) or "").lower()
+    extension_b = (getattr(blob_b, "extension", None) or "").lower()
+    size_a = getattr(blob_a, "file_size", None) or 0
+    size_b = getattr(blob_b, "file_size", None) or 0
+    if extension_a and extension_a == extension_b:
+        if size_a > size_b * 1.20:
+            return "quality_conflict", blob_a.sha256, "larger_file"
+        if size_b > size_a * 1.20:
+            return "quality_conflict", blob_b.sha256, "larger_file"
 
     return "variant", None, None
 
@@ -210,6 +268,10 @@ class DedupProgress:
     TOTAL_KEY = "dedup:progress:total"
     TIER_KEY = "dedup:progress:tier"
     MODE_KEY = "dedup:progress:mode"
+    LAST_STATUS_KEY = "dedup:progress:last_status"
+    LAST_STARTED_KEY = "dedup:progress:last_started"
+    LAST_FINISHED_KEY = "dedup:progress:last_finished"
+    LAST_ERROR_KEY = "dedup:progress:last_error"
     ALL_KEYS = [STATUS_KEY, SIGNAL_KEY, CURRENT_KEY, TOTAL_KEY, TIER_KEY, MODE_KEY]
 
     def __init__(self, r):
@@ -223,6 +285,8 @@ class DedupProgress:
         pipe.set(self.TOTAL_KEY, str(total))
         pipe.set(self.TIER_KEY, str(tier))
         pipe.set(self.CURRENT_KEY, "0")
+        pipe.set(self.LAST_STARTED_KEY, _now_iso())
+        pipe.set(self.LAST_STATUS_KEY, "running")
         pipe.delete(self.SIGNAL_KEY)
         await pipe.execute()
         self._current = 0
@@ -260,5 +324,16 @@ class DedupProgress:
             if signal == "stop":
                 return False
 
-    async def finish(self) -> None:
+    async def finish(self, status: str = "completed", error: str | None = None) -> None:
+        pipe = self.r.pipeline()
+        pipe.set(self.LAST_STATUS_KEY, status)
+        pipe.set(self.LAST_FINISHED_KEY, _now_iso())
+        if error:
+            pipe.set(self.LAST_ERROR_KEY, error[:1000])
+        else:
+            pipe.delete(self.LAST_ERROR_KEY)
+        await pipe.execute()
         await self.r.delete(*self.ALL_KEYS)
+
+    async def fail(self, error: str) -> None:
+        await self.finish("failed", error)

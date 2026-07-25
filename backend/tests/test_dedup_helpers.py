@@ -25,6 +25,7 @@ def _make_blob(sha256: str, width: int | None, height: int | None, file_size: in
     blob.width = width
     blob.height = height
     blob.file_size = file_size
+    blob.extension = "jpg"
     return blob
 
 
@@ -53,24 +54,24 @@ def _make_redis(pipeline: MagicMock | None = None) -> AsyncMock:
 
 
 class TestClassifyPairHeuristicDisabled:
-    """When heuristic_enabled=False the function always returns quality_conflict."""
+    """Without heuristic evidence the pair remains a neutral review candidate."""
 
-    def test_classify_pair_heuristic_disabled_returns_quality_conflict(self):
+    def test_classify_pair_heuristic_disabled_returns_needs_review(self):
         from worker.dedup_helpers import _classify_pair
 
         blob_a = _make_blob("aaa", 1920, 1080, 500_000)
         blob_b = _make_blob("bbb", 100, 100, 10_000)
         result = _classify_pair(blob_a, blob_b, heuristic_enabled=False)
-        assert result == ("quality_conflict", None, None)
+        assert result == ("needs_review", None, None)
 
     def test_classify_pair_heuristic_disabled_ignores_resolution(self):
         from worker.dedup_helpers import _classify_pair
 
-        """Even if A has far more pixels the result is still quality_conflict with no winner."""
+        """Even if A has far more pixels, disabled heuristics must not imply a winner."""
         blob_a = _make_blob("aaa", 4000, 3000, 1_000_000)
         blob_b = _make_blob("bbb", 10, 10, 100)
         label, winner, reason = _classify_pair(blob_a, blob_b, heuristic_enabled=False)
-        assert label == "quality_conflict"
+        assert label == "needs_review"
         assert winner is None
         assert reason is None
 

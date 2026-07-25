@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS blobs (
     phash_q2      SMALLINT,
     phash_q3      SMALLINT,
     dedup_scanned_threshold SMALLINT,
+    dedup_scanned_phash_int BIGINT,
+    dedup_scanned_version SMALLINT,
+    occurrence_revision BIGINT NOT NULL DEFAULT 0,
     extension     TEXT NOT NULL,
     storage       TEXT NOT NULL DEFAULT 'cas',
     external_path TEXT,
@@ -576,12 +579,18 @@ CREATE TABLE IF NOT EXISTS blob_relationships (
     sha_a           TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
     sha_b           TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
     hamming_dist    SMALLINT NOT NULL,
-    relationship    TEXT NOT NULL DEFAULT 'needs_t2',
+    relationship    TEXT NOT NULL DEFAULT 'needs_context',
     suggested_keep  TEXT,
     reason          TEXT,
     diff_score      FLOAT,
     diff_type       TEXT,
     context_scope   TEXT,
+    context_revision_a BIGINT,
+    context_revision_b BIGINT,
+    decision        TEXT,
+    decision_keep_sha TEXT,
+    decision_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    decided_at      TIMESTAMPTZ,
     tier            SMALLINT NOT NULL DEFAULT 1,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -591,6 +600,30 @@ CREATE TABLE IF NOT EXISTS blob_relationships (
 CREATE INDEX IF NOT EXISTS idx_blob_rel_relationship ON blob_relationships (relationship, id);
 CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_a ON blob_relationships (sha_a);
 CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_b ON blob_relationships (sha_b);
+
+CREATE OR REPLACE FUNCTION bump_blob_occurrence_revision()
+RETURNS trigger AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        UPDATE blobs SET occurrence_revision = occurrence_revision + 1 WHERE sha256 = NEW.blob_sha256;
+        RETURN NEW;
+    ELSIF TG_OP = 'DELETE' THEN
+        UPDATE blobs SET occurrence_revision = occurrence_revision + 1 WHERE sha256 = OLD.blob_sha256;
+        RETURN OLD;
+    END IF;
+    IF OLD.blob_sha256 IS DISTINCT FROM NEW.blob_sha256 THEN
+        UPDATE blobs SET occurrence_revision = occurrence_revision + 1
+        WHERE sha256 IN (OLD.blob_sha256, NEW.blob_sha256);
+    ELSIF OLD.gallery_id IS DISTINCT FROM NEW.gallery_id THEN
+        UPDATE blobs SET occurrence_revision = occurrence_revision + 1 WHERE sha256 = NEW.blob_sha256;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_images_blob_occurrence_revision ON images;
+CREATE TRIGGER trg_images_blob_occurrence_revision
+AFTER INSERT OR DELETE OR UPDATE OF blob_sha256, gallery_id ON images
+FOR EACH ROW EXECUTE FUNCTION bump_blob_occurrence_revision();
 
 -- ── Gallery Access Control (prep) ──────────────────────────────────
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';

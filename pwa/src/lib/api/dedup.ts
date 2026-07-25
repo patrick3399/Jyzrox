@@ -10,10 +10,10 @@ export const dedup = {
   getReview: (params: { relationship?: string; cursor?: string } = {}) =>
     apiFetch<DedupReviewResponse>(`/api/dedup/review${qs(params as Record<string, unknown>)}`),
 
-  keep: (id: number, keepSha: string) =>
+  keep: (id: number, keepSha: string, expectedDiscardRefs: number) =>
     apiFetch<{ status: string }>(`/api/dedup/review/${id}/keep`, {
       method: 'POST',
-      body: JSON.stringify({ keep_sha: keepSha }),
+      body: JSON.stringify({ keep_sha: keepSha, expected_discard_refs: expectedDiscardRefs }),
     }),
 
   whitelist: (id: number) =>
