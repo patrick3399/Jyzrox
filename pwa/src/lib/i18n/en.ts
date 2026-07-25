@@ -576,6 +576,7 @@ const en: Record<string, string> = {
   'library.metadataPagesChanged': 'Pages changed: {old} → {new}',
   'library.statusOutdated': 'Outdated',
   'library.updateNow': 'Update',
+  'library.repairNow': 'Repair',
   'library.updateEnqueued': 'Download queued for update',
   'library.checkingMetadata': 'Checking for updates...',
   'library.editTags': 'Edit Tags',

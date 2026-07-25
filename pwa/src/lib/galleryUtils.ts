@@ -58,6 +58,33 @@ export function getSourceStyle(gallery: Pick<Gallery, 'source' | 'import_mode'>)
   return { label, className }
 }
 
+/** Action the detail page offers next to the download-status badge. */
+export type GalleryStatusAction = { kind: 'none' } | { kind: 'outdated' } | { kind: 'repair' }
+
+/**
+ * Decide which status action a gallery should offer.
+ *
+ * `partial` means the last run left content behind — failed pages or failed
+ * imports — so it always gets a repair action, independent of whether a
+ * metadata check happened to report a page diff. Gating the action on
+ * `pagesOutdated && complete` (the original condition) excluded precisely the
+ * status that needs it, leaving partial galleries with no clickable affordance.
+ *
+ * Both actions enqueue the same source URL, so neither is offered while a run
+ * is already in flight, nor when there is no URL to enqueue.
+ */
+export function galleryStatusAction(params: {
+  downloadStatus: Gallery['download_status']
+  hasSourceUrl: boolean
+  pagesOutdated: boolean
+}): GalleryStatusAction {
+  const { downloadStatus, hasSourceUrl, pagesOutdated } = params
+  if (!hasSourceUrl || downloadStatus === 'downloading') return { kind: 'none' }
+  if (downloadStatus === 'partial') return { kind: 'repair' }
+  if (downloadStatus === 'complete' && pagesOutdated) return { kind: 'outdated' }
+  return { kind: 'none' }
+}
+
 export function getEventPosition(e: React.TouchEvent | React.MouseEvent): { x: number; y: number } {
   if ('touches' in e && e.touches.length > 0) {
     return { x: e.touches[0].clientX, y: e.touches[0].clientY }

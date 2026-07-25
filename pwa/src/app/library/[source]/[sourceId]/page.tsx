@@ -11,6 +11,7 @@ import { api } from '@/lib/api'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
+import { galleryStatusAction } from '@/lib/galleryUtils'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
 import { AppImage } from '@/components/AppImage'
 import type { GalleryImage } from '@/lib/types'
@@ -758,6 +759,11 @@ export default function GalleryDetailPage() {
 
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
+  const statusAction = galleryStatusAction({
+    downloadStatus: gallery.download_status,
+    hasSourceUrl: !!gallery.source_url,
+    pagesOutdated: !!pagesOutdated,
+  })
   const artistDisplayName = getArtistDisplayName(gallery)
 
   return (
@@ -814,20 +820,28 @@ export default function GalleryDetailPage() {
                   {gallery.title}
                 </h1>
               )}
-              {pagesOutdated && gallery.download_status === 'complete' ? (
+              {statusAction.kind !== 'none' ? (
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
-                    {t('library.statusOutdated')}
-                  </span>
-                  {gallery.source_url && (
-                    <button
-                      onClick={handleEnqueueUpdate}
-                      disabled={isEnqueueingUpdate || !!activeJobId}
-                      className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  {statusAction.kind === 'outdated' ? (
+                    <span className="px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
+                      {t('library.statusOutdated')}
+                    </span>
+                  ) : (
+                    <span
+                      className={`px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
                     >
-                      {isEnqueueingUpdate ? '...' : t('library.updateNow')}
-                    </button>
+                      {t(statusInfo.labelKey)}
+                    </span>
                   )}
+                  <button
+                    onClick={handleEnqueueUpdate}
+                    disabled={isEnqueueingUpdate || !!activeJobId}
+                    className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isEnqueueingUpdate
+                      ? '...'
+                      : t(statusAction.kind === 'repair' ? 'library.repairNow' : 'library.updateNow')}
+                  </button>
                 </div>
               ) : (
                 <span

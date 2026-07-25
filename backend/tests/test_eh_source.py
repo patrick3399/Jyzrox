@@ -223,6 +223,64 @@ class TestEhSourceDownloadNoCredentials:
         assert result.total == 20
         assert result.error is None
 
+    async def test_download_partial_status_is_not_coerced_to_failed(self):
+        """A 'partial' downloader result must survive the plugin status whitelist.
+
+        DownloadResult already permits "partial", but the whitelist here listed
+        only done/cancelled/failed, so a partial run would be rewritten to
+        "failed" — throwing away the downloaded count's meaning and mislabelling
+        a run that did retrieve most of its pages.
+        """
+        plugin = _make_plugin()
+
+        mock_result = {"status": "partial", "downloaded": 18, "total": 20, "failed_pages": [7, 12], "error": None}
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+
+        with (
+            patch("services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.config.settings") as mock_settings,
+        ):
+            mock_settings.eh_use_ex = False
+            mock_settings.eh_download_concurrency = 3
+
+            result = await plugin.download(
+                url="https://e-hentai.org/g/123456/abcdef1234/",
+                dest_dir=Path("/tmp/test_eh"),
+                credentials=None,
+            )
+
+        assert result.status == "partial"
+        assert result.downloaded == 18
+        assert result.failed_pages == [7, 12]
+
+    async def test_download_unknown_status_still_coerced_to_failed(self):
+        """Widening the whitelist must not let arbitrary statuses through."""
+        plugin = _make_plugin()
+
+        mock_result = {"status": "weird", "downloaded": 0, "total": 20, "failed_pages": [], "error": None}
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+
+        with (
+            patch("services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.config.settings") as mock_settings,
+        ):
+            mock_settings.eh_use_ex = False
+            mock_settings.eh_download_concurrency = 3
+
+            result = await plugin.download(
+                url="https://e-hentai.org/g/123456/abcdef1234/",
+                dest_dir=Path("/tmp/test_eh"),
+                credentials=None,
+            )
+
+        assert result.status == "failed"
+
 
 # ---------------------------------------------------------------------------
 # download() with invalid URL

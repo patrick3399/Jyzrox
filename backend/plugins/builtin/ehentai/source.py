@@ -243,8 +243,11 @@ class EhSourcePlugin(SourcePlugin):
             logger.error("[ehentai] %s", err, exc_info=True)
             return DownloadResult(status="failed", downloaded=0, total=0, error=err)
 
+        # "partial" is a valid DownloadResult status; omitting it here would
+        # coerce a lossy-but-successful run into "failed" and discard the
+        # distinction the downloader just made.
         status = result.get("status", "failed")
-        if status not in ("done", "cancelled", "failed"):
+        if status not in ("done", "cancelled", "failed", "partial"):
             status = "failed"
 
         return DownloadResult(

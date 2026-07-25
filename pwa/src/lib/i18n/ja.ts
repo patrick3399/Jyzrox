@@ -712,6 +712,7 @@ const ja: Record<string, string> = {
   'library.metadataPagesChanged': 'ページ数が変更されました: {old} → {new}',
   'library.statusOutdated': '古い',
   'library.updateNow': '更新',
+  'library.repairNow': '修復',
   'library.updateEnqueued': 'ダウンロードをキューに追加しました',
   'library.checkingMetadata': '更新を確認中...',
   'library.editTags': 'タグを編集',

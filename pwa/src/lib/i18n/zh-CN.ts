@@ -796,6 +796,7 @@ const zhCN: Record<string, string> = {
   'library.metadataPagesChanged': '页数变更：{old} → {new}',
   'library.statusOutdated': '已过时',
   'library.updateNow': '更新',
+  'library.repairNow': '修复',
   'library.updateEnqueued': '已加入下载队列',
   'library.checkingMetadata': '检查更新中...',
   'library.editTags': '编辑标签',

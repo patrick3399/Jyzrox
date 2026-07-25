@@ -315,6 +315,48 @@ class TestEhDownloaderErrorHandling:
         assert 2 in result["failed_pages"]
         assert result["downloaded"] == 2
 
+    async def test_download_gallery_some_pages_failed_reports_partial_not_done(self, tmp_path):
+        """Some-but-not-all pages failing must report 'partial', never 'done'.
+
+        The status ternary read as a three-way branch but collapsed to two:
+        anything short of a total wipeout returned "done", so a lossy download
+        reached the caller as an unqualified success. Only `download.py`
+        re-deriving partial-ness from `failed_pages` kept galleries from being
+        marked complete; any other caller trusting `status` silently lost pages.
+        """
+        from services.eh_downloader import download_eh_gallery
+
+        mock_client = _make_eh_client_mock()
+
+        async def _download_page_with_failure(showkey, gid, page_num, ptoken, max_retries=3):
+            if page_num == 2:
+                raise ConnectionError("Simulated connection failure")
+            return (_FAKE_IMAGE_BYTES, "image/jpeg", "jpg")
+
+        mock_client.download_image_with_retry = _download_page_with_failure
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+            )
+
+        assert result["status"] == "partial"
+        assert result["failed_pages"] == [2]
+        # A partial run must still report what it did retrieve.
+        assert result["downloaded"] == 2
+
     async def test_download_gallery_509_error_returns_failed(self, tmp_path):
         """When Image509Error is raised, the download should return status 'failed' with 509 message."""
         from services.eh_client import Image509Error

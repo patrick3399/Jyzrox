@@ -221,7 +221,15 @@ async def download_eh_gallery(
         }
         (output_dir / "metadata.json").write_text(json.dumps(metadata_out, ensure_ascii=False, indent=2))
 
-        status = "done" if not failed_pages else ("failed" if len(failed_pages) == total_pages else "done")
+        # Terminal status follows the actual per-page outcome: a run that lost
+        # pages is never "done". Callers must not have to re-derive this from
+        # failed_pages to avoid recording a lossy download as a success.
+        if not failed_pages:
+            status = "done"
+        elif len(failed_pages) == total_pages:
+            status = "failed"
+        else:
+            status = "partial"
         return {
             "status": status,
             "downloaded": downloaded,

@@ -372,6 +372,7 @@ const ko: Record<string, string> = {
   'library.metadataPagesChanged': '페이지 수 변경: {old} → {new}',
   'library.statusOutdated': '오래됨',
   'library.updateNow': '업데이트',
+  'library.repairNow': '복구',
   'library.updateEnqueued': '업데이트 다운로드가 대기열에 추가되었습니다',
   'library.checkingMetadata': '업데이트 확인 중...',
   'library.editTags': '태그 편집',

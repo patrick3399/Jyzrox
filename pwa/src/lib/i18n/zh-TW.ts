@@ -308,6 +308,7 @@ const zhTW: Record<string, string> = {
   'library.statusDownloading': '下載中',
   'library.statusOutdated': '已過期',
   'library.updateNow': '更新',
+  'library.repairNow': '修復',
   'library.updateEnqueued': '已加入下載佇列',
   'library.deleteConfirm': '刪除「{title}」？此操作無法復原。',
   'library.metaSource': '來源',
