@@ -217,6 +217,11 @@ class EhSourcePlugin(SourcePlugin):
 
         image_concurrency = await get_image_concurrency("ehentai", settings.eh_download_concurrency)
 
+        # Page numbers the gallery already holds, supplied by the worker when
+        # this run attaches to a pre-existing gallery. Lets a repair fetch only
+        # the gaps instead of the whole gallery.
+        skip_pages = (options or {}).get("skip_pages")
+
         try:
             result = await download_eh_gallery(
                 gid=gid,
@@ -229,6 +234,7 @@ class EhSourcePlugin(SourcePlugin):
                 cancel_check=cancel_check,
                 pause_check=pause_check,
                 on_file=on_file,
+                skip_pages=skip_pages,
             )
         except PermissionError as exc:
             err = str(exc)

@@ -1551,3 +1551,63 @@ class TestProgressiveFinalizeSidecar:
         assert source == "test_source"
         assert source_id == "sidecar_fin"
         assert payload["title"] == "Test Gallery"
+
+
+# ---------------------------------------------------------------------------
+# TestProgressiveImporterExistingPageNums — incremental repair input
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveImporterExistingPageNums:
+    """`existing_page_nums` is what lets a repair fetch only the gaps.
+
+    If it over-reports, the missing page is skipped and the repair silently
+    does nothing; if it under-reports, the repair re-downloads pages the
+    gallery already holds — the cost this feature exists to remove.
+    """
+
+    async def _attach(self, db_session, db_session_factory, gallery_id):
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None, page_num_from_filename=True)
+        importer.source = "test_source"
+        importer.source_id = "test_001"
+        importer.gallery_id = gallery_id
+        with patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)):
+            await importer._load_gallery_state()
+        return importer
+
+    async def test_gap_is_excluded_so_the_missing_page_is_still_fetched(self, db_session, db_session_factory):
+        gallery_id = await _insert_gallery(db_session, download_status="partial", pages=3)
+        sha = "bbbb01" + "0" * 58
+        await _insert_blob(db_session, sha)
+        for page in (1, 2, 4):
+            await _insert_image(db_session, gallery_id, page, sha, filename=f"{page:04d}.jpg")
+
+        importer = await self._attach(db_session, db_session_factory, gallery_id)
+
+        assert importer.existing_page_nums == {1, 2, 4}
+        assert 3 not in importer.existing_page_nums
+
+    async def test_negative_sentinel_page_num_is_not_treated_as_a_held_page(self, db_session, db_session_factory):
+        """page_num = -id marks a superseded/reordered row, not a held page.
+
+        Counting it would both pollute the skip set with a nonsense page number
+        and, more importantly, misrepresent which slots are actually filled.
+        """
+        gallery_id = await _insert_gallery(db_session, download_status="partial", pages=2)
+        sha = "bbbb02" + "0" * 58
+        await _insert_blob(db_session, sha)
+        await _insert_image(db_session, gallery_id, 1, sha, filename="0001.jpg")
+        await _insert_image(db_session, gallery_id, -4242, sha, filename="old.jpg")
+
+        importer = await self._attach(db_session, db_session_factory, gallery_id)
+
+        assert importer.existing_page_nums == {1}
+
+    async def test_new_gallery_reports_no_held_pages(self, db_session, db_session_factory):
+        gallery_id = await _insert_gallery(db_session, download_status="downloading", pages=0)
+
+        importer = await self._attach(db_session, db_session_factory, gallery_id)
+
+        assert importer.existing_page_nums == set()

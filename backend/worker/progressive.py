@@ -129,6 +129,8 @@ class ProgressiveImporter:
         self._preexisting_loaded = False
         self._processed: set[str] = set()
         self._page_counter = 0
+        # Page numbers already held by the attached gallery; empty for a new one.
+        self.existing_page_nums: set[int] = set()
         self.source_url: str | None = None
         self._sem = asyncio.Semaphore(2 if page_num_from_filename else 1)
         self._job_started_at = datetime.now(UTC)
@@ -216,6 +218,12 @@ class ProgressiveImporter:
                 for row in existing_rows
                 if row.source_item_id
             }
+
+            # Page numbers this gallery already holds. Downloaders that address
+            # pages by number (EH) use this to fetch only the gaps on a repair
+            # run. Negative page_num is the "superseded/reordered" sentinel and
+            # never denotes a held page, so it is excluded.
+            self.existing_page_nums = {row.page_num for row in existing_rows if row.page_num and row.page_num > 0}
 
             # Resume page counter from current max page_num so new images don't collide
             max_page = max((row.page_num for row in existing_rows), default=0)

@@ -2319,3 +2319,80 @@ class TestDownloadJobPause:
         assert observed_pause_results == [True], (
             f"pause_check() must return True when pause key is set in Redis, got: {observed_pause_results}"
         )
+
+
+class TestDownloadJobSkipPages:
+    """The worker hands the importer's held page numbers to the plugin.
+
+    Without this the incremental repair never engages: the downloader has no
+    way to know which pages the gallery already holds, so a run that exists
+    purely to recover a handful of gaps re-fetches the entire gallery.
+    """
+
+    @staticmethod
+    def _run(existing_page_nums):
+        from worker.download import download_job
+
+        plugin_result = _make_plugin_result(status="done", downloaded=3)
+        plugin = MagicMock()
+        plugin.meta.source_id = "ehentai"
+        plugin.meta.name = "E-Hentai"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = AsyncMock(return_value=plugin_result)
+
+        importer = MagicMock()
+        importer.gallery_id = 42
+        importer.title = "t"
+        importer.source_url = None
+        importer.existing_page_nums = existing_page_nums
+        importer.download_status = "complete"
+        importer.import_failures = ()
+        importer.import_success_count = 3
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.finalize = AsyncMock(return_value=42)
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        return (
+            plugin,
+            (
+                patch("plugins.registry.plugin_registry", mock_registry),
+                patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+                patch("worker.download._set_job_status", new_callable=AsyncMock),
+                patch("worker.download._set_job_progress", new_callable=AsyncMock),
+                patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+                patch("worker.progressive.ProgressiveImporter", return_value=importer),
+                patch("worker.download.DownloadSemaphore", mock_sem_cls),
+                patch("core.redis_client.get_redis", return_value=MagicMock()),
+                patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+            ),
+            download_job,
+        )
+
+    async def test_existing_page_nums_are_passed_to_plugin_as_skip_pages(self):
+        plugin, patches, download_job = self._run({1, 2, 3})
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
+            await download_job(_make_ctx(), "https://e-hentai.org/g/1/aaaaaaaaaa", db_job_id="job-skip-1")
+
+        plugin.download.assert_called_once()
+        assert plugin.download.call_args.kwargs["options"]["skip_pages"] == {1, 2, 3}
+
+    async def test_new_gallery_sends_no_skip_pages(self):
+        """A first-time download has nothing held, so nothing may be skipped."""
+        plugin, patches, download_job = self._run(set())
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
+            await download_job(_make_ctx(), "https://e-hentai.org/g/2/bbbbbbbbbb", db_job_id="job-skip-2")
+
+        plugin.download.assert_called_once()
+        assert "skip_pages" not in plugin.download.call_args.kwargs["options"]

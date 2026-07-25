@@ -457,3 +457,72 @@ class TestEhSourceDownloadErrorHandling:
 
         assert result.status == "failed"
         assert result.error is not None
+
+
+# ---------------------------------------------------------------------------
+# download() forwards skip_pages for incremental repair
+# ---------------------------------------------------------------------------
+
+
+class TestEhSourceSkipPages:
+    """The worker passes already-held page numbers through `options`."""
+
+    async def test_download_forwards_skip_pages_option_to_downloader(self):
+        """Without this the repair path silently re-downloads every page."""
+        plugin = _make_plugin()
+
+        captured = {}
+
+        async def _fake_download(**kwargs):
+            captured.update(kwargs)
+            return {"status": "done", "downloaded": 20, "total": 20, "failed_pages": [], "error": None}
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+
+        with (
+            patch("services.eh_downloader.download_eh_gallery", new=_fake_download),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.config.settings") as mock_settings,
+        ):
+            mock_settings.eh_use_ex = False
+            mock_settings.eh_download_concurrency = 3
+
+            await plugin.download(
+                url="https://e-hentai.org/g/123456/abcdef1234/",
+                dest_dir=Path("/tmp/test_eh"),
+                credentials=None,
+                options={"skip_pages": [1, 2, 5]},
+            )
+
+        assert captured.get("skip_pages") == [1, 2, 5]
+
+    async def test_download_without_skip_pages_option_passes_none(self):
+        """A first-time download must not accidentally skip anything."""
+        plugin = _make_plugin()
+
+        captured = {}
+
+        async def _fake_download(**kwargs):
+            captured.update(kwargs)
+            return {"status": "done", "downloaded": 20, "total": 20, "failed_pages": [], "error": None}
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+
+        with (
+            patch("services.eh_downloader.download_eh_gallery", new=_fake_download),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.config.settings") as mock_settings,
+        ):
+            mock_settings.eh_use_ex = False
+            mock_settings.eh_download_concurrency = 3
+
+            await plugin.download(
+                url="https://e-hentai.org/g/123456/abcdef1234/",
+                dest_dir=Path("/tmp/test_eh"),
+                credentials=None,
+                options={},
+            )
+
+        assert not captured.get("skip_pages")

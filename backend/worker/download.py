@@ -486,6 +486,11 @@ async def download_job(
                 opts["last_completed_at"] = None
         else:
             opts["last_completed_at"] = _lca_raw
+        # Repairing a partial gallery must not re-fetch what it already holds.
+        # Only meaningful when this run attached to a pre-existing gallery;
+        # plugins that do not address pages by number ignore it.
+        if importer.existing_page_nums:
+            opts["skip_pages"] = importer.existing_page_nums
 
         try:
             result = await plugin.download(

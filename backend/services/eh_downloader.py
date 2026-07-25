@@ -9,7 +9,7 @@ Reuses Redis cache from browsing proxy for instant cache hits.
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
 
 from core.config import settings
@@ -32,6 +32,7 @@ async def download_eh_gallery(
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
     pause_check: Callable[[], Awaitable[bool]] | None = None,
     on_file: Callable[[Path], Awaitable[None]] | None = None,
+    skip_pages: Collection[int] | None = None,
 ) -> dict:
     """Download all images of an EH gallery using native EhClient.
 
@@ -46,10 +47,25 @@ async def download_eh_gallery(
         cancel_key: Redis key to check for cancellation (direct / legacy callers)
         cancel_check: Async callable that returns True when the download should
             be cancelled (plugin path; takes precedence over cancel_key)
+        skip_pages: Page numbers already held in the database. These are not
+            fetched and no file is written for them, but they still count toward
+            `downloaded` because the gallery does hold that page — so a repair
+            that recovers every gap still reports a complete download.
+
+            This is what makes repairing a partial gallery incremental. The
+            filesystem resume check below cannot help there: progressive import
+            moves each file into CAS and finalize clears the staging dir, so a
+            repair run always starts against an empty directory.
+
+            Safe for E-Hentai specifically because a posted gallery is immutable
+            — a revision is published under a new gid/token — so page N always
+            holds the same image and never needs re-fetching.
 
     Returns:
-        {"status": "done"|"cancelled"|"failed", "downloaded": int, "total": int, "failed_pages": list}
+        {"status": "done"|"partial"|"cancelled"|"failed", "downloaded": int,
+         "total": int, "failed_pages": list}
     """
+    skip_set = frozenset(skip_pages or ())
     output_dir.mkdir(parents=True, exist_ok=True)
 
     async with EhClient(cookies, use_ex=use_ex) as client:
@@ -115,6 +131,15 @@ async def download_eh_gallery(
             # Check cancellation before queuing
             if await _check_cancel():
                 raise asyncio.CancelledError()
+
+            # Already held in the DB — count it as present and fetch nothing.
+            # No on_file: there is no file to import, and the Image row exists.
+            if page_num in skip_set:
+                async with lock:
+                    downloaded += 1
+                    if on_progress:
+                        await on_progress(downloaded, total_pages)
+                return
 
             # Check if file already exists (resume support)
             existing = list(output_dir.glob(f"{page_num:04d}.*"))
