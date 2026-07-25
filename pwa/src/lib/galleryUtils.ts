@@ -58,8 +58,17 @@ export function getSourceStyle(gallery: Pick<Gallery, 'source' | 'import_mode'>)
   return { label, className }
 }
 
-/** Action the detail page offers next to the download-status badge. */
-export type GalleryStatusAction = { kind: 'none' } | { kind: 'outdated' } | { kind: 'repair' }
+/**
+ * Action the detail page offers next to the download-status badge.
+ *
+ * `kind` is what the gallery is; `canEnqueue` is what we can do about it. They
+ * are separate because a gallery can need attention we cannot act on — see
+ * below.
+ */
+export type GalleryStatusAction = {
+  kind: 'none' | 'outdated' | 'repair'
+  canEnqueue: boolean
+}
 
 /**
  * Decide which status action a gallery should offer.
@@ -70,8 +79,13 @@ export type GalleryStatusAction = { kind: 'none' } | { kind: 'outdated' } | { ki
  * `pagesOutdated && complete` (the original condition) excluded precisely the
  * status that needs it, leaving partial galleries with no clickable affordance.
  *
- * Both actions enqueue the same source URL, so neither is offered while a run
- * is already in flight, nor when there is no URL to enqueue.
+ * A missing `source_url` suppresses only the button, never the badge. The
+ * outdated signal comes from `checkUpdate(source, source_id)`, which never
+ * consults `source_url`, so folding the two into one verdict silently hid the
+ * warning on exactly the galleries that could not be repaired from the UI.
+ *
+ * Nothing is offered while a run is already in flight, since both actions
+ * enqueue the same URL and would race the live job.
  */
 export function galleryStatusAction(params: {
   downloadStatus: Gallery['download_status']
@@ -79,10 +93,12 @@ export function galleryStatusAction(params: {
   pagesOutdated: boolean
 }): GalleryStatusAction {
   const { downloadStatus, hasSourceUrl, pagesOutdated } = params
-  if (!hasSourceUrl || downloadStatus === 'downloading') return { kind: 'none' }
-  if (downloadStatus === 'partial') return { kind: 'repair' }
-  if (downloadStatus === 'complete' && pagesOutdated) return { kind: 'outdated' }
-  return { kind: 'none' }
+  if (downloadStatus === 'downloading') return { kind: 'none', canEnqueue: false }
+  if (downloadStatus === 'partial') return { kind: 'repair', canEnqueue: hasSourceUrl }
+  if (downloadStatus === 'complete' && pagesOutdated) {
+    return { kind: 'outdated', canEnqueue: hasSourceUrl }
+  }
+  return { kind: 'none', canEnqueue: false }
 }
 
 export function getEventPosition(e: React.TouchEvent | React.MouseEvent): { x: number; y: number } {

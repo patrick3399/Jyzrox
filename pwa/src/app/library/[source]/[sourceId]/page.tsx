@@ -833,15 +833,21 @@ export default function GalleryDetailPage() {
                       {t(statusInfo.labelKey)}
                     </span>
                   )}
-                  <button
-                    onClick={handleEnqueueUpdate}
-                    disabled={isEnqueueingUpdate || !!activeJobId}
-                    className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isEnqueueingUpdate
-                      ? '...'
-                      : t(statusAction.kind === 'repair' ? 'library.repairNow' : 'library.updateNow')}
-                  </button>
+                  {statusAction.canEnqueue && (
+                    <button
+                      onClick={handleEnqueueUpdate}
+                      disabled={isEnqueueingUpdate || !!activeJobId}
+                      className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isEnqueueingUpdate
+                        ? '...'
+                        : t(
+                            statusAction.kind === 'repair'
+                              ? 'library.repairNow'
+                              : 'library.updateNow',
+                          )}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <span
