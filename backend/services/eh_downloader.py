@@ -249,15 +249,32 @@ async def download_eh_gallery(
         # Terminal status follows the actual per-page outcome: a run that lost
         # pages is never "done". Callers must not have to re-derive this from
         # failed_pages to avoid recording a lossy download as a success.
-        if not failed_pages:
+        #
+        # An empty failed_pages is not sufficient evidence of completeness. The
+        # tasks above iterate token_map, but the gallery's size comes from the
+        # metadata: get_image_tokens accumulates the map by scraping detail pages
+        # and never asserts it resolved them all, so a short parse drops pages
+        # that are then never attempted and never recorded as failures. Requiring
+        # downloaded to cover total_pages closes that gap; ">=" rather than "=="
+        # because a stale image-list cache can carry more entries than the
+        # gallery has, which is not a loss.
+        page_list_error: str | None = None
+        if not failed_pages and downloaded >= total_pages:
             status = "done"
         elif len(failed_pages) == total_pages:
             status = "failed"
         else:
             status = "partial"
+            if not failed_pages:
+                page_list_error = (
+                    f"Source page list incomplete: resolved {downloaded}/{total_pages} pages, "
+                    "the rest were never attempted"
+                )
+                logger.warning("[eh_download] gid=%d %s", gid, page_list_error)
         return {
             "status": status,
             "downloaded": downloaded,
             "total": total_pages,
             "failed_pages": failed_pages,
+            **({"error": page_list_error} if page_list_error else {}),
         }

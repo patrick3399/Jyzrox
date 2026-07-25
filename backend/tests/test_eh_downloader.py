@@ -601,3 +601,116 @@ class TestEhDownloaderSkipPages:
         assert sorted(fetched) == [1, 2, 3]
         assert result["downloaded"] == 3
         assert result["status"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# TestEhDownloaderIncompletePageList — pages the run never learned about
+# ---------------------------------------------------------------------------
+
+
+class TestEhDownloaderIncompletePageList:
+    """Pages missing from the token map must not be reported as downloaded.
+
+    The download tasks are built from ``token_map``, but ``total_pages`` comes
+    from the gallery metadata. ``get_image_tokens`` accumulates the map by
+    scraping detail pages and never asserts it resolved them all, so a short
+    parse silently drops pages: they are never attempted, never land in
+    ``failed_pages``, and the run reports "done" — which finalize turns into
+    ``download_status='complete'`` on a gallery that lost content.
+    """
+
+    async def test_token_map_short_of_total_pages_does_not_report_done(self, tmp_path):
+        from services.eh_downloader import download_eh_gallery
+
+        mock_client = _make_eh_client_mock()
+        # Metadata says 3 pages; only 2 pTokens resolve. Page 3 is never attempted.
+        mock_client.get_image_tokens = AsyncMock(return_value=({1: "aaaaaa", 2: "bbbbbb"}, None))
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+            )
+
+        # Every attempted page succeeded, so failed_pages stays empty — the old
+        # `if not failed_pages: status = "done"` reported this run as a success.
+        assert result["failed_pages"] == []
+        assert result["downloaded"] == 2
+        assert result["total"] == 3
+        assert result["status"] == "partial"
+        assert "2/3" in result.get("error", "")
+
+    async def test_short_token_map_under_skip_pages_does_not_report_done(self, tmp_path):
+        """A repair run must not certify completeness the page list cannot support."""
+        from services.eh_downloader import download_eh_gallery
+
+        mock_client = _make_eh_client_mock()
+        mock_client.get_image_tokens = AsyncMock(return_value=({1: "aaaaaa", 2: "bbbbbb"}, None))
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+                skip_pages={1, 2},
+            )
+
+        assert result["downloaded"] == 2
+        assert result["total"] == 3
+        assert result["status"] == "partial"
+
+    async def test_token_map_longer_than_total_pages_still_reports_done(self, tmp_path):
+        """A stale image-list cache may hold more entries than the gallery has.
+
+        Completeness is "covered at least every page", not "covered exactly
+        total_pages" — an over-long map must not be misread as a loss.
+        """
+        from services.eh_downloader import download_eh_gallery
+
+        mock_client = _make_eh_client_mock()
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch(
+                "services.eh_downloader.cache.get_imagelist_cache",
+                new_callable=AsyncMock,
+                return_value={"1": "aaaaaa", "2": "bbbbbb", "3": "cccccc", "4": "dddddd"},
+            ),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+            )
+
+        assert result["downloaded"] == 4
+        assert result["total"] == 3
+        assert result["status"] == "done"
