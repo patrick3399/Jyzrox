@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import { decodeRouteSegment } from '@/lib/galleryRoutes'
 import Reader from '@/components/Reader'
@@ -24,6 +24,7 @@ interface LoadedData {
 }
 
 export default function ReaderPage() {
+  const router = useRouter()
   const params = useParams<{ source: string; sourceId: string }>()
   const source = decodeRouteSegment(params.source)
   const sourceId = decodeRouteSegment(params.sourceId)
@@ -158,7 +159,14 @@ export default function ReaderPage() {
 
   if (error) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <div className="relative flex h-screen w-full items-center justify-center bg-black text-white">
+        <button
+          onClick={() => router.back()}
+          title={t('reader.goBack')}
+          className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl"
+        >
+          ✕
+        </button>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
@@ -169,7 +177,14 @@ export default function ReaderPage() {
 
   if (!data) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <div className="relative flex h-screen w-full items-center justify-center bg-black text-white">
+        <button
+          onClick={() => router.back()}
+          title={t('reader.goBack')}
+          className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl"
+        >
+          ✕
+        </button>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">{t('reader.loadingGallery')}</p>
@@ -184,7 +199,14 @@ export default function ReaderPage() {
   // The bounded polling/WS refresh above will keep refreshing until images arrive.
   if (images.length === 0 && gallery.download_status === 'downloading') {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <div className="relative flex h-screen w-full items-center justify-center bg-black text-white">
+        <button
+          onClick={() => router.back()}
+          title={t('reader.goBack')}
+          className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl"
+        >
+          ✕
+        </button>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-70">{t('reader.downloadingWait')}</p>
