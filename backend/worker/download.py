@@ -20,6 +20,22 @@ def _postprocess_failure_status(downloaded: int) -> str:
     return "partial" if downloaded > 0 else "failed"
 
 
+def _run_fetched_count(result) -> int:
+    """Pages whose bytes this run actually obtained.
+
+    `result.downloaded` counts what the gallery holds once the run ends. Under
+    incremental repair that includes pages skipped without a fetch, so a run
+    stopped at the 509 wall before obtaining anything still reports a large
+    `downloaded`. Demoting a failure to a partial success on that basis records
+    a run that accomplished nothing as one that gained content. Only plugins
+    that draw the distinction set `fetched`; the rest fall back unchanged.
+    """
+    fetched = getattr(result, "fetched", None)
+    if type(fetched) is not int:
+        return getattr(result, "downloaded", 0)
+    return fetched
+
+
 def _import_outcome(importer) -> tuple[tuple[dict[str, str], ...], int]:
     """Read the public progressive-import outcome without trusting loose mocks."""
     failures = getattr(importer, "import_failures", ())
@@ -538,9 +554,14 @@ async def download_job(
         return {"status": "cancelled"}
 
     if result.status == "failed":
-        if result.downloaded > 0 and importer.gallery_id:
+        # Gate on what this run fetched, not on what the gallery holds: a repair
+        # that hit the 509 wall before obtaining a byte still reports every page
+        # it skipped as `downloaded`, and demoting that to "partial" would hide a
+        # run worth retrying behind a status that reads like progress.
+        if _run_fetched_count(result) > 0 and importer.gallery_id:
             logger.warning(
-                "[download] treating failed download as partial (downloaded=%d): %s",
+                "[download] treating failed download as partial (fetched=%d of downloaded=%d): %s",
+                _run_fetched_count(result),
                 result.downloaded,
                 result.error,
             )
@@ -727,7 +748,7 @@ async def download_job(
         # a job stuck in 'running'. Downloaded bytes are not the same as a
         # committed gallery: post-processing failure is partial, never done.
         logger.error("[download] post-download steps failed: %s", exc, exc_info=True)
-        fin_status = _postprocess_failure_status(result.downloaded)
+        fin_status = _postprocess_failure_status(_run_fetched_count(result))
         fin_err = f"Post-download error: {exc}"
         await _set_job_status(db_job_id, fin_status, fin_err)
         await _set_subscription_result(db_job_id, fin_status, fin_err)

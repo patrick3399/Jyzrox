@@ -714,3 +714,138 @@ class TestEhDownloaderIncompletePageList:
         assert result["downloaded"] == 4
         assert result["total"] == 3
         assert result["status"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# TestEhDownloaderFetchedCount — real progress vs. pages merely held
+# ---------------------------------------------------------------------------
+
+
+class TestEhDownloaderFetchedCount:
+    """`downloaded` counts pages the gallery holds; `fetched` counts this run.
+
+    Incremental repair makes skipped pages count toward `downloaded`, so that
+    field can no longer answer "did this run accomplish anything". Callers that
+    demote a failure to a partial success on that basis need the real count.
+    """
+
+    async def test_509_during_repair_reports_nothing_fetched(self, tmp_path):
+        """The 509 wall is the failure this feature exists to avoid.
+
+        A repair of a 3-page gallery missing one page hits the limit on the only
+        page it needed. `downloaded` is 2 (the pages it already held), so a caller
+        gating on `downloaded > 0` records a run that obtained nothing as a
+        partial success instead of a failure worth retrying later.
+        """
+        from services.eh_client import Image509Error
+        from services.eh_downloader import download_eh_gallery
+
+        mock_client = _make_eh_client_mock()
+
+        async def _limit(showkey, gid, page_num, ptoken, max_retries=3):
+            raise Image509Error("509 limit")
+
+        mock_client.download_image_with_retry = _limit
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+                skip_pages={1, 3},
+            )
+
+        assert result["status"] == "failed"
+        assert result["downloaded"] == 2
+        assert result["fetched"] == 0
+
+    async def test_fetched_counts_only_pages_obtained_in_this_run(self, tmp_path):
+        from services.eh_downloader import download_eh_gallery
+
+        mock_client = _make_eh_client_mock()
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+                skip_pages={1, 3},
+            )
+
+        assert result["status"] == "done"
+        assert result["downloaded"] == 3
+        assert result["fetched"] == 1
+
+    async def test_fetched_counts_a_file_resumed_from_disk(self, tmp_path):
+        """A resumed file is handed to the importer, so it is real progress."""
+        from services.eh_downloader import download_eh_gallery
+
+        (tmp_path / "0002.jpg").write_bytes(_FAKE_IMAGE_BYTES)
+        mock_client = _make_eh_client_mock()
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+                skip_pages={1},
+            )
+
+        # Page 1 skipped (no file), page 2 resumed from disk, page 3 downloaded.
+        assert result["downloaded"] == 3
+        assert result["fetched"] == 2
+
+    async def test_full_download_reports_fetched_equal_to_downloaded(self, tmp_path):
+        """Without skip_pages the two counts must not diverge."""
+        from services.eh_downloader import download_eh_gallery
+
+        mock_client = _make_eh_client_mock()
+
+        with (
+            patch("services.eh_downloader.EhClient", return_value=mock_client),
+            patch("services.eh_downloader.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_gallery_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.eh_downloader.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.eh_downloader.get_download_delay", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await download_eh_gallery(
+                gid=12345,
+                token="abc123",
+                cookies={},
+                use_ex=False,
+                output_dir=tmp_path,
+            )
+
+        assert result["fetched"] == result["downloaded"] == 3

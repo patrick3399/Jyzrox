@@ -134,6 +134,12 @@ class DownloadResult(BaseModel):
     status: Literal["done", "cancelled", "failed", "partial"]
     downloaded: int
     total: int
+    # Pages this run actually obtained. `downloaded` counts what the gallery
+    # holds afterwards, which for an incremental repair includes pages that were
+    # skipped without a fetch — so it cannot answer "did this run make
+    # progress". None means the plugin does not draw the distinction, in which
+    # case callers fall back to `downloaded`.
+    fetched: int | None = None
     failed_pages: list[int] = []
     error: str | None = None
     unsupported_urls: list[str] = []

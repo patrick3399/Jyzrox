@@ -63,7 +63,11 @@ async def download_eh_gallery(
 
     Returns:
         {"status": "done"|"partial"|"cancelled"|"failed", "downloaded": int,
-         "total": int, "failed_pages": list}
+         "fetched": int, "total": int, "failed_pages": list}
+
+        `downloaded` counts pages the gallery holds once the run ends, including
+        skipped ones. `fetched` counts only the pages this run actually obtained
+        — the number to consult when asking whether the run made any progress.
     """
     skip_set = frozenset(skip_pages or ())
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -77,7 +81,14 @@ async def download_eh_gallery(
 
         total_pages = meta.get("pages", 0)
         if total_pages == 0:
-            return {"status": "failed", "downloaded": 0, "total": 0, "failed_pages": [], "error": "Gallery has 0 pages"}
+            return {
+                "status": "failed",
+                "downloaded": 0,
+                "fetched": 0,
+                "total": 0,
+                "failed_pages": [],
+                "error": "Gallery has 0 pages",
+            }
 
         # 2. Fetch pTokens (check cache first)
         cached_tokens = await cache.get_imagelist_cache(gid)
@@ -93,6 +104,7 @@ async def download_eh_gallery(
             return {
                 "status": "failed",
                 "downloaded": 0,
+                "fetched": 0,
                 "total": total_pages,
                 "failed_pages": list(range(1, total_pages + 1)),
                 "error": "Failed to fetch image tokens",
@@ -106,6 +118,10 @@ async def download_eh_gallery(
         # 4. Parallel download with semaphore
         sem = asyncio.Semaphore(concurrency)
         downloaded = 0
+        # Pages whose bytes this run actually put in front of the importer, as
+        # opposed to pages it merely confirmed the gallery already holds. Only
+        # this count answers "did the run make progress".
+        fetched = 0
         failed_pages: list[int] = []
         lock = asyncio.Lock()
 
@@ -126,7 +142,7 @@ async def download_eh_gallery(
                 return False
 
         async def _download_one(page_num: int, ptoken: str) -> None:
-            nonlocal downloaded
+            nonlocal downloaded, fetched
 
             # Check cancellation before queuing
             if await _check_cancel():
@@ -148,6 +164,8 @@ async def download_eh_gallery(
                     await on_file(existing[0])
                 async with lock:
                     downloaded += 1
+                    # A resumed file is handed to the importer, so it is progress.
+                    fetched += 1
                     if on_progress:
                         await on_progress(downloaded, total_pages)
                 return
@@ -195,6 +213,7 @@ async def download_eh_gallery(
 
                 async with lock:
                     downloaded += 1
+                    fetched += 1
                     if on_progress:
                         await on_progress(downloaded, total_pages)
 
@@ -208,18 +227,31 @@ async def download_eh_gallery(
         try:
             results = await asyncio.gather(*tasks, return_exceptions=True)
         except asyncio.CancelledError:
-            return {"status": "cancelled", "downloaded": downloaded, "total": total_pages, "failed_pages": []}
+            return {
+                "status": "cancelled",
+                "downloaded": downloaded,
+                "fetched": fetched,
+                "total": total_pages,
+                "failed_pages": [],
+            }
 
         # Process results
         sorted_pages = sorted(token_map.keys())
         for i, result in enumerate(results):
             page_num = sorted_pages[i]
             if isinstance(result, asyncio.CancelledError):
-                return {"status": "cancelled", "downloaded": downloaded, "total": total_pages, "failed_pages": []}
+                return {
+                    "status": "cancelled",
+                    "downloaded": downloaded,
+                    "fetched": fetched,
+                    "total": total_pages,
+                    "failed_pages": [],
+                }
             if isinstance(result, Image509Error):
                 return {
                     "status": "failed",
                     "downloaded": downloaded,
+                    "fetched": fetched,
                     "total": total_pages,
                     "failed_pages": [],
                     "error": "E-Hentai image viewing limit reached (509). Try again later or use a different IP.",
@@ -274,6 +306,7 @@ async def download_eh_gallery(
         return {
             "status": status,
             "downloaded": downloaded,
+            "fetched": fetched,
             "total": total_pages,
             "failed_pages": failed_pages,
             **({"error": page_list_error} if page_list_error else {}),

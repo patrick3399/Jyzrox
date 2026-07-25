@@ -259,6 +259,7 @@ class EhSourcePlugin(SourcePlugin):
         return DownloadResult(
             status=status,  # type: ignore[arg-type]
             downloaded=result.get("downloaded", 0),
+            fetched=result.get("fetched"),
             total=result.get("total", 0),
             failed_pages=result.get("failed_pages", []),
             error=result.get("error"),

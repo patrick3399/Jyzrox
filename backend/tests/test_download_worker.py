@@ -304,6 +304,30 @@ def test_postprocess_failure_with_downloaded_files_is_partial_not_done():
     assert _postprocess_failure_status(0) == "failed"
 
 
+class TestRunFetchedCount:
+    """`downloaded` stopped meaning "obtained by this run" once repair landed.
+
+    Incremental repair counts skipped pages toward `downloaded`, so a run that
+    fetched nothing at all can report `downloaded=334`. Failure demotion must
+    read the count that only rises on real progress.
+    """
+
+    def test_fetched_is_preferred_over_downloaded_when_the_plugin_reports_it(self):
+        from worker.download import _run_fetched_count
+
+        result = _make_plugin_result(status="failed", downloaded=334)
+        result.fetched = 0
+        assert _run_fetched_count(result) == 0
+
+    def test_falls_back_to_downloaded_for_plugins_that_do_not_report_fetched(self):
+        """Only the EH downloader distinguishes the two; the rest must be unaffected."""
+        from worker.download import _run_fetched_count
+
+        # A loose MagicMock auto-creates `.fetched` as a Mock, not an int —
+        # the same trap _import_outcome guards against.
+        assert _run_fetched_count(_make_plugin_result(status="failed", downloaded=7)) == 7
+
+
 class TestAuthoritativeDatabaseCancelGuard:
     async def test_cancelled_database_row_wins(self):
         from worker.download import _is_job_cancelled_in_db
@@ -2396,3 +2420,87 @@ class TestDownloadJobSkipPages:
 
         plugin.download.assert_called_once()
         assert "skip_pages" not in plugin.download.call_args.kwargs["options"]
+
+
+class TestFailedRepairIsNotDemotedToPartial:
+    """A failed repair that fetched nothing is a failure, not a partial success.
+
+    Post-download handling demotes `failed` to `partial` when the run got files,
+    on the theory that a gallery gained content. Incremental repair breaks that
+    reading: `downloaded` includes pages that were skipped without a fetch, so a
+    run stopped at the E-Hentai 509 wall before obtaining a single byte reports
+    `downloaded=334` and slips through as a partial success — no abort, and a
+    finalize pass that re-enqueues cover/thumbnail/tag jobs for nothing.
+    """
+
+    @staticmethod
+    def _harness(*, downloaded, fetched):
+        from worker.download import download_job
+
+        plugin_result = _make_plugin_result(
+            status="failed",
+            downloaded=downloaded,
+            error="E-Hentai image viewing limit reached (509).",
+        )
+        plugin_result.fetched = fetched
+        plugin = MagicMock()
+        plugin.meta.source_id = "ehentai"
+        plugin.meta.name = "E-Hentai"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = AsyncMock(return_value=plugin_result)
+
+        importer = MagicMock()
+        importer.gallery_id = 42
+        importer.title = "t"
+        importer.source_url = None
+        importer.existing_page_nums = {1, 3}
+        importer.download_status = "partial"
+        importer.import_failures = ()
+        importer.import_success_count = 0
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.finalize = AsyncMock(return_value=42)
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        set_status = AsyncMock()
+        mock_sem_cls = MagicMock(return_value=_make_mock_sem())
+
+        patches = (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", set_status),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        )
+        return download_job, importer, set_status, patches
+
+    async def test_509_that_fetched_nothing_is_recorded_as_failed(self):
+        download_job, importer, set_status, patches = self._harness(downloaded=2, fetched=0)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
+            outcome = await download_job(_make_ctx(), "https://e-hentai.org/g/3/cccccccccc", db_job_id="job-509")
+
+        assert outcome["status"] == "failed"
+        importer.abort.assert_awaited_once()
+        importer.finalize.assert_not_awaited()
+        assert set_status.await_args_list[-1].args[1] == "failed"
+
+    async def test_failed_run_that_did_fetch_files_is_still_demoted_to_partial(self):
+        """The original demotion must survive: real files mean real content gained."""
+        download_job, importer, set_status, patches = self._harness(downloaded=3, fetched=1)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
+            await download_job(_make_ctx(), "https://e-hentai.org/g/4/dddddddddd", db_job_id="job-partial")
+
+        importer.abort.assert_not_awaited()
+        assert set_status.await_args_list[-1].args[1] == "partial"
