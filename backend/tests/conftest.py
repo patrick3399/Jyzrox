@@ -411,6 +411,7 @@ _SQLITE_SCHEMA = [
         category TEXT,
         language TEXT,
         pages INTEGER,
+        source_pages INTEGER,
         posted_at TIMESTAMP,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         rating INTEGER DEFAULT 0,

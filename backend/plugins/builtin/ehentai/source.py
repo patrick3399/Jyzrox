@@ -145,6 +145,7 @@ class EhSourcePlugin(SourcePlugin):
             "title_jpn": meta.get("title_jpn", ""),
             "uploader": meta.get("uploader", ""),
             "posted": meta.get("posted_at", 0),
+            "pages": meta.get("pages", 0),
             "tags": meta.get("tags", []),
             "gallery_id": gid,
             "gid": gid,

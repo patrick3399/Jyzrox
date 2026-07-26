@@ -94,6 +94,7 @@ def _upsert_metadata_set(excluded, *, include_title_tags: bool) -> dict:
         "download_status": "downloading",
         "artist_id": func.coalesce(excluded.artist_id, Gallery.artist_id),
         "source_url": func.coalesce(Gallery.source_url, excluded.source_url),
+        "source_pages": func.coalesce(excluded.source_pages, Gallery.source_pages),
     }
     if include_title_tags:
         set_["title"] = func.coalesce(func.nullif(excluded.title, ""), Gallery.title)
@@ -399,6 +400,7 @@ class ProgressiveImporter:
                     category=import_data.category,
                     language=import_data.language,
                     pages=0,
+                    source_pages=import_data.page_count or None,
                     posted_at=import_data.posted_at,
                     uploader=import_data.uploader,
                     download_status="downloading",
@@ -476,6 +478,7 @@ class ProgressiveImporter:
                     source_id=source_id,
                     title=title,
                     pages=0,
+                    source_pages=None,
                     download_status="downloading",
                     artist_id=f"{source}:{source_id}" if self.source_url and source and source_id else None,
                     created_by_user_id=self.user_id,
@@ -525,6 +528,7 @@ class ProgressiveImporter:
                     category=data.category,
                     language=data.language,
                     pages=0,
+                    source_pages=data.page_count or None,
                     posted_at=data.posted_at,
                     uploader=data.uploader,
                     download_status="downloading",

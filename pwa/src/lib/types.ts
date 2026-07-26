@@ -20,6 +20,8 @@ export interface Gallery {
   category: string
   language: string
   pages: number
+  source_pages?: number | null
+  missing_pages?: number | null
   posted_at: string | null
   added_at: string
   rating: number // 0–5 (legacy global, kept for backward compat)

@@ -2790,6 +2790,10 @@ def _g(
         "category": g.category,
         "language": g.language,
         "pages": g.pages,
+        "source_pages": g.source_pages,
+        "missing_pages": (
+            max(g.source_pages - (g.pages or 0), 0) if g.source_pages is not None else None
+        ),
         "posted_at": g.posted_at.isoformat() if g.posted_at else None,
         "added_at": g.added_at.isoformat() if g.added_at else None,
         "rating": g.rating,

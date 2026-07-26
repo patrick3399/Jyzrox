@@ -31,6 +31,7 @@ async def _insert_gallery(db_session, **overrides):
         "category": "doujinshi",
         "language": "english",
         "pages": 20,
+        "source_pages": None,
         "rating": 0,
         "favorited": 0,
         "download_status": "completed",
@@ -45,10 +46,10 @@ async def _insert_gallery(db_session, **overrides):
     await db_session.execute(
         text(
             "INSERT INTO galleries (source, source_id, title, title_jpn, category, "
-            "language, pages, rating, favorited, download_status, tags_array, "
+            "language, pages, source_pages, rating, favorited, download_status, tags_array, "
             "artist_id, uploader, import_mode, library_path, source_path) "
             "VALUES (:source, :source_id, :title, :title_jpn, :category, "
-            ":language, :pages, :rating, :favorited, :download_status, :tags_array, "
+            ":language, :pages, :source_pages, :rating, :favorited, :download_status, :tags_array, "
             ":artist_id, :uploader, :import_mode, :library_path, :source_path)"
         ),
         defaults,
@@ -2374,6 +2375,26 @@ class TestGetGalleryDetail:
         assert resp.status_code == 200
         data = resp.json()
         assert data["pages"] == 42
+
+    async def test_get_gallery_exposes_authoritative_source_page_shortfall(self, client, db_session):
+        """Stored source total makes partial loss queryable without a gap scan."""
+        await _insert_gallery(
+            db_session,
+            source="ehentai",
+            source_id="partial-pages",
+            title="Partial Pages",
+            pages=17,
+            source_pages=20,
+            download_status="partial",
+        )
+
+        resp = await client.get("/api/library/galleries/ehentai/partial-pages")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pages"] == 17
+        assert data["source_pages"] == 20
+        assert data["missing_pages"] == 3
 
     async def test_get_gallery_unauthenticated_returns_401(self, unauthed_client):
         """Unauthenticated request should return 401."""

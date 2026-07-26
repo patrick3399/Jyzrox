@@ -9,6 +9,12 @@ from pathlib import Path
 _INIT_SQL = Path(__file__).parent.parent.parent / "db" / "init.sql"
 
 
+def test_init_sql_has_gallery_source_pages_contract():
+    content = _INIT_SQL.read_text()
+    assert "source_pages    INT" in content
+    assert "chk_galleries_source_pages_nonnegative" in content
+
+
 # ---------------------------------------------------------------------------
 # edge case #144 — read_progress single-column lookup indexes
 # ---------------------------------------------------------------------------

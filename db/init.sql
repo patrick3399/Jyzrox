@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     category        TEXT,
     language        TEXT,
     pages           INT,
+    source_pages    INT,
     posted_at       TIMESTAMPTZ,
     added_at        TIMESTAMPTZ DEFAULT now(),
     rating          SMALLINT DEFAULT 0,
@@ -40,6 +41,12 @@ CREATE TABLE IF NOT EXISTS galleries (
     metadata_updated_at TIMESTAMPTZ,
     UNIQUE (source, source_id)
 );
+
+DO $$ BEGIN
+    ALTER TABLE galleries ADD CONSTRAINT chk_galleries_source_pages_nonnegative
+        CHECK (source_pages IS NULL OR source_pages >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS blobs (
     sha256        TEXT PRIMARY KEY,

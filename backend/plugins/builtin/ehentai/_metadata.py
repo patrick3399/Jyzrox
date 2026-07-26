@@ -50,6 +50,7 @@ def parse_eh_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImpo
         language=meta.get("lang") or meta.get("language") or "",
         tags=tags,
         artist_id=artist_id,
+        page_count=int(meta.get("pages") or meta.get("filecount") or 0),
         posted_at=posted_at,
         uploader=meta.get("uploader") or "",
         extra={"token": meta.get("token") or ""},

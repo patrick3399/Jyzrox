@@ -44,6 +44,23 @@ class TestEhSourceRequiresCredentials:
         assert result is False
 
 
+def test_parse_import_preserves_authoritative_source_page_count(tmp_path):
+    """EH metadata page totals must survive into the importer contract."""
+    plugin = _make_plugin()
+
+    data = plugin.parse_import(
+        tmp_path,
+        {
+            "gid": 123,
+            "title": "Partial source",
+            "pages": 20,
+            "tags": [],
+        },
+    )
+
+    assert data.page_count == 20
+
+
 # ---------------------------------------------------------------------------
 # can_handle
 # ---------------------------------------------------------------------------
