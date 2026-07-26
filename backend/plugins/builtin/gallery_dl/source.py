@@ -821,12 +821,12 @@ class GalleryDlPlugin(SourcePlugin):
             target_source_id=_site_cfg.source_id,
         )
 
-        from worker.gallery_dl_venv import get_gdl_bin
+        from worker.gallery_dl_venv import get_gdl_exec_cmd
 
         config_id = (options or {}).get("config_id")
 
         cmd = [
-            get_gdl_bin(),
+            *get_gdl_exec_cmd(),
             "--config-ignore",
             "--config",
             str(config_path),
