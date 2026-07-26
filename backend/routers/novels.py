@@ -337,6 +337,52 @@ async def revert_file(body: RevertBody, auth: dict = Depends(_member)):
     return {**result, "reverted_to": body.rev}
 
 
+class SummaryBody(BaseModel):
+    path: str
+    summary: str
+    base_sha: str
+
+
+@router.put("/file/summary")
+async def put_summary(body: SummaryBody, auth: dict = Depends(_member)):
+    """Set (or clear, with an empty string) a chapter's `summary:` frontmatter.
+
+    The summary is authored content, so it lives in the file — the DB stays
+    derived-only (spec §2). Writing goes through the same guard/commit path as
+    any other edit; only the key's own line changes.
+    """
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, body.path)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    async def _do():
+        await _assert_writable(repo, body.path, body.base_sha)
+        try:
+            current = novel_fs.read_file(repo, body.path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        updated = novel_fs.set_frontmatter_value(current, "summary", body.summary)
+        novel_fs.write_file(repo, body.path, updated)
+        return await novel_git.commit_and_push(repo, body.path, f"summary: {body.path}")
+
+    try:
+        result = await _with_git_lock(_do)
+    except novel_git.NovelLocked:
+        raise HTTPException(status_code=409, detail="conflict; repo locked; resolve on desktop")
+
+    await audit.log_audit(auth["user_id"], "novel.summary", body.path)
+    await events.emit_safe(
+        events.EventType.NOVEL_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="novel",
+        resource_id=body.path,
+    )
+    await _enqueue_reindex()
+    return result
+
+
 @router.post("/sync")
 async def sync(_: dict = Depends(_member)):
     async def _do():

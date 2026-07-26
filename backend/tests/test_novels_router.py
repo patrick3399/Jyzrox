@@ -456,6 +456,63 @@ async def test_file_diff_rejects_arg_injection_in_base(viewer_client, novel_repo
     assert not sentinel.exists()
 
 
+async def test_summary_roundtrip_shows_up_in_the_chapter_listing(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    before = (await member_client.get("/api/novels/works/作品A/chapters")).json()["chapters"][0]
+    assert before["summary"] is None
+
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    r = await member_client.put(
+        "/api/novels/file/summary",
+        json={"path": path, "summary": "張三離開了城市", "base_sha": head},
+    )
+    assert r.status_code == 200, r.text
+
+    after = (await member_client.get("/api/novels/works/作品A/chapters")).json()["chapters"][0]
+    assert after["summary"] == "張三離開了城市"
+    # Metadata is not prose — the character count must not move.
+    assert after["chars"] == before["chars"]
+    # And the prose itself is untouched.
+    content = (await member_client.get(f"/api/novels/file?path={path}")).json()["content"]
+    assert content.endswith("# 第一章\n\n### 幕一\n\n正文 [[張三]]。\n")
+
+
+async def test_summary_empty_string_clears_it(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    await member_client.put("/api/novels/file/summary", json={"path": path, "summary": "暫定摘要", "base_sha": head})
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    r = await member_client.put("/api/novels/file/summary", json={"path": path, "summary": "", "base_sha": head})
+    assert r.status_code == 200
+    chapters = (await member_client.get("/api/novels/works/作品A/chapters")).json()["chapters"]
+    assert chapters[0]["summary"] is None
+
+
+async def test_summary_viewer_forbidden(viewer_client, novel_repo):
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.put(
+        "/api/novels/file/summary",
+        json={"path": "作品A/第01章.md", "summary": "x", "base_sha": head},
+    )
+    assert r.status_code == 403
+
+
+async def test_summary_with_stale_base_sha_returns_409(member_client, novel_repo):
+    r = await member_client.put(
+        "/api/novels/file/summary",
+        json={"path": "作品A/第01章.md", "summary": "x", "base_sha": "0000000"},
+    )
+    assert r.status_code == 409
+
+
+async def test_summary_rejects_traversal(member_client, novel_repo):
+    r = await member_client.put(
+        "/api/novels/file/summary",
+        json={"path": "../../etc/passwd", "summary": "x", "base_sha": "0000000"},
+    )
+    assert r.status_code == 400
+
+
 async def test_reset_forbidden_for_member(member_client, novel_repo):
     # Two clients cannot coexist (they share _app.dependency_overrides), so the
     # member and admin cases are separate tests.

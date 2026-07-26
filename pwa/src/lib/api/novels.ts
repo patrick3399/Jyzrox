@@ -10,7 +10,10 @@ export interface NovelWork {
 export interface NovelChapter {
   path: string
   name: string
+  /** Whitespace-excluded character count of the body (not the byte size). */
   chars: number
+  /** Authored one-liner from the file's `summary:` frontmatter, if any. */
+  summary?: string | null
   mtime: number
   category?: string
 }
@@ -162,6 +165,12 @@ export const novels = {
       message: `create: ${path}`,
     })
   },
+  // Writes the `summary:` frontmatter key only; an empty string clears it.
+  putSummary: (path: string, summary: string, base_sha: string) =>
+    apiFetch<{ head: string; pushed: boolean }>('/api/novels/file/summary', {
+      method: 'PUT',
+      body: JSON.stringify({ path, summary, base_sha }),
+    }),
   search: (q: string) => apiFetch<{ hits: NovelSearchHit[] }>(`/api/novels/search${qs({ q })}`),
   history: (path: string) =>
     apiFetch<{ commits: NovelCommit[] }>(`/api/novels/file/history${qs({ path })}`),

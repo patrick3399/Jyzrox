@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { BookText, ArrowLeft, Plus } from 'lucide-react'
+import { BookText, ArrowLeft, Pencil, Plus } from 'lucide-react'
 import useSWR, { mutate } from 'swr'
 import { api } from '@/lib/api'
 import { novelChapterHref } from '@/lib/novels'
@@ -16,6 +16,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { BackButton } from '@/components/BackButton'
 import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
 import { WorkCategorySection } from '@/components/novels/WorkCategorySection'
+import { ChapterSummaryEditor } from '@/components/novels/ChapterSummaryEditor'
 
 export default function NovelWorkPage() {
   useLocale()
@@ -28,6 +29,7 @@ export default function NovelWorkPage() {
   const { data: profile } = useProfile()
   const canEdit = hasRole(profile?.role, 'member')
   const [showCreate, setShowCreate] = useState(false)
+  const [editingSummary, setEditingSummary] = useState<string | null>(null)
   const chapters = data?.chapters ?? []
   const categories = data?.categories
   const hasAnyCategory = categories ? Object.values(categories).some((n) => n > 0) : false
@@ -65,16 +67,48 @@ export default function NovelWorkPage() {
       ) : (
         <ul className="flex flex-col gap-1">
           {chapters.map((c) => (
-            <li key={c.path}>
-              <Link
-                href={`/novels/${encodeURIComponent(work)}/${encodeURIComponent(c.name)}?path=${encodeURIComponent(c.path)}`}
-                className="flex items-center justify-between rounded-lg border border-vault-border bg-vault-card px-4 py-3 transition-colors hover:border-vault-accent"
-              >
-                <span className="truncate font-medium text-vault-text">{c.name}</span>
-                <span className="ml-2 shrink-0 text-xs text-vault-text-muted">
-                  {c.chars.toLocaleString()}
+            <li
+              key={c.path}
+              className="rounded-lg border border-vault-border bg-vault-card transition-colors hover:border-vault-accent"
+            >
+              <div className="flex items-center gap-2 px-4 py-3">
+                <Link
+                  href={`/novels/${encodeURIComponent(work)}/${encodeURIComponent(c.name)}?path=${encodeURIComponent(c.path)}`}
+                  className="min-w-0 flex-1"
+                >
+                  <span className="block truncate font-medium text-vault-text">{c.name}</span>
+                  {c.summary && (
+                    <span className="block truncate text-xs text-vault-text-muted">
+                      {c.summary}
+                    </span>
+                  )}
+                </Link>
+                <span className="shrink-0 text-xs text-vault-text-muted">
+                  {t('novels.charCount', { count: c.chars.toLocaleString() })}
                 </span>
-              </Link>
+                {canEdit && (
+                  <button
+                    type="button"
+                    aria-label={t('novels.editSummary')}
+                    title={t('novels.editSummary')}
+                    className="shrink-0 rounded border border-vault-border p-1 text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+                    onClick={() => setEditingSummary(editingSummary === c.path ? null : c.path)}
+                  >
+                    <Pencil className="size-3" />
+                  </button>
+                )}
+              </div>
+              {editingSummary === c.path && (
+                <ChapterSummaryEditor
+                  path={c.path}
+                  initial={c.summary}
+                  onSaved={() => {
+                    setEditingSummary(null)
+                    mutate(['novel-chapters', work])
+                  }}
+                  onCancel={() => setEditingSummary(null)}
+                />
+              )}
             </li>
           ))}
         </ul>
