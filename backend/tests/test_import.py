@@ -1294,6 +1294,37 @@ class TestBatchImportJob:
         assert result["failed"] == 1
         assert result["completed"] == 0
 
+    async def test_resumable_source_change_is_not_counted_as_completed(self, tmp_path):
+        from worker.importer import batch_import_job
+
+        gallery_dir = tmp_path / "renamed_gallery"
+        gallery_dir.mkdir()
+        no_existing = MagicMock()
+        no_existing.scalar_one_or_none.return_value = None
+        inserted = MagicMock()
+        inserted.scalar_one.return_value = 91
+        session = _make_mock_session()
+        session.execute = AsyncMock(side_effect=[no_existing, inserted])
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", _make_session_factory(session)),
+            patch(
+                "worker.importer.local_import_job",
+                new=AsyncMock(return_value={"status": "source_changed", "resumable": True}),
+            ),
+        ):
+            result = await batch_import_job(
+                _make_ctx(),
+                root_dir=str(tmp_path),
+                mode="link",
+                galleries=[{"path": str(gallery_dir), "title": "Renamed"}],
+                batch_id="batch-source-changed",
+                user_id=1,
+            )
+
+        assert result["completed"] == 0
+        assert result["failed"] == 1
+
     async def test_one_success_one_failure_correct_counts(self, tmp_path):
         """One succeeding and one failing gallery should report correct counts."""
         from worker.importer import batch_import_job
