@@ -12,13 +12,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 // URL carries ?q= but no explicit tab (default identity resolves to `search`).
 const mockSearchParams = new URLSearchParams('q=test')
+const replaceMock = vi.fn()
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: replaceMock, back: vi.fn() }),
   useSearchParams: () => mockSearchParams,
 }))
 
@@ -95,7 +96,7 @@ vi.mock('@/lib/api', () => ({
     eh: {
       search: (...args: unknown[]) => searchMock(...args),
       getFavorites: vi.fn(),
-      getPopular: vi.fn(),
+      getPopular: vi.fn().mockResolvedValue({ galleries: [], total: 0 }),
       getToplist: vi.fn(),
     },
   },
@@ -106,6 +107,11 @@ describe('E-Hentai search seeding', () => {
     localStorage.clear()
     sessionStorage.clear()
     searchMock.mockClear()
+    replaceMock.mockClear()
+    mockSearchParams.delete('tab')
+    mockSearchParams.delete('adv_open')
+    mockSearchParams.delete('minrating')
+    mockSearchParams.set('q', 'test')
   })
 
   it('seeds and shows search results when the URL carries a query', async () => {
@@ -119,5 +125,45 @@ describe('E-Hentai search seeding', () => {
         expect.anything(),
       ),
     )
+  })
+
+  it('applies a saved-search URL that changes while the page stays mounted', async () => {
+    const { default: Page } = await import('@/app/e-hentai/page')
+    mockSearchParams.delete('q')
+    const view = render(<Page />)
+
+    mockSearchParams.set('q', 'language:chinese')
+    mockSearchParams.set('adv_open', '1')
+    mockSearchParams.set('minrating', '5')
+    view.rerender(<Page />)
+
+    await waitFor(() =>
+      expect(searchMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          q: 'language:chinese',
+          advance: true,
+          min_rating: 5,
+        }),
+        expect.anything(),
+      ),
+    )
+    expect(screen.getByText('browse.minRating')).toBeInTheDocument()
+  })
+
+  it('clearing a search also clears its advanced filters', async () => {
+    const { default: Page } = await import('@/app/e-hentai/page')
+    mockSearchParams.set('q', 'language:chinese')
+    mockSearchParams.set('adv_open', '1')
+    mockSearchParams.set('minrating', '5')
+    render(<Page />)
+
+    await screen.findByText('ScrollResultGallery')
+    fireEvent.click(screen.getByRole('button', { name: 'browse.clearSearch' }))
+
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith('/e-hentai?tab=popular', { scroll: false }),
+    )
+    const urls = replaceMock.mock.calls.map(([url]) => String(url))
+    expect(urls.at(-1)).not.toMatch(/q=|adv_open=|minrating=/)
   })
 })

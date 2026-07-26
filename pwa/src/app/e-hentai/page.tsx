@@ -189,7 +189,6 @@ function BrowsePage() {
     if (typeof window !== 'undefined') localStorage.setItem(VIEW_MODE_KEY, m)
   }, [])
   const [colCount, setColCount] = useState(3)
-  const [showAdvanced, setShowAdvanced] = useState(state.filters.advancedOpen)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const favDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -443,16 +442,13 @@ function BrowsePage() {
   )
 
   const toggleAdvanced = useCallback(() => {
-    const next = !showAdvanced
-    setShowAdvanced(next)
-    actions.setFilter({ advancedOpen: next })
-  }, [showAdvanced, actions])
+    actions.setFilter({ advancedOpen: !filters.advancedOpen })
+  }, [actions, filters.advancedOpen])
 
   const clearSearch = useCallback(() => {
     setInputValue('')
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    actions.commitQuery('')
-    actions.setTab('popular')
+    actions.reset()
   }, [actions])
 
   const navigateToGallery = useCallback(
@@ -1270,10 +1266,10 @@ function BrowsePage() {
               className="flex items-center gap-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
             >
               {t('browse.advancedSearch')}
-              {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {filters.advancedOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
 
-            {showAdvanced && (
+            {filters.advancedOpen && (
               <div className="mt-2 bg-vault-card border border-vault-border rounded-lg p-4 space-y-4">
                 {/* Search in */}
                 <div>

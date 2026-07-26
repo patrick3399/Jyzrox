@@ -250,16 +250,25 @@ export function useEhBrowse() {
     router.replace(identityKey ? `/e-hentai?${identityKey}` : '/e-hentai', { scroll: false })
   }, [identityKey, router])
 
-  // React to an externally-cleared URL (e.g. tapping the nav link / double-tap reset
-  // navigates to bare /e-hentai while the page stays mounted): reset to the home tab
-  // and drop the snapshot. Guarded so our own popular-default URL writes don't loop.
+  // React to external URL changes while the page stays mounted (saved-search links,
+  // browser history, or tapping the active nav item). useReducer's initializer only
+  // reads the URL on mount, so without this sync a new non-empty identity could appear
+  // in the address bar while requests still used the previous filters.
   const searchStr = searchParams.toString()
   useEffect(() => {
-    if (searchStr !== '') return
-    if (queryKey(stateRef.current) === queryKey(initialState)) return
-    if (typeof window !== 'undefined') sessionStorage.removeItem(SNAPSHOT_KEY)
-    dispatch({ type: 'RESET' })
-  }, [searchStr])
+    const current = stateRef.current
+    if (searchStr === '') {
+      if (queryKey(current) === queryKey(initialState)) return
+      if (typeof window !== 'undefined') sessionStorage.removeItem(SNAPSHOT_KEY)
+      dispatch({ type: 'RESET' })
+      return
+    }
+
+    const identity = parseUrlToIdentity(new URLSearchParams(searchStr))
+    const next = { ...current, ...identity }
+    if (queryKey(current) === queryKey(next)) return
+    dispatchIdentityChange({ type: 'APPLY_IDENTITY', identity })
+  }, [dispatchIdentityChange, searchStr])
 
   // ── Snapshot persistence: continuous scroll capture + write on every exit.
   // MUST be a layout effect: on a push navigation Next resets window scroll in
