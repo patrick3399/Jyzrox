@@ -976,9 +976,67 @@ class TestProgressiveImporterEnsureGallery:
         with patch("worker.progressive.AsyncSessionLocal", fake_factory):
             await importer.ensure_gallery_from_url("https://www.testsite.org/gallery/12345", Path("/tmp/dest"))
 
-        # Path component "gallery" is used as source_id
-        assert importer.source_id == "gallery"
+        # Generic route prefixes cannot identify a remote gallery; the
+        # per-download destination is stable and collision-safe instead.
+        assert importer.source_id == "dest"
+        assert importer.title == "12345"
         assert importer.source is not None
+
+    async def test_distinct_urls_with_same_route_prefix_use_distinct_destination_ids(self):
+        """Generic route prefixes must not collapse separate URLs into one row."""
+        from worker.progressive import ProgressiveImporter
+
+        first_factory, _ = _make_mock_session_for_ensure(gallery_id=10)
+        first = ProgressiveImporter(db_job_id=None, user_id=None)
+        with patch("worker.progressive.AsyncSessionLocal", first_factory):
+            await first.ensure_gallery_from_url(
+                "https://unknown.example/gallery/111",
+                Path("/tmp/job-111"),
+            )
+
+        second_factory, _ = _make_mock_session_for_ensure(gallery_id=11)
+        second = ProgressiveImporter(db_job_id=None, user_id=None)
+        with patch("worker.progressive.AsyncSessionLocal", second_factory):
+            await second.ensure_gallery_from_url(
+                "https://unknown.example/gallery/222",
+                Path("/tmp/job-222"),
+            )
+
+        assert first.source == second.source == "unknown.example"
+        assert first.source_id == "job-111"
+        assert second.source_id == "job-222"
+        assert first.source_id != second.source_id
+        assert first.title == "111"
+        assert second.title == "222"
+
+    async def test_one_character_path_candidate_uses_destination_identity(self):
+        """One-character candidates are too collision-prone for source identity."""
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, _ = _make_mock_session_for_ensure(gallery_id=12)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.ensure_gallery_from_url("https://unknown.example/x/123", Path("/tmp/job-x"))
+
+        assert importer.source_id == "job-x"
+        assert importer.title == "123"
+
+    async def test_percent_encoded_route_candidate_uses_destination_identity(self):
+        """Percent encoding must not bypass generic route validation."""
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, _ = _make_mock_session_for_ensure(gallery_id=13)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.ensure_gallery_from_url(
+                "https://unknown.example/%67allery/333",
+                Path("/tmp/job-333"),
+            )
+
+        assert importer.source_id == "job-333"
+        assert importer.title == "333"
 
     async def test_ensure_gallery_from_url_on_eh_url_uses_gid_not_route_prefix(self):
         """Regression: e-hentai.org had no url_path_id_index, so /g/{gid}/{token}
