@@ -197,7 +197,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             # Batch query images for galleries in this chunk
             rows = (
                 await session.execute(
-                    select(Image.id, Image.gallery_id, Image.filename, Image.blob_sha256, Blob)
+                    select(Image.id, Image.gallery_id, Image.filename, Image.blob_sha256, Image.external_path, Blob)
                     .join(Blob, Blob.sha256 == Image.blob_sha256)
                     .where(Image.gallery_id.in_(chunk_gallery_ids))
                 )
@@ -207,11 +207,16 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             id_to_key = {g.id: key for key, g in gallery_by_key.items()}
 
             # Group DB rows by (source, source_id)
-            db_by_gallery: dict[tuple[str, str], dict[str, tuple[int, str, Blob]]] = {}
+            db_by_gallery: dict[tuple[str, str], dict[str, tuple[int, str, str | None, Blob]]] = {}
             for row in rows:
                 key = id_to_key.get(row.gallery_id)
                 if key:
-                    db_by_gallery.setdefault(key, {})[row.filename] = (row.id, row.blob_sha256, row.Blob)
+                    db_by_gallery.setdefault(key, {})[row.filename] = (
+                        row.id,
+                        row.blob_sha256,
+                        row.external_path,
+                        row.Blob,
+                    )
 
             # Determine which image IDs and blob shas to remove for this chunk
             dead_image_ids: list[int] = []
@@ -221,14 +226,20 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 disk_files = gallery_map[key]
                 gallery = gallery_by_key.get(key)
                 db_files = db_by_gallery.get(key, {})
-                for filename, (img_id, sha, blob) in db_files.items():
+                for filename, (img_id, sha, external_path, blob) in db_files.items():
                     if filename not in disk_files:
                         if gallery and gallery.import_mode == "link":
                             dead_image_ids.append(img_id)
                             dead_blob_shas.append(sha)
                         elif gallery and filename:
                             try:
-                                await create_library_symlink(gallery.source, gallery.source_id, filename, blob)
+                                await create_library_symlink(
+                                    gallery.source,
+                                    gallery.source_id,
+                                    filename,
+                                    blob,
+                                    external_path=external_path,
+                                )
                                 stats["repaired_links"] += 1
                             except Exception as exc:
                                 logger.warning(
@@ -342,7 +353,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             orphan_galleries = (await session.execute(select(Gallery).where(Gallery.id.in_(chunk_ids)))).scalars().all()
             orphan_rows = (
                 await session.execute(
-                    select(Image.gallery_id, Image.filename, Blob)
+                    select(Image.gallery_id, Image.filename, Image.external_path, Blob)
                     .join(Blob, Blob.sha256 == Image.blob_sha256)
                     .where(Image.gallery_id.in_(chunk_ids))
                 )
@@ -358,7 +369,13 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                     if not row.filename:
                         continue
                     try:
-                        await create_library_symlink(gallery.source, gallery.source_id, row.filename, row.Blob)
+                        await create_library_symlink(
+                            gallery.source,
+                            gallery.source_id,
+                            row.filename,
+                            row.Blob,
+                            external_path=row.external_path,
+                        )
                         stats["repaired_links"] += 1
                     except Exception as exc:
                         logger.warning(

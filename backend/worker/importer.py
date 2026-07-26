@@ -601,9 +601,17 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             if mode == "copy":
                 # Hardlink/copy into CAS; create library symlink
                 blob = await store_blob(f, sha256, session)
+                image_external_path = None
             else:
                 # Link mode: record external path, do not copy file
-                blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
+                image_external_path = str(f)
+                blob = await store_blob(
+                    f,
+                    sha256,
+                    session,
+                    storage="external",
+                    external_path=image_external_path,
+                )
 
             # Flush blob upsert before inserting image (FK constraint)
             await session.flush()
@@ -615,6 +623,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                     page_num=max_page + 1,
                     filename=f.name,
                     blob_sha256=sha256,
+                    external_path=image_external_path,
                     added_at=datetime.now(UTC),
                 )
                 .on_conflict_do_nothing()
@@ -627,7 +636,13 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 # New Image row created — increment blob ref_count.
                 await increment_ref_count(sha256, session)
                 # Symlink only for rows the DB actually represents (edge case #48)
-                await create_library_symlink(gallery_source, gallery_source_id, f.name, blob)
+                await create_library_symlink(
+                    gallery_source,
+                    gallery_source_id,
+                    f.name,
+                    blob,
+                    external_path=image_external_path,
+                )
                 processed += 1
                 max_page += 1
                 known_sha256s.add(sha256)

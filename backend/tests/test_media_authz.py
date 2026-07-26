@@ -26,6 +26,10 @@ async def _insert_blob(db_session, sha256: str, external_path: str) -> None:
         ),
         {"sha": sha256, "ext_path": external_path},
     )
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :ext_path)"),
+        {"sha": sha256, "ext_path": external_path},
+    )
     await db_session.commit()
 
 
@@ -44,7 +48,10 @@ async def _insert_gallery_with_image(
         await db_session.execute(text("SELECT id FROM galleries WHERE source_id = :sid"), {"sid": source_id})
     ).scalar_one()
     await db_session.execute(
-        text("INSERT INTO images (gallery_id, page_num, blob_sha256) VALUES (:gid, 1, :sha)"),
+        text(
+            "INSERT INTO images (gallery_id, page_num, blob_sha256, external_path) "
+            "SELECT :gid, 1, sha256, external_path FROM blobs WHERE sha256 = :sha"
+        ),
         {"gid": gid, "sha": blob_sha256},
     )
     await db_session.commit()

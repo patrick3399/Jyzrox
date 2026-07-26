@@ -5,12 +5,12 @@ import shutil
 from pathlib import Path
 from urllib.parse import quote
 
-from sqlalchemy import update
+from sqlalchemy import case, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
-from db.models import Blob
+from db.models import Blob, BlobLocation
 from services.media_formats import media_type_for_extension
 
 THUMBNAIL_SIZES = (160, 360, 720)
@@ -41,7 +41,7 @@ def library_url(external_path: str) -> str:
     the ``<img src>`` request at, so the image never loads (roughly half of the
     shamakho library filenames carry a ``#``). Percent-encode every segment so
     the URL the browser receives is well-formed; ``media_authz`` unquotes it
-    back to match ``Blob.external_path`` and nginx's ``alias`` decodes it for
+    back to match the Image-bound external path and nginx's ``alias`` decodes it for
     the filesystem lookup, so the round-trip is preserved.
     """
     return quote(external_path.replace("/mnt/", "/media/libraries/", 1), safe="/")
@@ -101,9 +101,13 @@ def ensure_library_dir(source: str, source_id: str) -> Path:
     return d
 
 
-def resolve_blob_path(blob: Blob) -> Path:
-    """Return the actual filesystem path for a blob (CAS or external)."""
+def resolve_blob_path(blob: Blob, external_path: str | None = None) -> Path:
+    """Return the filesystem path for a blob or a specific image binding."""
+    if external_path:
+        return Path(external_path)
     if blob.storage == "external" and blob.external_path:
+        # Compatibility fallback for callers that do not represent one Image.
+        # New image-bound reads pass ``external_path`` explicitly.
         return Path(blob.external_path)
     return cas_path(blob.sha256, blob.extension)
 
@@ -161,6 +165,9 @@ async def store_blob(
 
     Returns the Blob record.
     """
+    if storage == "external" and not external_path:
+        raise ValueError("external_path is required for external blob storage")
+
     ext = file_path.suffix.lower()  # e.g., '.jpg'
     file_size = file_path.stat().st_size
 
@@ -188,15 +195,14 @@ async def store_blob(
         )
         .on_conflict_do_update(
             index_elements=["sha256"],
-            # Refresh storage + external_path so a re-import after the source
-            # folder moved heals the stale path (edge case #43): blobs are keyed
-            # by sha256, so without this the first path stored for a hash would
-            # win forever and remove + re-import could never fix it. ref_count is
-            # deliberately NOT updated here — duplicate re-imports must not
-            # inflate it (callers increment only when an Image row is inserted).
+            # CAS is the durable representation when it exists. External paths
+            # are recorded independently below and bound to Image rows; the
+            # legacy scalar path must never be overwritten last-writer-wins.
             set_={
-                "storage": pg_insert(Blob).excluded.storage,
-                "external_path": pg_insert(Blob).excluded.external_path,
+                "storage": case(
+                    (pg_insert(Blob).excluded.storage == "cas", "cas"),
+                    else_=Blob.storage,
+                ),
             },
         )
         .returning(Blob)
@@ -204,6 +210,14 @@ async def store_blob(
 
     result = await session.execute(stmt)
     blob = result.scalar_one()
+
+    if storage == "external" and external_path is not None:
+        location_stmt = (
+            pg_insert(BlobLocation)
+            .values(blob_sha256=sha256, external_path=external_path)
+            .on_conflict_do_nothing(index_elements=["blob_sha256", "external_path"])
+        )
+        await session.execute(location_stmt)
 
     # Hardlink into CAS if not external, at the canonical-extension path
     if storage == "cas":
@@ -231,7 +245,14 @@ async def store_blob(
     return blob
 
 
-async def create_library_symlink(source: str, source_id: str, filename: str, blob: Blob) -> None:
+async def create_library_symlink(
+    source: str,
+    source_id: str,
+    filename: str,
+    blob: Blob,
+    *,
+    external_path: str | None = None,
+) -> None:
     """Create a symlink in /data/library/{source}/{safe_source_id}/ pointing to the blob's actual file."""
     try:
         link_dir = ensure_library_dir(source, source_id)
@@ -241,7 +262,7 @@ async def create_library_symlink(source: str, source_id: str, filename: str, blo
         await push_system_alert(str(exc))
         raise
 
-    target = resolve_blob_path(blob)
+    target = resolve_blob_path(blob, external_path)
     link = link_dir / filename
 
     # Remove existing symlink if any
@@ -256,7 +277,7 @@ async def create_library_symlink(source: str, source_id: str, filename: str, blo
     # browsed from the host (file browser / Samba). External blobs live outside
     # the data volume and rely on an identical bind-mount path, so they keep an
     # absolute target.
-    if blob.storage == "external" and blob.external_path:
+    if external_path or (blob.storage == "external" and blob.external_path):
         link.symlink_to(target)
     else:
         link.symlink_to(os.path.relpath(target, link_dir))

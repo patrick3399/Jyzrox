@@ -38,7 +38,7 @@ from sqlalchemy import select
 
 from core.auth import gallery_access_filter
 from core.database import async_session
-from db.models import Blob, Gallery, Image
+from db.models import Gallery, Image
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,7 @@ async def _authorize_libraries(auth: dict, uri: str) -> bool:
         stmt = (
             select(Gallery.id)
             .join(Image, Image.gallery_id == Gallery.id)
-            .join(Blob, Blob.sha256 == Image.blob_sha256)
-            .where(Blob.external_path == mnt_path, gallery_access_filter(auth))
+            .where(Image.external_path == mnt_path, gallery_access_filter(auth))
             .limit(1)
         )
         allowed = (await session.execute(stmt)).first() is not None

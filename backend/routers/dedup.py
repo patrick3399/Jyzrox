@@ -238,6 +238,19 @@ async def keep_blob(
                 detail=f"Discard reference count changed: expected {req.expected_discard_refs}, found {discard_refs}",
             )
 
+        external_refs = (
+            await session.execute(
+                select(func.count())
+                .select_from(Image)
+                .where(Image.blob_sha256 == discard_sha, Image.external_path.is_not(None))
+            )
+        ).scalar_one()
+        if external_refs:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot remap a blob with image-bound external locations",
+            )
+
         # Re-point images from discard_sha to keep_sha
         remap_result = await session.execute(
             update(Image).where(Image.blob_sha256 == discard_sha).values(blob_sha256=keep_sha)

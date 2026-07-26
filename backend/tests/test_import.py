@@ -943,12 +943,13 @@ class TestLocalImportJob:
             return next(sessions)
 
         mock_store = AsyncMock(return_value=mock_blob)
+        mock_symlink = AsyncMock()
         ctx = _make_ctx()
 
         with (
             patch("worker.importer.AsyncSessionLocal", side_effect=_factory),
             patch("worker.importer.store_blob", mock_store),
-            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
             patch("worker.importer.settings") as mock_settings,
@@ -1001,12 +1002,13 @@ class TestLocalImportJob:
             return next(sessions)
 
         mock_store = AsyncMock(return_value=mock_blob)
+        mock_symlink = AsyncMock()
         ctx = _make_ctx()
 
         with (
             patch("worker.importer.AsyncSessionLocal", side_effect=_factory),
             patch("worker.importer.store_blob", mock_store),
-            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
             patch("worker.importer.settings") as mock_settings,
@@ -1018,6 +1020,14 @@ class TestLocalImportJob:
         mock_store.assert_called_once()
         call_kwargs = mock_store.call_args[1] if mock_store.call_args[1] else {}
         assert call_kwargs.get("storage") == "external"
+        assert call_kwargs.get("external_path") == str(img)
+        image_insert = next(
+            call.args[0]
+            for call in mock_sess3.execute.await_args_list
+            if getattr(getattr(call.args[0], "table", None), "name", None) == "images"
+        )
+        assert image_insert.compile().params["external_path"] == str(img)
+        assert mock_symlink.await_args.kwargs["external_path"] == str(img)
 
     async def test_excluded_blob_skipped_in_local_import(self, tmp_path):
         """Files matching excluded_blobs sha256 should be skipped during local import."""

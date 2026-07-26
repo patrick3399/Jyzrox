@@ -144,7 +144,7 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
                 blob = img.blob
                 if not blob:
                     continue
-                src = resolve_blob_path(blob)
+                src = resolve_blob_path(blob, img.external_path)
                 if not src.exists() or src.suffix.lower() not in _IMAGE_EXTS:
                     continue
 

@@ -32,8 +32,8 @@ class BatchSearchRequest(BaseModel):
     min_similarity: float = 80.0
 
 
-def _image_bytes(blob: Blob) -> bytes:
-    path = resolve_blob_path(blob)
+def _image_bytes(blob: Blob, external_path: str | None = None) -> bytes:
+    path = resolve_blob_path(blob, external_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Image file not found on disk")
     if path.stat().st_size <= _MAX_UPLOAD_SIZE:
@@ -69,8 +69,8 @@ async def saucenao_search(body: SearchRequest, auth: dict = Depends(require_role
     if not api_key:
         raise HTTPException(status_code=400, detail="saucenao_not_configured")
 
-    _, blob, _ = await _load_image(body.image_id, auth)
-    image_bytes = _image_bytes(blob)
+    image, blob, _ = await _load_image(body.image_id, auth)
+    image_bytes = _image_bytes(blob, image.external_path)
 
     try:
         results = await search_by_image(
@@ -107,7 +107,11 @@ async def saucenao_batch(body: BatchSearchRequest, auth: dict = Depends(require_
     for image_id in image_ids:
         try:
             image, blob, gallery = await _load_image(image_id, auth)
-            results = await search_by_image(_image_bytes(blob), api_key, filename=f"{blob.sha256}{blob.extension}")
+            results = await search_by_image(
+                _image_bytes(blob, image.external_path),
+                api_key,
+                filename=f"{blob.sha256}{blob.extension}",
+            )
             best = results[0] if results else None
             applied = False
             if body.auto_fill_source and best and best["source_url"] and best["similarity"] >= body.min_similarity:

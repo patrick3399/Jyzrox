@@ -7,6 +7,8 @@ from sqlalchemy import (
     Boolean,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     Integer,
     LargeBinary,
     SmallInteger,
@@ -213,20 +215,45 @@ class Blob(Base):
     occurrence_revision: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     extension: Mapped[str] = mapped_column(Text, nullable=False)
     storage: Mapped[str] = mapped_column(Text, default="cas")
+    # Compatibility fallback only. Image.external_path + BlobLocation are the
+    # authoritative external-location binding (HR-004 / ADR 0007).
     external_path: Mapped[str | None] = mapped_column(Text)
     ref_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     thumbhash: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class BlobLocation(Base):
+    """One external filesystem location containing a blob's bytes."""
+
+    __tablename__ = "blob_locations"
+
+    blob_sha256: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("blobs.sha256", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    external_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Image(Base):
     __tablename__ = "images"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["blob_sha256", "external_path"],
+            ["blob_locations.blob_sha256", "blob_locations.external_path"],
+            name="fk_images_blob_location",
+        ),
+        Index("idx_images_external_path", "external_path", postgresql_where=text("external_path IS NOT NULL")),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
     page_num: Mapped[int] = mapped_column(Integer, nullable=False)
     filename: Mapped[str | None] = mapped_column(Text)
     blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
+    external_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

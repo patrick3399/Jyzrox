@@ -6,11 +6,13 @@ so no real filesystem layout is required. The async `decrement_ref_count` test
 uses an AsyncMock session and verifies `session.execute` is called.
 """
 
+import hashlib
 import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import func, select, text
 
 # Consistent 64-character hex sha256 used throughout
 SHA = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
@@ -372,13 +374,11 @@ class TestThumbUrl:
 
 
 class TestStoreBlobConflict:
-    """Regression tests for store_blob() upsert-on-conflict behaviour (edge case #43).
+    """Regression tests for external blob-location upserts (HR-004).
 
-    blobs is keyed by sha256. For external (link-mode) blobs the on-conflict path
-    must REFRESH external_path, otherwise the first path stored for a hash wins
-    forever: after the source folder moves, removing + re-importing the gallery
-    reuses the surviving blob row and the stale path persists. ref_count must
-    still NOT be touched on conflict (duplicate re-imports must not inflate it).
+    blobs is keyed by sha256, while external locations are one-to-many. A new
+    location must be inserted without overwriting the legacy scalar path, and
+    ref_count must not be touched by the blob conflict update.
     """
 
     async def _capture_upsert_sql(self, tmp_path, *, storage, external_path):
@@ -391,10 +391,10 @@ class TestStoreBlobConflict:
         f = tmp_path / "img.jpg"
         f.write_bytes(b"data")
 
-        captured = {}
+        captured = []
 
         async def fake_execute(stmt):
-            captured["stmt"] = stmt
+            captured.append(stmt)
             res = MagicMock()
             res.scalar_one.return_value = MagicMock()
             return res
@@ -405,24 +405,119 @@ class TestStoreBlobConflict:
         with patch("services.cas.settings", _mock_settings()):
             await store_blob(f, SHA, session, storage=storage, external_path=external_path)
 
-        return str(captured["stmt"].compile(dialect=postgresql.dialect())).lower()
+        return [str(stmt.compile(dialect=postgresql.dialect())).lower() for stmt in captured]
 
-    async def test_external_conflict_refreshes_external_path(self, tmp_path):
-        """On conflict, external blobs must update external_path so a re-import
-        after the source folder moved heals the stale path."""
+    async def test_external_conflict_records_location_without_overwriting_scalar(self, tmp_path):
         sql = await self._capture_upsert_sql(tmp_path, storage="external", external_path="/mnt/new/img.jpg")
 
-        assert "on conflict" in sql
-        set_clause = sql.split("do update set", 1)[1].split("returning", 1)[0]
-        assert "external_path" in set_clause, f"DO UPDATE SET must refresh external_path, got: {set_clause!r}"
+        assert len(sql) == 2
+        blob_set_clause = sql[0].split("do update set", 1)[1].split("returning", 1)[0]
+        assert "external_path" not in blob_set_clause
+        assert "insert into blob_locations" in sql[1]
+        assert "on conflict (blob_sha256, external_path) do nothing" in sql[1]
 
     async def test_conflict_never_touches_ref_count(self, tmp_path):
         """The on-conflict update must never write ref_count (would inflate it on
         duplicate re-imports)."""
         sql = await self._capture_upsert_sql(tmp_path, storage="external", external_path="/mnt/new/img.jpg")
 
-        set_clause = sql.split("do update set", 1)[1].split("returning", 1)[0]
+        set_clause = sql[0].split("do update set", 1)[1].split("returning", 1)[0]
         assert "ref_count" not in set_clause, f"DO UPDATE SET must not touch ref_count, got: {set_clause!r}"
+
+
+def test_identical_external_files_keep_independent_image_locations(tmp_path):
+    """Removing either same-content source path must not redirect the other image."""
+    from db.models import Blob, BlobLocation, Image
+    from services.cas import resolve_blob_path
+
+    first_path = tmp_path / "first" / "page.jpg"
+    second_path = tmp_path / "second" / "page.jpg"
+    first_path.parent.mkdir()
+    second_path.parent.mkdir()
+    payload = b"identical external bytes"
+    first_path.write_bytes(payload)
+    second_path.write_bytes(payload)
+    blob = Blob(
+        sha256=SHA,
+        file_size=len(payload),
+        extension=".jpg",
+        storage="external",
+        external_path=str(first_path),
+    )
+    locations = [
+        BlobLocation(blob_sha256=SHA, external_path=str(first_path)),
+        BlobLocation(blob_sha256=SHA, external_path=str(second_path)),
+    ]
+    images = [
+        Image(blob_sha256=SHA, external_path=str(first_path)),
+        Image(blob_sha256=SHA, external_path=str(second_path)),
+    ]
+    for image in images:
+        image.blob = blob
+
+    assert {(location.blob_sha256, location.external_path) for location in locations} == {
+        (SHA, str(first_path)),
+        (SHA, str(second_path)),
+    }
+
+    first_path.unlink()
+    assert not resolve_blob_path(images[0].blob, images[0].external_path).exists()
+    assert resolve_blob_path(images[1].blob, images[1].external_path).read_bytes() == payload
+
+    first_path.write_bytes(payload)
+    second_path.unlink()
+    assert resolve_blob_path(images[0].blob, images[0].external_path).read_bytes() == payload
+    assert not resolve_blob_path(images[1].blob, images[1].external_path).exists()
+
+
+async def test_store_blob_persists_multiple_external_locations_and_bindings(db_session, tmp_path):
+    from db.models import BlobLocation, Image
+    from services.cas import store_blob
+
+    payload = b"shared bytes"
+    sha256 = hashlib.sha256(payload).hexdigest()
+    paths = [tmp_path / "one" / "page.jpg", tmp_path / "two" / "page.jpg"]
+    for path in paths:
+        path.parent.mkdir()
+        path.write_bytes(payload)
+
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, download_status, import_mode) VALUES "
+            "('local', 'multi-location-a', 'A', 'complete', 'link'), "
+            "('local', 'multi-location-b', 'B', 'complete', 'link')"
+        )
+    )
+    gallery_ids = (
+        await db_session.execute(
+            text(
+                "SELECT id FROM galleries "
+                "WHERE source_id IN ('multi-location-a', 'multi-location-b') ORDER BY source_id"
+            )
+        )
+    ).scalars().all()
+
+    for gallery_id, path in zip(gallery_ids, paths, strict=True):
+        await store_blob(path, sha256, db_session, storage="external", external_path=str(path))
+        db_session.add(
+            Image(
+                gallery_id=gallery_id,
+                page_num=1,
+                filename=path.name,
+                blob_sha256=sha256,
+                external_path=str(path),
+            )
+        )
+    await db_session.commit()
+
+    location_count = (
+        await db_session.execute(select(func.count()).select_from(BlobLocation).where(BlobLocation.blob_sha256 == sha256))
+    ).scalar_one()
+    image_paths = set(
+        (await db_session.execute(select(Image.external_path).where(Image.blob_sha256 == sha256))).scalars().all()
+    )
+    assert location_count == 2
+    assert image_paths == {str(path) for path in paths}
 
 
 # ---------------------------------------------------------------------------

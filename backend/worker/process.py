@@ -50,7 +50,7 @@ async def process_job(
         if original is None:
             raise ValueError("Image is no longer active")
         original_sha256 = original.blob_sha256
-        input_path = resolve_blob_path(original.blob)
+        input_path = resolve_blob_path(original.blob, original.external_path)
 
     if not input_path.is_file():
         raise FileNotFoundError(f"Image blob is missing: {original_sha256}")

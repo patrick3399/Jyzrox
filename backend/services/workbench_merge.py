@@ -307,6 +307,7 @@ async def _copy_images(
                     page_num=next_page,
                     filename=source_image.filename,
                     blob_sha256=source_image.blob_sha256,
+                    external_path=source_image.external_path,
                     tags_array=list(source_image.tags_array or []),
                     added_at=source_image.added_at,
                     visibility=source_image.visibility,

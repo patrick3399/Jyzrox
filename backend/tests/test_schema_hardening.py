@@ -15,6 +15,14 @@ def test_init_sql_has_gallery_source_pages_contract():
     assert "chk_galleries_source_pages_nonnegative" in content
 
 
+def test_init_sql_binds_images_to_blob_locations():
+    content = _INIT_SQL.read_text()
+    assert "CREATE TABLE IF NOT EXISTS blob_locations" in content
+    assert "PRIMARY KEY (blob_sha256, external_path)" in content
+    assert "CONSTRAINT fk_images_blob_location" in content
+    assert "idx_images_external_path" in content
+
+
 # ---------------------------------------------------------------------------
 # edge case #144 — read_progress single-column lookup indexes
 # ---------------------------------------------------------------------------

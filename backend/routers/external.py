@@ -367,7 +367,7 @@ async def get_image_file(
     if not row or not row.blob:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    file_path = resolve_blob_path(row.blob)
+    file_path = resolve_blob_path(row.blob, row.external_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 

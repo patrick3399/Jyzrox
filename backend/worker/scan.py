@@ -290,7 +290,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                             images_to_delete.append(img.id)
                             removed += 1
                             continue
-                        src = resolve_blob_path(blob)
+                        src = resolve_blob_path(blob, img.external_path)
                         if not src.exists():
                             logger.warning(
                                 "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
@@ -485,7 +485,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 await session.delete(img)
                 removed += 1
                 continue
-            src = resolve_blob_path(blob)
+            src = resolve_blob_path(blob, img.external_path)
             if not src.exists():
                 logger.warning(
                     "[rescan_gallery] gallery_id=%d image_id=%d missing: %s",
@@ -562,10 +562,24 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                     continue
                 # New file found on disk that is not in the DB.
                 if gallery.import_mode == "link":
-                    blob = await store_blob(fpath, file_hash, session, storage="external", external_path=str(fpath))
+                    image_external_path = str(fpath)
+                    blob = await store_blob(
+                        fpath,
+                        file_hash,
+                        session,
+                        storage="external",
+                        external_path=image_external_path,
+                    )
                 else:
+                    image_external_path = None
                     blob = await store_blob(fpath, file_hash, session)
-                await create_library_symlink(gallery.source, gallery.source_id, fpath.name, blob)
+                await create_library_symlink(
+                    gallery.source,
+                    gallery.source_id,
+                    fpath.name,
+                    blob,
+                    external_path=image_external_path,
+                )
                 await session.flush()
                 max_page += 1
                 stmt = (
@@ -575,6 +589,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                         page_num=max_page,
                         filename=fpath.name,
                         blob_sha256=file_hash,
+                        external_path=image_external_path,
                     )
                     .on_conflict_do_nothing()
                     .returning(Image.id)
@@ -821,9 +836,8 @@ async def rescan_by_path_job(ctx: dict, dir_path: str, watcher_origin: bool = Fa
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(Image.gallery_id)
-                .join(Blob, Image.blob_sha256 == Blob.sha256)
                 .where(
-                    Blob.external_path.like(
+                    Image.external_path.like(
                         dir_path.replace("%", "\\%").replace("_", "\\_") + "%",
                         escape="\\",
                     )

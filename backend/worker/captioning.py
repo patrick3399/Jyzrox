@@ -59,7 +59,7 @@ async def caption_job(ctx: dict, dataset_id: int, engine_id: str, actor_user_id:
         generated = 0
         failed = 0
         for image in images:
-            source = resolve_blob_path(image.blob)
+            source = resolve_blob_path(image.blob, image.external_path)
             if not source.is_file() or source.suffix.lower() not in _IMAGE_EXTS:
                 failed += 1
                 continue

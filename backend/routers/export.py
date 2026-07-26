@@ -116,7 +116,7 @@ async def export_dataset(
                 page_num=image.page_num,
                 filename=image.filename or f"image_{image.id}{blob.extension}",
                 sha256=blob.sha256,
-                path=resolve_blob_path(blob),
+                path=resolve_blob_path(blob, image.external_path),
                 extension=blob.extension,
                 gallery_source=gallery.source,
                 gallery_source_id=gallery.source_id,
@@ -215,7 +215,7 @@ async def export_kohya(
     def _file_path(img):
         if not img.blob:
             return None
-        p = resolve_blob_path(img.blob)
+        p = resolve_blob_path(img.blob, img.external_path)
         return p if p.exists() else None
 
     # Check total size before creating ZIP (limit: 2 GB)

@@ -418,7 +418,12 @@ class TestReconciliationJob:
         missing_gallery.tags_array = []
         missing_gallery.posted_at = None
         blob = MagicMock()
-        image_row = MagicMock(gallery_id=2, filename="page.jpg", Blob=blob)
+        image_row = MagicMock(
+            gallery_id=2,
+            filename="page.jpg",
+            external_path="/mnt/source/page.jpg",
+            Blob=blob,
+        )
 
         execute_returns = [
             _make_result_with_rows([existing_gallery]),  # Phase 1 gallery lookup
@@ -445,7 +450,13 @@ class TestReconciliationJob:
         assert result["status"] == "done"
         assert result["removed_galleries"] == 0
         assert result["repaired_galleries"] == 1
-        symlink_spy.assert_awaited_once_with("src_a", "missing", "page.jpg", blob)
+        symlink_spy.assert_awaited_once_with(
+            "src_a",
+            "missing",
+            "page.jpg",
+            blob,
+            external_path="/mnt/source/page.jpg",
+        )
         sidecar_spy.assert_awaited_once()
 
     async def test_orphan_blobs_deleted_from_cas_and_db(self, tmp_path):
@@ -936,6 +947,7 @@ class TestPhase1SpecialCharSymlinkRepair:
         img_row.gallery_id = 7
         img_row.filename = "002.jpg"  # in DB but missing on disk → needs repair
         img_row.blob_sha256 = "aa" * 32
+        img_row.external_path = None
         img_row.Blob = blob
 
         execute_returns = [
@@ -962,7 +974,13 @@ class TestPhase1SpecialCharSymlinkRepair:
             result = await reconciliation_job(_make_ctx())
 
         assert result["status"] == "done"
-        symlink_spy.assert_awaited_once_with("local", "artist/2025/title", "002.jpg", blob)
+        symlink_spy.assert_awaited_once_with(
+            "local",
+            "artist/2025/title",
+            "002.jpg",
+            blob,
+            external_path=None,
+        )
         assert result["repaired_links"] == 1
 
 

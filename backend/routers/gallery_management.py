@@ -245,7 +245,7 @@ async def public_share_image(token: str, image_id: int, db: AsyncSession = Depen
     if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
     image, blob = row
-    path = resolve_blob_path(blob)
+    path = resolve_blob_path(blob, image.external_path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Image file not found")
     return FileResponse(path, filename=image.filename or path.name, content_disposition_type="inline")

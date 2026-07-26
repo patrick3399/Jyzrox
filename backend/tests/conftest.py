@@ -458,6 +458,14 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS blob_locations (
+        blob_sha256 TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+        external_path TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (blob_sha256, external_path)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS gallery_source_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
@@ -480,6 +488,7 @@ _SQLITE_SCHEMA = [
         page_num INTEGER NOT NULL,
         filename TEXT,
         blob_sha256 TEXT REFERENCES blobs(sha256),
+        external_path TEXT,
         tags_array TEXT DEFAULT '[]',
         caption TEXT,
         added_at TIMESTAMP,
@@ -490,7 +499,9 @@ _SQLITE_SCHEMA = [
         source_seen_at TIMESTAMP,
         hidden_at TIMESTAMP,
         replaced_by_image_id INTEGER REFERENCES images(id),
-        source_item_row_id INTEGER REFERENCES gallery_source_items(id)
+        source_item_row_id INTEGER REFERENCES gallery_source_items(id),
+        FOREIGN KEY (blob_sha256, external_path)
+            REFERENCES blob_locations(blob_sha256, external_path)
     )
     """,
     """
