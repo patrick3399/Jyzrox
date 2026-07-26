@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     # Container memory alert threshold (percent of the cgroup limit); used by
     # the worker memory_monitor cron and the api memory watch (STAB-011)
     memory_alert_pct: float = 85.0
+    # Redis alert threshold as a percentage of its configured maxmemory. Redis
+    # stores control-plane state, so pressure must be visible before writes fail.
+    redis_memory_alert_pct: float = 85.0
     # api self-sampling cadence (services/memory_watch.py); floor is 30s
     memory_watch_interval_sec: int = 300
     # Log top Python allocation sites each api memory sample (diagnosis only)
