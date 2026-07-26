@@ -360,6 +360,102 @@ async def test_create_viewer_forbidden(viewer_client, novel_repo):
     assert r.status_code == 403
 
 
+async def _edit(client, path, content):
+    """Save `content` over `path` through the API and return the new HEAD."""
+    head = (await client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    r = await client.put("/api/novels/file", json={"path": path, "content": content, "base_sha": head})
+    assert r.status_code == 200
+    return r.json()["head"]
+
+
+async def test_revert_restores_content_of_an_older_revision(member_client, novel_repo):
+    """Revert writes the historical content forward as a NEW commit; history is
+    not rewritten, so the reverted-away version stays in the log."""
+    path = "作品A/第01章.md"
+    first_read = (await member_client.get(f"/api/novels/file?path={path}")).json()
+    original, first_rev = first_read["content"], first_read["base_sha"]
+    bad_head = await _edit(member_client, path, "壞掉的改寫\n")
+
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": path, "rev": first_rev, "base_sha": bad_head},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["reverted_to"] == first_rev
+    assert (await member_client.get(f"/api/novels/file?path={path}")).json()["content"] == original
+
+    commits = (await member_client.get(f"/api/novels/file/history?path={path}")).json()["commits"]
+    assert commits[0]["message"].startswith("revert:")
+    assert bad_head in [c["hash"] for c in commits]
+
+
+async def test_revert_viewer_forbidden(viewer_client, novel_repo):
+    """Revert rewrites file content → member-only, like every other write."""
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": head, "base_sha": head},
+    )
+    assert r.status_code == 403
+
+
+async def test_revert_with_stale_base_sha_returns_409(member_client, novel_repo):
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": head, "base_sha": "0000000"},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "stale base_sha"
+
+
+async def test_revert_to_locked_repo_returns_409(member_client, novel_repo):
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    (novel_repo["work"] / ".jyzrox-locked").write_text("conflict\n", encoding="utf-8")
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": head, "base_sha": head},
+    )
+    assert r.status_code == 409
+    assert "locked" in str(r.json()["detail"])
+
+
+async def test_revert_rejects_arg_injection_and_traversal(member_client, novel_repo, tmp_path):
+    """`rev` is glued to the path for `git show rev:path` — a `--option` rev must
+    be rejected (400), never write an arbitrary file."""
+    sentinel = tmp_path / "pwned.txt"
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": f"--output={sentinel}", "base_sha": head},
+    )
+    assert r.status_code == 400
+    assert not sentinel.exists()
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "../../etc/passwd", "rev": head, "base_sha": head},
+    )
+    assert r.status_code == 400
+
+
+async def test_file_diff_with_base_compares_two_revisions(member_client, novel_repo):
+    """Two-version compare: base=<older rev> diffs the pair, not rev vs its parent."""
+    path = "作品A/第01章.md"
+    first = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    second = await _edit(member_client, path, "第二版\n")
+    r = await member_client.get(f"/api/novels/file/diff?path={path}&rev={second}&base={first}")
+    assert r.status_code == 200
+    assert "+第二版" in r.json()["diff"]
+
+
+async def test_file_diff_rejects_arg_injection_in_base(viewer_client, novel_repo, tmp_path):
+    sentinel = tmp_path / "pwned.txt"
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.get(f"/api/novels/file/diff?path=作品A/第01章.md&rev={head}&base=--output={sentinel}")
+    assert r.status_code == 400
+    assert not sentinel.exists()
+
+
 async def test_reset_forbidden_for_member(member_client, novel_repo):
     # Two clients cannot coexist (they share _app.dependency_overrides), so the
     # member and admin cases are separate tests.

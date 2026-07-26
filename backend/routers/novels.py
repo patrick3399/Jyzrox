@@ -130,11 +130,17 @@ async def file_history(path: str = Query(...), _: dict = Depends(require_auth)):
 
 
 @router.get("/file/diff")
-async def file_diff(path: str = Query(...), rev: str = Query(...), _: dict = Depends(require_auth)):
+async def file_diff(
+    path: str = Query(...),
+    rev: str = Query(...),
+    base: str | None = Query(None),
+    _: dict = Depends(require_auth),
+):
+    """Diff of `rev` against its parent, or against `base` when given."""
     repo = _repo()
     try:
         novel_fs.safe_repo_path(repo, path)
-        return {"diff": await novel_git.diff_file(repo, path, rev)}
+        return {"diff": await novel_git.diff_file(repo, path, rev, base=base)}
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except novel_git.NovelGitError as e:
@@ -225,6 +231,32 @@ async def _with_git_lock(coro_factory):
         await release_lock(r, _GIT_LOCK, token)
 
 
+async def _assert_writable(repo: str, path: str, base_sha: str | None) -> None:
+    """Pre-write guard for every mutating endpoint. MUST run under the git lock:
+    checking before taking it is a lost-update TOCTOU (a commit could land
+    between the check and the write).
+
+    `base_sha=None` means "create": a brand-new file has no base revision to be
+    stale against, so its only invariant is that the path is free.
+    """
+    st = await novel_git.status(repo)
+    if st["locked"]:
+        raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
+    if base_sha is None:
+        if novel_fs.file_exists(repo, path):
+            raise HTTPException(status_code=409, detail={"error": "file exists"})
+        return
+    if st["head"] != base_sha:
+        try:
+            current = novel_fs.read_file(repo, path)
+        except FileNotFoundError:
+            current = ""
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
+        )
+
+
 @router.put("/file")
 async def write_file(body: WriteBody, auth: dict = Depends(_member)):
     repo = _repo()
@@ -237,25 +269,7 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
     msg = body.message or f"edit: {body.path}"
 
     async def _do():
-        # The locked/base_sha check MUST run under the lock: checking before it
-        # is a lost-update TOCTOU (a commit could land between check and write).
-        st = await novel_git.status(repo)
-        if st["locked"]:
-            raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
-        if body.create:
-            # A create's only invariant is that the path is free — no base_sha.
-            # Checked under the git lock so a concurrent create can't slip in.
-            if novel_fs.file_exists(repo, body.path):
-                raise HTTPException(status_code=409, detail={"error": "file exists"})
-        elif st["head"] != body.base_sha:
-            try:
-                current = novel_fs.read_file(repo, body.path)
-            except FileNotFoundError:
-                current = ""
-            raise HTTPException(
-                status_code=409,
-                detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
-            )
+        await _assert_writable(repo, body.path, None if body.create else body.base_sha)
         novel_fs.write_file(repo, body.path, body.content)
         return await novel_git.commit_and_push(repo, body.path, msg)
 
@@ -273,6 +287,54 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
     )
     await _enqueue_reindex()
     return result
+
+
+class RevertBody(BaseModel):
+    path: str
+    rev: str
+    base_sha: str
+    message: str | None = None
+
+
+@router.post("/file/revert")
+async def revert_file(body: RevertBody, auth: dict = Depends(_member)):
+    """Restore one file to its content at `rev` as a NEW commit.
+
+    History is never rewritten: the revert is an ordinary edit whose content
+    comes from git instead of the client, so it goes through the same lock,
+    staleness guard and commit+push path as PUT /file.
+    """
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, body.path)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    msg = body.message or f"revert: {body.path} to {body.rev[:7]}"
+
+    async def _do():
+        await _assert_writable(repo, body.path, body.base_sha)
+        content = await novel_git.file_at_rev(repo, body.path, body.rev)
+        novel_fs.write_file(repo, body.path, content)
+        return await novel_git.commit_and_push(repo, body.path, msg)
+
+    try:
+        result = await _with_git_lock(_do)
+    except novel_git.NovelLocked:
+        raise HTTPException(status_code=409, detail="conflict; repo locked; resolve on desktop")
+    except novel_git.NovelGitError as e:
+        # Bad rev, or the file did not exist at that revision — caller error.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await audit.log_audit(auth["user_id"], "novel.revert", f"{body.path}@{body.rev}")
+    await events.emit_safe(
+        events.EventType.NOVEL_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="novel",
+        resource_id=body.path,
+    )
+    await _enqueue_reindex()
+    return {**result, "reverted_to": body.rev}
 
 
 @router.post("/sync")

@@ -93,7 +93,7 @@ export default function NovelChapterPage() {
           onCancel={() => setEditing(false)}
         />
       ) : showHistory ? (
-        <HistoryPanel path={path} />
+        <HistoryPanel path={path} canEdit={canEdit} />
       ) : (
         <Reader path={path} canEdit={canEdit} />
       )}

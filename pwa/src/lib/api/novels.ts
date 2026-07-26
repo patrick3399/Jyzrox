@@ -165,8 +165,16 @@ export const novels = {
   search: (q: string) => apiFetch<{ hits: NovelSearchHit[] }>(`/api/novels/search${qs({ q })}`),
   history: (path: string) =>
     apiFetch<{ commits: NovelCommit[] }>(`/api/novels/file/history${qs({ path })}`),
-  diff: (path: string, rev: string) =>
-    apiFetch<{ diff: string }>(`/api/novels/file/diff${qs({ path, rev })}`),
+  // `base` compares two arbitrary revisions; omitted → rev against its parent.
+  diff: (path: string, rev: string, base?: string) =>
+    apiFetch<{ diff: string }>(`/api/novels/file/diff${qs({ path, rev, base })}`),
+  // Restore a file to an older revision as a new commit (never rewrites history).
+  // base_sha is the caller's view of HEAD — the same lost-update guard as writeFile.
+  revertFile: (path: string, rev: string, base_sha: string) =>
+    apiFetch<{ head: string; pushed: boolean; reverted_to: string }>('/api/novels/file/revert', {
+      method: 'POST',
+      body: JSON.stringify({ path, rev, base_sha }),
+    }),
   status: () => apiFetch<NovelRepoStatus>('/api/novels/status'),
   sync: () => apiFetch<{ pulled: boolean }>('/api/novels/sync', { method: 'POST' }),
   reset: () => apiFetch<{ ok: boolean }>('/api/novels/reset', { method: 'POST' }),
