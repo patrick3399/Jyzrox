@@ -19,8 +19,9 @@ from core.local_patterns import (
     normalize_relative_path,
 )
 from core.source_display import get_display_config
-from db.models import Blob, ExcludedBlob, Gallery, Image, LibraryPath
+from db.models import Blob, BlobLocation, ExcludedBlob, Gallery, Image, LibraryPath
 from services.cas import (
+    OWNER_MARKER_FILENAME,
     create_library_symlink,
     decrement_ref_count,
     increment_ref_count,
@@ -48,6 +49,41 @@ class _ImportRequest:
     gallery_id: int
     source_dir: str
     mode: str
+
+
+class _LibraryMoveConflict(RuntimeError):
+    """A monitored move cannot be applied without risking gallery identity."""
+
+
+@dataclass
+class _LibraryMoveFilesystemState:
+    old_dir: Path
+    new_dir: Path
+    renamed: bool
+    created: bool
+    marker_before: str | None
+    links_before: dict[Path, str | None]
+
+    def rollback(self) -> None:
+        """Restore only filesystem artifacts changed by this move."""
+        for link, target in reversed(tuple(self.links_before.items())):
+            if os.path.lexists(link):
+                link.unlink()
+            if target is not None:
+                link.symlink_to(target)
+
+        marker = self.new_dir / OWNER_MARKER_FILENAME
+        if self.marker_before is None:
+            marker.unlink(missing_ok=True)
+        else:
+            marker.write_text(self.marker_before, encoding="utf-8")
+
+        if self.renamed:
+            if self.old_dir.exists():
+                raise _LibraryMoveConflict(f"cannot roll back library move; old directory exists: {self.old_dir}")
+            self.new_dir.rename(self.old_dir)
+        elif self.created:
+            self.new_dir.rmdir()
 
 
 def _cover_image_for_gallery(
@@ -121,6 +157,97 @@ def _match_library_candidate(spec: _LibrarySpec, root: Path, candidate: Path) ->
     if not match:
         return None
     return rel_path, match.groupdict()
+
+
+def _read_owner_marker(directory: Path) -> str | None:
+    marker = directory / OWNER_MARKER_FILENAME
+    try:
+        return marker.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise _LibraryMoveConflict(f"cannot read gallery ownership marker {marker}: {exc}") from exc
+
+
+async def _prepare_library_move(
+    gallery: Gallery,
+    new_source_id: str,
+    images: list[Image],
+    new_external_paths: dict[int, str],
+) -> _LibraryMoveFilesystemState:
+    """Prepare library links before committing a monitored source move."""
+    old_dir = library_dir(gallery.source, gallery.source_id)
+    new_dir = library_dir(gallery.source, new_source_id)
+    old_owner = f"{gallery.source}:{gallery.source_id}"
+    new_owner = f"{gallery.source}:{new_source_id}"
+    renamed = False
+    created = False
+    marker_before: str | None
+
+    if old_dir.exists():
+        if not old_dir.is_dir():
+            raise _LibraryMoveConflict(f"gallery library path is not a directory: {old_dir}")
+        old_marker = _read_owner_marker(old_dir)
+        if old_marker not in (None, old_owner):
+            raise _LibraryMoveConflict(
+                f"gallery library directory {old_dir} is owned by {old_marker!r}, expected {old_owner!r}"
+            )
+        marker_before = old_marker
+        if old_dir != new_dir:
+            if os.path.lexists(new_dir):
+                raise _LibraryMoveConflict(f"destination library directory already exists: {new_dir}")
+            new_dir.parent.mkdir(parents=True, exist_ok=True)
+            old_dir.rename(new_dir)
+            renamed = True
+    elif not new_dir.exists():
+        new_dir.mkdir(parents=True, exist_ok=False)
+        created = True
+        marker_before = None
+    elif not new_dir.is_dir():
+        raise _LibraryMoveConflict(f"destination library path is not a directory: {new_dir}")
+    else:
+        marker_before = _read_owner_marker(new_dir)
+
+    if not renamed and marker_before not in (None, old_owner, new_owner):
+        raise _LibraryMoveConflict(
+            f"destination library directory {new_dir} is owned by {marker_before!r}, expected {new_owner!r}"
+        )
+
+    state = _LibraryMoveFilesystemState(
+        old_dir=old_dir,
+        new_dir=new_dir,
+        renamed=renamed,
+        created=created,
+        marker_before=marker_before,
+        links_before={},
+    )
+    try:
+        (new_dir / OWNER_MARKER_FILENAME).write_text(new_owner, encoding="utf-8")
+        for image in images:
+            if not image.filename or Path(image.filename).name != image.filename:
+                raise _LibraryMoveConflict(f"image {image.id} has an unsafe filename: {image.filename!r}")
+            if image.blob is None:
+                raise _LibraryMoveConflict(f"image {image.id} has no blob")
+
+            link = new_dir / image.filename
+            if os.path.lexists(link):
+                if not link.is_symlink():
+                    raise _LibraryMoveConflict(f"refusing to replace non-symlink library artifact: {link}")
+                state.links_before[link] = os.readlink(link)
+            else:
+                state.links_before[link] = None
+
+            await create_library_symlink(
+                gallery.source,
+                new_source_id,
+                image.filename,
+                image.blob,
+                external_path=new_external_paths.get(image.id),
+            )
+    except Exception:
+        state.rollback()
+        raise
+    return state
 
 
 async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Path) -> _ImportRequest | None:
@@ -767,6 +894,293 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
     await emit_safe(EventType.GALLERY_DISCOVERED, resource_type="gallery", discovered=discovered)
 
     return {"discovered": discovered}
+
+
+async def reconcile_library_path_job(
+    ctx: dict,
+    old_paths: list[str],
+    new_path: str,
+    destination_device: int | None = None,
+    destination_inode: int | None = None,
+    watcher_origin: bool = False,
+) -> dict:
+    """Pair unmatched cross-root create/delete events by exact gallery content."""
+    from sqlalchemy.orm import selectinload
+
+    if not await _watcher_work_enabled(ctx, watcher_origin):
+        return {"status": "skipped", "reason": "watcher_disabled", "new_path": new_path}
+
+    new_real = os.path.realpath(new_path)
+    destination = Path(new_real)
+    try:
+        destination_stat = destination.stat()
+        media_files = sorted(
+            entry
+            for entry in destination.iterdir()
+            if entry.is_file() and entry.suffix.lower() in _SUPPORTED_MEDIA_EXTS
+        )
+    except OSError:
+        return {"status": "stale", "reason": "destination_unavailable", "new_path": new_real}
+    if destination_device is not None and destination_stat.st_dev != destination_device:
+        return {"status": "stale", "reason": "destination_replaced", "new_path": new_real}
+    if destination_inode is not None and destination_stat.st_ino != destination_inode:
+        return {"status": "stale", "reason": "destination_replaced", "new_path": new_real}
+
+    normalized_old_paths = sorted({os.path.realpath(path) for path in old_paths if path})
+    async with AsyncSessionLocal() as session:
+        candidates = (
+            (
+                await session.execute(
+                    select(Gallery)
+                    .where(Gallery.source == "local", Gallery.source_path.in_(normalized_old_paths))
+                    .options(selectinload(Gallery.images))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    if not candidates:
+        return await rescan_by_path_job(ctx, new_real, watcher_origin=watcher_origin)
+    if not media_files:
+        return {"status": "conflict", "reason": "candidate_gallery_but_no_media", "new_path": new_real}
+
+    destination_signature = []
+    for path in media_files:
+        destination_signature.append((path.name, await asyncio.to_thread(_sha256, path)))
+    destination_signature.sort()
+    matches = [
+        gallery
+        for gallery in candidates
+        if gallery.images
+        and sorted((image.filename, image.blob_sha256) for image in gallery.images if image.filename)
+        == destination_signature
+    ]
+    if len(matches) != 1:
+        reason = "content_mismatch" if not matches else "ambiguous_content_match"
+        logger.warning(
+            "[reconcile_library_path] %s for %s across %d candidate galleries",
+            reason,
+            new_real,
+            len(candidates),
+        )
+        return {"status": "conflict", "reason": reason, "new_path": new_real}
+
+    gallery = matches[0]
+    if gallery.deleted_at is not None:
+        return {"status": "skipped", "reason": "trashed", "gallery_id": gallery.id, "new_path": new_real}
+    return await move_library_path_job(
+        ctx,
+        old_path=gallery.source_path or normalized_old_paths[0],
+        new_path=new_real,
+        destination_device=destination_device,
+        destination_inode=destination_inode,
+        watcher_origin=watcher_origin,
+    )
+
+
+async def move_library_path_job(
+    ctx: dict,
+    old_path: str,
+    new_path: str,
+    destination_device: int | None = None,
+    destination_inode: int | None = None,
+    watcher_origin: bool = False,
+) -> dict:
+    """Apply one monitored directory move without replacing gallery identity."""
+    from sqlalchemy.orm import selectinload
+
+    if not await _watcher_work_enabled(ctx, watcher_origin):
+        logger.info("[move_library_path] Skipping queued watcher job because monitoring is disabled")
+        return {"status": "skipped", "reason": "watcher_disabled", "old_path": old_path, "new_path": new_path}
+
+    old_real = os.path.realpath(old_path)
+    new_real = os.path.realpath(new_path)
+    destination = Path(new_real)
+    try:
+        destination_stat = destination.stat()
+    except OSError:
+        return {"status": "stale", "reason": "destination_unavailable", "new_path": new_real}
+    if not destination.is_dir():
+        return {"status": "ignored", "reason": "destination_not_directory", "new_path": new_real}
+    if destination_device is not None and destination_stat.st_dev != destination_device:
+        return {"status": "stale", "reason": "destination_replaced", "new_path": new_real}
+    if destination_inode is not None and destination_stat.st_ino != destination_inode:
+        return {"status": "stale", "reason": "destination_replaced", "new_path": new_real}
+
+    filesystem_state: _LibraryMoveFilesystemState | None = None
+    gallery_id: int | None = None
+    old_source_id: str | None = None
+    new_source_id: str | None = None
+    try:
+        async with AsyncSessionLocal() as session:
+            specs = await _get_library_specs(session, monitored_only=watcher_origin)
+            matches: list[tuple[int, _LibrarySpec, str]] = []
+            for spec in specs:
+                root = Path(os.path.realpath(spec.path))
+                try:
+                    matched = _match_library_candidate(spec, root, destination)
+                except ValueError as exc:
+                    logger.warning("[move_library_path] skipping invalid pattern for %s: %s", spec.path, exc)
+                    continue
+                if matched:
+                    matches.append((len(str(root)), spec, matched[0]))
+            if not matches:
+                return {"status": "ignored", "reason": "destination_not_monitored", "new_path": new_real}
+            matches.sort(key=lambda item: item[0], reverse=True)
+            _, destination_spec, new_source_id = matches[0]
+
+            galleries = (
+                (
+                    await session.execute(
+                        select(Gallery)
+                        .where(Gallery.source == "local", Gallery.source_path == old_real)
+                        .options(selectinload(Gallery.images).selectinload(Image.blob))
+                        .with_for_update()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if len(galleries) > 1:
+                raise _LibraryMoveConflict(f"multiple galleries claim source path {old_real}")
+            if not galleries:
+                descendant = (
+                    await session.execute(
+                        select(Gallery.id)
+                        .where(Gallery.source == "local")
+                        .where(Gallery.source_path.startswith(old_real.rstrip(os.sep) + os.sep, autoescape=True))
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if descendant is not None:
+                    return {
+                        "status": "ignored",
+                        "reason": "parent_move_has_gallery_descendants",
+                        "old_path": old_real,
+                        "new_path": new_real,
+                    }
+
+                filenames = [entry.name for entry in destination.iterdir() if entry.is_file()]
+                if _media_count(filenames) == 0:
+                    return {"status": "ignored", "reason": "no_media", "new_path": new_real}
+                import_request = await _discover_single_library_dir(session, destination_spec, destination)
+                if import_request is None:
+                    await session.rollback()
+                    return {"status": "ignored", "reason": "discovery_conflict", "new_path": new_real}
+                await session.commit()
+                await core.queue.enqueue(
+                    "local_import_job",
+                    source_dir=import_request.source_dir,
+                    mode=import_request.mode,
+                    gallery_id=import_request.gallery_id,
+                    _timeout=3600,
+                    _job_id=f"local-import:{import_request.gallery_id}",
+                )
+                return {"status": "discovered", "gallery_id": import_request.gallery_id, "new_path": new_real}
+
+            gallery = galleries[0]
+            gallery_id = gallery.id
+            old_source_id = gallery.source_id
+            if gallery.deleted_at is not None:
+                return {"status": "skipped", "reason": "trashed", "gallery_id": gallery.id}
+
+            collision = (
+                await session.execute(
+                    select(Gallery.id)
+                    .where(
+                        Gallery.source == "local",
+                        Gallery.source_id == new_source_id,
+                        Gallery.id != gallery.id,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if collision is not None:
+                raise _LibraryMoveConflict(
+                    f"destination source identity local:{new_source_id} already belongs to gallery {collision}"
+                )
+
+            new_external_paths: dict[int, str] = {}
+            for image in gallery.images:
+                if not image.filename or Path(image.filename).name != image.filename:
+                    raise _LibraryMoveConflict(f"image {image.id} has an unsafe filename: {image.filename!r}")
+                moved_image_path = destination / image.filename
+                if not moved_image_path.is_file():
+                    raise _LibraryMoveConflict(
+                        f"moved image path is unavailable for image {image.id}: {moved_image_path}"
+                    )
+                moved_hash = await asyncio.to_thread(_sha256, moved_image_path)
+                if moved_hash != image.blob_sha256:
+                    raise _LibraryMoveConflict(
+                        f"moved image content does not match image {image.id}: {moved_image_path}"
+                    )
+
+                if gallery.import_mode == "link":
+                    if image.external_path is None:
+                        raise _LibraryMoveConflict(f"link gallery image {image.id} has no external path")
+                    try:
+                        relative = Path(image.external_path).relative_to(old_real)
+                    except ValueError as exc:
+                        raise _LibraryMoveConflict(
+                            f"image {image.id} path {image.external_path} is outside moved directory {old_real}"
+                        ) from exc
+                    moved_external_path = str(destination / relative)
+                    if Path(moved_external_path) != moved_image_path:
+                        raise _LibraryMoveConflict(
+                            f"image {image.id} filename and external path disagree after move: {moved_external_path}"
+                        )
+                    new_external_paths[image.id] = moved_external_path
+                    if moved_external_path != image.external_path:
+                        location = await session.get(BlobLocation, (image.blob_sha256, moved_external_path))
+                        if location is None:
+                            session.add(BlobLocation(blob_sha256=image.blob_sha256, external_path=moved_external_path))
+
+            await session.flush()
+            filesystem_state = await _prepare_library_move(
+                gallery,
+                new_source_id,
+                list(gallery.images),
+                new_external_paths,
+            )
+            for image in gallery.images:
+                if image.id in new_external_paths:
+                    image.external_path = new_external_paths[image.id]
+            gallery.source_id = new_source_id
+            gallery.source_path = new_real
+            gallery.library_path = destination_spec.path
+            await session.commit()
+    except _LibraryMoveConflict as exc:
+        logger.warning("[move_library_path] refusing %s -> %s: %s", old_real, new_real, exc)
+        return {"status": "conflict", "error": str(exc), "old_path": old_real, "new_path": new_real}
+    except Exception:
+        if filesystem_state is not None:
+            try:
+                filesystem_state.rollback()
+            except Exception:
+                logger.exception("[move_library_path] Failed to roll back library filesystem state")
+        raise
+
+    from core.events import EventType, emit_safe
+
+    await emit_safe(
+        EventType.GALLERY_UPDATED,
+        resource_type="gallery",
+        resource_id=gallery_id,
+        reason="monitored_source_moved",
+        old_source_id=old_source_id,
+        source_id=new_source_id,
+        old_path=old_real,
+        source_path=new_real,
+    )
+    return {
+        "status": "moved",
+        "gallery_id": gallery_id,
+        "old_source_id": old_source_id,
+        "source_id": new_source_id,
+        "old_path": old_real,
+        "new_path": new_real,
+    }
 
 
 async def rescan_by_path_job(ctx: dict, dir_path: str, watcher_origin: bool = False) -> dict:

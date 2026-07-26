@@ -47,6 +47,8 @@ from worker.reconciliation import reconciliation_job
 from worker.retry import retry_failed_downloads_job
 from worker.scan import (
     auto_discover_job,
+    move_library_path_job,
+    reconcile_library_path_job,
     rescan_by_path_job,
     rescan_gallery_job,
     rescan_library_job,
@@ -76,6 +78,31 @@ logger = logging.getLogger("worker")
 # ── Lifecycle ────────────────────────────────────────────────────────
 
 _watcher = LibraryWatcher()
+
+
+def _watcher_job_kwargs(job_name: str, args: tuple) -> dict:
+    """Translate watchdog's positional callback into durable SAQ kwargs."""
+    if job_name == "auto_discover_job" and not args:
+        return {"watcher_origin": True}
+    if job_name == "rescan_by_path_job" and len(args) == 1:
+        return {"dir_path": args[0], "watcher_origin": True}
+    if job_name == "move_library_path_job" and len(args) == 4:
+        return {
+            "old_path": args[0],
+            "new_path": args[1],
+            "destination_device": args[2],
+            "destination_inode": args[3],
+            "watcher_origin": True,
+        }
+    if job_name == "reconcile_library_path_job" and len(args) == 4:
+        return {
+            "old_paths": args[0],
+            "new_path": args[1],
+            "destination_device": args[2],
+            "destination_inode": args[3],
+            "watcher_origin": True,
+        }
+    raise ValueError(f"Unsupported watcher job callback: {job_name}({len(args)} args)")
 
 
 async def _log_level_subscriber(ctx: dict) -> None:
@@ -458,9 +485,7 @@ async def startup(ctx: dict) -> None:
         def enqueue_sync(job_name: str, *args):
             import core.queue
 
-            # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
-            kwargs = {"dir_path": args[0]} if args else {}
-            kwargs["watcher_origin"] = True
+            kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)
@@ -524,9 +549,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
         def enqueue_sync(job_name: str, *args):
             import core.queue
 
-            # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
-            kwargs = {"dir_path": args[0]} if args else {}
-            kwargs["watcher_origin"] = True
+            kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)
@@ -806,6 +829,8 @@ def _make_startup_log(label: str):
 
 
 _ingest_startup = _make_startup_log("ingest")
+
+
 async def _render_startup(ctx: dict) -> None:
     await _make_startup_log("render")(ctx)
     from plugins import init_plugins
@@ -890,6 +915,8 @@ def build_workers() -> tuple:
             rescan_library_job,
             rescan_gallery_job,
             rescan_by_path_job,
+            move_library_path_job,
+            reconcile_library_path_job,
             rescan_library_path_job,
             tag_job,
             reconciliation_job,
@@ -965,6 +992,8 @@ __all__ = [
     "rescan_library_job",
     "rescan_gallery_job",
     "rescan_by_path_job",
+    "move_library_path_job",
+    "reconcile_library_path_job",
     "rescan_library_path_job",
     "auto_discover_job",
     "scheduled_scan_job",
