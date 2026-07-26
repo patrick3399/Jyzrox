@@ -8,10 +8,16 @@ async def init_plugins() -> None:
     from plugins.builtin.ehentai.browse import EhBrowsePlugin
     from plugins.builtin.ehentai.source import EhSourcePlugin
     from plugins.builtin.fanbox.source import FanboxSourcePlugin
+    from plugins.builtin.gallery_dl._extractors import load_inprocess
     from plugins.builtin.gallery_dl.source import GalleryDlPlugin
     from plugins.builtin.pixiv._browse import PixivBrowsePlugin
     from plugins.builtin.pixiv.source import PixivSourcePlugin
     from plugins.builtin.swarmui.plugin import SwarmUiPlugin
+
+    # Bundled custom extractors must reach the in-process gallery_dl.extractor
+    # before any URL detection runs — module-sources only covers the download
+    # subprocess. Never raises; a bad extractor degrades to "not detected".
+    load_inprocess()
 
     plugin_registry.register(GalleryDlPlugin())
     plugin_registry.register(EhBrowsePlugin())

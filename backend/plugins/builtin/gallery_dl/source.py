@@ -19,6 +19,7 @@ from pathlib import Path
 from core.config import settings
 from core.version import __version__
 from plugins.base import SourcePlugin
+from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
 from plugins.builtin.gallery_dl._metadata import _resolve_source_id
 from plugins.models import (
     CredentialFlow,
@@ -188,6 +189,15 @@ async def _build_gallery_dl_config(
             {"name": "metadata", "mode": "json", "include": list(_METADATA_INCLUDE)},
         ],
     }
+
+    # Custom extractors bundled under plugins/builtin/gallery_dl/extractors.
+    # gallery-dl loads modules outside its own package only when this option is
+    # set; the trailing None keeps the built-in extractors, and listing ours
+    # first matches the in-process load order in _extractors.load_inprocess().
+    # Omitted entirely when nothing is bundled, so the emitted config is
+    # unchanged for the default install.
+    if module_sources := extractor_source_dirs():
+        config["extractor"]["module-sources"] = [*module_sources, None]
 
     # N3: EH rate limits are ban-adjacent — back off harder than the global
     # default. gallery-dl runs both EH domains under the 'exhentai' category
