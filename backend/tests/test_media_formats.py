@@ -15,8 +15,8 @@ def test_mov_is_a_supported_video_everywhere():
     from plugins.builtin.fanbox.source import _VIDEO_EXTS as fanbox_video_extensions
     from routers.import_router import _SUPPORTED_EXTS as import_extensions
     from services.explorer_filesystem import MEDIA_EXTENSIONS as explorer_extensions
-    from worker.scan import _SUPPORTED_MEDIA_EXTS as scan_extensions
     from worker.constants import _MEDIA_EXTS, _VIDEO_EXTS
+    from worker.scan import _SUPPORTED_MEDIA_EXTS as scan_extensions
 
     assert ".mov" in VIDEO_EXTENSIONS
     assert ".mov" in MEDIA_EXTENSIONS
