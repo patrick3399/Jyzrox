@@ -23,7 +23,7 @@ from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import NovelLink, NovelMention, NovelNote
-from services import novel_format, novel_fs, novel_git, novel_index
+from services import novel_format, novel_fs, novel_git, novel_index, novel_outline
 from worker.helpers import acquire_lock, release_lock
 
 _GIT_LOCK = "novel:git:lock"
@@ -381,6 +381,33 @@ async def put_summary(body: SummaryBody, auth: dict = Depends(_member)):
     )
     await _enqueue_reindex()
     return result
+
+
+# ── Plot outline (Phase 1.7) ───────────────────────────────────────────────
+
+
+@router.get("/works/{work}/outline")
+async def work_outline(work: str, _: dict = Depends(require_auth)):
+    """A work's plot nodes, each lined up with the chapter it plans (if written).
+
+    Derived live from `參考/大綱.md` — the file is the source of truth and a
+    single small read, so there is no derived table to go stale. `path` is null
+    when the work has no outline yet, and `canonical_path` is where one goes.
+    """
+    repo = _repo()
+    try:
+        chapters = novel_fs.list_chapters(repo, work)
+        path = novel_outline.find_outline(repo, work)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if path is None:
+        return {"path": None, "canonical_path": novel_outline.outline_path(work), "nodes": []}
+    nodes = novel_outline.parse_outline(novel_fs.read_file(repo, path))
+    return {
+        "path": path,
+        "canonical_path": novel_outline.outline_path(work),
+        "nodes": novel_outline.link_chapters(nodes, chapters),
+    }
 
 
 # ── FORMAT.md lint / fix (Phase 1.7) ───────────────────────────────────────

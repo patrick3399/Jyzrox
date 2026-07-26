@@ -564,6 +564,40 @@ async def test_fix_with_stale_base_sha_returns_409(member_client, novel_repo):
     assert r.status_code == 409
 
 
+async def test_outline_endpoint_reports_where_an_outline_goes_when_absent(viewer_client, novel_repo):
+    r = await viewer_client.get("/api/novels/works/作品A/outline")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"path": None, "canonical_path": "作品A/參考/大綱.md", "nodes": []}
+
+
+async def test_outline_endpoint_links_nodes_to_existing_chapters(member_client, novel_repo):
+    """A node whose chapter exists links to it; the rest is the unwritten plan."""
+    (novel_repo["work"] / "作品A" / "參考").mkdir(parents=True)
+    (novel_repo["work"] / "作品A" / "參考" / "大綱.md").write_text(
+        "### 第1章：開場\n**項目狀態：** 已寫\n\n*   **第一幕：抵達**\n\n### 第2章：未寫\n構想中。\n",
+        encoding="utf-8",
+    )
+    (novel_repo["work"] / "作品A" / "01.md").write_text("第1章\n\n（第1章 完）\n", encoding="utf-8")
+    _run(novel_repo["work"], "add", ".")
+    _run(novel_repo["work"], "commit", "-m", "outline")
+
+    r = await member_client.get("/api/novels/works/作品A/outline")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["path"] == "作品A/參考/大綱.md"
+    assert [n["chapter_no"] for n in body["nodes"]] == [1, 2]
+    assert body["nodes"][0]["chapter_path"] == "作品A/01.md"
+    assert [b["title"] for b in body["nodes"][0]["beats"]] == ["第一幕：抵達"]
+    assert body["nodes"][1]["chapter_path"] is None
+
+
+async def test_outline_endpoint_rejects_an_unsafe_work_name(viewer_client, novel_repo):
+    """An unsafe work must surface as a 400 from the path guard, never as a read."""
+    r = await viewer_client.get("/api/novels/works/%00/outline")
+    assert r.status_code == 400
+
+
 async def test_reset_forbidden_for_member(member_client, novel_repo):
     # Two clients cannot coexist (they share _app.dependency_overrides), so the
     # member and admin cases are separate tests.

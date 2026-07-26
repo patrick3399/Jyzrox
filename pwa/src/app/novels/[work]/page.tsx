@@ -17,6 +17,7 @@ import { BackButton } from '@/components/BackButton'
 import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
 import { WorkCategorySection } from '@/components/novels/WorkCategorySection'
 import { ChapterSummaryEditor } from '@/components/novels/ChapterSummaryEditor'
+import { OutlineSection } from '@/components/novels/OutlineSection'
 
 export default function NovelWorkPage() {
   useLocale()
@@ -145,6 +146,8 @@ export default function NovelWorkPage() {
           ))}
         </ul>
       )}
+
+      <OutlineSection work={work} />
 
       {categories &&
         (['extra', 'draft', 'reference', 'scrap'] as const).map((cat) => (
