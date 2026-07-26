@@ -2,18 +2,22 @@
 
 gallery-dl only discovers extractor modules outside its own package through the
 ``extractor.module-sources`` option, and that option is applied in its CLI entry
-point (``gallery_dl.__init__.main``). Two independent consumers need to see the
-same extractors:
+point (``gallery_dl.__init__.main``). Three independent consumers need to see
+the same extractors:
 
 * the **download subprocess**, which reads the config written by
   ``_build_gallery_dl_config()`` — covered by ``extractor_source_dirs()``;
+* the **admin site probe** (``core.probe._run_gallery_dl_probe``), which runs
+  with ``--config /dev/null`` to keep credentials out of probe runs and so
+  never sees ``module-sources`` — passes ``extractor_source_dirs()`` on the CLI
+  as ``-X/--extractors`` instead;
 * the **in-process** ``gallery_dl.extractor`` import used for URL/category
   detection (``plugins.registry.detect_source``) and ``directory_fmt`` lookup
   (``._metadata._get_identity_field``). That code path never runs ``main()``,
   so ``module-sources`` does nothing for it — covered by ``load_inprocess()``.
 
-Both read the same directory, so a bundled extractor can never be visible to
-one consumer and invisible to the other.
+All three read the same directory, so a bundled extractor can never be visible
+to one consumer and invisible to another.
 
 Note the two consumers do not even use the same gallery-dl installation: the
 subprocess runs the upgradable venv at ``/opt/gallery-dl`` while the in-process
