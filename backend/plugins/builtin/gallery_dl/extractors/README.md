@@ -45,16 +45,21 @@ anything else.
 
 ## After adding an extractor
 
-1. **Register the site in `.._sites.GDL_SITES`.** Without an entry,
-   `get_site_config()` returns `_DEFAULT_CONFIG` and the importer files every
-   gallery under `source_id="gallery_dl"` ("Unknown Site") instead of the real
-   source. Set `extractor=` when the gallery-dl `category` differs from
-   `source_id`.
+1. **Register the site in `.._sites.GDL_SITES` when it needs Jyzrox-specific
+   behavior.** Unknown extractor categories are preserved as the gallery
+   `source`; they are not collapsed into `gallery_dl`. Registration is still
+   needed for a canonical source ID, display metadata, credentials, tuning,
+   subscriptions, or any non-default metadata rules. Set `extractor=` when the
+   gallery-dl `category` differs from `source_id`.
 
-2. **Set `url_path_id_index` deliberately.** It decides which URL path segment
-   becomes the gallery's source identity. Leaving the default on a site whose
-   ID is not the first segment lets distinct remote galleries upsert into one
-   row (HR-018).
+2. **Choose a stable gallery identity deliberately.** Normal metadata imports
+   resolve `source_id` from the registered site's `source_id_fields`, then the
+   extractor's `directory_fmt`, then `gallery_id` / `id`. Make sure one of those
+   paths yields the remote gallery's stable unique ID; otherwise refreshes can
+   create duplicates or distinct remote galleries can collide (HR-018).
+   `url_path_id_index` applies only to the no-metadata URL fallback in
+   `ProgressiveImporter.ensure_gallery_from_url()`; set it as well if the
+   extractor can finish without emitting a metadata sidecar.
 
 3. **Check `_METADATA_INCLUDE` in `..source`.** The metadata postprocessor
    drops any field not on that allowlist. Either emit the existing field names

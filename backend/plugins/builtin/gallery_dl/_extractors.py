@@ -98,7 +98,13 @@ def load_inprocess() -> list[str]:
                     sys.path.remove(path)
                 except ValueError:
                     pass
-            extractor.add_module(module)
+            classes = extractor.add_module(module)
+            if not classes:
+                logger.warning(
+                    "[gallery_dl] custom extractor %r defines no extractor classes",
+                    name,
+                )
+                continue
         except Exception as exc:
             logger.warning("[gallery_dl] failed to load custom extractor %r: %s", name, exc)
             continue

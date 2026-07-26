@@ -30,7 +30,7 @@ class _FakeGalleryDl(types.ModuleType):
 def fake_gallery_dl(monkeypatch):
     """Install a stub ``gallery_dl`` exposing a recording ``extractor.add_module``."""
     package = _FakeGalleryDl("gallery_dl")
-    package.extractor = types.SimpleNamespace(add_module=MagicMock())
+    package.extractor = types.SimpleNamespace(add_module=MagicMock(return_value=[object()]))
     monkeypatch.setitem(sys.modules, "gallery_dl", package)
     return package.extractor
 
@@ -153,6 +153,17 @@ def test_load_inprocess_survives_extractor_raising_on_import(bundled_dir, fake_g
         fake_gallery_dl.add_module.assert_not_called()
     finally:
         sys.modules.pop("gdlx_broken", None)
+
+
+def test_load_inprocess_rejects_module_without_extractor_classes(bundled_dir, fake_gallery_dl):
+    """An importable module is not loaded unless gallery-dl finds extractor classes."""
+    _write_extractor(bundled_dir, "gdlx_empty", body="VALUE = 1\n")
+    fake_gallery_dl.add_module.return_value = []
+    try:
+        assert _extractors.load_inprocess() == []
+        assert "gdlx_empty" not in _extractors._loaded
+    finally:
+        sys.modules.pop("gdlx_empty", None)
 
 
 def test_load_inprocess_loads_healthy_module_despite_broken_sibling(bundled_dir, fake_gallery_dl):

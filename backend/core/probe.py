@@ -205,10 +205,12 @@ async def _check_dns(hostname: str) -> None:
 async def _run_gallery_dl_probe(url: str) -> list[dict]:
     """Run gallery-dl --dump-json and parse each output line as JSON.
 
-    Uses --config /dev/null to prevent cookie leakage.
+    Uses --config /dev/null to prevent cookie leakage while loading bundled
+    custom extractors explicitly via --extractors.
     Enforces 2 MB output cap and 60s total timeout.
     Returns empty list on any error.
     """
+    from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
     from worker.gallery_dl_venv import get_gdl_bin
 
     gdl_bin = get_gdl_bin()
@@ -221,8 +223,10 @@ async def _run_gallery_dl_probe(url: str) -> list[dict]:
         "15",
         "--config",
         "/dev/null",
-        url,
     ]
+    for source_dir in extractor_source_dirs():
+        cmd.extend(("--extractors", source_dir))
+    cmd.append(url)
 
     try:
         proc = await asyncio.create_subprocess_exec(

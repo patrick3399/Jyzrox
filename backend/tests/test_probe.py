@@ -832,6 +832,33 @@ class TestDetectSource:
 class TestRunGalleryDlProbe:
     """_run_gallery_dl_probe() — subprocess invocation and output parsing."""
 
+    async def test_run_gallery_dl_probe_loads_bundled_extractors_without_app_config(self):
+        """Probe sees bundled extractors while /dev/null keeps credentials isolated."""
+        from core.probe import _run_gallery_dl_probe
+
+        mock_proc = AsyncMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.stdout.read = AsyncMock(return_value=b"")
+        mock_proc.wait = AsyncMock()
+
+        with (
+            patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),
+            patch(
+                "plugins.builtin.gallery_dl._extractors.extractor_source_dirs",
+                return_value=["/app/custom-extractors"],
+            ),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc) as create_proc,
+        ):
+            await _run_gallery_dl_probe("https://example.com/gallery/1")
+
+        cmd = create_proc.call_args.args
+        assert cmd[-3:] == (
+            "--extractors",
+            "/app/custom-extractors",
+            "https://example.com/gallery/1",
+        )
+        assert cmd[cmd.index("--config") + 1] == "/dev/null"
+
     async def test_run_gallery_dl_probe_returns_parsed_dicts_from_json_lines(self):
         """Valid JSON-lines output → list of dicts."""
         from core.probe import _run_gallery_dl_probe
