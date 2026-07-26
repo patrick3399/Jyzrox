@@ -62,6 +62,17 @@ export type NovelWriteResult =
       message?: string
     }
 
+/** One FORMAT.md violation. `rule` is a stable id; its wording lives in i18n. */
+export interface NovelFormatIssue {
+  rule: string
+  line: number
+  text: string
+}
+export interface NovelFileIssues {
+  path: string
+  issues: NovelFormatIssue[]
+}
+
 export interface NovelGraphNode {
   id: string
   label: string
@@ -170,6 +181,18 @@ export const novels = {
     apiFetch<{ head: string; pushed: boolean }>('/api/novels/file/summary', {
       method: 'PUT',
       body: JSON.stringify({ path, summary, base_sha }),
+    }),
+  // ── FORMAT.md lint / fix ──
+  lintFile: (path: string) =>
+    apiFetch<{ path: string; issues: NovelFormatIssue[] }>(`/api/novels/file/lint${qs({ path })}`),
+  lintWork: (work: string) =>
+    apiFetch<{ files: NovelFileIssues[]; total: number }>(
+      `/api/novels/works/${encodeURIComponent(work)}/lint`,
+    ),
+  fixFile: (path: string, base_sha: string) =>
+    apiFetch<{ changes: string[]; head: string; pushed: boolean }>('/api/novels/file/fix', {
+      method: 'POST',
+      body: JSON.stringify({ path, base_sha }),
     }),
   search: (q: string) => apiFetch<{ hits: NovelSearchHit[] }>(`/api/novels/search${qs({ q })}`),
   history: (path: string) =>

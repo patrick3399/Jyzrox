@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { BookText, ArrowLeft, Pencil, Plus } from 'lucide-react'
+import { BookText, ArrowLeft, Pencil, Plus, SpellCheck } from 'lucide-react'
 import useSWR, { mutate } from 'swr'
 import { api } from '@/lib/api'
 import { novelChapterHref } from '@/lib/novels'
@@ -30,6 +30,14 @@ export default function NovelWorkPage() {
   const canEdit = hasRole(profile?.role, 'member')
   const [showCreate, setShowCreate] = useState(false)
   const [editingSummary, setEditingSummary] = useState<string | null>(null)
+  const [lintOn, setLintOn] = useState(false)
+  const { data: lint } = useSWR(lintOn && work ? ['novel-lint-work', work] : null, ([, w]) =>
+    api.novels.lintWork(w as string),
+  )
+  const issueCounts = useMemo(
+    () => new Map((lint?.files ?? []).map((f) => [f.path, f.issues.length])),
+    [lint],
+  )
   const chapters = data?.chapters ?? []
   const categories = data?.categories
   const hasAnyCategory = categories ? Object.values(categories).some((n) => n > 0) : false
@@ -48,16 +56,28 @@ export default function NovelWorkPage() {
           <BookText className="size-6" />
           {work}
         </h1>
-        {canEdit && (
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Linting reads every chapter, so it is opt-in rather than automatic. */}
           <button
             type="button"
-            onClick={() => setShowCreate(true)}
+            aria-pressed={lintOn}
+            onClick={() => setLintOn((v) => !v)}
             className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
           >
-            <Plus className="size-4" />
-            {t('novels.newChapter')}
+            <SpellCheck className="size-4" />
+            {t('novels.checkFormat')}
           </button>
-        )}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setShowCreate(true)}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+            >
+              <Plus className="size-4" />
+              {t('novels.newChapter')}
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -83,6 +103,18 @@ export default function NovelWorkPage() {
                     </span>
                   )}
                 </Link>
+                {lintOn && issueCounts.has(c.path) && (
+                  <span
+                    data-testid={`lint-count-${c.name}`}
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
+                      issueCounts.get(c.path)
+                        ? 'bg-amber-500/15 text-amber-500'
+                        : 'text-vault-text-muted'
+                    }`}
+                  >
+                    {t('novels.formatIssueCount', { count: issueCounts.get(c.path) ?? 0 })}
+                  </span>
+                )}
                 <span className="shrink-0 text-xs text-vault-text-muted">
                   {t('novels.charCount', { count: c.chars.toLocaleString() })}
                 </span>

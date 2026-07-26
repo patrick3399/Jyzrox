@@ -93,4 +93,6 @@ export type {
   NovelGraph,
   NovelNoteSummary,
   NovelAppearance,
+  NovelFormatIssue,
+  NovelFileIssues,
 } from './novels'

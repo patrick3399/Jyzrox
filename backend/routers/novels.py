@@ -23,7 +23,7 @@ from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import NovelLink, NovelMention, NovelNote
-from services import novel_fs, novel_git, novel_index
+from services import novel_format, novel_fs, novel_git, novel_index
 from worker.helpers import acquire_lock, release_lock
 
 _GIT_LOCK = "novel:git:lock"
@@ -380,6 +380,88 @@ async def put_summary(body: SummaryBody, auth: dict = Depends(_member)):
         resource_id=body.path,
     )
     await _enqueue_reindex()
+    return result
+
+
+# ── FORMAT.md lint / fix (Phase 1.7) ───────────────────────────────────────
+
+
+def _lint_file(repo: str, path: str) -> list[dict]:
+    return novel_format.check_text(
+        novel_fs.read_file(repo, path),
+        variant=novel_format.variant_for(path),
+        category=novel_fs.classify_path(path),
+    )
+
+
+@router.get("/file/lint")
+async def lint_file(path: str = Query(...), _: dict = Depends(require_auth)):
+    repo = _repo()
+    try:
+        return {"path": path, "issues": _lint_file(repo, path)}
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="not found")
+
+
+@router.get("/works/{work}/lint")
+async def lint_work(work: str, _: dict = Depends(require_auth)):
+    """Every main chapter of one work, mirroring the desktop batch scan."""
+    repo = _repo()
+    try:
+        chapters = novel_fs.list_chapters(repo, work)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    files = [{"path": ch["path"], "issues": _lint_file(repo, ch["path"])} for ch in chapters]
+    return {"files": files, "total": sum(len(f["issues"]) for f in files)}
+
+
+class FixBody(BaseModel):
+    path: str
+    base_sha: str
+
+
+@router.post("/file/fix")
+async def fix_file(body: FixBody, auth: dict = Depends(_member)):
+    """Apply the auto-fixable FORMAT.md rules and commit if anything changed.
+
+    Nothing to fix → no commit, `changes: []`. The un-fixable rules (a missing
+    chapter-end marker) stay in the lint output for the author to resolve.
+    """
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, body.path)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    async def _do():
+        await _assert_writable(repo, body.path, body.base_sha)
+        try:
+            current = novel_fs.read_file(repo, body.path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        fixed, changes = novel_format.fix_text(current, variant=novel_format.variant_for(body.path))
+        if not changes:
+            return {"changes": [], "head": body.base_sha, "pushed": False}
+        novel_fs.write_file(repo, body.path, fixed)
+        result = await novel_git.commit_and_push(repo, body.path, f"format: {body.path}")
+        return {**result, "changes": changes}
+
+    try:
+        result = await _with_git_lock(_do)
+    except novel_git.NovelLocked:
+        raise HTTPException(status_code=409, detail="conflict; repo locked; resolve on desktop")
+
+    if result["changes"]:
+        await audit.log_audit(auth["user_id"], "novel.format", body.path)
+        await events.emit_safe(
+            events.EventType.NOVEL_UPDATED,
+            actor_user_id=auth["user_id"],
+            resource_type="novel",
+            resource_id=body.path,
+        )
+        await _enqueue_reindex()
     return result
 
 

@@ -23,16 +23,24 @@ const h = vi.hoisted(() => ({
     { path: '作品A/第01章.md', name: '第01章', chars: 1234, summary: '張三離開了城市', mtime: 0 },
     { path: '作品A/第02章.md', name: '第02章', chars: 20, summary: null, mtime: 0 },
   ],
+  lintFiles: [
+    { path: '作品A/第01章.md', issues: [{ rule: 'dialogue_colon_outside_bold', line: 3, text: 'x' }] },
+    { path: '作品A/第02章.md', issues: [] },
+  ],
   status: vi.fn(async () => ({ head: 'headsha', ahead: 0, behind: 0, clean: true, locked: false })),
   putSummary: vi.fn(async () => ({ head: 'newhead', pushed: true })),
   mutate: vi.fn(),
 }))
 
 vi.mock('swr', () => ({
-  default: () => ({
-    data: { chapters: h.chapters, categories: { extra: 0, draft: 0, reference: 0, scrap: 0 } },
-    isLoading: false,
-  }),
+  default: (key: unknown) => {
+    const k = key as unknown[] | null
+    if (k?.[0] === 'novel-lint-work') return { data: { files: h.lintFiles, total: 1 }, isLoading: false }
+    return {
+      data: { chapters: h.chapters, categories: { extra: 0, draft: 0, reference: 0, scrap: 0 } },
+      isLoading: false,
+    }
+  },
   mutate: (...args: unknown[]) => h.mutate(...args),
 }))
 vi.mock('@/hooks/useProfile', () => ({ useProfile: () => ({ data: { role: h.role } }) }))
@@ -40,6 +48,7 @@ vi.mock('@/lib/api', () => ({
   api: {
     novels: {
       listChapters: vi.fn(),
+      lintWork: vi.fn(),
       status: () => h.status(),
       putSummary: (...args: unknown[]) => h.putSummary(...(args as [])),
     },
@@ -87,5 +96,14 @@ describe('chapter summaries on the work page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'novels.cancel' }))
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(h.putSummary).not.toHaveBeenCalled()
+  })
+
+  it('shows per-chapter format issue counts only after the check is turned on', async () => {
+    render(<NovelWorkPage />)
+    // Linting reads every chapter, so nothing runs until asked.
+    expect(screen.queryByTestId('lint-count-第01章')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'novels.checkFormat' }))
+    expect(screen.getByTestId('lint-count-第01章')).toHaveTextContent('novels.formatIssueCount 1')
+    expect(screen.getByTestId('lint-count-第02章')).toHaveTextContent('novels.formatIssueCount 0')
   })
 })

@@ -513,6 +513,57 @@ async def test_summary_rejects_traversal(member_client, novel_repo):
     assert r.status_code == 400
 
 
+async def test_lint_reports_issues_for_a_file_and_for_the_whole_work(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    # The fixture chapter has no （…完） marker, so it starts out non-conforming.
+    r = await member_client.get(f"/api/novels/file/lint?path={path}")
+    assert r.status_code == 200
+    assert "missing_chapter_end_marker" in [i["rule"] for i in r.json()["issues"]]
+
+    await _edit(member_client, path, "第1章：開場\n\n**張三**：「嗨。」\n\n（第1章 完）\n")
+    work = await member_client.get("/api/novels/works/作品A/lint")
+    assert work.status_code == 200
+    body = work.json()
+    assert body["total"] == 1
+    assert [i["rule"] for i in body["files"][0]["issues"]] == ["dialogue_colon_outside_bold"]
+
+
+async def test_lint_rejects_traversal(viewer_client, novel_repo):
+    assert (await viewer_client.get("/api/novels/file/lint?path=../../etc/passwd")).status_code == 400
+
+
+async def test_fix_commits_only_when_something_changed(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    await _edit(member_client, path, "第1章：開場\n\n**張三**：「嗨。」\n\n（第1章 完）\n")
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+
+    r = await member_client.post("/api/novels/file/fix", json={"path": path, "base_sha": head})
+    assert r.status_code == 200, r.text
+    assert r.json()["changes"] == ["dialogue_colon_outside_bold"]
+    content = (await member_client.get(f"/api/novels/file?path={path}")).json()
+    assert "**張三：**「嗨。」" in content["content"]
+    assert (await member_client.get(f"/api/novels/file/lint?path={path}")).json()["issues"] == []
+
+    # Second run has nothing to do → no commit, and the log does not grow.
+    before = (await member_client.get(f"/api/novels/file/history?path={path}")).json()["commits"]
+    r = await member_client.post("/api/novels/file/fix", json={"path": path, "base_sha": content["base_sha"]})
+    assert r.status_code == 200
+    assert r.json()["changes"] == []
+    after = (await member_client.get(f"/api/novels/file/history?path={path}")).json()["commits"]
+    assert len(after) == len(before)
+
+
+async def test_fix_viewer_forbidden(viewer_client, novel_repo):
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.post("/api/novels/file/fix", json={"path": "作品A/第01章.md", "base_sha": head})
+    assert r.status_code == 403
+
+
+async def test_fix_with_stale_base_sha_returns_409(member_client, novel_repo):
+    r = await member_client.post("/api/novels/file/fix", json={"path": "作品A/第01章.md", "base_sha": "0000000"})
+    assert r.status_code == 409
+
+
 async def test_reset_forbidden_for_member(member_client, novel_repo):
     # Two clients cannot coexist (they share _app.dependency_overrides), so the
     # member and admin cases are separate tests.
