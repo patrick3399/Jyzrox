@@ -152,6 +152,10 @@ const FAV_COLORS = [
   '#9C27B0',
   '#E91E63',
 ]
+// E-Hentai's own default favourite category labels — remote data, not UI copy,
+// so they stay untranslated (see `browse` favourites pills).
+const FAV_NAMES = Array.from({ length: 10 }, (_, i) => `Favorites ${i}`)
+
 // ── Namespace colours (EhViewer style) ─────────────────────────────────
 
 const NS_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -655,9 +659,7 @@ function EhGalleryDetail() {
                       rows={2}
                       className="m-2 mb-1 w-[calc(100%-1rem)] resize-none rounded border border-vault-border bg-vault-input px-2 py-1.5 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                     />
-                    {Array.from({ length: 10 }, (_, i) =>
-                      t('browse.favoriteCategory', { index: i }),
-                    ).map((name, i) => (
+                    {FAV_NAMES.map((name, i) => (
                       <button
                         key={i}
                         onClick={() => handleAddFavorite(i)}

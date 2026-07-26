@@ -2293,7 +2293,6 @@ const zhTW: Record<string, string> = {
   'browse.language.french': '法文',
   'browse.language.german': '德文',
   'browse.language.russian': '俄文',
-  'browse.favoriteCategory': '我的最愛 {index}',
   'browse.pageCount': '{count} 頁|{count} 頁',
   'browse.torrentCount': '{count} 個種子|{count} 個種子',
   'browse.searchUploader': '搜尋上傳者：{uploader}',

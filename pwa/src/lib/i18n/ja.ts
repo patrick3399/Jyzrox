@@ -2342,7 +2342,6 @@ const ja: Record<string, string> = {
   'browse.language.french': 'フランス語',
   'browse.language.german': 'ドイツ語',
   'browse.language.russian': 'ロシア語',
-  'browse.favoriteCategory': 'お気に入り {index}',
   'browse.pageCount': '{count} ページ|{count} ページ',
   'browse.torrentCount': '{count} 件のTorrent|{count} 件のTorrent',
   'browse.searchUploader': '投稿者を検索：{uploader}',

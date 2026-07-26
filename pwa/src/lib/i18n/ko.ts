@@ -2320,7 +2320,6 @@ const ko: Record<string, string> = {
   'browse.language.french': '프랑스어',
   'browse.language.german': '독일어',
   'browse.language.russian': '러시아어',
-  'browse.favoriteCategory': '즐겨찾기 {index}',
   'browse.pageCount': '{count}페이지|{count}페이지',
   'browse.torrentCount': 'Torrent {count}개|Torrent {count}개',
   'browse.searchUploader': '업로더 검색: {uploader}',

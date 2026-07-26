@@ -2291,7 +2291,6 @@ const zhCN: Record<string, string> = {
   'browse.language.french': '法语',
   'browse.language.german': '德语',
   'browse.language.russian': '俄语',
-  'browse.favoriteCategory': '收藏夹 {index}',
   'browse.pageCount': '{count} 页|{count} 页',
   'browse.torrentCount': '{count} 个种子|{count} 个种子',
   'browse.searchUploader': '搜索上传者：{uploader}',

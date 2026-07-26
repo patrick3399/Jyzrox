@@ -1492,7 +1492,10 @@ function BrowsePage() {
             </button>
             {Array.from({ length: 10 }, (_, i) => {
               const catData = favCategories.find((c) => c.index === i)
-              const name = catData?.name || t('browse.favoriteCategory', { index: i })
+              // Favourite category names are remote E-Hentai data, not UI copy — the
+              // fallback mirrors E-Hentai's own default label so it does not flip
+              // languages once the real names arrive.
+              const name = catData?.name || `Favorites ${i}`
               const color = FAV_COLORS[i]
               const isActive = filters.favCat === String(i)
               return (

@@ -2360,7 +2360,6 @@ const en: Record<string, string> = {
   'browse.language.french': 'French',
   'browse.language.german': 'German',
   'browse.language.russian': 'Russian',
-  'browse.favoriteCategory': 'Favorites {index}',
   'browse.pageCount': '{count} page|{count} pages',
   'browse.torrentCount': '{count} torrent|{count} torrents',
   'browse.searchUploader': 'Search uploader: {uploader}',
