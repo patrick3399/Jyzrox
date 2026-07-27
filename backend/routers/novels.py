@@ -10,6 +10,8 @@ reverse.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,9 +26,12 @@ from core.database import async_session
 from core.redis_client import get_redis
 from db.models import NovelLink, NovelMention, NovelNote
 from services import novel_format, novel_fs, novel_git, novel_index, novel_outline
-from worker.helpers import acquire_lock, release_lock
+from worker.helpers import acquire_lock, release_lock, renew_lock
 
 _GIT_LOCK = "novel:git:lock"
+# Renewed while the operation runs, so the TTL only matters if the process dies.
+_GIT_LOCK_TTL = 60
+_GIT_LOCK_RENEW_INTERVAL = 20
 logger = logging.getLogger(__name__)
 
 
@@ -220,14 +225,40 @@ class WriteBody(BaseModel):
 
 
 async def _with_git_lock(coro_factory):
-    """Serialize every repo-mutating git op on the Redis lock `novel:git:lock`."""
+    """Serialize every repo-mutating git op on the Redis lock `novel:git:lock`.
+
+    The lock is renewed for as long as the operation is still running.
+    ``commit_and_push`` can chain commit + push + fetch + rebase + push, each
+    with its own 30s subprocess timeout, so a fixed 60s TTL could expire while
+    the work was still in progress and let a second request into the same repo.
+    ``release_lock`` is token-checked and so would never delete the new holder's
+    lock, but nothing prevented the two operations from overlapping.
+
+    A renewal that returns False means the lock is gone or has changed hands.
+    That is logged rather than raised: the git work is already underway and
+    aborting mid-rebase would leave a worse state than finishing.
+    """
     r = get_redis()
-    token = await acquire_lock(r, _GIT_LOCK, ttl=60)
+    token = await acquire_lock(r, _GIT_LOCK, ttl=_GIT_LOCK_TTL)
     if token is None:
         raise HTTPException(status_code=409, detail="git busy, retry")
+
+    async def _keep_held() -> None:
+        while True:
+            await asyncio.sleep(_GIT_LOCK_RENEW_INTERVAL)
+            if not await renew_lock(r, _GIT_LOCK, token, _GIT_LOCK_TTL):
+                logger.error(
+                    "novel git lock lost while the operation was still running; another writer may now be in the repo"
+                )
+                return
+
+    heartbeat = asyncio.create_task(_keep_held())
     try:
         return await coro_factory()
     finally:
+        heartbeat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat
         await release_lock(r, _GIT_LOCK, token)
 
 
