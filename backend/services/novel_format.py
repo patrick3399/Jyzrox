@@ -43,6 +43,8 @@ _META_COLON_OUTSIDE = [re.compile(rf"\*\*{f}\*\*\s*[：:]") for f in _META_FIELD
 # Nordkale's 裏側視角 heading must sit outside the blockquote it introduces.
 _NORDKALE_INNER_VIEW = re.compile(r"^>\s*\*\*【裏側視角")
 _CHAPTER_END = re.compile(r"（.{1,20}完）\s*$")
+# Opening/closing fence for a code block; the run length gates the close.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 def variant_for(rel_path: str) -> str:
@@ -66,6 +68,32 @@ def _frontmatter_lines(content: str) -> int:
     return content[: end + 4].count("\n") + 1
 
 
+def _fenced_line_numbers(lines: list[str]) -> set[int]:
+    """1-based line numbers inside a fenced code block, markers included.
+
+    The FORMAT.md rules describe prose. A fenced block is verbatim sample text —
+    the convention docs quote badly-formatted headings on purpose — so linting
+    inside one misreports, and rewriting inside one corrupts the example. An
+    unterminated fence swallows the rest of the file, which is the safe
+    direction: leave it alone rather than rewrite it.
+    """
+    inside: set[int] = set()
+    open_char: str | None = None
+    open_len = 0
+    for idx, line in enumerate(lines, 1):
+        match = _FENCE_RE.match(line)
+        if open_char is None:
+            if match:
+                open_char = match.group(1)[0]
+                open_len = len(match.group(1))
+                inside.add(idx)
+            continue
+        inside.add(idx)
+        if match and match.group(1)[0] == open_char and len(match.group(1)) >= open_len:
+            open_char = None
+    return inside
+
+
 def check_text(content: str, *, variant: str = "default", category: str = "main") -> list[dict]:
     """FORMAT.md violations in one file, as {rule, line, text} (1-based lines).
 
@@ -77,8 +105,9 @@ def check_text(content: str, *, variant: str = "default", category: str = "main"
     issues: list[dict] = []
     skip = _frontmatter_lines(content)
     lines = content.splitlines()
+    fenced = _fenced_line_numbers(lines)
     for idx, line in enumerate(lines, 1):
-        if idx <= skip:
+        if idx <= skip or idx in fenced:
             continue
         for rule, pattern, anchored in _LINE_RULES:
             if pattern.match(line) if anchored else pattern.search(line):
@@ -101,6 +130,40 @@ def check_text(content: str, *, variant: str = "default", category: str = "main"
 
 
 def _fix_body(body: str, variant: str) -> tuple[str, list[str]]:
+    """Rewrite prose only — fenced code blocks pass through byte for byte."""
+    lines = body.split("\n")
+    fenced = _fenced_line_numbers(lines)
+    if not fenced:
+        return _fix_prose(body, variant)
+
+    out: list[str] = []
+    changes: list[str] = []
+    prose: list[str] = []
+
+    def _flush_prose() -> None:
+        if not prose:
+            return
+        fixed, fixed_rules = _fix_prose("\n".join(prose), variant)
+        out.append(fixed)
+        changes.extend(fixed_rules)
+        prose.clear()
+
+    for idx, line in enumerate(lines, 1):
+        if idx in fenced:
+            _flush_prose()
+            out.append(line)
+        else:
+            prose.append(line)
+    _flush_prose()
+
+    seen: list[str] = []
+    for rule in changes:
+        if rule not in seen:
+            seen.append(rule)
+    return "\n".join(out), seen
+
+
+def _fix_prose(body: str, variant: str) -> tuple[str, list[str]]:
     changes: list[str] = []
 
     def sub(rule: str, pattern: str, repl: str, text: str, flags: int = re.MULTILINE) -> str:

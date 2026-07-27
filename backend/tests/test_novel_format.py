@@ -149,3 +149,71 @@ def test_fix_never_invents_a_chapter_end_marker():
     assert fixed == content
     assert changes == []
     assert "missing_chapter_end_marker" in _rules(content)
+
+
+# ---------------------------------------------------------------------------
+# Fenced code blocks
+# ---------------------------------------------------------------------------
+
+
+_FENCED = """第1章：開場
+
+正文開頭。
+
+```markdown
+#### 第一幕：範例
+**地點**: 這是文件裡故意寫錯的範例
+```
+
+正文結尾。（第1章 完）
+"""
+
+
+def test_fix_text_leaves_fenced_examples_untouched():
+    """FORMAT.md quotes badly-formatted headings on purpose as examples.
+
+    Rewriting them would corrupt the very documentation that explains the rule.
+    """
+    fixed, changes = fix_text(_FENCED)
+    assert "#### 第一幕：範例" in fixed
+    assert "**地點**: 這是文件裡故意寫錯的範例" in fixed
+    assert changes == []
+    assert fixed == _FENCED
+
+
+def test_check_text_does_not_report_issues_inside_a_fence():
+    issues = check_text(_FENCED)
+    assert [i["rule"] for i in issues] == []
+
+
+def test_prose_outside_a_fence_is_still_fixed():
+    """The fence must not become a blanket exemption for the whole file."""
+    content = "第1章：開場\n\n```\n#### 第一幕：範例\n```\n\n#### 第二幕：真正的內容\n\n（第1章 完）\n"
+    fixed, changes = fix_text(content)
+    assert "act_title_wrong_level" in changes
+    # Inside the fence: untouched. Outside: corrected to ###.
+    assert "```\n#### 第一幕：範例\n```" in fixed
+    assert "### 第二幕：真正的內容" in fixed
+
+
+def test_tilde_fences_are_honoured_too():
+    content = "第1章：開場\n\n~~~\n#### 第一幕：範例\n~~~\n\n（第1章 完）\n"
+    fixed, changes = fix_text(content)
+    assert changes == []
+    assert "#### 第一幕：範例" in fixed
+
+
+def test_unterminated_fence_is_left_alone_to_the_end_of_file():
+    """Safer to skip than to rewrite text whose structure we misread."""
+    content = "第1章：開場\n\n```\n#### 第一幕：範例\n**地點**: x\n"
+    fixed, changes = fix_text(content)
+    assert changes == []
+    assert fixed == content
+
+
+def test_a_longer_closing_run_still_closes_the_fence():
+    content = "第1章：開場\n\n```\n#### 範例\n````\n\n#### 第二幕：真的\n\n（第1章 完）\n"
+    fixed, changes = fix_text(content)
+    assert "act_title_wrong_level" in changes
+    assert "### 第二幕：真的" in fixed
+    assert "#### 範例" in fixed
