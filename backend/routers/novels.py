@@ -23,7 +23,7 @@ from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import NovelLink, NovelMention, NovelNote
-from services import novel_fs, novel_git, novel_index
+from services import novel_format, novel_fs, novel_git, novel_index, novel_outline
 from worker.helpers import acquire_lock, release_lock
 
 _GIT_LOCK = "novel:git:lock"
@@ -130,11 +130,17 @@ async def file_history(path: str = Query(...), _: dict = Depends(require_auth)):
 
 
 @router.get("/file/diff")
-async def file_diff(path: str = Query(...), rev: str = Query(...), _: dict = Depends(require_auth)):
+async def file_diff(
+    path: str = Query(...),
+    rev: str = Query(...),
+    base: str | None = Query(None),
+    _: dict = Depends(require_auth),
+):
+    """Diff of `rev` against its parent, or against `base` when given."""
     repo = _repo()
     try:
         novel_fs.safe_repo_path(repo, path)
-        return {"diff": await novel_git.diff_file(repo, path, rev)}
+        return {"diff": await novel_git.diff_file(repo, path, rev, base=base)}
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except novel_git.NovelGitError as e:
@@ -225,6 +231,32 @@ async def _with_git_lock(coro_factory):
         await release_lock(r, _GIT_LOCK, token)
 
 
+async def _assert_writable(repo: str, path: str, base_sha: str | None) -> None:
+    """Pre-write guard for every mutating endpoint. MUST run under the git lock:
+    checking before taking it is a lost-update TOCTOU (a commit could land
+    between the check and the write).
+
+    `base_sha=None` means "create": a brand-new file has no base revision to be
+    stale against, so its only invariant is that the path is free.
+    """
+    st = await novel_git.status(repo)
+    if st["locked"]:
+        raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
+    if base_sha is None:
+        if novel_fs.file_exists(repo, path):
+            raise HTTPException(status_code=409, detail={"error": "file exists"})
+        return
+    if st["head"] != base_sha:
+        try:
+            current = novel_fs.read_file(repo, path)
+        except FileNotFoundError:
+            current = ""
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
+        )
+
+
 @router.put("/file")
 async def write_file(body: WriteBody, auth: dict = Depends(_member)):
     repo = _repo()
@@ -237,25 +269,7 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
     msg = body.message or f"edit: {body.path}"
 
     async def _do():
-        # The locked/base_sha check MUST run under the lock: checking before it
-        # is a lost-update TOCTOU (a commit could land between check and write).
-        st = await novel_git.status(repo)
-        if st["locked"]:
-            raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
-        if body.create:
-            # A create's only invariant is that the path is free — no base_sha.
-            # Checked under the git lock so a concurrent create can't slip in.
-            if novel_fs.file_exists(repo, body.path):
-                raise HTTPException(status_code=409, detail={"error": "file exists"})
-        elif st["head"] != body.base_sha:
-            try:
-                current = novel_fs.read_file(repo, body.path)
-            except FileNotFoundError:
-                current = ""
-            raise HTTPException(
-                status_code=409,
-                detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
-            )
+        await _assert_writable(repo, body.path, None if body.create else body.base_sha)
         novel_fs.write_file(repo, body.path, body.content)
         return await novel_git.commit_and_push(repo, body.path, msg)
 
@@ -272,6 +286,209 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
         resource_id=body.path,
     )
     await _enqueue_reindex()
+    return result
+
+
+class RevertBody(BaseModel):
+    path: str
+    rev: str
+    base_sha: str
+    message: str | None = None
+
+
+@router.post("/file/revert")
+async def revert_file(body: RevertBody, auth: dict = Depends(_member)):
+    """Restore one file to its content at `rev` as a NEW commit.
+
+    History is never rewritten: the revert is an ordinary edit whose content
+    comes from git instead of the client, so it goes through the same lock,
+    staleness guard and commit+push path as PUT /file.
+    """
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, body.path)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    msg = body.message or f"revert: {body.path} to {body.rev[:7]}"
+
+    async def _do():
+        await _assert_writable(repo, body.path, body.base_sha)
+        content = await novel_git.file_at_rev(repo, body.path, body.rev)
+        novel_fs.write_file(repo, body.path, content)
+        return await novel_git.commit_and_push(repo, body.path, msg)
+
+    try:
+        result = await _with_git_lock(_do)
+    except novel_git.NovelLocked:
+        raise HTTPException(status_code=409, detail="conflict; repo locked; resolve on desktop")
+    except novel_git.NovelGitError as e:
+        # Bad rev, or the file did not exist at that revision — caller error.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await audit.log_audit(auth["user_id"], "novel.revert", f"{body.path}@{body.rev}")
+    await events.emit_safe(
+        events.EventType.NOVEL_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="novel",
+        resource_id=body.path,
+    )
+    await _enqueue_reindex()
+    return {**result, "reverted_to": body.rev}
+
+
+class SummaryBody(BaseModel):
+    path: str
+    summary: str
+    base_sha: str
+
+
+@router.put("/file/summary")
+async def put_summary(body: SummaryBody, auth: dict = Depends(_member)):
+    """Set (or clear, with an empty string) a chapter's `summary:` frontmatter.
+
+    The summary is authored content, so it lives in the file — the DB stays
+    derived-only (spec §2). Writing goes through the same guard/commit path as
+    any other edit; only the key's own line changes.
+    """
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, body.path)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    async def _do():
+        await _assert_writable(repo, body.path, body.base_sha)
+        try:
+            current = novel_fs.read_file(repo, body.path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        updated = novel_fs.set_frontmatter_value(current, "summary", body.summary)
+        novel_fs.write_file(repo, body.path, updated)
+        return await novel_git.commit_and_push(repo, body.path, f"summary: {body.path}")
+
+    try:
+        result = await _with_git_lock(_do)
+    except novel_git.NovelLocked:
+        raise HTTPException(status_code=409, detail="conflict; repo locked; resolve on desktop")
+
+    await audit.log_audit(auth["user_id"], "novel.summary", body.path)
+    await events.emit_safe(
+        events.EventType.NOVEL_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="novel",
+        resource_id=body.path,
+    )
+    await _enqueue_reindex()
+    return result
+
+
+# ── Plot outline (Phase 1.7) ───────────────────────────────────────────────
+
+
+@router.get("/works/{work}/outline")
+async def work_outline(work: str, _: dict = Depends(require_auth)):
+    """A work's plot nodes, each lined up with the chapter it plans (if written).
+
+    Derived live from `參考/大綱.md` — the file is the source of truth and a
+    single small read, so there is no derived table to go stale. `path` is null
+    when the work has no outline yet, and `canonical_path` is where one goes.
+    """
+    repo = _repo()
+    try:
+        chapters = novel_fs.list_chapters(repo, work)
+        path = novel_outline.find_outline(repo, work)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if path is None:
+        return {"path": None, "canonical_path": novel_outline.outline_path(work), "nodes": []}
+    nodes = novel_outline.parse_outline(novel_fs.read_file(repo, path))
+    return {
+        "path": path,
+        "canonical_path": novel_outline.outline_path(work),
+        "nodes": novel_outline.link_chapters(nodes, chapters),
+    }
+
+
+# ── FORMAT.md lint / fix (Phase 1.7) ───────────────────────────────────────
+
+
+def _lint_file(repo: str, path: str) -> list[dict]:
+    return novel_format.check_text(
+        novel_fs.read_file(repo, path),
+        variant=novel_format.variant_for(path),
+        category=novel_fs.classify_path(path),
+    )
+
+
+@router.get("/file/lint")
+async def lint_file(path: str = Query(...), _: dict = Depends(require_auth)):
+    repo = _repo()
+    try:
+        return {"path": path, "issues": _lint_file(repo, path)}
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="not found")
+
+
+@router.get("/works/{work}/lint")
+async def lint_work(work: str, _: dict = Depends(require_auth)):
+    """Every main chapter of one work, mirroring the desktop batch scan."""
+    repo = _repo()
+    try:
+        chapters = novel_fs.list_chapters(repo, work)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    files = [{"path": ch["path"], "issues": _lint_file(repo, ch["path"])} for ch in chapters]
+    return {"files": files, "total": sum(len(f["issues"]) for f in files)}
+
+
+class FixBody(BaseModel):
+    path: str
+    base_sha: str
+
+
+@router.post("/file/fix")
+async def fix_file(body: FixBody, auth: dict = Depends(_member)):
+    """Apply the auto-fixable FORMAT.md rules and commit if anything changed.
+
+    Nothing to fix → no commit, `changes: []`. The un-fixable rules (a missing
+    chapter-end marker) stay in the lint output for the author to resolve.
+    """
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, body.path)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    async def _do():
+        await _assert_writable(repo, body.path, body.base_sha)
+        try:
+            current = novel_fs.read_file(repo, body.path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        fixed, changes = novel_format.fix_text(current, variant=novel_format.variant_for(body.path))
+        if not changes:
+            return {"changes": [], "head": body.base_sha, "pushed": False}
+        novel_fs.write_file(repo, body.path, fixed)
+        result = await novel_git.commit_and_push(repo, body.path, f"format: {body.path}")
+        return {**result, "changes": changes}
+
+    try:
+        result = await _with_git_lock(_do)
+    except novel_git.NovelLocked:
+        raise HTTPException(status_code=409, detail="conflict; repo locked; resolve on desktop")
+
+    if result["changes"]:
+        await audit.log_audit(auth["user_id"], "novel.format", body.path)
+        await events.emit_safe(
+            events.EventType.NOVEL_UPDATED,
+            actor_user_id=auth["user_id"],
+            resource_type="novel",
+            resource_id=body.path,
+        )
+        await _enqueue_reindex()
     return result
 
 

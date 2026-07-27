@@ -360,6 +360,244 @@ async def test_create_viewer_forbidden(viewer_client, novel_repo):
     assert r.status_code == 403
 
 
+async def _edit(client, path, content):
+    """Save `content` over `path` through the API and return the new HEAD."""
+    head = (await client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    r = await client.put("/api/novels/file", json={"path": path, "content": content, "base_sha": head})
+    assert r.status_code == 200
+    return r.json()["head"]
+
+
+async def test_revert_restores_content_of_an_older_revision(member_client, novel_repo):
+    """Revert writes the historical content forward as a NEW commit; history is
+    not rewritten, so the reverted-away version stays in the log."""
+    path = "作品A/第01章.md"
+    first_read = (await member_client.get(f"/api/novels/file?path={path}")).json()
+    original, first_rev = first_read["content"], first_read["base_sha"]
+    bad_head = await _edit(member_client, path, "壞掉的改寫\n")
+
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": path, "rev": first_rev, "base_sha": bad_head},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["reverted_to"] == first_rev
+    assert (await member_client.get(f"/api/novels/file?path={path}")).json()["content"] == original
+
+    commits = (await member_client.get(f"/api/novels/file/history?path={path}")).json()["commits"]
+    assert commits[0]["message"].startswith("revert:")
+    assert bad_head in [c["hash"] for c in commits]
+
+
+async def test_revert_viewer_forbidden(viewer_client, novel_repo):
+    """Revert rewrites file content → member-only, like every other write."""
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": head, "base_sha": head},
+    )
+    assert r.status_code == 403
+
+
+async def test_revert_with_stale_base_sha_returns_409(member_client, novel_repo):
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": head, "base_sha": "0000000"},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "stale base_sha"
+
+
+async def test_revert_to_locked_repo_returns_409(member_client, novel_repo):
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    (novel_repo["work"] / ".jyzrox-locked").write_text("conflict\n", encoding="utf-8")
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": head, "base_sha": head},
+    )
+    assert r.status_code == 409
+    assert "locked" in str(r.json()["detail"])
+
+
+async def test_revert_rejects_arg_injection_and_traversal(member_client, novel_repo, tmp_path):
+    """`rev` is glued to the path for `git show rev:path` — a `--option` rev must
+    be rejected (400), never write an arbitrary file."""
+    sentinel = tmp_path / "pwned.txt"
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "作品A/第01章.md", "rev": f"--output={sentinel}", "base_sha": head},
+    )
+    assert r.status_code == 400
+    assert not sentinel.exists()
+    r = await member_client.post(
+        "/api/novels/file/revert",
+        json={"path": "../../etc/passwd", "rev": head, "base_sha": head},
+    )
+    assert r.status_code == 400
+
+
+async def test_file_diff_with_base_compares_two_revisions(member_client, novel_repo):
+    """Two-version compare: base=<older rev> diffs the pair, not rev vs its parent."""
+    path = "作品A/第01章.md"
+    first = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    second = await _edit(member_client, path, "第二版\n")
+    r = await member_client.get(f"/api/novels/file/diff?path={path}&rev={second}&base={first}")
+    assert r.status_code == 200
+    assert "+第二版" in r.json()["diff"]
+
+
+async def test_file_diff_rejects_arg_injection_in_base(viewer_client, novel_repo, tmp_path):
+    sentinel = tmp_path / "pwned.txt"
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.get(f"/api/novels/file/diff?path=作品A/第01章.md&rev={head}&base=--output={sentinel}")
+    assert r.status_code == 400
+    assert not sentinel.exists()
+
+
+async def test_summary_roundtrip_shows_up_in_the_chapter_listing(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    before = (await member_client.get("/api/novels/works/作品A/chapters")).json()["chapters"][0]
+    assert before["summary"] is None
+
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    r = await member_client.put(
+        "/api/novels/file/summary",
+        json={"path": path, "summary": "張三離開了城市", "base_sha": head},
+    )
+    assert r.status_code == 200, r.text
+
+    after = (await member_client.get("/api/novels/works/作品A/chapters")).json()["chapters"][0]
+    assert after["summary"] == "張三離開了城市"
+    # Metadata is not prose — the character count must not move.
+    assert after["chars"] == before["chars"]
+    # And the prose itself is untouched.
+    content = (await member_client.get(f"/api/novels/file?path={path}")).json()["content"]
+    assert content.endswith("# 第一章\n\n### 幕一\n\n正文 [[張三]]。\n")
+
+
+async def test_summary_empty_string_clears_it(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    await member_client.put("/api/novels/file/summary", json={"path": path, "summary": "暫定摘要", "base_sha": head})
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+    r = await member_client.put("/api/novels/file/summary", json={"path": path, "summary": "", "base_sha": head})
+    assert r.status_code == 200
+    chapters = (await member_client.get("/api/novels/works/作品A/chapters")).json()["chapters"]
+    assert chapters[0]["summary"] is None
+
+
+async def test_summary_viewer_forbidden(viewer_client, novel_repo):
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.put(
+        "/api/novels/file/summary",
+        json={"path": "作品A/第01章.md", "summary": "x", "base_sha": head},
+    )
+    assert r.status_code == 403
+
+
+async def test_summary_with_stale_base_sha_returns_409(member_client, novel_repo):
+    r = await member_client.put(
+        "/api/novels/file/summary",
+        json={"path": "作品A/第01章.md", "summary": "x", "base_sha": "0000000"},
+    )
+    assert r.status_code == 409
+
+
+async def test_summary_rejects_traversal(member_client, novel_repo):
+    r = await member_client.put(
+        "/api/novels/file/summary",
+        json={"path": "../../etc/passwd", "summary": "x", "base_sha": "0000000"},
+    )
+    assert r.status_code == 400
+
+
+async def test_lint_reports_issues_for_a_file_and_for_the_whole_work(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    # The fixture chapter has no （…完） marker, so it starts out non-conforming.
+    r = await member_client.get(f"/api/novels/file/lint?path={path}")
+    assert r.status_code == 200
+    assert "missing_chapter_end_marker" in [i["rule"] for i in r.json()["issues"]]
+
+    await _edit(member_client, path, "第1章：開場\n\n**張三**：「嗨。」\n\n（第1章 完）\n")
+    work = await member_client.get("/api/novels/works/作品A/lint")
+    assert work.status_code == 200
+    body = work.json()
+    assert body["total"] == 1
+    assert [i["rule"] for i in body["files"][0]["issues"]] == ["dialogue_colon_outside_bold"]
+
+
+async def test_lint_rejects_traversal(viewer_client, novel_repo):
+    assert (await viewer_client.get("/api/novels/file/lint?path=../../etc/passwd")).status_code == 400
+
+
+async def test_fix_commits_only_when_something_changed(member_client, novel_repo):
+    path = "作品A/第01章.md"
+    await _edit(member_client, path, "第1章：開場\n\n**張三**：「嗨。」\n\n（第1章 完）\n")
+    head = (await member_client.get(f"/api/novels/file?path={path}")).json()["base_sha"]
+
+    r = await member_client.post("/api/novels/file/fix", json={"path": path, "base_sha": head})
+    assert r.status_code == 200, r.text
+    assert r.json()["changes"] == ["dialogue_colon_outside_bold"]
+    content = (await member_client.get(f"/api/novels/file?path={path}")).json()
+    assert "**張三：**「嗨。」" in content["content"]
+    assert (await member_client.get(f"/api/novels/file/lint?path={path}")).json()["issues"] == []
+
+    # Second run has nothing to do → no commit, and the log does not grow.
+    before = (await member_client.get(f"/api/novels/file/history?path={path}")).json()["commits"]
+    r = await member_client.post("/api/novels/file/fix", json={"path": path, "base_sha": content["base_sha"]})
+    assert r.status_code == 200
+    assert r.json()["changes"] == []
+    after = (await member_client.get(f"/api/novels/file/history?path={path}")).json()["commits"]
+    assert len(after) == len(before)
+
+
+async def test_fix_viewer_forbidden(viewer_client, novel_repo):
+    head = (await viewer_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await viewer_client.post("/api/novels/file/fix", json={"path": "作品A/第01章.md", "base_sha": head})
+    assert r.status_code == 403
+
+
+async def test_fix_with_stale_base_sha_returns_409(member_client, novel_repo):
+    r = await member_client.post("/api/novels/file/fix", json={"path": "作品A/第01章.md", "base_sha": "0000000"})
+    assert r.status_code == 409
+
+
+async def test_outline_endpoint_reports_where_an_outline_goes_when_absent(viewer_client, novel_repo):
+    r = await viewer_client.get("/api/novels/works/作品A/outline")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"path": None, "canonical_path": "作品A/參考/大綱.md", "nodes": []}
+
+
+async def test_outline_endpoint_links_nodes_to_existing_chapters(member_client, novel_repo):
+    """A node whose chapter exists links to it; the rest is the unwritten plan."""
+    (novel_repo["work"] / "作品A" / "參考").mkdir(parents=True)
+    (novel_repo["work"] / "作品A" / "參考" / "大綱.md").write_text(
+        "### 第1章：開場\n**項目狀態：** 已寫\n\n*   **第一幕：抵達**\n\n### 第2章：未寫\n構想中。\n",
+        encoding="utf-8",
+    )
+    (novel_repo["work"] / "作品A" / "01.md").write_text("第1章\n\n（第1章 完）\n", encoding="utf-8")
+    _run(novel_repo["work"], "add", ".")
+    _run(novel_repo["work"], "commit", "-m", "outline")
+
+    r = await member_client.get("/api/novels/works/作品A/outline")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["path"] == "作品A/參考/大綱.md"
+    assert [n["chapter_no"] for n in body["nodes"]] == [1, 2]
+    assert body["nodes"][0]["chapter_path"] == "作品A/01.md"
+    assert [b["title"] for b in body["nodes"][0]["beats"]] == ["第一幕：抵達"]
+    assert body["nodes"][1]["chapter_path"] is None
+
+
+async def test_outline_endpoint_rejects_an_unsafe_work_name(viewer_client, novel_repo):
+    """An unsafe work must surface as a 400 from the path guard, never as a read."""
+    r = await viewer_client.get("/api/novels/works/%00/outline")
+    assert r.status_code == 400
+
+
 async def test_reset_forbidden_for_member(member_client, novel_repo):
     # Two clients cannot coexist (they share _app.dependency_overrides), so the
     # member and admin cases are separate tests.

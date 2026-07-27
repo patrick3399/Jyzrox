@@ -31,6 +31,24 @@ function rangeOf(node?: MdNode): BlockRange | null {
   return pos ? { start: pos.start.line, end: pos.end.line } : null
 }
 
+/**
+ * Blank out leading YAML frontmatter so it is not rendered as a horizontal rule
+ * plus a stray heading (markdown has no frontmatter concept without a plugin).
+ *
+ * The fence is replaced by the SAME number of newlines rather than removed:
+ * every block's source-line range must keep pointing at the right line of the
+ * real file, or block editing would splice into the wrong place. Fence
+ * detection mirrors the backend's parse_frontmatter so both agree on what
+ * counts as metadata.
+ */
+export function blankFrontmatter(content: string): string {
+  if (!content.startsWith('---\n')) return content
+  const end = content.indexOf('\n---', 4)
+  if (end === -1) return content
+  const fence = content.slice(0, end + 4)
+  return '\n'.repeat((fence.match(/\n/g) ?? []).length) + content.slice(end + 4)
+}
+
 const draftKey = (path: string, baseSha: string, r: BlockRange) =>
   `novel:blockdraft:${path}:${baseSha}:${r.start}-${r.end}`
 
@@ -186,6 +204,9 @@ export function MarkdownView({
     return base
   }, [editable, entityNames, entityHrefFor])
 
+  // Rendered source has the frontmatter blanked; `lines` (the edit seed) stays
+  // the real file, so a block's range maps back to the same text either way.
+  const source = useMemo(() => blankFrontmatter(content), [content])
   const lines = useMemo(() => content.split('\n'), [content])
   const seedFor = useCallback(
     (r: BlockRange) => lines.slice(r.start - 1, r.end).join('\n'),
@@ -317,7 +338,7 @@ export function MarkdownView({
       {...(editable ? longPress : {})}
     >
       <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-        {content}
+        {source}
       </ReactMarkdown>
     </div>
   )

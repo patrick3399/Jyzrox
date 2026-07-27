@@ -10,7 +10,10 @@ export interface NovelWork {
 export interface NovelChapter {
   path: string
   name: string
+  /** Whitespace-excluded character count of the body (not the byte size). */
   chars: number
+  /** Authored one-liner from the file's `summary:` frontmatter, if any. */
+  summary?: string | null
   mtime: number
   category?: string
 }
@@ -58,6 +61,36 @@ export type NovelWriteResult =
       conflict?: { current: string; current_sha: string }
       message?: string
     }
+
+/** A plot node from a work's outline, lined up with the chapter it plans. */
+export interface NovelOutlineNode {
+  order: number
+  level: number
+  title: string
+  line: number
+  chapter_no: number | null
+  preview: string
+  beats: { title: string; line: number }[]
+  chapter_path: string | null
+}
+export interface NovelOutline {
+  /** null when the work has no outline file yet. */
+  path: string | null
+  /** Where an outline belongs, for the "create one" affordance. */
+  canonical_path: string
+  nodes: NovelOutlineNode[]
+}
+
+/** One FORMAT.md violation. `rule` is a stable id; its wording lives in i18n. */
+export interface NovelFormatIssue {
+  rule: string
+  line: number
+  text: string
+}
+export interface NovelFileIssues {
+  path: string
+  issues: NovelFormatIssue[]
+}
 
 export interface NovelGraphNode {
   id: string
@@ -162,11 +195,39 @@ export const novels = {
       message: `create: ${path}`,
     })
   },
+  // Writes the `summary:` frontmatter key only; an empty string clears it.
+  putSummary: (path: string, summary: string, base_sha: string) =>
+    apiFetch<{ head: string; pushed: boolean }>('/api/novels/file/summary', {
+      method: 'PUT',
+      body: JSON.stringify({ path, summary, base_sha }),
+    }),
+  outline: (work: string) =>
+    apiFetch<NovelOutline>(`/api/novels/works/${encodeURIComponent(work)}/outline`),
+  // ── FORMAT.md lint / fix ──
+  lintFile: (path: string) =>
+    apiFetch<{ path: string; issues: NovelFormatIssue[] }>(`/api/novels/file/lint${qs({ path })}`),
+  lintWork: (work: string) =>
+    apiFetch<{ files: NovelFileIssues[]; total: number }>(
+      `/api/novels/works/${encodeURIComponent(work)}/lint`,
+    ),
+  fixFile: (path: string, base_sha: string) =>
+    apiFetch<{ changes: string[]; head: string; pushed: boolean }>('/api/novels/file/fix', {
+      method: 'POST',
+      body: JSON.stringify({ path, base_sha }),
+    }),
   search: (q: string) => apiFetch<{ hits: NovelSearchHit[] }>(`/api/novels/search${qs({ q })}`),
   history: (path: string) =>
     apiFetch<{ commits: NovelCommit[] }>(`/api/novels/file/history${qs({ path })}`),
-  diff: (path: string, rev: string) =>
-    apiFetch<{ diff: string }>(`/api/novels/file/diff${qs({ path, rev })}`),
+  // `base` compares two arbitrary revisions; omitted → rev against its parent.
+  diff: (path: string, rev: string, base?: string) =>
+    apiFetch<{ diff: string }>(`/api/novels/file/diff${qs({ path, rev, base })}`),
+  // Restore a file to an older revision as a new commit (never rewrites history).
+  // base_sha is the caller's view of HEAD — the same lost-update guard as writeFile.
+  revertFile: (path: string, rev: string, base_sha: string) =>
+    apiFetch<{ head: string; pushed: boolean; reverted_to: string }>('/api/novels/file/revert', {
+      method: 'POST',
+      body: JSON.stringify({ path, rev, base_sha }),
+    }),
   status: () => apiFetch<NovelRepoStatus>('/api/novels/status'),
   sync: () => apiFetch<{ pulled: boolean }>('/api/novels/sync', { method: 'POST' }),
   reset: () => apiFetch<{ ok: boolean }>('/api/novels/reset', { method: 'POST' }),

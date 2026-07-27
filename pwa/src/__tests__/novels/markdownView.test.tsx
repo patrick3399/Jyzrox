@@ -5,7 +5,7 @@ vi.mock('@/lib/i18n', () => ({
   t: (key: string) => key,
 }))
 
-import { MarkdownView } from '@/components/novels/MarkdownView'
+import { MarkdownView, blankFrontmatter } from '@/components/novels/MarkdownView'
 
 // 1:# 第一章 / 3:### 幕一 / 5:正文一 [[張三]]。 / 7:**粗體** / 9-10:list / 12:--- / 14:正文二
 const CONTENT =
@@ -80,5 +80,43 @@ describe('MarkdownView', () => {
     )
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
     expect(textarea.value).toBe('正文一 [[張三]]。')
+  })
+
+  it('does not render leading frontmatter as a rule plus a stray heading', () => {
+    const withFm = '---\nsummary: 張三離開\n---\n\n' + CONTENT
+    const { container } = render(<MarkdownView content={withFm} acts={[]} />)
+    expect(container.textContent).not.toContain('summary')
+    // The one hr in the body is still rendered; the fence adds none.
+    expect(container.querySelectorAll('hr')).toHaveLength(1)
+  })
+
+  it('keeps source line numbers pointing at the real file when frontmatter is present', () => {
+    // 4 frontmatter lines shift every block down by 4: 正文一 moves 5 → 9.
+    const withFm = '---\nsummary: 張三離開\n---\n\n' + CONTENT
+    render(<MarkdownView content={withFm} acts={[]} />)
+    const para = screen.getByText(/正文一/).closest('[data-line-start]') as HTMLElement
+    expect(para.dataset.lineStart).toBe('9')
+  })
+
+  it('seeds the block editor from the real file, frontmatter offset included', () => {
+    const withFm = '---\nsummary: 張三離開\n---\n\n' + CONTENT
+    render(
+      <MarkdownView
+        content={withFm}
+        acts={[]}
+        editable
+        path="作品A/第01章.md"
+        baseSha="abc1234"
+        editingRange={{ start: 9, end: 9 }}
+      />,
+    )
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('正文一 [[張三]]。')
+  })
+
+  it('blankFrontmatter preserves the line count so ranges never drift', () => {
+    expect(blankFrontmatter('---\na: 1\nb: 2\n---\n\n本文\n')).toBe('\n\n\n\n\n本文\n')
+    // No fence, or an unterminated one, is left completely alone.
+    expect(blankFrontmatter('本文\n')).toBe('本文\n')
+    expect(blankFrontmatter('---\na: 1\n本文\n')).toBe('---\na: 1\n本文\n')
   })
 })

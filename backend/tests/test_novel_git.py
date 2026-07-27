@@ -110,6 +110,54 @@ async def test_diff_file_rejects_option_injection(repos, tmp_path):
     assert not sentinel.exists()
 
 
+async def test_diff_file_with_base_compares_two_revisions(repos):
+    """base=<rev> diffs two arbitrary commits, not just a commit against its parent."""
+    work = str(repos["work"])
+    first = await novel_git.head_sha(work)
+    (Path(work) / "作品A" / "第01章.md").write_text("v2\n", encoding="utf-8")
+    await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: v2")
+    second = await novel_git.head_sha(work)
+    diff = await novel_git.diff_file(work, "作品A/第01章.md", second, base=first)
+    assert "-v1" in diff and "+v2" in diff
+
+
+async def test_diff_file_rejects_option_injection_in_base(repos, tmp_path):
+    """The compare base takes the same hex-only validation as `rev`."""
+    work = str(repos["work"])
+    sentinel = tmp_path / "pwned.txt"
+    head = await novel_git.head_sha(work)
+    with pytest.raises(novel_git.NovelGitError):
+        await novel_git.diff_file(work, "作品A/第01章.md", head, base=f"--output={sentinel}")
+    assert not sentinel.exists()
+
+
+async def test_file_at_rev_returns_old_content(repos):
+    work = str(repos["work"])
+    first = await novel_git.head_sha(work)
+    (Path(work) / "作品A" / "第01章.md").write_text("v2\n", encoding="utf-8")
+    await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: v2")
+    assert await novel_git.file_at_rev(work, "作品A/第01章.md", first) == "v1\n"
+
+
+async def test_file_at_rev_rejects_option_injection(repos, tmp_path):
+    """`rev` reaches git glued to the path (`rev:path`); it must stay hex-only."""
+    work = str(repos["work"])
+    sentinel = tmp_path / "pwned.txt"
+    with pytest.raises(novel_git.NovelGitError):
+        await novel_git.file_at_rev(work, "作品A/第01章.md", f"--output={sentinel}")
+    assert not sentinel.exists()
+
+
+async def test_file_at_rev_raises_when_file_absent_at_that_revision(repos):
+    """Reverting a path that did not exist yet must fail loudly, not return ''."""
+    work = str(repos["work"])
+    first = await novel_git.head_sha(work)
+    (Path(work) / "作品A" / "第02章.md").write_text("new\n", encoding="utf-8")
+    await novel_git.commit_and_push(work, "作品A/第02章.md", "create: 第02章")
+    with pytest.raises(novel_git.NovelGitError):
+        await novel_git.file_at_rev(work, "作品A/第02章.md", first)
+
+
 async def test_commit_and_push_noop_when_content_unchanged(repos):
     """Saving identical content must be a no-op, not a `nothing to commit` error."""
     work = str(repos["work"])

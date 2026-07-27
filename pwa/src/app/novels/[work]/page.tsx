@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { BookText, ArrowLeft, Plus } from 'lucide-react'
+import { BookText, ArrowLeft, Pencil, Plus, SpellCheck } from 'lucide-react'
 import useSWR, { mutate } from 'swr'
 import { api } from '@/lib/api'
 import { novelChapterHref } from '@/lib/novels'
@@ -16,6 +16,8 @@ import { EmptyState } from '@/components/EmptyState'
 import { BackButton } from '@/components/BackButton'
 import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
 import { WorkCategorySection } from '@/components/novels/WorkCategorySection'
+import { ChapterSummaryEditor } from '@/components/novels/ChapterSummaryEditor'
+import { OutlineSection } from '@/components/novels/OutlineSection'
 
 export default function NovelWorkPage() {
   useLocale()
@@ -28,6 +30,15 @@ export default function NovelWorkPage() {
   const { data: profile } = useProfile()
   const canEdit = hasRole(profile?.role, 'member')
   const [showCreate, setShowCreate] = useState(false)
+  const [editingSummary, setEditingSummary] = useState<string | null>(null)
+  const [lintOn, setLintOn] = useState(false)
+  const { data: lint } = useSWR(lintOn && work ? ['novel-lint-work', work] : null, ([, w]) =>
+    api.novels.lintWork(w as string),
+  )
+  const issueCounts = useMemo(
+    () => new Map((lint?.files ?? []).map((f) => [f.path, f.issues.length])),
+    [lint],
+  )
   const chapters = data?.chapters ?? []
   const categories = data?.categories
   const hasAnyCategory = categories ? Object.values(categories).some((n) => n > 0) : false
@@ -46,16 +57,28 @@ export default function NovelWorkPage() {
           <BookText className="size-6" />
           {work}
         </h1>
-        {canEdit && (
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Linting reads every chapter, so it is opt-in rather than automatic. */}
           <button
             type="button"
-            onClick={() => setShowCreate(true)}
+            aria-pressed={lintOn}
+            onClick={() => setLintOn((v) => !v)}
             className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
           >
-            <Plus className="size-4" />
-            {t('novels.newChapter')}
+            <SpellCheck className="size-4" />
+            {t('novels.checkFormat')}
           </button>
-        )}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setShowCreate(true)}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+            >
+              <Plus className="size-4" />
+              {t('novels.newChapter')}
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -65,20 +88,66 @@ export default function NovelWorkPage() {
       ) : (
         <ul className="flex flex-col gap-1">
           {chapters.map((c) => (
-            <li key={c.path}>
-              <Link
-                href={`/novels/${encodeURIComponent(work)}/${encodeURIComponent(c.name)}?path=${encodeURIComponent(c.path)}`}
-                className="flex items-center justify-between rounded-lg border border-vault-border bg-vault-card px-4 py-3 transition-colors hover:border-vault-accent"
-              >
-                <span className="truncate font-medium text-vault-text">{c.name}</span>
-                <span className="ml-2 shrink-0 text-xs text-vault-text-muted">
-                  {c.chars.toLocaleString()}
+            <li
+              key={c.path}
+              className="rounded-lg border border-vault-border bg-vault-card transition-colors hover:border-vault-accent"
+            >
+              <div className="flex items-center gap-2 px-4 py-3">
+                <Link
+                  href={`/novels/${encodeURIComponent(work)}/${encodeURIComponent(c.name)}?path=${encodeURIComponent(c.path)}`}
+                  className="min-w-0 flex-1"
+                >
+                  <span className="block truncate font-medium text-vault-text">{c.name}</span>
+                  {c.summary && (
+                    <span className="block truncate text-xs text-vault-text-muted">
+                      {c.summary}
+                    </span>
+                  )}
+                </Link>
+                {lintOn && issueCounts.has(c.path) && (
+                  <span
+                    data-testid={`lint-count-${c.name}`}
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
+                      issueCounts.get(c.path)
+                        ? 'bg-amber-500/15 text-amber-500'
+                        : 'text-vault-text-muted'
+                    }`}
+                  >
+                    {t('novels.formatIssueCount', { count: issueCounts.get(c.path) ?? 0 })}
+                  </span>
+                )}
+                <span className="shrink-0 text-xs text-vault-text-muted">
+                  {t('novels.charCount', { count: c.chars.toLocaleString() })}
                 </span>
-              </Link>
+                {canEdit && (
+                  <button
+                    type="button"
+                    aria-label={t('novels.editSummary')}
+                    title={t('novels.editSummary')}
+                    className="shrink-0 rounded border border-vault-border p-1 text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+                    onClick={() => setEditingSummary(editingSummary === c.path ? null : c.path)}
+                  >
+                    <Pencil className="size-3" />
+                  </button>
+                )}
+              </div>
+              {editingSummary === c.path && (
+                <ChapterSummaryEditor
+                  path={c.path}
+                  initial={c.summary}
+                  onSaved={() => {
+                    setEditingSummary(null)
+                    mutate(['novel-chapters', work])
+                  }}
+                  onCancel={() => setEditingSummary(null)}
+                />
+              )}
             </li>
           ))}
         </ul>
       )}
+
+      <OutlineSection work={work} />
 
       {categories &&
         (['extra', 'draft', 'reference', 'scrap'] as const).map((cat) => (

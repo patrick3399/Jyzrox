@@ -13,6 +13,7 @@ _WIKILINK = re.compile(r"\[\[([^\]|#]+)")
 _ACT = re.compile(r"^### +(.*)$")
 _RESERVED_DIRS = {"設定"}
 _H1 = re.compile(r"^#\s+(.*)$", re.MULTILINE)
+_WS = re.compile(r"\s+")
 
 # Canon layout (Phase 1.5, spec 2026-07-08): category is derived purely from
 # the path. Folder-name matching is case-insensitive; legacy names (Old, DEMO,
@@ -96,6 +97,40 @@ def _work_dir_of(repo_root: str | Path, work: str) -> tuple[Path, Path]:
     return root, work_dir
 
 
+def _file_record(root: Path, f: Path, category: str) -> dict:
+    """Listing entry for one file: real character count + authored summary.
+
+    `chars` is the whitespace-excluded character count of the body, NOT the byte
+    size — CJK prose is ~3 bytes per character, so st_size was overstating every
+    chapter threefold. Reading the file is what makes both fields possible; a
+    per-work listing is a few dozen small files (measured: 17–77 ms for the real
+    corpus's largest works).
+    """
+    stat = f.stat()
+    try:
+        text = f.read_text(encoding="utf-8")
+    except OSError, UnicodeDecodeError:  # unreadable/binary — list it, count nothing
+        text = ""
+    fm, body = parse_frontmatter(text)
+    return {
+        "path": str(f.relative_to(root)),
+        "name": f.stem,
+        "chars": len(_WS.sub("", body)),
+        "summary": frontmatter_summary(fm),
+        "mtime": stat.st_mtime,
+        "category": category,
+    }
+
+
+def frontmatter_summary(fm: dict) -> str | None:
+    """The `summary:` value as a trimmed one-liner, or None when absent/blank."""
+    raw = fm.get("summary")
+    if raw is None:
+        return None
+    text = " ".join(str(raw).split())
+    return text or None
+
+
 def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
     root, work_dir = _work_dir_of(repo_root, work)
     chapters: list[dict] = []
@@ -104,16 +139,7 @@ def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
         # Main text lives at the work root's first level only (spec §3 rule 4).
         if classify_path(rel) != "main":
             continue
-        stat = f.stat()
-        chapters.append(
-            {
-                "path": str(rel),
-                "name": f.stem,
-                "chars": stat.st_size,
-                "mtime": stat.st_mtime,
-                "category": "main",
-            }
-        )
+        chapters.append(_file_record(root, f, "main"))
     return chapters
 
 
@@ -127,10 +153,7 @@ def list_work_files(repo_root: str | Path, work: str, category: str) -> list[dic
             continue
         if classify_path(rel) != category:
             continue
-        stat = f.stat()
-        out.append(
-            {"path": str(rel), "name": f.stem, "chars": stat.st_size, "mtime": stat.st_mtime, "category": category}
-        )
+        out.append(_file_record(root, f, category))
     return out
 
 
@@ -197,6 +220,44 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     except Exception:  # noqa: BLE001 — malformed frontmatter is tolerated
         return {}, body
     return (data if isinstance(data, dict) else {}), body
+
+
+def _yaml_line(key: str, value: str) -> str:
+    import yaml
+
+    # width high enough that a long summary is never folded across lines: the
+    # upsert below is line-oriented and a folded value would corrupt the fence.
+    return yaml.safe_dump({key: value}, allow_unicode=True, width=10**6, sort_keys=False).rstrip("\n")
+
+
+def set_frontmatter_value(content: str, key: str, value: str | None) -> str:
+    """Insert/replace/remove one scalar key in the leading YAML frontmatter.
+
+    Line-oriented on purpose: a YAML round-trip would reformat hand-written
+    notes (quoting, key order, comments), and these files are edited on the
+    desktop too. Everything except the key's own line is preserved byte for
+    byte. `value=None` (or blank) removes the key, and drops the fence entirely
+    once it holds nothing else.
+    """
+    text = " ".join(value.split()) if value else ""
+    has_fence = content.startswith("---\n")
+    end = content.find("\n---", 4) if has_fence else -1
+    if end == -1:
+        if not text:
+            return content
+        return f"---\n{_yaml_line(key, text)}\n---\n\n{content}"
+
+    head_lines = content[4:end].split("\n")
+    rest = content[end + 4 :]
+    prefix = f"{key}:"
+    kept = [ln for ln in head_lines if not ln.startswith(prefix)]
+    if text:
+        kept.append(_yaml_line(key, text))
+    if not [ln for ln in kept if ln.strip()]:
+        # The fence existed only for this key — remove it, and the blank line
+        # that separated it from the body, so removal is a clean undo of insert.
+        return rest.lstrip("\n")
+    return "---\n" + "\n".join(kept) + "\n---" + rest
 
 
 def read_file(repo_root: str | Path, rel_path: str) -> str:

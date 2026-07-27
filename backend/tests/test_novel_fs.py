@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from services.novel_fs import (
     parse_frontmatter,
     read_file,
     safe_repo_path,
+    set_frontmatter_value,
     write_file,
 )
 
@@ -71,7 +73,10 @@ def test_list_works_and_chapters(tmp_path):
     assert works == [{"name": "作品A", "chapter_count": 1}]
     chapters = list_chapters(tmp_path, "作品A")
     assert chapters[0]["path"] == "作品A/第01章.md"
-    assert chapters[0]["chars"] == len(_SAMPLE.encode("utf-8"))
+    # Real characters, not bytes: CJK prose is ~3 bytes each, so the byte size
+    # used to overstate every chapter threefold.
+    assert chapters[0]["chars"] == len(re.sub(r"\s+", "", _SAMPLE))
+    assert chapters[0]["summary"] is None
 
 
 def test_parse_acts(tmp_path):
@@ -277,3 +282,79 @@ def test_keyword_scan_hits_carry_category(tmp_path):
     cats = {h["path"]: h["category"] for h in hits}
     assert cats["作品B/01.md"] == "main"
     assert cats["作品B/Old/01.md"] == "scrap"
+
+
+# ── Chapter stats + summary (Phase 1.7) ────────────────────────────────────
+
+
+def test_list_chapters_excludes_frontmatter_from_the_char_count(tmp_path):
+    """Metadata is not prose: a chapter's count must not move when a summary is
+    added, or the number stops matching what the author counts on the desktop."""
+    (tmp_path / "作品A").mkdir()
+    body = "# 第一章\n\n正文兩百字。\n"
+    plain = tmp_path / "作品A" / "第01章.md"
+    plain.write_text(body, encoding="utf-8")
+    bare_count = list_chapters(tmp_path, "作品A")[0]["chars"]
+    plain.write_text("---\nsummary: 這一章張三離開了城市\n---\n\n" + body, encoding="utf-8")
+    ch = list_chapters(tmp_path, "作品A")[0]
+    assert ch["chars"] == bare_count
+    assert ch["summary"] == "這一章張三離開了城市"
+
+
+def test_list_work_files_carries_chars_and_summary(tmp_path):
+    (tmp_path / "作品A" / "草稿").mkdir(parents=True)
+    (tmp_path / "作品A" / "草稿" / "試寫.md").write_text("---\nsummary: 一段試寫\n---\n\n草稿內容\n", encoding="utf-8")
+    drafts = list_work_files(tmp_path, "作品A", "draft")
+    assert drafts[0]["summary"] == "一段試寫"
+    assert drafts[0]["chars"] == len("草稿內容")
+
+
+def test_list_chapters_blank_summary_reads_as_absent(tmp_path):
+    (tmp_path / "作品A").mkdir()
+    (tmp_path / "作品A" / "第01章.md").write_text("---\nsummary: '  '\n---\n\n正文\n", encoding="utf-8")
+    assert list_chapters(tmp_path, "作品A")[0]["summary"] is None
+
+
+def test_set_frontmatter_value_adds_fence_to_a_plain_chapter():
+    out = set_frontmatter_value("# 第一章\n\n正文\n", "summary", "張三離開")
+    assert out == "---\nsummary: 張三離開\n---\n\n# 第一章\n\n正文\n"
+    assert parse_frontmatter(out)[0]["summary"] == "張三離開"
+
+
+def test_set_frontmatter_value_replaces_only_its_own_line():
+    """Hand-written frontmatter is also edited on the desktop — every other key,
+    its order and its exact formatting must survive untouched."""
+    src = "---\ntype: character\naliases: [小三]   # 別名\nsummary: 舊摘要\n---\n\n# 張三\n內文\n"
+    out = set_frontmatter_value(src, "summary", "新摘要")
+    assert "aliases: [小三]   # 別名" in out
+    assert out.index("type: character") < out.index("aliases:")
+    assert parse_frontmatter(out)[0]["summary"] == "新摘要"
+    assert out.endswith("---\n\n# 張三\n內文\n")
+
+
+def test_set_frontmatter_value_quotes_a_summary_that_would_break_yaml():
+    out = set_frontmatter_value("正文\n", "summary", "他說：「好」 #1: 開場")
+    assert parse_frontmatter(out)[0]["summary"] == "他說：「好」 #1: 開場"
+
+
+def test_set_frontmatter_value_collapses_newlines_into_one_line():
+    """A multi-line value would break the line-oriented upsert (and the fence)."""
+    out = set_frontmatter_value("正文\n", "summary", "第一行\n第二行")
+    assert out.count("\n---\n") == 1
+    assert parse_frontmatter(out)[0]["summary"] == "第一行 第二行"
+
+
+def test_set_frontmatter_value_empty_removes_the_key_and_the_lone_fence():
+    src = "# 第一章\n\n正文\n"
+    with_summary = set_frontmatter_value(src, "summary", "摘要")
+    assert set_frontmatter_value(with_summary, "summary", "") == src
+
+
+def test_set_frontmatter_value_empty_keeps_a_fence_with_other_keys():
+    src = "---\ntype: character\nsummary: 摘要\n---\n\n內文\n"
+    out = set_frontmatter_value(src, "summary", "")
+    assert out == "---\ntype: character\n---\n\n內文\n"
+
+
+def test_set_frontmatter_value_empty_on_a_plain_file_is_a_noop():
+    assert set_frontmatter_value("正文\n", "summary", "") == "正文\n"

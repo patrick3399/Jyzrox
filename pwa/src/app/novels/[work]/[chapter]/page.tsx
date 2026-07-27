@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { mutate } from 'swr'
-import { ArrowLeft, ChevronLeft, ChevronRight, History, Pencil } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, History, Pencil, SpellCheck } from 'lucide-react'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { novelChapterHref } from '@/lib/novels'
@@ -16,6 +16,7 @@ import { BackButton } from '@/components/BackButton'
 import { Reader } from '@/components/novels/Reader'
 import { Editor } from '@/components/novels/Editor'
 import { HistoryPanel } from '@/components/novels/HistoryPanel'
+import { FormatPanel } from '@/components/novels/FormatPanel'
 
 export default function NovelChapterPage() {
   useLocale()
@@ -24,8 +25,8 @@ export default function NovelChapterPage() {
   const work = decodeURIComponent(params?.work ?? '')
   const chapterName = decodeURIComponent(params?.chapter ?? '')
   const path = search?.get('path') ?? ''
-  const [editing, setEditing] = useState(false)
-  const [showHistory, setShowHistory] = useState(false)
+  // One view at a time: reader, editor, history or the FORMAT.md report.
+  const [view, setView] = useState<'read' | 'edit' | 'history' | 'format'>('read')
   const { data: profile } = useProfile()
   const canEdit = hasRole(profile?.role, 'member')
 
@@ -56,22 +57,33 @@ export default function NovelChapterPage() {
         </Link>
         <div className="flex min-w-0 items-center gap-3">
           <h1 className="truncate text-lg font-semibold text-vault-text">{chapterName}</h1>
-          {path && !editing && (
+          {path && view !== 'edit' && (
             <button
               type="button"
-              aria-pressed={showHistory}
+              aria-pressed={view === 'history'}
               className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
-              onClick={() => setShowHistory((v) => !v)}
+              onClick={() => setView(view === 'history' ? 'read' : 'history')}
             >
               <History className="size-3" />
               {t('novels.history')}
             </button>
           )}
-          {canEdit && !editing && path && (
+          {path && view !== 'edit' && (
+            <button
+              type="button"
+              aria-pressed={view === 'format'}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+              onClick={() => setView(view === 'format' ? 'read' : 'format')}
+            >
+              <SpellCheck className="size-3" />
+              {t('novels.format')}
+            </button>
+          )}
+          {canEdit && view !== 'edit' && path && (
             <button
               type="button"
               className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
-              onClick={() => setEditing(true)}
+              onClick={() => setView('edit')}
             >
               <Pencil className="size-3" />
               {t('novels.edit')}
@@ -82,18 +94,21 @@ export default function NovelChapterPage() {
 
       {!path ? (
         <p className="py-10 text-center text-vault-text-muted">{t('novels.loadFailed')}</p>
-      ) : editing ? (
+      ) : view === 'edit' ? (
         <Editor
           path={path}
           onSaved={() => {
-            setEditing(false)
+            setView('read')
             mutate(['novel-file', path])
             mutate(['novel-edit', path])
+            mutate(['novel-lint', path])
           }}
-          onCancel={() => setEditing(false)}
+          onCancel={() => setView('read')}
         />
-      ) : showHistory ? (
-        <HistoryPanel path={path} />
+      ) : view === 'history' ? (
+        <HistoryPanel path={path} canEdit={canEdit} />
+      ) : view === 'format' ? (
+        <FormatPanel path={path} canEdit={canEdit} />
       ) : (
         <Reader path={path} canEdit={canEdit} />
       )}

@@ -159,13 +159,36 @@ async def log_file(repo: str | Path, rel_path: str, limit: int = 50) -> list[dic
     return rows
 
 
-async def diff_file(repo: str | Path, rel_path: str, rev: str) -> str:
+async def diff_file(repo: str | Path, rel_path: str, rev: str, base: str | None = None) -> str:
+    """Unified diff for one file: `rev` against its parent, or against `base`
+    when given (compare any two revisions)."""
     if not _REV_RE.match(rev):
         raise NovelGitError(f"invalid rev: {rev!r}")
     # --end-of-options is a second guard: even a validated rev can never be
     # reinterpreted as a git option.
-    code, out, err = await _git(repo, "show", "--end-of-options", rev, "--", rel_path)
+    if base is None:
+        args = ("show", "--end-of-options", rev, "--", rel_path)
+    else:
+        if not _REV_RE.match(base):
+            raise NovelGitError(f"invalid rev: {base!r}")
+        args = ("diff", "--end-of-options", base, rev, "--", rel_path)
+    code, out, err = await _git(repo, *args)
     if code != 0:
+        raise NovelGitError(err)
+    return out
+
+
+async def file_at_rev(repo: str | Path, rel_path: str, rev: str) -> str:
+    """The file's content as of `rev` — the source for a revert.
+
+    `rev:path` is resolved from the repo root (git runs with -C repo). The rev
+    is hex-validated, so the combined argument can never look like an option.
+    """
+    if not _REV_RE.match(rev):
+        raise NovelGitError(f"invalid rev: {rev!r}")
+    code, out, err = await _git(repo, "show", "--end-of-options", f"{rev}:{rel_path}")
+    if code != 0:
+        # Also the "file did not exist at that revision" path.
         raise NovelGitError(err)
     return out
 
