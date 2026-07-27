@@ -143,9 +143,30 @@ export function useSequentialPrefetch(
   // Number of requests currently in flight (proxy mode)
   const inflightCountRef = useRef(0)
   const prefetchedRef = useRef<Set<number>>(new Set())
+  // Pages with a request currently in flight. Without this, a re-render that
+  // restarts the chain issues a second request for a page whose first request
+  // has not settled yet — for a large file that means downloading it twice.
+  const inflightPagesRef = useRef<Set<number>>(new Set())
   // Track active Image elements for cleanup on unmount / page change
   const activeImagesRef = useRef<Set<HTMLImageElement>>(new Set())
   const unmountedRef = useRef(false)
+
+  // Reader rebuilds its `images` array on every render, so reading it through a
+  // ref keeps prefetchPage — and therefore the effect below — stable. Keying
+  // the effect on the array identity made every Reader render abort and re-issue
+  // the whole prefetch window, including the renders this hook triggers itself
+  // when a prefetch settles.
+  const imagesRef = useRef(images)
+  useEffect(() => {
+    imagesRef.current = images
+  }, [images])
+
+  // Changes only when the set of prefetchable pages actually changes (pages
+  // appended by infinite scroll, a still-downloading page gaining a URL, a page
+  // hidden) — not when the array is merely rebuilt with identical content.
+  const prefetchableKey = images
+    .map((img) => (img.mediaType === 'video' ? 'v' : img.url ? '1' : '0'))
+    .join('')
 
   // prefetchPage needs a stable reference so we use useRef to break the
   // circular dependency with the chain callback.
@@ -173,6 +194,7 @@ export function useSequentialPrefetch(
       el.src = ''
     })
     activeImagesRef.current.clear()
+    inflightPagesRef.current.clear()
   }, [])
 
   // Cleanup on unmount
@@ -183,10 +205,35 @@ export function useSequentialPrefetch(
     }
   }, [cleanupAllImages])
 
+  // A page is worth starting a request for when nothing is already covering it
+  // and it is not a video. Videos must never be routed through an <img>: the
+  // decoder can never use the bytes, but the browser downloads the entire file
+  // before it gives up and fires onerror, so prefetching a large video costs
+  // its full size in memory for nothing. Videos load from their <video> element.
+  const canPrefetch = useCallback(
+    (img: ReaderImage) =>
+      img.mediaType !== 'video' &&
+      !prefetchedRef.current.has(img.pageNum) &&
+      !inflightPagesRef.current.has(img.pageNum),
+    [],
+  )
+
   const prefetchPage = useCallback(
-    (pageNum: number) => {
-      const img = images.find((i) => i.pageNum === pageNum)
-      if (!img || prefetchedRef.current.has(pageNum)) return
+    (requestedPage: number) => {
+      const images = imagesRef.current
+      let idx = images.findIndex((i) => i.pageNum === requestedPage)
+      if (idx < 0) return
+
+      if (isProxyMode) {
+        // Chain semantics: hop forward over pages that cannot be started right
+        // now instead of stalling the slot on them.
+        while (idx < images.length && !canPrefetch(images[idx])) idx += 1
+        if (idx >= images.length) return
+      }
+
+      const img = images[idx]
+      if (!canPrefetch(img)) return
+      const pageNum = img.pageNum
 
       if (isProxyMode) {
         // Proxy mode: allow up to PROXY_PREFETCH_CONCURRENCY concurrent requests.
@@ -196,6 +243,7 @@ export function useSequentialPrefetch(
         if (!img.url) return // skip un-downloaded images — no proxy available
 
         inflightCountRef.current += 1
+        inflightPagesRef.current.add(pageNum)
         const capturedEpoch = epochRef.current
 
         const el = new window.Image()
@@ -204,6 +252,7 @@ export function useSequentialPrefetch(
         // Timeout: if image hasn't loaded within threshold, skip and continue chain
         const timeoutId = setTimeout(() => {
           cleanupImage(el)
+          inflightPagesRef.current.delete(pageNum)
           if (unmountedRef.current || capturedEpoch !== epochRef.current) return
           inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
           // Skip this page (don't add to prefetched) and try next
@@ -213,6 +262,7 @@ export function useSequentialPrefetch(
         el.onload = el.onerror = () => {
           clearTimeout(timeoutId)
           cleanupImage(el)
+          inflightPagesRef.current.delete(pageNum)
 
           // If unmounted or the user has moved to a different page since this
           // request was started, abandon the chain.
@@ -228,10 +278,12 @@ export function useSequentialPrefetch(
       } else {
         // Local mode: fire-and-forget (concurrent, up to 3 ahead from caller)
         if (!img.url) return // skip un-downloaded images
+        inflightPagesRef.current.add(pageNum)
         const el = new window.Image()
         activeImagesRef.current.add(el)
         el.onload = el.onerror = () => {
           cleanupImage(el)
+          inflightPagesRef.current.delete(pageNum)
           if (unmountedRef.current) return
 
           prefetchedRef.current = new Set([...prefetchedRef.current, pageNum])
@@ -240,13 +292,34 @@ export function useSequentialPrefetch(
         el.src = img.url
       }
     },
-    [images, isProxyMode, cleanupImage],
+    [isProxyMode, cleanupImage, canPrefetch],
   )
 
   // Keep the ref in sync with the latest callback
   useEffect(() => {
     prefetchPageRef.current = prefetchPage
   }, [prefetchPage])
+
+  const startPrefetchWindow = useCallback(
+    (page: number) => {
+      if (isProxyMode) {
+        // Start parallel prefetch chains — fire PROXY_PREFETCH_CONCURRENCY starting
+        // pages so we have multiple requests in flight without strict serialisation.
+        for (let slot = 0; slot < PROXY_PREFETCH_CONCURRENCY; slot++) {
+          prefetchPage(page + 1 + slot)
+        }
+      } else {
+        // Local: prefetch forward 5 + backward 2 concurrently
+        for (let i = 1; i <= 5; i++) {
+          prefetchPage(page + i)
+        }
+        for (let i = 1; i <= 2; i++) {
+          prefetchPage(page - i)
+        }
+      }
+    },
+    [isProxyMode, prefetchPage],
+  )
 
   useEffect(() => {
     // Advance epoch so any stale in-flight callback from the previous page
@@ -258,22 +331,21 @@ export function useSequentialPrefetch(
     // Clean up any in-flight Image objects from the previous page
     cleanupAllImages()
 
-    if (isProxyMode) {
-      // Start parallel prefetch chains — fire PROXY_PREFETCH_CONCURRENCY starting
-      // pages so we have multiple requests in flight without strict serialisation.
-      for (let slot = 0; slot < PROXY_PREFETCH_CONCURRENCY; slot++) {
-        prefetchPage(currentPage + 1 + slot)
-      }
-    } else {
-      // Local: prefetch forward 5 + backward 2 concurrently
-      for (let i = 1; i <= 5; i++) {
-        prefetchPage(currentPage + i)
-      }
-      for (let i = 1; i <= 2; i++) {
-        prefetchPage(currentPage - i)
-      }
-    }
-  }, [currentPage, prefetchPage, isProxyMode, cleanupAllImages])
+    startPrefetchWindow(currentPage)
+  }, [currentPage, startPrefetchWindow, cleanupAllImages])
+
+  // Pages that only became prefetchable later (appended by infinite scroll, or
+  // finished downloading and gained a URL) still need a request. Top the window
+  // up without tearing down the requests already running for this page — that
+  // teardown-and-restart is what turned one page turn into repeated downloads
+  // of the same file.
+  const currentPageRef = useRef(currentPage)
+  useEffect(() => {
+    currentPageRef.current = currentPage
+  }, [currentPage])
+  useEffect(() => {
+    startPrefetchWindow(currentPageRef.current)
+  }, [prefetchableKey, startPrefetchWindow])
 
   return prefetched
 }

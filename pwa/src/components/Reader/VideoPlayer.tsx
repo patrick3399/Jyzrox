@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '@/lib/i18n'
 import type { ReaderImage } from './types'
 
@@ -47,11 +47,44 @@ export default function VideoPlayer({
     [innerRef],
   )
 
+  // Playback follows visibility instead of the `autoPlay` attribute. Webtoon
+  // mode mounts every loaded page at once, so autoplaying players buffer whole
+  // videos off-screen — a screenful of those is enough for iOS Safari to kill
+  // the tab. Together with `preload="metadata"` an off-screen player costs only
+  // its metadata.
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    // Any visible part counts: a video taller than the viewport (fit-height or
+    // original scale in webtoon mode) never reaches a fractional threshold even
+    // while it fills the screen, and would then never start.
+    const observer = new IntersectionObserver((entries) =>
+      setVisible(entries.some((entry) => entry.isIntersecting)),
+    )
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
+  // Also re-runs when the source changes: in single-page view React reuses this
+  // element across page turns, and a new src starts out paused.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    if (visible) v.play().catch(() => undefined)
+    else v.pause()
+  }, [visible, image.url])
+
   const togglePlay = useCallback(() => {
     const v = videoRef.current
     if (!v) return
     if (v.paused) {
-      v.play()
+      v.play().catch(() => undefined)
       setPlaying(true)
     } else {
       v.pause()
@@ -100,7 +133,7 @@ export default function VideoPlayer({
         loop
         muted={muted}
         playsInline
-        autoPlay
+        preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onTimeUpdate={handleTimeUpdate}

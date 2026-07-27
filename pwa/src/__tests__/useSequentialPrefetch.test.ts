@@ -281,4 +281,91 @@ describe('useSequentialPrefetch', () => {
       expect(result.current.has(2)).toBe(true)
     })
   })
+
+  // ── Video pages ──────────────────────────────────────────────────
+  // Regression: prefetching a page whose blob is a video pointed an <img> at
+  // the .mp4 URL. The decoder can never use those bytes, but the browser still
+  // downloads the whole file before firing onerror — a 144 MB video was pulled
+  // repeatedly until iOS Safari killed the tab mid-playback.
+
+  describe('video pages', () => {
+    it('should not prefetch a video page through an Image element', () => {
+      const images = makeImages(6)
+      images[2] = { ...images[2], mediaType: 'video', url: 'http://proxy/page/3.mp4' }
+
+      renderHook(() => useSequentialPrefetch(images, 1, false))
+
+      expect(instances.map((i) => i.src)).not.toContain('http://proxy/page/3.mp4')
+    })
+
+    it('should keep prefetching later image pages when a video page is skipped', () => {
+      const images = makeImages(6)
+      images[1] = { ...images[1], mediaType: 'video', url: 'http://proxy/page/2.mp4' }
+
+      renderHook(() => useSequentialPrefetch(images, 1, false))
+
+      const srcs = instances.map((i) => i.src)
+      expect(srcs).toContain('http://proxy/page/3')
+      expect(srcs).toContain('http://proxy/page/6')
+    })
+
+    it('should advance the proxy chain past a video page instead of stalling on it', async () => {
+      const images = makeImages(5)
+      images[1] = { ...images[1], mediaType: 'video', url: 'http://proxy/page/2.mp4' }
+
+      renderHook(() => useSequentialPrefetch(images, 1, true))
+
+      // Concurrency is 2: with page 2 skipped, both slots must land on real images.
+      const srcs = activeSrcs(instances)
+      expect(srcs).not.toContain('http://proxy/page/2.mp4')
+      expect(srcs).toContain('http://proxy/page/3')
+      expect(srcs).toContain('http://proxy/page/4')
+    })
+  })
+
+  // ── Re-render stability ──────────────────────────────────────────
+  // Regression: Reader rebuilds its `images` array on every render, so the
+  // prefetch effect re-ran on every render — including the renders this hook
+  // itself triggers when a prefetch settles. Each re-run aborted and re-issued
+  // every in-flight request, multiplying one page turn into many concurrent
+  // downloads of the same file.
+
+  describe('re-render stability', () => {
+    it('should not re-issue in-flight requests when the images array identity changes', async () => {
+      let images = makeImages(10)
+
+      const { rerender } = renderHook(() => useSequentialPrefetch(images, 1, false))
+
+      const initialCount = instances.length
+      expect(initialCount).toBe(5)
+
+      // Same pages, new array identity — exactly what a Reader re-render produces.
+      images = makeImages(10)
+      await act(async () => {
+        rerender()
+      })
+
+      expect(instances).toHaveLength(initialCount)
+    })
+
+    it('should prefetch pages that gain a url after a later render', async () => {
+      // Reader rebuilds the array every render, so a page that was still
+      // downloading (url === null) must still be picked up once it resolves.
+      const withoutPage2 = (): ReaderImage[] =>
+        makeImages(4).map((img) => (img.pageNum === 2 ? { ...img, url: null } : img))
+
+      let images = withoutPage2()
+      const { rerender } = renderHook(() => useSequentialPrefetch(images, 1, false))
+
+      expect(activeSrcs(instances)).not.toContain('http://proxy/page/2')
+
+      // The download finished and page 2 now resolves to a real URL.
+      images = makeImages(4)
+      await act(async () => {
+        rerender()
+      })
+
+      expect(activeSrcs(instances)).toContain('http://proxy/page/2')
+    })
+  })
 })

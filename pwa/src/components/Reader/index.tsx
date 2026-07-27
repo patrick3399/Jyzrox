@@ -1434,19 +1434,27 @@ export default function Reader({
     () => new Set(initialFavoritedImageIds ?? []),
   )
 
-  const images: ReaderImage[] = rawImages
-    .filter((img) => !hiddenPages.has(img.page_num))
-    .map((img) => ({
-      pageNum: img.page_num,
-      url: resolveImageUrl(img, source, sourceId),
-      isLocal: img.file_path != null,
-      width: img.width ?? undefined,
-      height: img.height ?? undefined,
-      mediaType: img.media_type,
-      duration: img.duration ?? undefined,
-      thumbUrl: img.thumb_path?.replace('/data/', '/media/') ?? undefined,
-      thumbhash: img.thumbhash ?? null,
-    }))
+  // Memoized: this array feeds effects in the prefetch hook and the webtoon
+  // observer. Rebuilding it on every render made those effects re-run on every
+  // render — including the ones triggered by a prefetch settling — which tore
+  // down and re-issued in-flight media requests in a loop.
+  const images: ReaderImage[] = useMemo(
+    () =>
+      rawImages
+        .filter((img) => !hiddenPages.has(img.page_num))
+        .map((img) => ({
+          pageNum: img.page_num,
+          url: resolveImageUrl(img, source, sourceId),
+          isLocal: img.file_path != null,
+          width: img.width ?? undefined,
+          height: img.height ?? undefined,
+          mediaType: img.media_type,
+          duration: img.duration ?? undefined,
+          thumbUrl: img.thumb_path?.replace('/data/', '/media/') ?? undefined,
+          thumbhash: img.thumbhash ?? null,
+        })),
+    [rawImages, hiddenPages, source, sourceId],
+  )
 
   const {
     state,

@@ -7,6 +7,8 @@ const PAGE_CACHE_NAME = 'jyzrox-pages';
 
 // sha256-addressed media: the same URL always denotes the same bytes.
 const CONTENT_ADDRESSED_MEDIA = /^\/media\/(cas|thumbs|image)\//;
+// Video containers the backend stores (services/media_formats.py VIDEO_EXTENSIONS).
+const VIDEO_MEDIA = /\.(mp4|webm|mov)$/i;
 const MEDIA_CACHE_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 // ── Cache Config (overridable via postMessage) ──
@@ -283,6 +285,16 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(fetch(event.request));
     return;
   }
+
+  // Video is left to the browser's own media stack. Responding here means
+  // `response.clone()` holds the entire body in the worker until the
+  // CacheStorage write completes — a second full copy of a file the <video>
+  // element is already buffering, which is what exhausted memory and killed the
+  // tab while playing a large clip in the Reader. Media elements also stream by
+  // Range, and CacheStorage rejects a 206 anyway, so the copy bought nothing.
+  // Offline playback is therefore not offered; nginx `auth_request` still gates
+  // every byte, so the revocation posture in security-model BR-006 is unchanged.
+  if (VIDEO_MEDIA.test(requestUrl.pathname)) return;
 
   // Media is split by addressing mode: content-addressed immutable capability
   // URLs vs. path-addressed revocable media. See each branch below.

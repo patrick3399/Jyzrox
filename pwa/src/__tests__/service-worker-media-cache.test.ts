@@ -19,6 +19,12 @@ interface Harness {
   stats: Stats
   /** Drive the SW `fetch` handler and resolve what it responds with. */
   request: (url: string) => Promise<Response>
+  /**
+   * Drive the SW `fetch` handler without requiring it to respond. `responded`
+   * is undefined when the worker declined the request and left it to the
+   * browser's own network stack.
+   */
+  handle: (url: string) => { responded: Promise<Response> | undefined }
   /** Seed the media cache as if the image had already been fetched once. */
   seedMedia: (url: string, bytes?: number) => Promise<void>
   /**
@@ -139,7 +145,7 @@ function loadServiceWorker(): Harness {
 
   return {
     stats,
-    async request(url: string) {
+    handle(url: string) {
       let responded: Promise<Response> | undefined
       fetchHandler({
         request: new Request(url),
@@ -148,6 +154,10 @@ function loadServiceWorker(): Harness {
         },
         waitUntil: (p: Promise<unknown>) => pendingWork.push(p),
       })
+      return { responded }
+    },
+    async request(url: string) {
+      const { responded } = this.handle(url)
       if (!responded) throw new Error(`SW did not respondWith for ${url}`)
       return responded
     },
@@ -282,5 +292,33 @@ describe('service worker media cache performance', () => {
     await sw.settle()
 
     expect(sw.stats.network).toBe(1)
+  })
+
+  it('leaves video requests to the browser instead of routing them through the worker', async () => {
+    // Regression (Reader video playback crash): responding to a video means
+    // `response.clone()` buffers the whole body in the worker for the
+    // CacheStorage write, on top of what the <video> element already holds. A
+    // 144 MB clip did that repeatedly until iOS Safari killed the tab. Media
+    // elements also stream by Range, and a 206 can never be stored in
+    // CacheStorage anyway — so the copy was pure cost.
+    const clip = `${ORIGIN}/media/cas/2b/ff/2bff41ba.mp4`
+
+    const { responded } = sw.handle(clip)
+    await sw.settle()
+
+    expect(responded).toBeUndefined()
+    expect(sw.stats.cachePut).toBe(0)
+    expect(sw.stats.cacheMatch).toBe(0)
+  })
+
+  it('keeps handling images that merely live next to a video in the same store', async () => {
+    // The video bypass must key on the media type, not on /media/cas/.
+    const still = `${ORIGIN}/media/cas/2b/ff/2bff41ba.webp`
+
+    const { responded } = sw.handle(still)
+    await sw.settle()
+
+    expect(responded).toBeDefined()
+    expect(sw.stats.cachePut).toBeGreaterThanOrEqual(1)
   })
 })
