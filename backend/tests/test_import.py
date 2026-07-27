@@ -511,7 +511,7 @@ class TestImportJob:
             patch("worker.importer._sha256", return_value=fixed_hash),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
         ):
             # No media files remain after exclusion, so expect failed
             await import_job(_make_ctx(), str(gallery_dir))
@@ -564,7 +564,7 @@ class TestImportJob:
             patch("worker.importer._sha256", return_value=fixed_hash),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer._upsert_tags", AsyncMock()),
             patch("shutil.rmtree"),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
@@ -642,7 +642,7 @@ class TestImportJob:
             patch("worker.importer._sha256", return_value=fixed_hash),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer._upsert_tags", AsyncMock()),
             patch("shutil.rmtree"),
         ):
@@ -695,7 +695,7 @@ class TestImportJob:
             patch("worker.importer._sha256", return_value=fixed_hash),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer._upsert_tags", AsyncMock()),
             patch("worker.importer.settings") as mock_settings,
             patch("shutil.rmtree"),
@@ -754,7 +754,7 @@ class TestImportJob:
             patch("worker.importer._sha256", return_value=fixed_hash),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer._upsert_tags", AsyncMock()),
             patch("shutil.rmtree"),
         ):
@@ -813,7 +813,7 @@ class TestImportJob:
             patch("worker.importer._sha256", return_value=fixed_hash),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer._upsert_tags", AsyncMock()),
             patch("shutil.rmtree"),
         ):
@@ -843,6 +843,26 @@ class TestImportSortHelpers:
             "10.jpg",
             "cover.jpg",
         ]
+
+
+def _to_thread_stub(fixed_hash: str):
+    """Stand-in for asyncio.to_thread that dispatches on the callable.
+
+    local_import_job hashes via hash_file_with_identity, which returns
+    (sha256, identity) so the digest and the bytes it describes stay pinned
+    together; import_job still uses the plain _sha256. One stub serves both.
+    """
+    from worker import importer as _importer
+    from worker.source_identity import SourceFileIdentity
+
+    async def _fake(fn, *args, **kwargs):
+        if fn is _importer.hash_file_with_identity:
+            path = Path(args[0])
+            # Real stat, so the commit-boundary re-check sees an unchanged file.
+            return fixed_hash, SourceFileIdentity._from_stat(path, path.stat())
+        return fixed_hash
+
+    return _fake
 
 
 class TestLocalImportJob:
@@ -951,7 +971,7 @@ class TestLocalImportJob:
             patch("worker.importer.store_blob", mock_store),
             patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer.settings") as mock_settings,
         ):
             mock_settings.tag_model_enabled = False
@@ -1010,7 +1030,7 @@ class TestLocalImportJob:
             patch("worker.importer.store_blob", mock_store),
             patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer.settings") as mock_settings,
         ):
             mock_settings.tag_model_enabled = False
@@ -1069,7 +1089,7 @@ class TestLocalImportJob:
             patch("worker.importer.store_blob", mock_store),
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer.settings") as mock_settings,
         ):
             mock_settings.tag_model_enabled = False
@@ -1131,7 +1151,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer.thumb_dir", return_value=missing_thumb_dir),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer.settings") as mock_settings,
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -1199,7 +1219,7 @@ class TestLocalImportJob:
             patch("worker.importer.store_blob", AsyncMock(return_value=mock_blob)),
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer.settings") as mock_settings,
         ):
             mock_settings.tag_model_enabled = False
@@ -1397,7 +1417,7 @@ class TestBatchImportJob:
             patch("worker.importer.store_blob", AsyncMock(return_value=mock_blob)),
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer.settings") as mock_settings,
         ):
             mock_settings.tag_model_enabled = False

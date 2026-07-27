@@ -33,7 +33,13 @@ from worker.constants import (
     logger,
 )
 from worker.helpers import _sha256, _validate_image_magic
-from worker.source_identity import SourceDirectoryChangedError, SourceDirectoryIdentity
+from worker.source_identity import (
+    SourceDirectoryChangedError,
+    SourceDirectoryIdentity,
+    SourceFileChangedError,
+    SourceFileIdentity,
+    hash_file_with_identity,
+)
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
 
@@ -593,12 +599,17 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             existing_page_by_sha = {row.blob_sha256: row.page_num for row in existing_rows}
             max_page = max((row.page_num for row in existing_rows), default=0)
             pending_link_symlinks: list[tuple[str, Blob, str]] = []
+            # Link mode only: re-verified at the commit boundary below.
+            file_identities: list[SourceFileIdentity] = []
 
             for f in files:
                 if source_identity is not None:
                     source_identity.assert_unchanged(f"before:{f.name}")
                 try:
-                    sha256 = await asyncio.to_thread(_sha256, f)
+                    # Link mode stores the path, so the sha256 and the bytes at
+                    # that path must be pinned together: the directory check
+                    # cannot see a file replaced under the same name.
+                    sha256, file_identity = await asyncio.to_thread(hash_file_with_identity, f)
                 except (FileNotFoundError, OSError) as exc:
                     if source_identity is not None:
                         source_identity.assert_unchanged(f"read:{f.name}")
@@ -614,8 +625,18 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                     )
                     attempted += 1
                     continue
+                except SourceFileChangedError as exc:
+                    # Recording sha(old bytes) against a path now holding new
+                    # bytes is worse than skipping the file; the next rescan
+                    # picks up whatever settled.
+                    logger.warning("[local_import] gallery_id=%d: skipping %s — %s", gallery_id, f.name, exc)
+                    import_failures.append({"filename": f.name, "error_type": type(exc).__name__, "error": str(exc)})
+                    attempted += 1
+                    continue
                 if source_identity is not None:
                     source_identity.assert_unchanged(f"after:{f.name}")
+                if mode == "link":
+                    file_identities.append(file_identity)
 
                 if sha256 in excluded_set:
                     logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
@@ -691,6 +712,10 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
             if source_identity is not None:
                 source_identity.assert_unchanged("finalize")
+                # Per-file re-check: the directory may be untouched while an
+                # individual file was rewritten or swapped since we hashed it.
+                for identity in file_identities:
+                    identity.assert_unchanged("finalize")
                 link_states: list[tuple[Path, str | None]] = []
                 try:
                     for filename, blob, external_path in pending_link_symlinks:
@@ -707,6 +732,8 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                             external_path=external_path,
                         )
                     source_identity.assert_unchanged("commit")
+                    for identity in file_identities:
+                        identity.assert_unchanged("commit")
                 except Exception:
                     _restore_library_links(link_states)
                     raise
@@ -735,7 +762,10 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 sidecar_payload = sidecar_payload_from_gallery(gallery)
 
             await session.commit()
-    except SourceDirectoryChangedError as exc:
+    except (SourceDirectoryChangedError, SourceFileChangedError) as exc:
+        # Same remedy either way: the source moved under us, so keep whatever
+        # was already committed and mark the gallery partial rather than
+        # recording rows that describe bytes no longer at those paths.
         logger.warning("[local_import] gallery_id=%d aborted: %s", gallery_id, exc)
         async with AsyncSessionLocal() as status_session:
             gallery = await status_session.get(Gallery, gallery_id)

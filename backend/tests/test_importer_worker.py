@@ -674,6 +674,20 @@ class TestImportJob:
 # ---------------------------------------------------------------------------
 
 
+def _hash_stub(test_sha: str):
+    """local_import_job now pins the digest to the bytes it hashed.
+
+    Returning the real stat keeps the commit-boundary re-check satisfied while
+    the digest itself stays fixed for the assertions.
+    """
+    from worker.source_identity import SourceFileIdentity
+
+    def _hash(path):
+        return test_sha, SourceFileIdentity._from_stat(path, path.stat())
+
+    return _hash
+
+
 def _make_local_import_sessions(test_sha: str):
     """Returns (s1, s2, s3) where:
     s1 — gallery lookup session
@@ -745,7 +759,7 @@ class TestLocalImportJob:
 
         with (
             patch("worker.importer.AsyncSessionLocal", side_effect=_session_rotator([s1, s2, s3])),
-            patch("worker.importer._sha256", return_value=test_sha),
+            patch("worker.importer.hash_file_with_identity", side_effect=_hash_stub(test_sha)),
             patch("worker.importer.thumb_dir", return_value=td),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
@@ -772,7 +786,7 @@ class TestLocalImportJob:
 
         with (
             patch("worker.importer.AsyncSessionLocal", side_effect=_session_rotator([s1, s2, s3])),
-            patch("worker.importer._sha256", return_value=test_sha),
+            patch("worker.importer.hash_file_with_identity", side_effect=_hash_stub(test_sha)),
             patch("worker.importer.thumb_dir", return_value=td),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
