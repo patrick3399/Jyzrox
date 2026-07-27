@@ -8,9 +8,12 @@ serialization is the caller's responsibility (see routers/worker).
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30
 _LOCK_SENTINEL = ".jyzrox-locked"
@@ -132,20 +135,41 @@ async def push(repo: str | Path) -> bool:
 
 
 async def commit_and_push(repo: str | Path, rel_path: str, message: str) -> dict:
+    """Commit locally, then try to publish. The local commit is always reported.
+
+    The two legs fail independently and must be reported independently. A
+    generic push failure (unreachable host, SSH/auth trouble) used to raise out
+    of here *after* commit_file had already advanced HEAD, so the endpoint
+    returned 500 while the author's edit was committed — audit, the WebSocket
+    event and the reindex were all skipped, and a retry from the client then hit
+    a stale base_sha because HEAD had moved. Report ``pushed: False`` with the
+    reason instead; the work is safe in local history and the next successful
+    push (or a sync) carries it to the remote.
+
+    A rebase conflict still raises NovelLocked: that is not a transport problem
+    but a repo state needing manual resolution, and the sentinel it writes makes
+    every later write fail fast until a human clears it.
+    """
     new_head = await commit_file(repo, rel_path, message)
-    if await push(repo):
-        return {"head": new_head, "pushed": True}
-    # non-fast-forward → rebase once, retry push once
-    await fetch(repo)
-    branch = await _current_branch(repo)
-    code, _, _ = await _git(repo, "rebase", f"origin/{branch}")
-    if code != 0:
-        await _git(repo, "rebase", "--abort")
-        _lock_path(repo).write_text("conflict on commit_and_push\n", encoding="utf-8")
-        raise NovelLocked(rel_path)
-    if await push(repo):
-        return {"head": await head_sha(repo), "pushed": True}
-    return {"head": await head_sha(repo), "pushed": False}  # remote hub offline etc.
+    try:
+        if await push(repo):
+            return {"head": new_head, "pushed": True}
+        # non-fast-forward → rebase once, retry push once
+        await fetch(repo)
+        branch = await _current_branch(repo)
+        code, _, _ = await _git(repo, "rebase", f"origin/{branch}")
+        if code != 0:
+            await _git(repo, "rebase", "--abort")
+            _lock_path(repo).write_text("conflict on commit_and_push\n", encoding="utf-8")
+            raise NovelLocked(rel_path)
+        if await push(repo):
+            return {"head": await head_sha(repo), "pushed": True}
+        return {"head": await head_sha(repo), "pushed": False}  # remote hub offline etc.
+    except NovelLocked:
+        raise
+    except NovelGitError as exc:
+        logger.warning("novel push failed after a successful local commit: %s", exc)
+        return {"head": await head_sha(repo), "pushed": False, "push_error": str(exc)}
 
 
 async def log_file(repo: str | Path, rel_path: str, limit: int = 50) -> list[dict]:

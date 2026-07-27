@@ -186,3 +186,78 @@ async def test_diverged_edit_locks_repo(repos):
     st2 = await novel_git.status(str(work))
     assert st2["locked"] is False
     assert (work / "作品A" / "第01章.md").read_text() == "desktop-change\n"
+
+
+async def test_unreachable_remote_still_reports_the_local_commit(repos):
+    """A transport failure must not discard the fact that the commit landed.
+
+    push() raises NovelGitError for anything that is not a non-fast-forward, and
+    that used to propagate out of commit_and_push *after* commit_file had already
+    advanced HEAD: the endpoint answered 500 while the edit sat committed, audit
+    and the reindex never ran, and the client's retry then hit a stale base_sha.
+    """
+    work = str(repos["work"])
+    _run(work, "remote", "set-url", "origin", "/nonexistent/definitely-not-a-repo.git")
+    (Path(work) / "作品A" / "第01章.md").write_text("v2\n", encoding="utf-8")
+
+    head_before = await novel_git.head_sha(work)
+    result = await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: unreachable remote")
+
+    assert result["pushed"] is False
+    assert result["push_error"]
+    # The commit is real and reported, so the client can keep writing.
+    assert result["head"] != head_before
+    assert result["head"] == await novel_git.head_sha(work)
+    log = await novel_git.log_file(work, "作品A/第01章.md")
+    assert log[0]["message"] == "edit: unreachable remote"
+
+
+async def test_unpushed_commit_shows_up_as_ahead(repos):
+    """`ahead` is what the UI's unpushed badge reads, so it must reflect this."""
+    work = str(repos["work"])
+    _run(work, "remote", "set-url", "origin", "/nonexistent/definitely-not-a-repo.git")
+    (Path(work) / "作品A" / "第01章.md").write_text("v2\n", encoding="utf-8")
+
+    await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: offline")
+
+    st = await novel_git.status(work)
+    assert st["ahead"] == 1
+    assert st["locked"] is False
+
+
+async def test_a_later_push_carries_the_deferred_commit(repos):
+    """Nothing is lost: once the remote is reachable the commit publishes."""
+    work = str(repos["work"])
+    good_url = str(repos["bare"])
+    _run(work, "remote", "set-url", "origin", "/nonexistent/definitely-not-a-repo.git")
+    (Path(work) / "作品A" / "第01章.md").write_text("v2\n", encoding="utf-8")
+    first = await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: offline")
+    assert first["pushed"] is False
+
+    _run(work, "remote", "set-url", "origin", good_url)
+    (Path(work) / "作品A" / "第01章.md").write_text("v3\n", encoding="utf-8")
+    second = await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: back online")
+
+    assert second["pushed"] is True
+    st = await novel_git.status(work)
+    assert st["ahead"] == 0
+
+
+async def test_rebase_conflict_still_locks_the_repo(repos, tmp_path):
+    """A conflict is a repo state needing a human, not a transport blip — it must
+    keep raising NovelLocked and leave the sentinel behind."""
+    work = str(repos["work"])
+    other = tmp_path / "other"
+    _run(tmp_path, "clone", str(repos["bare"]), str(other))
+    _run(other, "config", "user.email", "other@local")
+    _run(other, "config", "user.name", "Other")
+    (other / "作品A" / "第01章.md").write_text("theirs\n", encoding="utf-8")
+    _run(other, "add", ".")
+    _run(other, "commit", "-m", "theirs")
+    _run(other, "push", "origin", "main")
+
+    (Path(work) / "作品A" / "第01章.md").write_text("mine\n", encoding="utf-8")
+    with pytest.raises(novel_git.NovelLocked):
+        await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: mine")
+
+    assert (await novel_git.status(work))["locked"] is True
