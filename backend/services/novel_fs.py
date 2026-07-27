@@ -131,6 +131,24 @@ def frontmatter_summary(fm: dict) -> str | None:
     return text or None
 
 
+def main_chapter_paths(repo_root: str | Path, work: str) -> list[str]:
+    """Repo-relative paths of a work's main chapters, without reading any file.
+
+    ``list_chapters`` reads every file to produce character counts and
+    summaries. Callers that only need the paths — the batch lint, which reads
+    each file itself — would otherwise read the whole work twice.
+    """
+    root, work_dir = _work_dir_of(repo_root, work)
+    paths: list[str] = []
+    for f in sorted(work_dir.glob("*.md"), key=lambda p: p.name):
+        rel = f.relative_to(root)
+        # Main text lives at the work root's first level only (spec §3 rule 4).
+        if classify_path(rel) != "main":
+            continue
+        paths.append(str(rel))
+    return paths
+
+
 def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
     root, work_dir = _work_dir_of(repo_root, work)
     chapters: list[dict] = []

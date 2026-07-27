@@ -79,11 +79,16 @@ _FILE_CATEGORIES = {"extra", "draft", "reference", "scrap"}
 
 @router.get("/works/{work}/chapters")
 async def list_chapters(work: str, _: dict = Depends(require_auth)):
-    try:
+    def _read() -> dict:
+        # Character counts require reading each chapter, so this is real I/O and
+        # belongs off the event loop.
         return {
             "chapters": novel_fs.list_chapters(_repo(), work),
             "categories": novel_fs.count_work_files(_repo(), work),
         }
+
+    try:
+        return await asyncio.to_thread(_read)
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -95,9 +100,10 @@ async def list_work_files_ep(work: str, category: str = Query(...), _: dict = De
     if category not in _FILE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"unknown category: {category!r}")
     try:
-        return {"files": novel_fs.list_work_files(_repo(), work, category)}
+        files = await asyncio.to_thread(novel_fs.list_work_files, _repo(), work, category)
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return {"files": files}
 
 
 @router.get("/file")
@@ -456,11 +462,22 @@ def _lint_file(repo: str, path: str) -> list[dict]:
 async def lint_file(path: str = Query(...), _: dict = Depends(require_auth)):
     repo = _repo()
     try:
-        return {"path": path, "issues": _lint_file(repo, path)}
+        issues = await asyncio.to_thread(_lint_file, repo, path)
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="not found")
+    return {"path": path, "issues": issues}
+
+
+def _lint_work_sync(repo: str, work: str) -> list[dict]:
+    """Lint every main chapter, reading each file exactly once.
+
+    Enumerating with ``main_chapter_paths`` instead of ``list_chapters``: the
+    latter reads each file to compute character counts and summaries, which the
+    lint does not need, so going through it read the whole work twice.
+    """
+    return [{"path": path, "issues": _lint_file(repo, path)} for path in novel_fs.main_chapter_paths(repo, work)]
 
 
 @router.get("/works/{work}/lint")
@@ -468,10 +485,11 @@ async def lint_work(work: str, _: dict = Depends(require_auth)):
     """Every main chapter of one work, mirroring the desktop batch scan."""
     repo = _repo()
     try:
-        chapters = novel_fs.list_chapters(repo, work)
+        # Whole-work read: off the event loop so one batch lint cannot stall
+        # every other request for its duration.
+        files = await asyncio.to_thread(_lint_work_sync, repo, work)
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    files = [{"path": ch["path"], "issues": _lint_file(repo, ch["path"])} for ch in chapters]
     return {"files": files, "total": sum(len(f["issues"]) for f in files)}
 
 

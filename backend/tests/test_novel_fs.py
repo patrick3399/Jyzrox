@@ -14,6 +14,7 @@ from services.novel_fs import (
     list_notes,
     list_work_files,
     list_works,
+    main_chapter_paths,
     parse_acts,
     parse_backlinks,
     parse_frontmatter,
@@ -413,3 +414,42 @@ def test_set_frontmatter_value_keeps_a_top_level_comment_after_the_key():
     out = set_frontmatter_value(src, "summary", "新摘要")
     assert "# 這是註解" in out
     assert parse_frontmatter(out)[0]["title"] == "T"
+
+
+def test_main_chapter_paths_does_not_read_any_file(tmp_path, monkeypatch):
+    """The batch lint reads each chapter itself, so enumeration must not.
+
+    Going through list_chapters (which reads every file for its character count)
+    meant a whole-work lint read the entire work twice.
+    """
+    work = tmp_path / "作品A"
+    work.mkdir()
+    (work / "第01章.md").write_text("一二三\n", encoding="utf-8")
+    (work / "第02章.md").write_text("四五六\n", encoding="utf-8")
+    (work / "設定").mkdir()
+    (work / "設定" / "人物.md").write_text("not main\n", encoding="utf-8")
+
+    reads: list[str] = []
+    original = Path.read_text
+
+    def _tracking_read_text(self, *args, **kwargs):
+        reads.append(str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _tracking_read_text)
+
+    paths = main_chapter_paths(tmp_path, "作品A")
+
+    assert paths == ["作品A/第01章.md", "作品A/第02章.md"]
+    assert reads == [], f"enumeration read files: {reads}"
+
+
+def test_main_chapter_paths_matches_list_chapters_selection(tmp_path):
+    """Both must agree on what counts as a main chapter."""
+    work = tmp_path / "作品A"
+    work.mkdir()
+    (work / "第01章.md").write_text("x\n", encoding="utf-8")
+    (work / "設定").mkdir()
+    (work / "設定" / "人物.md").write_text("y\n", encoding="utf-8")
+
+    assert main_chapter_paths(tmp_path, "作品A") == [c["path"] for c in list_chapters(tmp_path, "作品A")]
