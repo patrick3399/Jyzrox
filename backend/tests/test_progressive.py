@@ -29,12 +29,13 @@ async def _insert_gallery(
     title: str = "Test Gallery",
     download_status: str = "downloading",
     pages: int = 0,
+    source_pages: int | None = None,
 ) -> int:
     """Insert a gallery row and return its integer id."""
     result = await db_session.execute(
         text(
-            "INSERT INTO galleries (source, source_id, title, pages, download_status) "
-            "VALUES (:source, :source_id, :title, :pages, :download_status) "
+            "INSERT INTO galleries (source, source_id, title, pages, source_pages, download_status) "
+            "VALUES (:source, :source_id, :title, :pages, :source_pages, :download_status) "
             "RETURNING id"
         ),
         {
@@ -42,6 +43,7 @@ async def _insert_gallery(
             "source_id": source_id,
             "title": title,
             "pages": pages,
+            "source_pages": source_pages,
             "download_status": download_status,
         },
     )
@@ -841,6 +843,48 @@ class TestProgressiveImporterFinalize:
         assert row[0] == "partial", "Gallery download_status should be 'partial' after finalize(partial=True)"
         assert row[1] == 1, "Gallery pages should reflect actual image count"
 
+    async def test_later_full_finalize_preserves_source_total_and_restores_complete(
+        self,
+        db_session,
+        db_session_factory,
+        tmp_path,
+    ):
+        """A full repair closes the stored shortfall and returns to complete."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(
+            db_session,
+            pages=1,
+            source_pages=3,
+            download_status="partial",
+        )
+        sha = "cd" * 32
+        await _insert_blob(db_session, sha)
+        await _insert_image(db_session, gallery_id, 1, sha)
+        await _insert_image(db_session, gallery_id, 2, sha)
+        await _insert_image(db_session, gallery_id, 3, sha)
+        dest_dir = tmp_path / "gallery_dl_repaired"
+        dest_dir.mkdir()
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "test_001"
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
+            patch("core.config.settings", MagicMock(tag_model_enabled=False)),
+        ):
+            await importer.finalize(dest_dir, partial=False)
+
+        row = (
+            await db_session.execute(
+                text("SELECT download_status, pages, source_pages FROM galleries WHERE id = :id"),
+                {"id": gallery_id},
+            )
+        ).one()
+        assert row == ("complete", 3, 3)
+
     async def test_finalize_file_failure_after_success_sets_partial(self, db_session, db_session_factory, tmp_path):
         """A swallowed per-file error must make the terminal gallery status partial."""
         from worker.progressive import ProgressiveImporter
@@ -953,6 +997,32 @@ def _make_mock_session_for_ensure(gallery_id: int):
 class TestProgressiveImporterEnsureGallery:
     """Tests for ProgressiveImporter.ensure_gallery_from_url."""
 
+    async def test_import_metadata_persists_source_page_total(self):
+        """Authoritative metadata total is written separately from active pages."""
+        from plugins.models import GalleryImportData
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, session = _make_mock_session_for_ensure(gallery_id=41)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        data = GalleryImportData(
+            source="ehentai",
+            source_id="123",
+            title="Known total",
+            page_count=20,
+        )
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.ensure_gallery_from_import_data(data)
+
+        insert_stmt = next(
+            call.args[0]
+            for call in session.execute.await_args_list
+            if getattr(call.args[0], "table", None) is not None
+        )
+        compiled = insert_stmt.compile()
+        assert compiled.params["source_pages"] == 20
+        assert compiled.params["pages"] == 0
+
     async def test_ensure_gallery_from_url_creates_gallery_record(self):
         """ensure_gallery_from_url must return the gallery id from the DB."""
         from worker.progressive import ProgressiveImporter
@@ -976,9 +1046,67 @@ class TestProgressiveImporterEnsureGallery:
         with patch("worker.progressive.AsyncSessionLocal", fake_factory):
             await importer.ensure_gallery_from_url("https://www.testsite.org/gallery/12345", Path("/tmp/dest"))
 
-        # Path component "gallery" is used as source_id
-        assert importer.source_id == "gallery"
+        # Generic route prefixes cannot identify a remote gallery; the
+        # per-download destination is stable and collision-safe instead.
+        assert importer.source_id == "dest"
+        assert importer.title == "12345"
         assert importer.source is not None
+
+    async def test_distinct_urls_with_same_route_prefix_use_distinct_destination_ids(self):
+        """Generic route prefixes must not collapse separate URLs into one row."""
+        from worker.progressive import ProgressiveImporter
+
+        first_factory, _ = _make_mock_session_for_ensure(gallery_id=10)
+        first = ProgressiveImporter(db_job_id=None, user_id=None)
+        with patch("worker.progressive.AsyncSessionLocal", first_factory):
+            await first.ensure_gallery_from_url(
+                "https://unknown.example/gallery/111",
+                Path("/tmp/job-111"),
+            )
+
+        second_factory, _ = _make_mock_session_for_ensure(gallery_id=11)
+        second = ProgressiveImporter(db_job_id=None, user_id=None)
+        with patch("worker.progressive.AsyncSessionLocal", second_factory):
+            await second.ensure_gallery_from_url(
+                "https://unknown.example/gallery/222",
+                Path("/tmp/job-222"),
+            )
+
+        assert first.source == second.source == "unknown.example"
+        assert first.source_id == "job-111"
+        assert second.source_id == "job-222"
+        assert first.source_id != second.source_id
+        assert first.title == "111"
+        assert second.title == "222"
+
+    async def test_one_character_path_candidate_uses_destination_identity(self):
+        """One-character candidates are too collision-prone for source identity."""
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, _ = _make_mock_session_for_ensure(gallery_id=12)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.ensure_gallery_from_url("https://unknown.example/x/123", Path("/tmp/job-x"))
+
+        assert importer.source_id == "job-x"
+        assert importer.title == "123"
+
+    async def test_percent_encoded_route_candidate_uses_destination_identity(self):
+        """Percent encoding must not bypass generic route validation."""
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, _ = _make_mock_session_for_ensure(gallery_id=13)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.ensure_gallery_from_url(
+                "https://unknown.example/%67allery/333",
+                Path("/tmp/job-333"),
+            )
+
+        assert importer.source_id == "job-333"
+        assert importer.title == "333"
 
     async def test_ensure_gallery_from_url_on_eh_url_uses_gid_not_route_prefix(self):
         """Regression: e-hentai.org had no url_path_id_index, so /g/{gid}/{token}

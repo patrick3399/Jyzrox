@@ -376,6 +376,42 @@ class TestToggleWatcherJob:
         queued_coro = mock_submit.call_args.args[0]
         queued_coro.close()
 
+        mock_enqueue.reset_mock()
+        mock_submit.reset_mock()
+        with (
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_move_enqueue,
+            patch("worker.asyncio.run_coroutine_threadsafe") as mock_move_submit,
+        ):
+            enqueue_callback("move_library_path_job", "/lib/old", "/lib/new", 12, 34)
+
+        mock_move_enqueue.assert_called_once_with(
+            "move_library_path_job",
+            old_path="/lib/old",
+            new_path="/lib/new",
+            destination_device=12,
+            destination_inode=34,
+            watcher_origin=True,
+        )
+        move_coro = mock_move_submit.call_args.args[0]
+        move_coro.close()
+
+        with (
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_reconcile_enqueue,
+            patch("worker.asyncio.run_coroutine_threadsafe") as mock_reconcile_submit,
+        ):
+            enqueue_callback("reconcile_library_path_job", ["/lib/old"], "/lib/new", 12, 34)
+
+        mock_reconcile_enqueue.assert_called_once_with(
+            "reconcile_library_path_job",
+            old_paths=["/lib/old"],
+            new_path="/lib/new",
+            destination_device=12,
+            destination_inode=34,
+            watcher_origin=True,
+        )
+        reconcile_coro = mock_reconcile_submit.call_args.args[0]
+        reconcile_coro.close()
+
     async def test_stop_watcher_calls_watcher_stop(self):
         """toggle_watcher_job(enabled=False) must stop the watcher and return status='stopped'."""
         from unittest.mock import AsyncMock, MagicMock, patch

@@ -13,10 +13,12 @@ Volume layout:
 """
 
 import asyncio
+import fcntl
 import logging
 import re
 import shutil
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,8 @@ _VERSION_DIR_RE = re.compile(r"^v\d+$")
 
 _gdl_bin_cache: str | None = None
 
+_ACTIVE_DOWNLOAD_STATUSES = ("queued", "paused", "running")
+
 
 def _venv_create_cmd(target: Path) -> list[str]:
     """Create an isolated venv that owns its gallery-dl entry point."""
@@ -45,6 +49,22 @@ def get_gdl_bin() -> str:
     if _gdl_bin_cache is None:
         _gdl_bin_cache = str(GDL_BIN) if GDL_BIN.exists() else "gallery-dl"
     return _gdl_bin_cache
+
+
+def get_gdl_exec_cmd() -> list[str]:
+    """Return a command prefix that holds a shared venv lock until exit.
+
+    The small Python launcher acquires the lock and then ``exec`` replaces it
+    with gallery-dl, so the lock follows the exact subprocess lifetime without
+    serialising concurrent downloads.
+    """
+    return [
+        sys.executable,
+        "-m",
+        "gallery_dl_exec",
+        str(VENV_BASE / ".lifecycle.lock"),
+        get_gdl_bin(),
+    ]
 
 
 def invalidate_gdl_bin_cache() -> None:
@@ -125,8 +145,21 @@ def _swap_active_symlink(target_dir: Path) -> None:
     tmp_link.rename(VENV_ACTIVE)  # atomic on same filesystem
 
 
-async def _check_running_downloads() -> int:
-    """Return count of currently running download jobs."""
+@asynccontextmanager
+async def _exclusive_venv_lock():
+    """Block gallery-dl starts while swapping or deleting venv directories."""
+    VENV_BASE.mkdir(parents=True, exist_ok=True)
+    lock_file = (VENV_BASE / ".lifecycle.lock").open("a+b")
+    try:
+        await asyncio.to_thread(fcntl.flock, lock_file.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
+
+
+async def _check_active_downloads() -> int:
+    """Return count of jobs that can use or start the active gallery-dl venv."""
     from sqlalchemy import func, select
 
     from core.database import AsyncSessionLocal
@@ -134,7 +167,11 @@ async def _check_running_downloads() -> int:
 
     async with AsyncSessionLocal() as session:
         return (
-            await session.execute(select(func.count()).select_from(DownloadJob).where(DownloadJob.status == "running"))
+            await session.execute(
+                select(func.count())
+                .select_from(DownloadJob)
+                .where(DownloadJob.status.in_(_ACTIVE_DOWNLOAD_STATUSES))
+            )
         ).scalar_one()
 
 
@@ -272,7 +309,7 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
     """SAQ job: upgrade gallery-dl to a specific version (or latest).
 
     Steps:
-    1. Check no downloads are running
+    1. Check no downloads are queued, paused, or running
     2. Create a fresh, isolated venv dir (never clone the current one)
     3. pip install gallery-dl==version (or latest)
     4. Verify with --version
@@ -281,10 +318,11 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
     """
     from core.events import EventType, emit_safe
 
-    # 1. Check for running downloads
-    running = await _check_running_downloads()
-    if running > 0:
-        return await _fail("rejected", f"{running} download(s) still running", version)
+    # Reject before doing expensive installation work. The same check is
+    # repeated under the exclusive lifecycle lock immediately before swap.
+    active = await _check_active_downloads()
+    if active > 0:
+        return await _fail("rejected", f"{active} download(s) queued, paused, or running", version)
 
     old_version = await get_current_version()
 
@@ -327,13 +365,19 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
     if version and new_version != version:
         logger.warning("[gallery-dl venv] Requested %s but got %s", version, new_version)
 
-    # 5. Atomic symlink swap
-    _swap_active_symlink(new_dir)
+    # 5-6. Serialize the final guard, swap, and cleanup against every
+    # gallery-dl subprocess. A download that starts after the first DB check
+    # either holds the shared lock until it exits or waits and starts from the
+    # new active venv after this block completes.
+    async with _exclusive_venv_lock():
+        active = await _check_active_downloads()
+        if active > 0:
+            await _cleanup_new_dir(new_dir)
+            return await _fail("rejected", f"{active} download(s) queued, paused, or running", version)
 
-    logger.info("[gallery-dl venv] Upgraded: %s → %s", old_version, new_version)
-
-    # 6. Cleanup: keep only current and previous
-    await _cleanup_old_versions()
+        _swap_active_symlink(new_dir)
+        logger.info("[gallery-dl venv] Upgraded: %s → %s", old_version, new_version)
+        await _cleanup_old_versions()
 
     invalidate_gdl_bin_cache()
 
@@ -355,30 +399,29 @@ async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
     """SAQ job: rollback gallery-dl to the previous version."""
     from core.events import EventType, emit_safe
 
-    # Check for running downloads
-    running = await _check_running_downloads()
-    if running > 0:
-        return await _fail("rejected", f"{running} download(s) still running")
+    async with _exclusive_venv_lock():
+        active = await _check_active_downloads()
+        if active > 0:
+            return await _fail("rejected", f"{active} download(s) queued, paused, or running")
 
-    prev_dir = _previous_version_dir()
-    if prev_dir is None:
-        return await _fail("failed", "No previous version to rollback to")
+        prev_dir = _previous_version_dir()
+        if prev_dir is None:
+            return await _fail("failed", "No previous version to rollback to")
 
-    if not (prev_dir / "bin" / "gallery-dl").exists():
-        return await _fail("failed", f"Previous version {prev_dir.name} is corrupt")
+        if not (prev_dir / "bin" / "gallery-dl").exists():
+            return await _fail("failed", f"Previous version {prev_dir.name} is corrupt")
 
-    old_version = await get_current_version()
-    current_dir = _current_version_dir()
+        old_version = await get_current_version()
+        current_dir = _current_version_dir()
+        _swap_active_symlink(prev_dir)
 
-    # Atomic symlink swap
-    _swap_active_symlink(prev_dir)
+        new_version = await _get_version(str(prev_dir / "bin" / "gallery-dl"))
+        logger.info("[gallery-dl venv] Rolled back: %s → %s", old_version, new_version)
 
-    new_version = await _get_version(str(prev_dir / "bin" / "gallery-dl"))
-    logger.info("[gallery-dl venv] Rolled back: %s → %s", old_version, new_version)
-
-    # Remove the version we rolled back FROM
-    if current_dir and current_dir != prev_dir:
-        await asyncio.to_thread(shutil.rmtree, current_dir, True)
+        # The exclusive lock proves no gallery-dl process can still import
+        # from the version being removed.
+        if current_dir and current_dir != prev_dir:
+            await asyncio.to_thread(shutil.rmtree, current_dir, True)
 
     invalidate_gdl_bin_cache()
 

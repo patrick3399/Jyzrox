@@ -47,6 +47,8 @@ from worker.reconciliation import reconciliation_job
 from worker.retry import retry_failed_downloads_job
 from worker.scan import (
     auto_discover_job,
+    move_library_path_job,
+    reconcile_library_path_job,
     rescan_by_path_job,
     rescan_gallery_job,
     rescan_library_job,
@@ -76,6 +78,31 @@ logger = logging.getLogger("worker")
 # ── Lifecycle ────────────────────────────────────────────────────────
 
 _watcher = LibraryWatcher()
+
+
+def _watcher_job_kwargs(job_name: str, args: tuple) -> dict:
+    """Translate watchdog's positional callback into durable SAQ kwargs."""
+    if job_name == "auto_discover_job" and not args:
+        return {"watcher_origin": True}
+    if job_name == "rescan_by_path_job" and len(args) == 1:
+        return {"dir_path": args[0], "watcher_origin": True}
+    if job_name == "move_library_path_job" and len(args) == 4:
+        return {
+            "old_path": args[0],
+            "new_path": args[1],
+            "destination_device": args[2],
+            "destination_inode": args[3],
+            "watcher_origin": True,
+        }
+    if job_name == "reconcile_library_path_job" and len(args) == 4:
+        return {
+            "old_paths": args[0],
+            "new_path": args[1],
+            "destination_device": args[2],
+            "destination_inode": args[3],
+            "watcher_origin": True,
+        }
+    raise ValueError(f"Unsupported watcher job callback: {job_name}({len(args)} args)")
 
 
 async def _log_level_subscriber(ctx: dict) -> None:
@@ -458,9 +485,7 @@ async def startup(ctx: dict) -> None:
         def enqueue_sync(job_name: str, *args):
             import core.queue
 
-            # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
-            kwargs = {"dir_path": args[0]} if args else {}
-            kwargs["watcher_origin"] = True
+            kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)
@@ -524,9 +549,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
         def enqueue_sync(job_name: str, *args):
             import core.queue
 
-            # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
-            kwargs = {"dir_path": args[0]} if args else {}
-            kwargs["watcher_origin"] = True
+            kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)
@@ -674,19 +697,58 @@ async def disk_monitor_job(ctx: dict) -> dict:
 
 
 async def memory_monitor_job(ctx: dict) -> dict:
-    """Cron: warn when the worker container's memory use exceeds the alert threshold.
+    """Cron: warn when worker or Redis memory crosses its alert threshold.
 
     Reads the worker's own cgroup v2 memory (the same figure ``docker stats``
     reports against the 2 GB limit) and logs a warning + emits an event when it
-    crosses ``settings.memory_alert_pct``. Replaces the external memory_monitor.sh
-    + CSV with an in-app, log-visible alert.
+    crosses ``settings.memory_alert_pct``. Redis is sampled independently because
+    it holds non-evictable control-plane state and must alert before maxmemory
+    causes writes to fail. Replaces the external memory_monitor.sh + CSV with an
+    in-app, log-visible alert.
     """
     from core.config import settings
     from worker import memory as _mem
+    from worker.redis_memory import sample_redis_memory
+
+    redis_sample = await sample_redis_memory(ctx.get("redis"))
+    redis_status = "unknown"
+    if redis_sample is not None:
+        redis_pct = float(redis_sample["pct"])
+        redis_policy = str(redis_sample["policy"])
+        redis_limit = int(redis_sample["limit_bytes"])
+        if redis_limit <= 0:
+            redis_status = "unbounded"
+        elif redis_policy != "noeviction":
+            redis_status = "unsafe_policy"
+        else:
+            redis_status = "high" if redis_pct >= settings.redis_memory_alert_pct else "ok"
+
+        if redis_status != "ok":
+            from core.events import EventType, emit_safe
+
+            await emit_safe(
+                EventType.SYSTEM_MEMORY_HIGH,
+                resource_type="redis",
+                used_mb=round(int(redis_sample["used_bytes"]) / (1024 * 1024), 1),
+                limit_mb=round(int(redis_sample["limit_bytes"]) / (1024 * 1024), 1),
+                pct=redis_pct,
+                threshold_pct=settings.redis_memory_alert_pct,
+                maxmemory_policy=redis_policy,
+                evicted_keys=int(redis_sample["evicted_keys"]),
+            )
+            logger.warning(
+                "[memory_monitor] REDIS %s: %.1f%% used (threshold %.0f%%, policy %s, evicted %d)",
+                redis_status.upper(),
+                redis_pct,
+                settings.redis_memory_alert_pct,
+                redis_policy,
+                int(redis_sample["evicted_keys"]),
+            )
+    redis_is_alert = redis_status in {"high", "unbounded", "unsafe_policy"}
 
     mem = _mem.read_container_memory()
     if mem is None:
-        return {"status": "unknown"}
+        return {"status": "high" if redis_is_alert else "unknown", "redis_status": redis_status}
 
     used_bytes, limit_bytes = mem
     used_mb = used_bytes / (1024 * 1024)
@@ -728,9 +790,19 @@ async def memory_monitor_job(ctx: dict) -> dict:
             pct,
             threshold,
         )
-        return {"status": "high", "pct": round(pct, 1), "used_mb": round(used_mb, 1)}
+        return {
+            "status": "high",
+            "pct": round(pct, 1),
+            "used_mb": round(used_mb, 1),
+            "redis_status": redis_status,
+        }
 
-    return {"status": "ok", "pct": round(pct, 1), "used_mb": round(used_mb, 1)}
+    return {
+        "status": "high" if redis_is_alert else "ok",
+        "pct": round(pct, 1),
+        "used_mb": round(used_mb, 1),
+        "redis_status": redis_status,
+    }
 
 
 async def adaptive_persist_job(ctx: dict) -> dict:
@@ -757,6 +829,8 @@ def _make_startup_log(label: str):
 
 
 _ingest_startup = _make_startup_log("ingest")
+
+
 async def _render_startup(ctx: dict) -> None:
     await _make_startup_log("render")(ctx)
     from plugins import init_plugins
@@ -841,6 +915,8 @@ def build_workers() -> tuple:
             rescan_library_job,
             rescan_gallery_job,
             rescan_by_path_job,
+            move_library_path_job,
+            reconcile_library_path_job,
             rescan_library_path_job,
             tag_job,
             reconciliation_job,
@@ -916,6 +992,8 @@ __all__ = [
     "rescan_library_job",
     "rescan_gallery_job",
     "rescan_by_path_job",
+    "move_library_path_job",
+    "reconcile_library_path_job",
     "rescan_library_path_job",
     "auto_discover_job",
     "scheduled_scan_job",

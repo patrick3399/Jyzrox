@@ -943,12 +943,13 @@ class TestLocalImportJob:
             return next(sessions)
 
         mock_store = AsyncMock(return_value=mock_blob)
+        mock_symlink = AsyncMock()
         ctx = _make_ctx()
 
         with (
             patch("worker.importer.AsyncSessionLocal", side_effect=_factory),
             patch("worker.importer.store_blob", mock_store),
-            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
             patch("worker.importer.settings") as mock_settings,
@@ -1001,12 +1002,13 @@ class TestLocalImportJob:
             return next(sessions)
 
         mock_store = AsyncMock(return_value=mock_blob)
+        mock_symlink = AsyncMock()
         ctx = _make_ctx()
 
         with (
             patch("worker.importer.AsyncSessionLocal", side_effect=_factory),
             patch("worker.importer.store_blob", mock_store),
-            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
             patch("worker.importer.settings") as mock_settings,
@@ -1018,6 +1020,14 @@ class TestLocalImportJob:
         mock_store.assert_called_once()
         call_kwargs = mock_store.call_args[1] if mock_store.call_args[1] else {}
         assert call_kwargs.get("storage") == "external"
+        assert call_kwargs.get("external_path") == str(img)
+        image_insert = next(
+            call.args[0]
+            for call in mock_sess3.execute.await_args_list
+            if getattr(getattr(call.args[0], "table", None), "name", None) == "images"
+        )
+        assert image_insert.compile().params["external_path"] == str(img)
+        assert mock_symlink.await_args.kwargs["external_path"] == str(img)
 
     async def test_excluded_blob_skipped_in_local_import(self, tmp_path):
         """Files matching excluded_blobs sha256 should be skipped during local import."""
@@ -1283,6 +1293,37 @@ class TestBatchImportJob:
         assert result["status"] == "done"
         assert result["failed"] == 1
         assert result["completed"] == 0
+
+    async def test_resumable_source_change_is_not_counted_as_completed(self, tmp_path):
+        from worker.importer import batch_import_job
+
+        gallery_dir = tmp_path / "renamed_gallery"
+        gallery_dir.mkdir()
+        no_existing = MagicMock()
+        no_existing.scalar_one_or_none.return_value = None
+        inserted = MagicMock()
+        inserted.scalar_one.return_value = 91
+        session = _make_mock_session()
+        session.execute = AsyncMock(side_effect=[no_existing, inserted])
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", _make_session_factory(session)),
+            patch(
+                "worker.importer.local_import_job",
+                new=AsyncMock(return_value={"status": "source_changed", "resumable": True}),
+            ),
+        ):
+            result = await batch_import_job(
+                _make_ctx(),
+                root_dir=str(tmp_path),
+                mode="link",
+                galleries=[{"path": str(gallery_dir), "title": "Renamed"}],
+                batch_id="batch-source-changed",
+                user_id=1,
+            )
+
+        assert result["completed"] == 0
+        assert result["failed"] == 1
 
     async def test_one_success_one_failure_correct_counts(self, tmp_path):
         """One succeeding and one failing gallery should report correct counts."""

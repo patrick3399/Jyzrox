@@ -891,7 +891,13 @@ export default function GalleryDetailPage() {
               {[
                 { labelKey: 'library.metaSource', value: gallery.source },
                 { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
-                { labelKey: 'library.metaPages', value: String(gallery.pages) },
+                {
+                  labelKey: 'library.metaPages',
+                  value:
+                    gallery.source_pages && gallery.source_pages > gallery.pages
+                      ? `${gallery.pages}/${gallery.source_pages}`
+                      : String(gallery.pages),
+                },
                 {
                   labelKey: 'library.metaAdded',
                   value: formatDate(gallery.added_at),
@@ -1326,7 +1332,11 @@ export default function GalleryDetailPage() {
       <div className="bg-vault-card border border-vault-border rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
-            {t('library.images')} ({gallery.pages} {t('library.metaPages')})
+            {t('library.images')} ({gallery.pages}
+            {gallery.source_pages && gallery.source_pages > gallery.pages
+              ? `/${gallery.source_pages}`
+              : ''}{' '}
+            {t('library.metaPages')})
           </h2>
           <div className="flex items-center gap-2">
             {selectMode ? (

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     category        TEXT,
     language        TEXT,
     pages           INT,
+    source_pages    INT,
     posted_at       TIMESTAMPTZ,
     added_at        TIMESTAMPTZ DEFAULT now(),
     rating          SMALLINT DEFAULT 0,
@@ -40,6 +41,12 @@ CREATE TABLE IF NOT EXISTS galleries (
     metadata_updated_at TIMESTAMPTZ,
     UNIQUE (source, source_id)
 );
+
+DO $$ BEGIN
+    ALTER TABLE galleries ADD CONSTRAINT chk_galleries_source_pages_nonnegative
+        CHECK (source_pages IS NULL OR source_pages >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS blobs (
     sha256        TEXT PRIMARY KEY,
@@ -72,12 +79,20 @@ CREATE INDEX IF NOT EXISTS idx_blobs_phash_q3 ON blobs(phash_q3) WHERE phash_q3 
 CREATE INDEX IF NOT EXISTS idx_blobs_dedup_scanned_threshold
     ON blobs(dedup_scanned_threshold) WHERE phash_int IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS blob_locations (
+    blob_sha256  TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+    external_path TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (blob_sha256, external_path)
+);
+
 CREATE TABLE IF NOT EXISTS images (
     id              BIGSERIAL PRIMARY KEY,
     gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     page_num        INT NOT NULL,
     filename        TEXT,
     blob_sha256     TEXT NOT NULL REFERENCES blobs(sha256),
+    external_path   TEXT,
     tags_array      TEXT[] DEFAULT '{}',
     caption         TEXT,
     visibility      TEXT NOT NULL DEFAULT 'active',
@@ -87,8 +102,13 @@ CREATE TABLE IF NOT EXISTS images (
     source_seen_at  TIMESTAMPTZ,
     hidden_at       TIMESTAMPTZ,
     replaced_by_image_id BIGINT REFERENCES images(id) ON DELETE SET NULL,
+    CONSTRAINT fk_images_blob_location
+        FOREIGN KEY (blob_sha256, external_path)
+        REFERENCES blob_locations(blob_sha256, external_path),
     UNIQUE (gallery_id, page_num)
 );
+CREATE INDEX IF NOT EXISTS idx_images_external_path
+    ON images(external_path) WHERE external_path IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS tags (
     id              BIGSERIAL PRIMARY KEY,

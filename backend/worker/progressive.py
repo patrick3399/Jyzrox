@@ -31,6 +31,43 @@ from worker.helpers import _sha256, _validate_image_magic
 
 _FILENAME_NUMBER_RE = re.compile(r"(\d+)")
 _PIXIV_USER_WORK_PAGE_RE = re.compile(r"^\d+_p\d+$")
+_ROUTE_LIKE_SOURCE_IDS = frozenset(
+    {
+        "album",
+        "albums",
+        "art",
+        "artwork",
+        "artworks",
+        "comic",
+        "comics",
+        "g",
+        "gallery",
+        "galleries",
+        "image",
+        "images",
+        "item",
+        "items",
+        "manga",
+        "p",
+        "photo",
+        "photos",
+        "post",
+        "posts",
+        "profile",
+        "u",
+        "user",
+        "users",
+        "view",
+    }
+)
+
+
+def _is_url_source_id_candidate(candidate: str) -> bool:
+    """Return whether a URL path segment is specific enough for identity."""
+    from urllib.parse import unquote
+
+    normalized = unquote(candidate).strip()
+    return len(normalized) > 1 and normalized.casefold() not in _ROUTE_LIKE_SOURCE_IDS
 
 
 def _subscription_artist_id(data: GalleryImportData, source_url: str | None) -> str | None:
@@ -57,6 +94,7 @@ def _upsert_metadata_set(excluded, *, include_title_tags: bool) -> dict:
         "download_status": "downloading",
         "artist_id": func.coalesce(excluded.artist_id, Gallery.artist_id),
         "source_url": func.coalesce(Gallery.source_url, excluded.source_url),
+        "source_pages": func.coalesce(excluded.source_pages, Gallery.source_pages),
     }
     if include_title_tags:
         set_["title"] = func.coalesce(func.nullif(excluded.title, ""), Gallery.title)
@@ -362,6 +400,7 @@ class ProgressiveImporter:
                     category=import_data.category,
                     language=import_data.language,
                     pages=0,
+                    source_pages=import_data.page_count or None,
                     posted_at=import_data.posted_at,
                     uploader=import_data.uploader,
                     download_status="downloading",
@@ -414,8 +453,15 @@ class ProgressiveImporter:
         # E.g. weibo.com/u/USERID: url_path_id_index=1 skips the "u" routing prefix.
         path_parts = [p for p in parsed.path.strip("/").split("/") if p]
         id_idx = min(site_cfg.url_path_id_index, len(path_parts) - 1) if path_parts else 0
-        source_id = path_parts[id_idx] if path_parts else dest_dir.name
-        title = source_id
+        candidate = path_parts[id_idx] if path_parts else ""
+        if _is_url_source_id_candidate(candidate):
+            source_id = candidate
+            title = candidate
+        else:
+            source_id = dest_dir.name
+            # Keep the fallback title readable even when collision-safe
+            # identity comes from the per-download staging destination.
+            title = path_parts[-1] if path_parts else source_id
 
         self.title = title
         self.source = source
@@ -432,6 +478,7 @@ class ProgressiveImporter:
                     source_id=source_id,
                     title=title,
                     pages=0,
+                    source_pages=None,
                     download_status="downloading",
                     artist_id=f"{source}:{source_id}" if self.source_url and source and source_id else None,
                     created_by_user_id=self.user_id,
@@ -481,6 +528,7 @@ class ProgressiveImporter:
                     category=data.category,
                     language=data.language,
                     pages=0,
+                    source_pages=data.page_count or None,
                     posted_at=data.posted_at,
                     uploader=data.uploader,
                     download_status="downloading",

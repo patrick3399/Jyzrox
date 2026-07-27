@@ -38,6 +38,7 @@ def sidecar_payload_from_gallery(gallery: Gallery) -> dict[str, Any]:
         "uploader": gallery.uploader,
         "artist_id": gallery.artist_id,
         "pages": gallery.pages,
+        "source_pages": gallery.source_pages,
         "source_url": gallery.source_url,
         "tags": list(gallery.tags_array or []),
         "posted_at": posted_at.isoformat() if posted_at is not None else None,

@@ -617,6 +617,46 @@ async def test_dedup_keep_pair_remaps_images_from_discard_to_keep(client, db_ses
     assert row.scalar_one() == 2
 
 
+async def test_dedup_keep_rejects_image_bound_external_location(client, db_session, db_session_factory):
+    """A visual-dedup remap cannot relabel bytes at an external source path."""
+    await _insert_user(db_session)
+    await _insert_blob(db_session, "external_keep")
+    await _insert_blob(db_session, "external_discard")
+    pair_id = await _insert_relationship(db_session, "external_keep", "external_discard", "quality_conflict")
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, download_status) "
+            "VALUES ('test', 'g_external_remap', 'External Remap', 'downloaded')"
+        )
+    )
+    gid = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id='g_external_remap'"))
+    ).scalar_one()
+    await db_session.execute(
+        text(
+            "INSERT INTO blob_locations (blob_sha256, external_path) "
+            "VALUES ('external_discard', '/mnt/external/page.jpg')"
+        )
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, blob_sha256, external_path) "
+            "VALUES (:gid, 1, 'external_discard', '/mnt/external/page.jpg')"
+        ),
+        {"gid": gid},
+    )
+    await db_session.commit()
+
+    with patch("routers.dedup.async_session", db_session_factory):
+        resp = await client.post(
+            f"/api/dedup/review/{pair_id}/keep",
+            json={"keep_sha": "external_keep", "expected_discard_refs": 1},
+        )
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Cannot remap a blob with image-bound external locations"
+
+
 # ---------------------------------------------------------------------------
 # Tests — scan signal types (resume / stop)
 # ---------------------------------------------------------------------------

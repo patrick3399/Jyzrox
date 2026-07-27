@@ -1111,24 +1111,26 @@ class TestRescanByPathJob:
         assert result["status"] == "done"
 
     async def test_gallery_found_by_blob_external_path(self):
-        """Path not under library base falls back to blob external_path lookup."""
+        """Path not under library base falls back to the image-bound external path."""
         from worker.scan import rescan_by_path_job
 
-        # The path is NOT under lib_base so the library lookup block is skipped
-        # entirely (ValueError from relative_to).  Only ONE AsyncSessionLocal call
-        # is made — the blob external_path lookup — which returns gallery_id 88.
+        # Direct source-path and monitored-library discovery miss first; the
+        # image external_path lookup then returns gallery_id 88.
         session = AsyncMock()
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
+        no_gallery_res = MagicMock()
+        no_gallery_res.scalar_one_or_none.return_value = None
         found_res = MagicMock()
         found_res.scalar_one_or_none.return_value = 88
-        session.execute = AsyncMock(return_value=found_res)
+        session.execute = AsyncMock(side_effect=[no_gallery_res, found_res])
 
         r = _make_redis()
         rescan_gallery_mock = AsyncMock(return_value={"status": "done", "gallery_id": 88})
 
         with (
             patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan._get_library_specs", new=AsyncMock(return_value=[])),
             patch("worker.scan.settings") as mock_settings,
             patch("worker.scan.rescan_gallery_job", rescan_gallery_mock),
         ):
@@ -1137,6 +1139,7 @@ class TestRescanByPathJob:
 
         rescan_gallery_mock.assert_awaited_once_with({"redis": r}, 88)
         assert result["status"] == "done"
+        assert "images.external_path" in str(session.execute.await_args.args[0])
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,11 @@ def test_ingest_jobs_route_to_ingest_queue():
     assert JOB_QUEUE_ROUTING["auto_discover_job"] == QUEUE_INGEST
 
 
+def test_watcher_lifecycle_jobs_route_to_interactive_queue():
+    assert JOB_QUEUE_ROUTING["move_library_path_job"] == QUEUE_INTERACTIVE
+    assert JOB_QUEUE_ROUTING["reconcile_library_path_job"] == QUEUE_INTERACTIVE
+
+
 def test_unlisted_jobs_are_not_in_routing_map():
     """Jobs not listed default to interactive at call sites — they must be absent."""
     interactive_jobs = [

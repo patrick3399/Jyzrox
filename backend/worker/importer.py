@@ -16,8 +16,15 @@ import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
-from db.models import ExcludedBlob, Gallery, GalleryTag, Image, ImportConflict, Tag
-from services.cas import create_library_symlink, increment_ref_count, store_blob, thumb_dir, thumbnails_complete_at
+from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, ImportConflict, Tag
+from services.cas import (
+    create_library_symlink,
+    increment_ref_count,
+    library_dir,
+    store_blob,
+    thumb_dir,
+    thumbnails_complete_at,
+)
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from services.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
 from worker.constants import (
@@ -26,6 +33,7 @@ from worker.constants import (
     logger,
 )
 from worker.helpers import _sha256, _validate_image_magic
+from worker.source_identity import SourceDirectoryChangedError, SourceDirectoryIdentity
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
 
@@ -42,6 +50,18 @@ def _natural_sort_key(path: Path) -> tuple[tuple[int, str | int], ...]:
     """Sort filenames in human page order: 1, 2, 10 instead of 1, 10, 2."""
     parts = _NATURAL_SORT_RE.split(path.name)
     return tuple((1, int(part)) if part.isdigit() else (0, part.casefold()) for part in parts)
+
+
+def _restore_library_links(states: list[tuple[Path, str | None]]) -> None:
+    """Best-effort rollback for deferred link-import symlinks."""
+    for link, previous_target in reversed(states):
+        try:
+            if link.is_symlink():
+                link.unlink()
+            if previous_target is not None:
+                link.symlink_to(previous_target)
+        except OSError as exc:
+            logger.error("[local_import] failed to restore library link %s: %s", link, exc)
 
 
 def _disambiguate_library_filenames(paths: list[Path]) -> list[str]:
@@ -510,6 +530,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     src_path = Path(source_dir)
     if not src_path.is_dir():
         return {"status": "failed", "error": f"not a directory: {source_dir}"}
+    source_identity = SourceDirectoryIdentity.capture(src_path) if mode == "link" else None
 
     files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
     # Validate magic bytes for image files; pass video files through without magic check
@@ -533,6 +554,10 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     processed = 0  # actual new Image rows inserted (used for gallery.pages)
     attempted = 0  # files attempted regardless of conflict (used for progress display)
     import_failures: list[dict[str, str]] = []
+    terminal_status = "failed"
+    final_pages = 0
+    existing_missing_thumb = False
+    sidecar_payload = None
     r = ctx["redis"]
 
     # Load gallery to get source/source_id for library symlink creation
@@ -559,113 +584,187 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         )
     excluded_set: set[str] = set(excluded_rows)
 
-    async with AsyncSessionLocal() as session:
-        final_pages = processed
-        existing_rows = (
-            await session.execute(select(Image.page_num, Image.blob_sha256).where(Image.gallery_id == gallery_id))
-        ).all()
-        known_sha256s = {row.blob_sha256 for row in existing_rows}
-        existing_page_by_sha = {row.blob_sha256: row.page_num for row in existing_rows}
-        max_page = max((row.page_num for row in existing_rows), default=0)
-        existing_missing_thumb = False
+    try:
+        async with AsyncSessionLocal() as session:
+            existing_rows = (
+                await session.execute(select(Image.page_num, Image.blob_sha256).where(Image.gallery_id == gallery_id))
+            ).all()
+            known_sha256s = {row.blob_sha256 for row in existing_rows}
+            existing_page_by_sha = {row.blob_sha256: row.page_num for row in existing_rows}
+            max_page = max((row.page_num for row in existing_rows), default=0)
+            pending_link_symlinks: list[tuple[str, Blob, str]] = []
 
-        for f in files:
-            try:
-                sha256 = await asyncio.to_thread(_sha256, f)
-            except (FileNotFoundError, OSError) as exc:
-                logger.warning("[local_import] gallery_id=%d: skipping deleted file %s: %s", gallery_id, f.name, exc)
-                import_failures.append(
-                    {
-                        "filename": f.name,
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    }
-                )
-                attempted += 1
-                continue
-
-            if sha256 in excluded_set:
-                logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
-                continue
-            if sha256 in known_sha256s:
-                if not thumbnails_complete_at(thumb_dir(sha256)):
-                    existing_missing_thumb = True
-                    logger.debug(
-                        "[local_import] gallery_id=%d: existing page %s missing thumbnail(s)",
-                        gallery_id,
-                        existing_page_by_sha.get(sha256),
+            for f in files:
+                if source_identity is not None:
+                    source_identity.assert_unchanged(f"before:{f.name}")
+                try:
+                    sha256 = await asyncio.to_thread(_sha256, f)
+                except (FileNotFoundError, OSError) as exc:
+                    if source_identity is not None:
+                        source_identity.assert_unchanged(f"read:{f.name}")
+                    logger.warning(
+                        "[local_import] gallery_id=%d: skipping deleted file %s: %s", gallery_id, f.name, exc
                     )
+                    import_failures.append(
+                        {
+                            "filename": f.name,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                    )
+                    attempted += 1
+                    continue
+                if source_identity is not None:
+                    source_identity.assert_unchanged(f"after:{f.name}")
+
+                if sha256 in excluded_set:
+                    logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
+                    continue
+                if sha256 in known_sha256s:
+                    if not thumbnails_complete_at(thumb_dir(sha256)):
+                        existing_missing_thumb = True
+                        logger.debug(
+                            "[local_import] gallery_id=%d: existing page %s missing thumbnail(s)",
+                            gallery_id,
+                            existing_page_by_sha.get(sha256),
+                        )
+                    attempted += 1
+                    continue
+
+                if mode == "copy":
+                    # Hardlink/copy into CAS; create library symlink
+                    blob = await store_blob(f, sha256, session)
+                    image_external_path = None
+                else:
+                    # Link mode: record external path, do not copy file
+                    image_external_path = str(f)
+                    blob = await store_blob(
+                        f,
+                        sha256,
+                        session,
+                        storage="external",
+                        external_path=image_external_path,
+                    )
+
+                # Flush blob upsert before inserting image (FK constraint)
+                await session.flush()
+
+                stmt = (
+                    pg_insert(Image)
+                    .values(
+                        gallery_id=gallery_id,
+                        page_num=max_page + 1,
+                        filename=f.name,
+                        blob_sha256=sha256,
+                        external_path=image_external_path,
+                        added_at=datetime.now(UTC),
+                    )
+                    .on_conflict_do_nothing()
+                    .returning(Image.id)
+                )
+                result = await session.execute(stmt)
+                inserted = result.scalar_one_or_none()
+
+                if inserted is not None:
+                    # New Image row created — increment blob ref_count.
+                    await increment_ref_count(sha256, session)
+                    if image_external_path is None:
+                        await create_library_symlink(gallery_source, gallery_source_id, f.name, blob)
+                    else:
+                        # Do not expose an external symlink until the pinned
+                        # source identity passes the finalize boundary.
+                        pending_link_symlinks.append((f.name, blob, image_external_path))
+                    processed += 1
+                    max_page += 1
+                    known_sha256s.add(sha256)
+
                 attempted += 1
-                continue
 
-            if mode == "copy":
-                # Hardlink/copy into CAS; create library symlink
-                blob = await store_blob(f, sha256, session)
-            else:
-                # Link mode: record external path, do not copy file
-                blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
+                # Update progress every 5 files or proportionally for small batches
+                update_every = max(1, min(5, total // 10))
+                if attempted % update_every == 0 or attempted == total:
+                    await r.setex(
+                        f"import:progress:{gallery_id}",
+                        3600,
+                        _json.dumps({"processed": processed, "total": total, "status": "running"}),
+                    )
 
-            # Flush blob upsert before inserting image (FK constraint)
-            await session.flush()
+            if source_identity is not None:
+                source_identity.assert_unchanged("finalize")
+                link_states: list[tuple[Path, str | None]] = []
+                try:
+                    for filename, blob, external_path in pending_link_symlinks:
+                        link = library_dir(gallery_source, gallery_source_id) / filename
+                        if link.exists() and not link.is_symlink():
+                            raise FileExistsError(f"refusing to replace non-symlink library file: {link}")
+                        previous_target = os.readlink(link) if link.is_symlink() else None
+                        link_states.append((link, previous_target))
+                        await create_library_symlink(
+                            gallery_source,
+                            gallery_source_id,
+                            filename,
+                            blob,
+                            external_path=external_path,
+                        )
+                    source_identity.assert_unchanged("commit")
+                except Exception:
+                    _restore_library_links(link_states)
+                    raise
 
-            stmt = (
-                pg_insert(Image)
-                .values(
-                    gallery_id=gallery_id,
-                    page_num=max_page + 1,
-                    filename=f.name,
-                    blob_sha256=sha256,
-                    added_at=datetime.now(UTC),
-                )
-                .on_conflict_do_nothing()
-                .returning(Image.id)
-            )
-            result = await session.execute(stmt)
-            inserted = result.scalar_one_or_none()
+            # Update gallery page count and status
+            gallery = await session.get(Gallery, gallery_id)
+            if gallery:
+                image_count = (
+                    await session.execute(select(func.count(Image.id)).where(Image.gallery_id == gallery_id))
+                ).scalar_one()
+                final_pages = image_count
+                gallery.pages = image_count
+                if import_failures and attempted == len(import_failures):
+                    terminal_status = "failed"
+                elif import_failures:
+                    terminal_status = "partial"
+                else:
+                    terminal_status = "complete"
+                gallery.download_status = terminal_status
+                if mode == "link" and not gallery.source_path:
+                    gallery.source_path = source_identity.real_path if source_identity is not None else os.path.realpath(src_path)
+                gallery.metadata_updated_at = func.now()
+                # Capture before commit: attributes expire on commit
+                sidecar_payload = sidecar_payload_from_gallery(gallery)
 
-            if inserted is not None:
-                # New Image row created — increment blob ref_count.
-                await increment_ref_count(sha256, session)
-                # Symlink only for rows the DB actually represents (edge case #48)
-                await create_library_symlink(gallery_source, gallery_source_id, f.name, blob)
-                processed += 1
-                max_page += 1
-                known_sha256s.add(sha256)
+            await session.commit()
+    except SourceDirectoryChangedError as exc:
+        logger.warning("[local_import] gallery_id=%d aborted: %s", gallery_id, exc)
+        async with AsyncSessionLocal() as status_session:
+            gallery = await status_session.get(Gallery, gallery_id)
+            existing_count = 0
+            if gallery is not None and gallery.deleted_at is None:
+                existing_count = (
+                    await status_session.execute(select(func.count(Image.id)).where(Image.gallery_id == gallery_id))
+                ).scalar_one()
+                gallery.pages = existing_count
+                gallery.download_status = "partial" if existing_count else "failed"
+                gallery.metadata_updated_at = func.now()
+                await status_session.commit()
+        payload = {
+            "processed": 0,
+            "total": total,
+            "status": "source_changed",
+            "error": str(exc),
+            "resumable": True,
+        }
+        await r.setex(f"import:progress:{gallery_id}", 3600, _json.dumps(payload))
+        from core.events import EventType, emit_safe
 
-            attempted += 1
-
-            # Update progress every 5 files or proportionally for small batches
-            update_every = max(1, min(5, total // 10))
-            if attempted % update_every == 0 or attempted == total:
-                await r.setex(
-                    f"import:progress:{gallery_id}",
-                    3600,
-                    _json.dumps({"processed": processed, "total": total, "status": "running"}),
-                )
-
-        # Update gallery page count and status
-        gallery = await session.get(Gallery, gallery_id)
-        sidecar_payload = None
-        if gallery:
-            image_count = (
-                await session.execute(select(func.count(Image.id)).where(Image.gallery_id == gallery_id))
-            ).scalar_one()
-            final_pages = image_count
-            gallery.pages = image_count
-            if import_failures and attempted == len(import_failures):
-                terminal_status = "failed"
-            elif import_failures:
-                terminal_status = "partial"
-            else:
-                terminal_status = "complete"
-            gallery.download_status = terminal_status
-            if mode == "link" and not gallery.source_path:
-                gallery.source_path = os.path.realpath(src_path)
-            gallery.metadata_updated_at = func.now()
-            # Capture before commit: attributes expire on commit
-            sidecar_payload = sidecar_payload_from_gallery(gallery)
-
-        await session.commit()
+        await emit_safe(
+            EventType.IMPORT_FAILED,
+            resource_type="gallery",
+            resource_id=gallery_id,
+            source="local",
+            reason="source_changed",
+            error=str(exc),
+        )
+        return payload
 
     # Disaster-recovery sidecar (best-effort)
     if sidecar_payload is not None:
@@ -816,9 +915,13 @@ async def batch_import_job(
                 ),
             )
 
-            # Directly call local_import_job logic
-            await local_import_job(ctx, abs_path, mode, gallery_id)
-            completed += 1
+            # Directly call local_import_job logic. Partial/source-changed
+            # results remain resumable but are not counted as completed.
+            import_result = await local_import_job(ctx, abs_path, mode, gallery_id)
+            if import_result.get("status") == "done":
+                completed += 1
+            else:
+                failed += 1
 
         except Exception as e:
             logger.error("[batch_import] failed for %s: %s", abs_path, e)

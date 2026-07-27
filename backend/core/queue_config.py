@@ -29,6 +29,8 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 # check_followed_artists      interactive       75
 # check_subscription_group    interactive       75
 # rescan_gallery_job          interactive       70
+# move_library_path_job      interactive       70       preserves gallery identity
+# reconcile_library_path_job interactive       70       pairs cross-root events
 # tag_job                     interactive       70
 # download_job (subscription) interactive       65       via subscription_id
 # dedup_scan_job              interactive       60
@@ -56,6 +58,9 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 # ─────────────────────────────────────────────────────────────────────────────
 
 JOB_QUEUE_ROUTING: dict[str, str] = {
+    # interactive — watcher lifecycle operation, aligned with gallery rescans
+    "move_library_path_job": QUEUE_INTERACTIVE,
+    "reconcile_library_path_job": QUEUE_INTERACTIVE,
     # render — CPU-bound, lowest priority
     "thumbnail_job": QUEUE_RENDER,
     "thumbhash_backfill_job": QUEUE_RENDER,

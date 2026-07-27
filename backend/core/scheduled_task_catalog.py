@@ -194,7 +194,7 @@ CATALOG: list[ScheduledTaskDef] = [
     ScheduledTaskDef(
         task_id="memory_monitor",
         name="Memory Monitor",
-        description="Check worker container memory usage and emit alerts when high",
+        description="Check worker and Redis memory usage and emit alerts when high",
         job_name="memory_monitor_job",
         default_cron="*/5 * * * *",
         default_enabled=True,

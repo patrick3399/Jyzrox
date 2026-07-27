@@ -10,8 +10,10 @@ Regression tests covering:
 - Fallback to system gallery-dl when METADATA is missing or unreadable.
 """
 
+import asyncio
+import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,6 +32,48 @@ def _create_dist_info(site_packages: Path, version: str) -> None:
         f"Version: {version}\n"
         f"Summary: Command-line program to download image-galleries\n"
     )
+
+
+def test_get_gdl_exec_cmd_uses_shared_lifecycle_launcher(tmp_path):
+    """Every gallery-dl subprocess command must enter through the lock holder."""
+    from worker import gallery_dl_venv as venv_mod
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", tmp_path),
+        patch.object(venv_mod, "get_gdl_bin", return_value="/opt/gallery-dl/active/bin/gallery-dl"),
+    ):
+        command = venv_mod.get_gdl_exec_cmd()
+
+    assert command == [
+        sys.executable,
+        "-m",
+        "gallery_dl_exec",
+        str(tmp_path / ".lifecycle.lock"),
+        "/opt/gallery-dl/active/bin/gallery-dl",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_active_download_guard_covers_queued_paused_and_running():
+    """The lifecycle guard must query every status that can retain/start a venv."""
+    from worker import gallery_dl_venv as venv_mod
+
+    result = MagicMock()
+    result.scalar_one.return_value = 3
+    session = AsyncMock()
+    session.execute.return_value = result
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = False
+
+    with patch("core.database.AsyncSessionLocal", return_value=session_cm):
+        count = await venv_mod._check_active_downloads()
+
+    statement = session.execute.await_args.args[0]
+    params = statement.compile().params
+    statuses = next(value for value in params.values() if isinstance(value, (list, tuple)))
+    assert set(statuses) == {"queued", "paused", "running"}
+    assert count == 3
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +290,7 @@ async def test_upgrade_does_not_clone_venv_so_active_entrypoint_survives_cleanup
         patch.object(venv_mod, "VENV_BASE", fake_base),
         patch.object(venv_mod, "VENV_ACTIVE", fake_active),
         patch.object(venv_mod, "_run", side_effect=fake_run),
-        patch.object(venv_mod, "_check_running_downloads", new_callable=AsyncMock, return_value=0),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
         patch("core.events.emit_safe", new_callable=AsyncMock),
     ):
         r1 = await venv_mod.upgrade_job({})
@@ -302,7 +346,7 @@ async def test_upgrade_job_install_failure_emits_upgrade_failed_event(tmp_path):
         patch.object(venv_mod, "VENV_BASE", fake_base),
         patch.object(venv_mod, "VENV_ACTIVE", fake_active),
         patch.object(venv_mod, "_run", side_effect=fake_run),
-        patch.object(venv_mod, "_check_running_downloads", new_callable=AsyncMock, return_value=0),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
         patch("core.events.emit_safe", emit),
     ):
         result = await venv_mod.upgrade_job({}, version="1.99.0")
@@ -317,8 +361,8 @@ async def test_upgrade_job_install_failure_emits_upgrade_failed_event(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_upgrade_job_rejected_when_downloads_running_emits_event(tmp_path):
-    """A rejected upgrade (downloads running) must also emit a failure event,
+async def test_upgrade_job_rejected_when_downloads_active_emits_event(tmp_path):
+    """A rejected upgrade (downloads active) must also emit a failure event,
     distinctly flagged as ``rejected`` so the UI can show an actionable reason.
     """
     from core.events import EventType
@@ -333,7 +377,7 @@ async def test_upgrade_job_rejected_when_downloads_running_emits_event(tmp_path)
     with (
         patch.object(venv_mod, "VENV_BASE", fake_base),
         patch.object(venv_mod, "VENV_ACTIVE", fake_active),
-        patch.object(venv_mod, "_check_running_downloads", new_callable=AsyncMock, return_value=3),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=3),
         patch("core.events.emit_safe", emit),
     ):
         result = await venv_mod.upgrade_job({})
@@ -342,3 +386,98 @@ async def test_upgrade_job_rejected_when_downloads_running_emits_event(tmp_path)
     assert emit.await_count == 1
     assert emit.await_args.args[0] == EventType.SYSTEM_GDL_UPGRADE_FAILED
     assert emit.await_args.kwargs["status"] == "rejected"
+    assert "queued, paused, or running" in emit.await_args.kwargs["error"]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rechecks_active_downloads_before_swap(tmp_path):
+    """A job becoming active during install rejects the swap and preserves v1."""
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.8")
+            return (0, "", "")
+        if "--version" in cmd:
+            return (0, "1.32.8\n", "")
+        return (0, "", "")
+
+    emit = AsyncMock()
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, side_effect=[0, 1]),
+        patch("core.events.emit_safe", emit),
+    ):
+        result = await venv_mod.upgrade_job({}, version="1.32.8")
+
+    assert result["status"] == "rejected"
+    assert fake_active.resolve() == fake_base / "v1"
+    assert not (fake_base / "v2").exists()
+    assert emit.await_args.kwargs["status"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_rollback_waits_for_gallery_dl_process_before_deleting_venv(tmp_path):
+    """A process starting before rollback must retain its venv until exit."""
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    _make_fake_venv(fake_base / "v2", "1.32.8")
+    fake_active.symlink_to("v2")
+    started = tmp_path / "started"
+    release = tmp_path / "release"
+    child_code = f"""\
+import pathlib
+import time
+
+pathlib.Path({str(started)!r}).touch()
+release = pathlib.Path({str(release)!r})
+deadline = time.monotonic() + 5
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+"""
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ):
+        cmd = [
+            sys.executable,
+            "-m",
+            "gallery_dl_exec",
+            str(fake_base / ".lifecycle.lock"),
+            sys.executable,
+            "-c",
+            child_code,
+        ]
+        proc = await asyncio.create_subprocess_exec(*cmd)
+        for _ in range(200):
+            if started.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert started.exists()
+
+        rollback = asyncio.create_task(venv_mod.rollback_job({}))
+        await asyncio.sleep(0.05)
+        assert not rollback.done()
+        assert fake_active.resolve() == fake_base / "v2"
+        assert (fake_base / "v2").exists()
+
+        release.touch()
+        assert await proc.wait() == 0
+        result = await asyncio.wait_for(rollback, timeout=2)
+
+    assert result["status"] == "ok"
+    assert fake_active.resolve() == fake_base / "v1"
+    assert not (fake_base / "v2").exists()

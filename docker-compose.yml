@@ -333,7 +333,7 @@ services:
 
   redis:
     image: redis:8-alpine
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy allkeys-lru --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     volumes:
       - redis_data:/data
     healthcheck:

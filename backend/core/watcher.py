@@ -1,7 +1,9 @@
 """Real-time library directory monitoring via watchdog."""
 
 import logging
+import os
 import threading
+import time
 from os import fsdecode
 from pathlib import Path
 
@@ -27,8 +29,100 @@ class _LibraryHandler(FileSystemEventHandler):
         self._debounce_secs = debounce_secs
         self._pending: dict[str, threading.Timer] = {}
         self._dirty_while_paused: dict[str, tuple[str, tuple]] = {}
+        self._recent_directory_creates: dict[str, tuple[float, int | None, int | None]] = {}
+        self._recent_directory_deletes: dict[str, float] = {}
+        self._recent_directory_moves: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()
         self._paused = False
+
+    def _directory_event_window(self) -> float:
+        return max(300.0, self._debounce_secs * 10.0)
+
+    def _prune_directory_events(self, now: float) -> None:
+        cutoff = now - self._directory_event_window()
+        self._recent_directory_creates = {
+            path: value for path, value in self._recent_directory_creates.items() if value[0] >= cutoff
+        }
+        self._recent_directory_deletes = {
+            path: timestamp for path, timestamp in self._recent_directory_deletes.items() if timestamp >= cutoff
+        }
+        self._recent_directory_moves = {
+            paths: timestamp for paths, timestamp in self._recent_directory_moves.items() if timestamp >= cutoff
+        }
+
+    @staticmethod
+    def _is_within(path: str, directory: str) -> bool:
+        return path == directory or path.startswith(directory.rstrip(os.sep) + os.sep)
+
+    def _recent_directory_context(self, path: str, *, side: str) -> tuple[str, bool] | None:
+        with self._lock:
+            now = time.monotonic()
+            self._prune_directory_events(now)
+            cutoff = now - max(60.0, self._debounce_secs * 2.0)
+            move_index = 1 if side == "created" else 0
+            moved_roots = [
+                paths[move_index]
+                for paths, timestamp in self._recent_directory_moves.items()
+                if timestamp >= cutoff and self._is_within(path, paths[move_index])
+            ]
+            if moved_roots:
+                return max(moved_roots, key=len), True
+            if side == "created":
+                roots = [root for root, value in self._recent_directory_creates.items() if value[0] >= cutoff]
+            else:
+                roots = [root for root, timestamp in self._recent_directory_deletes.items() if timestamp >= cutoff]
+            matching_roots = [root for root in roots if self._is_within(path, root)]
+            if matching_roots:
+                return max(matching_roots, key=len), False
+            return None
+
+    def _remember_directory_moved(self, old_path: str, new_path: str) -> None:
+        with self._lock:
+            now = time.monotonic()
+            self._prune_directory_events(now)
+            self._recent_directory_moves[(old_path, new_path)] = now
+
+    def _cancel(self, key: str) -> None:
+        with self._lock:
+            timer = self._pending.pop(key, None)
+            if timer:
+                timer.cancel()
+            self._dirty_while_paused.pop(key, None)
+
+    def _remember_directory_created(self, path: str, device: int | None, inode: int | None) -> list[str]:
+        with self._lock:
+            now = time.monotonic()
+            self._prune_directory_events(now)
+            self._recent_directory_creates[path] = (now, device, inode)
+            return list(self._recent_directory_deletes)
+
+    def _remember_directory_deleted(self, path: str) -> list[tuple[str, int | None, int | None]]:
+        with self._lock:
+            now = time.monotonic()
+            self._prune_directory_events(now)
+            self._recent_directory_deletes[path] = now
+            return [(path, value[1], value[2]) for path, value in self._recent_directory_creates.items()]
+
+    def _schedule_directory_move_candidates(
+        self,
+        old_paths: list[str],
+        new_path: str,
+        destination_device: int | None,
+        destination_inode: int | None,
+    ) -> None:
+        self._cancel(f"discover:{new_path}")
+        self._cancel(f"rescan:{new_path}")
+        for old_path in old_paths:
+            self._remember_directory_moved(old_path, new_path)
+            self._cancel(f"rescan:{old_path}")
+        self._schedule(
+            f"reconcile:{new_path}",
+            "reconcile_library_path_job",
+            sorted(set(old_paths)),
+            new_path,
+            destination_device,
+            destination_inode,
+        )
 
     def _schedule(self, key: str, job_name: str, *args):
         with self._lock:
@@ -69,6 +163,9 @@ class _LibraryHandler(FileSystemEventHandler):
                 timer.cancel()
             self._pending.clear()
             self._dirty_while_paused.clear()
+            self._recent_directory_creates.clear()
+            self._recent_directory_deletes.clear()
+            self._recent_directory_moves.clear()
             self._paused = False
 
     @property
@@ -77,28 +174,95 @@ class _LibraryHandler(FileSystemEventHandler):
 
     def on_created(self, event):
         if event.is_directory:
-            self._schedule("discover", "auto_discover_job")
+            destination = os.path.realpath(_event_path(event.src_path))
+            try:
+                stat_result = Path(destination).stat()
+                destination_device = stat_result.st_dev
+                destination_inode = stat_result.st_ino
+            except OSError:
+                destination_device = None
+                destination_inode = None
+            old_paths = self._remember_directory_created(destination, destination_device, destination_inode)
+            if old_paths:
+                self._schedule_directory_move_candidates(
+                    old_paths,
+                    destination,
+                    destination_device,
+                    destination_inode,
+                )
+            else:
+                self._schedule(f"discover:{destination}", "auto_discover_job")
         else:
-            ext = _event_path(event.src_path).suffix.lower()
+            event_path = os.path.realpath(_event_path(event.src_path))
+            context = self._recent_directory_context(event_path, side="created")
+            if context:
+                root, is_paired_move = context
+                if not is_paired_move:
+                    self._schedule(f"discover:{root}", "auto_discover_job")
+                return
+            ext = Path(event_path).suffix.lower()
             if ext in _SUPPORTED_EXTS:
-                parent = str(_event_path(event.src_path).parent)
+                parent = str(Path(event_path).parent)
                 self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
 
     def on_deleted(self, event):
-        if not event.is_directory:
-            ext = _event_path(event.src_path).suffix.lower()
+        if event.is_directory:
+            old_path = os.path.realpath(_event_path(event.src_path))
+            destinations = self._remember_directory_deleted(old_path)
+            for new_path, destination_device, destination_inode in destinations:
+                with self._lock:
+                    old_paths = list(self._recent_directory_deletes)
+                self._schedule_directory_move_candidates(
+                    old_paths,
+                    new_path,
+                    destination_device,
+                    destination_inode,
+                )
+        else:
+            event_path = os.path.realpath(_event_path(event.src_path))
+            if self._recent_directory_context(event_path, side="deleted"):
+                return
+            ext = Path(event_path).suffix.lower()
             if ext in _SUPPORTED_EXTS:
-                parent = str(_event_path(event.src_path).parent)
+                parent = str(Path(event_path).parent)
                 self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
 
     def on_moved(self, event):
         if event.is_directory:
-            self._schedule("discover", "auto_discover_job")
+            destination = _event_path(event.dest_path)
+            try:
+                stat_result = destination.stat()
+                destination_device = stat_result.st_dev
+                destination_inode = stat_result.st_ino
+            except OSError:
+                destination_device = None
+                destination_inode = None
+            old_path = os.path.realpath(_event_path(event.src_path))
+            new_path = os.path.realpath(destination)
+            self._remember_directory_moved(old_path, new_path)
+            self._cancel(f"rescan:{old_path}")
+            self._cancel(f"rescan:{new_path}")
+            self._schedule(
+                f"move:{old_path}",
+                "move_library_path_job",
+                old_path,
+                new_path,
+                destination_device,
+                destination_inode,
+            )
         else:
-            old_ext = _event_path(event.src_path).suffix.lower()
-            new_ext = _event_path(event.dest_path).suffix.lower()
-            old_parent = str(_event_path(event.src_path).parent)
-            new_parent = str(_event_path(event.dest_path).parent)
+            old_path = os.path.realpath(_event_path(event.src_path))
+            new_path = os.path.realpath(_event_path(event.dest_path))
+            old_context = self._recent_directory_context(old_path, side="deleted")
+            new_context = self._recent_directory_context(new_path, side="created")
+            if old_context or new_context:
+                if new_context and not new_context[1]:
+                    self._schedule(f"discover:{new_context[0]}", "auto_discover_job")
+                return
+            old_ext = Path(old_path).suffix.lower()
+            new_ext = Path(new_path).suffix.lower()
+            old_parent = str(Path(old_path).parent)
+            new_parent = str(Path(new_path).parent)
             if old_ext in _SUPPORTED_EXTS:
                 self._schedule(f"rescan:{old_parent}", "rescan_by_path_job", old_parent)
             if new_parent != old_parent and new_ext in _SUPPORTED_EXTS:
@@ -107,9 +271,16 @@ class _LibraryHandler(FileSystemEventHandler):
     def on_modified(self, event):
         # Only care about file modifications (e.g., image replaced in-place)
         if not event.is_directory:
-            ext = _event_path(event.src_path).suffix.lower()
+            event_path = os.path.realpath(_event_path(event.src_path))
+            context = self._recent_directory_context(event_path, side="created")
+            if context:
+                root, is_paired_move = context
+                if not is_paired_move:
+                    self._schedule(f"discover:{root}", "auto_discover_job")
+                return
+            ext = Path(event_path).suffix.lower()
             if ext in _SUPPORTED_EXTS:
-                parent = str(_event_path(event.src_path).parent)
+                parent = str(Path(event_path).parent)
                 self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
 
 

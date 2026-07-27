@@ -519,7 +519,7 @@ def _i_browse(img: Image) -> dict:
         "height": blob.height if blob else None,
         "thumb_path": _thumb_url(blob),
         "thumb_srcset": _thumb_srcset(blob),
-        "file_path": _to_url(blob),
+        "file_path": _to_url(blob, img.external_path),
         "thumbhash": blob.thumbhash if blob else None,
         "media_type": blob.media_type if blob else "image",
         "added_at": img.added_at.isoformat() if img.added_at else None,
@@ -966,7 +966,7 @@ async def list_artist_images(
                 "filename": img.filename,
                 "width": blob.width if blob else None,
                 "height": blob.height if blob else None,
-                "file_path": _to_url(blob),
+                "file_path": _to_url(blob, img.external_path),
                 "thumb_path": _thumb_url(blob),
                 "thumb_srcset": _thumb_srcset(blob),
                 "file_size": blob.file_size if blob else None,
@@ -1175,7 +1175,7 @@ async def list_gallery_files(
                 "media_type": blob.media_type if blob else "image",
                 "thumb_path": _thumb_url(blob),
                 "thumb_srcset": _thumb_srcset(blob),
-                "file_path": _to_url(blob),
+                "file_path": _to_url(blob, img.external_path if img else None),
                 "is_symlink": f["is_symlink"],
                 "is_broken": f["is_broken"],
                 "symlink_target": f["symlink_target"],
@@ -2480,7 +2480,7 @@ async def find_similar_images(
         # fall back to full scan on phash_int with exact bit_count filter.
         stmt = sql_text("""
             SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
-                   b.storage, b.external_path, b.phash,
+                   i.external_path, b.phash,
                    bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
             FROM images i
             JOIN blobs b ON i.blob_sha256 = b.sha256
@@ -2511,7 +2511,7 @@ async def find_similar_images(
         if total_neighbors > 10000:
             stmt = sql_text("""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
-                       b.storage, b.external_path, b.phash,
+                       i.external_path, b.phash,
                        bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
                 FROM images i
                 JOIN blobs b ON i.blob_sha256 = b.sha256
@@ -2551,7 +2551,7 @@ async def find_similar_images(
 
             stmt = sql_text(f"""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
-                       b.storage, b.external_path, b.phash,
+                       i.external_path, b.phash,
                        bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
                 FROM images i
                 JOIN blobs b ON i.blob_sha256 = b.sha256
@@ -2565,7 +2565,7 @@ async def find_similar_images(
             results = (await db.execute(stmt, params)).all()
 
     def _row_to_url(r) -> str:
-        if r.storage == "external" and r.external_path:
+        if r.external_path:
             return library_url(r.external_path)
         return cas_url(r.sha256, r.extension)
 
@@ -2716,11 +2716,15 @@ async def _build_updated_response(
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _to_url(blob) -> str | None:
-    """Convert a Blob ORM object to its nginx-served URL."""
+def _to_url(blob, external_path: str | None = None) -> str | None:
+    """Convert an image-bound Blob to its nginx-served URL."""
     if not blob:
         return None
+    if external_path:
+        return library_url(external_path)
     if blob.storage == "external" and blob.external_path:
+        # Compatibility for callers/tests without an Image binding. Migrated
+        # production Image rows carry their own external_path.
         return library_url(blob.external_path)
     return cas_url(blob.sha256, blob.extension)
 
@@ -2790,6 +2794,10 @@ def _g(
         "category": g.category,
         "language": g.language,
         "pages": g.pages,
+        "source_pages": g.source_pages,
+        "missing_pages": (
+            max(g.source_pages - (g.pages or 0), 0) if g.source_pages is not None else None
+        ),
         "posted_at": g.posted_at.isoformat() if g.posted_at else None,
         "added_at": g.added_at.isoformat() if g.added_at else None,
         "rating": g.rating,
@@ -2820,7 +2828,7 @@ def _i(img: Image) -> dict:
         "filename": img.filename,
         "width": blob.width if blob else None,
         "height": blob.height if blob else None,
-        "file_path": _to_url(blob),
+        "file_path": _to_url(blob, img.external_path),
         "thumb_path": _thumb_url(blob),
         "thumb_srcset": _thumb_srcset(blob),
         "file_size": blob.file_size if blob else None,
