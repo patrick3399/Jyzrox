@@ -358,3 +358,58 @@ def test_set_frontmatter_value_empty_keeps_a_fence_with_other_keys():
 
 def test_set_frontmatter_value_empty_on_a_plain_file_is_a_noop():
     assert set_frontmatter_value("正文\n", "summary", "") == "正文\n"
+
+
+def test_set_frontmatter_value_replacing_block_scalar_does_not_corrupt_previous_key():
+    """Removing only the `summary:` line orphaned its indented continuations,
+    and YAML then folded them into the key above — silently rewriting `title`."""
+    src = "---\ntitle: 第一章\nsummary: |\n  第一行\n  第二行\ntags: [a, b]\n---\n\n正文\n"
+    out = set_frontmatter_value(src, "summary", "新摘要")
+    fm = parse_frontmatter(out)[0]
+    assert fm["title"] == "第一章", f"title was rewritten: {fm.get('title')!r}"
+    assert fm["summary"] == "新摘要"
+    assert fm["tags"] == ["a", "b"]
+    assert "第一行" not in out and "第二行" not in out
+
+
+def test_set_frontmatter_value_replacing_leading_block_scalar_keeps_every_key():
+    """When the block scalar is the first key its orphaned lines broke the whole
+    fence, so `parse_frontmatter` tolerated the error and returned {} — every
+    field lost at once."""
+    src = "---\nsummary: >\n  折疊摘要續行\n  還有一行\ntitle: 第一章\n---\n\n正文\n"
+    out = set_frontmatter_value(src, "summary", "新摘要")
+    fm = parse_frontmatter(out)[0]
+    assert fm["title"] == "第一章"
+    assert fm["summary"] == "新摘要"
+
+
+def test_set_frontmatter_value_removing_block_scalar_leaves_no_orphan_lines():
+    src = "---\ntitle: 第一章\nsummary: |\n  第一行\n  第二行\n---\n\n正文\n"
+    out = set_frontmatter_value(src, "summary", "")
+    assert out == "---\ntitle: 第一章\n---\n\n正文\n"
+
+
+def test_set_frontmatter_value_replaces_multi_line_flow_collection():
+    """A wrapped flow sequence is a continuation too, not just block scalars."""
+    src = "---\nsummary:\n  - 一\n  - 二\ntitle: T\n---\n\n正文\n"
+    out = set_frontmatter_value(src, "summary", "新摘要")
+    fm = parse_frontmatter(out)[0]
+    assert fm["summary"] == "新摘要"
+    assert fm["title"] == "T"
+
+
+def test_set_frontmatter_value_keeps_a_nested_key_of_the_same_name():
+    """Only a column-0 `summary:` is this document's own field."""
+    src = "---\nmeta:\n  summary: 內層\ntitle: T\n---\n\n正文\n"
+    out = set_frontmatter_value(src, "summary", "外層")
+    fm = parse_frontmatter(out)[0]
+    assert fm["meta"] == {"summary": "內層"}
+    assert fm["summary"] == "外層"
+    assert fm["title"] == "T"
+
+
+def test_set_frontmatter_value_keeps_a_top_level_comment_after_the_key():
+    src = "---\nsummary: |\n  舊的\n# 這是註解\ntitle: T\n---\n\n正文\n"
+    out = set_frontmatter_value(src, "summary", "新摘要")
+    assert "# 這是註解" in out
+    assert parse_frontmatter(out)[0]["title"] == "T"
