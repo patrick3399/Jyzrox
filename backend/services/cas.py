@@ -1,16 +1,17 @@
 """Content-Addressable Storage (CAS) service layer."""
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
 from urllib.parse import quote
 
-from sqlalchemy import case, update
+from sqlalchemy import case, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
-from db.models import Blob, BlobLocation
+from db.models import Blob, BlobLocation, Image
 from services.media_formats import media_type_for_extension
 
 THUMBNAIL_SIZES = (160, 360, 720)
@@ -110,6 +111,57 @@ def resolve_blob_path(blob: Blob, external_path: str | None = None) -> Path:
         # New image-bound reads pass ``external_path`` explicitly.
         return Path(blob.external_path)
     return cas_path(blob.sha256, blob.extension)
+
+
+async def resolve_readable_blob_path(session: AsyncSession, blob: Blob) -> Path | None:
+    """Return a path whose bytes are actually present, or None if none are.
+
+    For callers that hold a Blob but no particular Image — tier-3 dedup compares
+    blob *pairs* — the scalar ``Blob.external_path`` is not enough: it records
+    only one of possibly several locations and ``store_blob`` deliberately no
+    longer refreshes it, so it can point at a file that has since moved while
+    another Image's binding for the same bytes is still valid. Reading the
+    scalar alone made such pairs fail the pixel diff and degrade to
+    ``quality_conflict`` even though the content was right there.
+
+    CAS wins when present because it is the durable copy; otherwise prefer an
+    Image-bound location, then any registered BlobLocation, then the legacy
+    scalar.
+    """
+    candidates: list[Path] = []
+    if blob.storage != "external":
+        candidates.append(cas_path(blob.sha256, blob.extension))
+
+    bound = (
+        (
+            await session.execute(
+                select(Image.external_path)
+                .where(Image.blob_sha256 == blob.sha256, Image.external_path.is_not(None))
+                .distinct()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    registered = (
+        (await session.execute(select(BlobLocation.external_path).where(BlobLocation.blob_sha256 == blob.sha256)))
+        .scalars()
+        .all()
+    )
+
+    seen: set[str] = set()
+    for raw in [*bound, *registered, blob.external_path]:
+        if raw and raw not in seen:
+            seen.add(raw)
+            candidates.append(Path(raw))
+    # CAS is also worth a look for an 'external' blob that was later ingested.
+    if blob.storage == "external":
+        candidates.append(cas_path(blob.sha256, blob.extension))
+
+    def _first_existing() -> Path | None:
+        return next((p for p in candidates if p.is_file()), None)
+
+    return await asyncio.to_thread(_first_existing)
 
 
 def thumb_dir(sha256: str) -> Path:

@@ -99,7 +99,9 @@ async def _dedup_scan_job_impl(ctx: dict, mode: str = "pending") -> dict:
     ]
     index = PhashBKTree(blobs)
     total_blobs = len(scan_blobs)
-    logger.info("Tier 1 indexed start, threshold=%d, scan_blobs=%d, indexed_blobs=%d", threshold, total_blobs, len(blobs))
+    logger.info(
+        "Tier 1 indexed start, threshold=%d, scan_blobs=%d, indexed_blobs=%d", threshold, total_blobs, len(blobs)
+    )
     await progress.start(mode, total=total_blobs, tier=1)
 
     total_inserted = 0
@@ -371,7 +373,7 @@ async def _dedup_scan_job_impl(ctx: dict, mode: str = "pending") -> dict:
 
     import asyncio
 
-    from services.cas import resolve_blob_path
+    from services.cas import resolve_readable_blob_path
     from worker.dedup_helpers import _opencv_pixel_diff
 
     threshold_cv_raw = await r.get("setting:dedup_opencv_threshold")
@@ -414,8 +416,25 @@ async def _dedup_scan_job_impl(ctx: dict, mode: str = "pending") -> dict:
                     await session.commit()
                     continue
 
-                path_a = str(resolve_blob_path(blob_a))
-                path_b = str(resolve_blob_path(blob_b))
+                resolved_a = await resolve_readable_blob_path(session, blob_a)
+                resolved_b = await resolve_readable_blob_path(session, blob_b)
+                if resolved_a is None or resolved_b is None:
+                    # Genuinely gone, not merely a stale scalar path — record it
+                    # as unresolvable rather than reporting a pixel mismatch.
+                    logger.warning(
+                        "[dedup] pair %d: no readable file for %s",
+                        pair.id,
+                        pair.sha_a if resolved_a is None else pair.sha_b,
+                    )
+                    await session.execute(
+                        update(BlobRelationship)
+                        .where(BlobRelationship.id == pair.id)
+                        .values(relationship="quality_conflict", tier=3)
+                    )
+                    await session.commit()
+                    continue
+                path_a = str(resolved_a)
+                path_b = str(resolved_b)
 
                 try:
                     score, diff_type = await asyncio.to_thread(_opencv_pixel_diff, path_a, path_b)

@@ -9,6 +9,7 @@ Strategy:
 - Insert blobs / blob_relationships directly via raw SQL (SQLite-compatible).
 """
 
+import pathlib
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -94,10 +95,7 @@ async def _insert_relationship(
             await session.execute(select(Gallery.id).where(Gallery.source == "test", Gallery.source_id == source_id))
         ).scalar_one()
         await session.execute(
-            text(
-                "INSERT OR IGNORE INTO images (gallery_id, page_num, blob_sha256) "
-                "VALUES (:gallery_id, 1, :sha)"
-            ),
+            text("INSERT OR IGNORE INTO images (gallery_id, page_num, blob_sha256) VALUES (:gallery_id, 1, :sha)"),
             {"gallery_id": gallery_id, "sha": sha},
         )
     result = await session.execute(
@@ -136,10 +134,7 @@ async def _insert_occurrence(session, sha256: str, source_id: str, page_num: int
         )
     ).scalar_one()
     await session.execute(
-        text(
-            "INSERT OR IGNORE INTO images (gallery_id, page_num, blob_sha256) "
-            "VALUES (:gallery_id, :page_num, :sha)"
-        ),
+        text("INSERT OR IGNORE INTO images (gallery_id, page_num, blob_sha256) VALUES (:gallery_id, :page_num, :sha)"),
         {"gallery_id": gallery_id, "page_num": page_num, "sha": sha256},
     )
     await session.commit()
@@ -360,9 +355,7 @@ class TestDedupTier1:
             first = await dedup_tier1_job(_make_ctx(), force=True)
             second = await dedup_tier1_job(_make_ctx(), force=True)
 
-        await db_session.execute(
-            update(Blob).where(Blob.sha256 == "d1" + "0" * 62).values(phash_int=7)
-        )
+        await db_session.execute(update(Blob).where(Blob.sha256 == "d1" + "0" * 62).values(phash_int=7))
         await db_session.commit()
         with (
             patch("worker.dedup_tier1.get_redis", return_value=r),
@@ -374,8 +367,8 @@ class TestDedupTier1:
         assert second["scanned"] == 0
         assert after_phash_change["scanned"] == 1
         thresholds = (
-            await db_session.execute(select(Blob.dedup_scanned_threshold).order_by(Blob.sha256))
-        ).scalars().all()
+            (await db_session.execute(select(Blob.dedup_scanned_threshold).order_by(Blob.sha256))).scalars().all()
+        )
         assert thresholds == [10, 10]
 
     async def test_progress_redis_keys_written_on_completion(self, db_session, db_session_factory):
@@ -536,9 +529,7 @@ class TestDedupTier2:
         # Tier-2 run must re-evaluate the suppressed state and classify it.
         await _insert_occurrence(db_session, sha_a, "other", 1)
         # SQLite tests do not install the PostgreSQL occurrence trigger.
-        await db_session.execute(
-            update(Blob).where(Blob.sha256 == sha_a).values(occurrence_revision=1)
-        )
+        await db_session.execute(update(Blob).where(Blob.sha256 == sha_a).values(occurrence_revision=1))
         await db_session.commit()
         with (
             patch("worker.dedup_tier2.get_redis", return_value=r),
@@ -840,7 +831,9 @@ class TestDedupTier3:
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
             patch(
-                "worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake/path.jpg")
+                "worker.dedup_tier3.resolve_readable_blob_path",
+                new_callable=AsyncMock,
+                return_value=pathlib.Path("/fake/path.jpg"),
             ),
             patch(
                 "worker.dedup_tier3._opencv_pixel_diff",
@@ -887,7 +880,9 @@ class TestDedupTier3:
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
             patch(
-                "worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake/path.jpg")
+                "worker.dedup_tier3.resolve_readable_blob_path",
+                new_callable=AsyncMock,
+                return_value=pathlib.Path("/fake/path.jpg"),
             ),
             patch(
                 "worker.dedup_tier3._opencv_pixel_diff",
@@ -944,7 +939,11 @@ class TestDedupTier3:
         with (
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
-            patch("worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake.jpg")),
+            patch(
+                "worker.dedup_tier3.resolve_readable_blob_path",
+                new_callable=AsyncMock,
+                return_value=pathlib.Path("/fake.jpg"),
+            ),
             patch("worker.dedup_tier3._opencv_pixel_diff", side_effect=_failing_diff),
         ):
             result = await dedup_tier3_job(_make_ctx(), force=True)
@@ -1017,7 +1016,11 @@ class TestDedupTier3:
         with (
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
-            patch("worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake.jpg")),
+            patch(
+                "worker.dedup_tier3.resolve_readable_blob_path",
+                new_callable=AsyncMock,
+                return_value=pathlib.Path("/fake.jpg"),
+            ),
             patch(
                 "worker.dedup_tier3._opencv_pixel_diff",
                 return_value=(0.9, "compression_noise"),
@@ -1034,6 +1037,57 @@ class TestDedupTier3:
         # score 0.9 >= threshold 0.9 → confirmed similar
         assert row is not None
         assert row[0] == "needs_review"
+
+    async def test_unreadable_blob_is_flagged_without_running_opencv(self, db_session, db_session_factory):
+        """No readable location anywhere → flag for review, don't call OpenCV.
+
+        Previously the resolver returned the legacy scalar path unconditionally,
+        so a moved file reached OpenCV and surfaced as a decode failure rather
+        than a missing-content problem.
+        """
+        from worker.dedup_tier3 import dedup_tier3_job
+
+        sha_a = "ua" + "0" * 62
+        sha_b = "ub" + "0" * 62
+        await _insert_blob(session=db_session, sha256=sha_a, width=100, height=100)
+        await _insert_blob(session=db_session, sha256=sha_b, width=100, height=100)
+        await _insert_relationship(db_session, sha_a, sha_b, "needs_t3", tier=2)
+
+        r = _make_redis()
+
+        async def _get_side(key):
+            if "threshold" in key:
+                return b"0.85"
+            if "heuristic" in key:
+                return b"0"
+            return b"1"
+
+        r.get = AsyncMock(side_effect=_get_side)
+
+        diff = MagicMock()
+        fake_db = _make_session_cm(db_session_factory)
+        with (
+            patch("worker.dedup_tier3.get_redis", return_value=r),
+            patch("worker.dedup_tier3.async_session", fake_db),
+            patch(
+                "worker.dedup_tier3.resolve_readable_blob_path",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("worker.dedup_tier3._opencv_pixel_diff", diff),
+        ):
+            await dedup_tier3_job(_make_ctx(), force=True)
+
+        diff.assert_not_called()
+        row = (
+            await db_session.execute(
+                text("SELECT relationship, tier FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
+                {"a": sha_a, "b": sha_b},
+            )
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "quality_conflict"
+        assert row[1] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -1091,9 +1145,7 @@ async def test_full_rescan_preserves_durable_review_decisions(db_session, db_ses
     await _insert_blob(session=db_session, sha256=sha_b, phash_int=None)
     pair_id = await _insert_relationship(db_session, sha_a, sha_b, "decided")
     await db_session.execute(
-        update(BlobRelationship)
-        .where(BlobRelationship.id == pair_id)
-        .values(decision="whitelisted")
+        update(BlobRelationship).where(BlobRelationship.id == pair_id).values(decision="whitelisted")
     )
     await db_session.commit()
 
@@ -1116,9 +1168,7 @@ async def test_full_rescan_preserves_durable_review_decisions(db_session, db_ses
 
     assert result["status"] == "ok"
     decision = (
-        await db_session.execute(
-            select(BlobRelationship.decision).where(BlobRelationship.id == pair_id)
-        )
+        await db_session.execute(select(BlobRelationship.decision).where(BlobRelationship.id == pair_id))
     ).scalar_one()
     assert decision == "whitelisted"
 
@@ -1143,9 +1193,7 @@ async def test_dirty_quality_candidate_reenters_same_gallery_context_gate(db_ses
             {"sha_a": sha_a, "sha_b": sha_b},
         )
     ).scalar_one()
-    await db_session.execute(
-        update(Blob).where(Blob.sha256.in_((sha_a, sha_b))).values(occurrence_revision=1)
-    )
+    await db_session.execute(update(Blob).where(Blob.sha256.in_((sha_a, sha_b))).values(occurrence_revision=1))
     await db_session.execute(
         update(BlobRelationship)
         .where(BlobRelationship.id == pair_id)
@@ -1173,9 +1221,7 @@ async def test_dirty_quality_candidate_reenters_same_gallery_context_gate(db_ses
     assert result["status"] == "ok"
     row = (
         await db_session.execute(
-            select(BlobRelationship.relationship, BlobRelationship.context_scope).where(
-                BlobRelationship.id == pair_id
-            )
+            select(BlobRelationship.relationship, BlobRelationship.context_scope).where(BlobRelationship.id == pair_id)
         )
     ).one()
     assert row == ("same_gallery_only", "same_gallery_only")

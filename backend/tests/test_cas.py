@@ -858,3 +858,90 @@ class TestStoreBlobExtensionFirstWins:
             await store_blob(src, SHA, self._session_returning(fresh_blob))
 
         assert (cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.png").read_bytes() == b"fresh"
+
+
+# ---------------------------------------------------------------------------
+# resolve_readable_blob_path
+# ---------------------------------------------------------------------------
+
+
+async def _seed_external_blob(db_session, sha256: str, scalar_path: str, bound_paths: list[str]):
+    """One external blob whose scalar path may differ from its Image bindings."""
+    from db.models import Blob, BlobLocation, Image
+
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, download_status, import_mode) "
+            "VALUES ('local', 'resolver-g', 'G', 'complete', 'link')"
+        )
+    )
+    gallery_id = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id = 'resolver-g'"))
+    ).scalar_one()
+
+    db_session.add(Blob(sha256=sha256, file_size=1, extension=".jpg", storage="external", external_path=scalar_path))
+    await db_session.flush()
+    for page, bound in enumerate(bound_paths, start=1):
+        db_session.add(BlobLocation(blob_sha256=sha256, external_path=bound))
+        db_session.add(
+            Image(
+                gallery_id=gallery_id,
+                page_num=page,
+                filename=f"{page}.jpg",
+                blob_sha256=sha256,
+                external_path=bound,
+            )
+        )
+    await db_session.commit()
+    return (await db_session.execute(select(Blob).where(Blob.sha256 == sha256))).scalar_one()
+
+
+async def test_resolver_uses_a_live_binding_when_the_legacy_scalar_moved(db_session, tmp_path):
+    """A stale Blob.external_path must not hide bytes another binding still has.
+
+    store_blob deliberately stops refreshing the scalar, so tier-3 dedup — which
+    holds Blobs and no Image — was reading a path that could point at a moved
+    file and degrading the pair to quality_conflict with the content right there.
+    """
+    from services.cas import resolve_readable_blob_path
+
+    live = tmp_path / "still-here" / "page.jpg"
+    live.parent.mkdir()
+    live.write_bytes(b"payload")
+    moved_away = str(tmp_path / "gone" / "page.jpg")
+
+    blob = await _seed_external_blob(db_session, "a" * 64, moved_away, [str(live)])
+
+    resolved = await resolve_readable_blob_path(db_session, blob)
+    assert resolved == live
+
+
+async def test_resolver_returns_none_when_nothing_is_readable(db_session, tmp_path):
+    """Genuinely missing content must be distinguishable from a stale path."""
+    from services.cas import resolve_readable_blob_path
+
+    blob = await _seed_external_blob(
+        db_session, "b" * 64, str(tmp_path / "gone.jpg"), [str(tmp_path / "also-gone.jpg")]
+    )
+
+    assert await resolve_readable_blob_path(db_session, blob) is None
+
+
+async def test_resolver_prefers_cas_for_an_internal_blob(db_session, tmp_path):
+    """CAS is the durable copy, so it wins when present."""
+    from db.models import Blob
+    from services.cas import resolve_readable_blob_path
+
+    sha256 = "c" * 64
+    cas_root = tmp_path / "cas"
+    cas_file = cas_root / sha256[:2] / sha256[2:4] / f"{sha256}.jpg"
+    cas_file.parent.mkdir(parents=True)
+    cas_file.write_bytes(b"payload")
+
+    db_session.add(Blob(sha256=sha256, file_size=1, extension=".jpg", storage="cas", external_path=None))
+    await db_session.commit()
+    blob = (await db_session.execute(select(Blob).where(Blob.sha256 == sha256))).scalar_one()
+
+    with patch("services.cas.settings", _mock_settings(cas=str(cas_root))):
+        resolved = await resolve_readable_blob_path(db_session, blob)
+    assert resolved == cas_file

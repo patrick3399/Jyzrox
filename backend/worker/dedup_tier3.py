@@ -9,7 +9,7 @@ from core.database import async_session
 from core.redis_client import get_redis
 from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 from db.models import Blob, BlobRelationship
-from services.cas import resolve_blob_path
+from services.cas import resolve_readable_blob_path
 from worker.dedup_helpers import _classify_pair, _now_iso, _opencv_pixel_diff
 from worker.helpers import _cron_record, _cron_should_run
 
@@ -80,8 +80,25 @@ async def _verify_pending_pairs() -> dict:
                     await session.commit()
                     continue
 
-                path_a = str(resolve_blob_path(blob_a))
-                path_b = str(resolve_blob_path(blob_b))
+                resolved_a = await resolve_readable_blob_path(session, blob_a)
+                resolved_b = await resolve_readable_blob_path(session, blob_b)
+                if resolved_a is None or resolved_b is None:
+                    # Genuinely gone, not merely a stale scalar path — record it
+                    # as unresolvable rather than reporting a pixel mismatch.
+                    logger.warning(
+                        "[dedup_tier3] pair %d: no readable file for %s",
+                        pair.id,
+                        pair.sha_a if resolved_a is None else pair.sha_b,
+                    )
+                    await session.execute(
+                        update(BlobRelationship)
+                        .where(BlobRelationship.id == pair.id)
+                        .values(relationship="quality_conflict", tier=3)
+                    )
+                    await session.commit()
+                    continue
+                path_a = str(resolved_a)
+                path_b = str(resolved_b)
 
                 try:
                     score, diff_type = await asyncio.to_thread(_opencv_pixel_diff, path_a, path_b)
