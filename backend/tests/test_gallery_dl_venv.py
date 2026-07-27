@@ -481,3 +481,70 @@ while not release.exists() and time.monotonic() < deadline:
     assert result["status"] == "ok"
     assert fake_active.resolve() == fake_base / "v1"
     assert not (fake_base / "v2").exists()
+
+
+async def test_rollback_gives_up_instead_of_waiting_on_a_long_download(tmp_path):
+    """A held shared lock must time out into `rejected`, not block forever.
+
+    The DB precheck is a TOCTOU (a download can start right after it) and flock
+    grants no priority to a waiting writer, so a plain blocking LOCK_EX could be
+    starved indefinitely by a stream of downloads while pinning a worker slot.
+    """
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gdl"
+    (fake_base / "v1" / "bin").mkdir(parents=True)
+    (fake_base / "v1" / "bin" / "gallery-dl").write_text("#!/bin/sh\n")
+    (fake_base / "v2" / "bin").mkdir(parents=True)
+    fake_active = fake_base / "active"
+    fake_active.symlink_to("v2")
+
+    started = tmp_path / "started2"
+    release = tmp_path / "release2"
+    child_code = f"""\
+import pathlib
+import time
+
+pathlib.Path({str(started)!r}).touch()
+release = pathlib.Path({str(release)!r})
+deadline = time.monotonic() + 10
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+"""
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_LIFECYCLE_LOCK_TIMEOUT", 0.3),
+        patch.object(venv_mod, "_LIFECYCLE_LOCK_POLL", 0.05),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
+        patch.object(venv_mod, "_fail", new_callable=AsyncMock, side_effect=lambda s, m, *a: {"status": s, "error": m}),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ):
+        cmd = [
+            sys.executable,
+            "-m",
+            "gallery_dl_exec",
+            str(fake_base / ".lifecycle.lock"),
+            sys.executable,
+            "-c",
+            child_code,
+        ]
+        proc = await asyncio.create_subprocess_exec(*cmd)
+        for _ in range(400):
+            if started.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert started.exists()
+
+        # Must return on its own while the lock is still held.
+        result = await asyncio.wait_for(venv_mod.rollback_job({}), timeout=5)
+
+        release.touch()
+        await proc.wait()
+
+    assert result["status"] == "rejected"
+    assert "still held" in result["error"]
+    # Nothing was swapped or deleted while a gallery-dl process held the lock.
+    assert fake_active.resolve() == fake_base / "v2"
+    assert (fake_base / "v2").exists()

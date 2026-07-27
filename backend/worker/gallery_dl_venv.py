@@ -18,6 +18,7 @@ import logging
 import re
 import shutil
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -145,16 +146,50 @@ def _swap_active_symlink(target_dir: Path) -> None:
     tmp_link.rename(VENV_ACTIVE)  # atomic on same filesystem
 
 
+class VenvLockBusy(RuntimeError):
+    """The lifecycle lock stayed held by running gallery-dl processes."""
+
+
+# Long enough to ride out a download that is about to finish, short enough that
+# the job gives the slot back instead of waiting on the whole queue to drain.
+_LIFECYCLE_LOCK_TIMEOUT = 30.0
+_LIFECYCLE_LOCK_POLL = 0.5
+
+
 @asynccontextmanager
-async def _exclusive_venv_lock():
-    """Block gallery-dl starts while swapping or deleting venv directories."""
+async def _exclusive_venv_lock(timeout: float | None = None):
+    """Block gallery-dl starts while swapping or deleting venv directories.
+
+    Non-blocking acquire with a bounded retry rather than a plain blocking
+    ``LOCK_EX``. The DB precheck is a TOCTOU — a download can start between the
+    check and the lock — and flock grants no priority to a waiting writer, so
+    new shared holders can keep being granted ahead of it. A steady stream of
+    downloads would therefore starve the wait indefinitely while pinning a SAQ
+    worker slot. Timing out lets the caller report ``rejected``, which is the
+    same answer an upgrade already gives when downloads are in flight.
+    """
+    # Read the module globals here rather than binding them as parameter
+    # defaults, which would freeze them at import time and make the budget
+    # impossible to adjust (or to exercise from a test).
+    limit = _LIFECYCLE_LOCK_TIMEOUT if timeout is None else timeout
     VENV_BASE.mkdir(parents=True, exist_ok=True)
     lock_file = (VENV_BASE / ".lifecycle.lock").open("a+b")
+    acquired = False
     try:
-        await asyncio.to_thread(fcntl.flock, lock_file.fileno(), fcntl.LOCK_EX)
+        deadline = time.monotonic() + limit
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise VenvLockBusy(f"gallery-dl venv lifecycle lock still held after {limit:.0f}s") from None
+                await asyncio.sleep(_LIFECYCLE_LOCK_POLL)
         yield
     finally:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        if acquired:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         lock_file.close()
 
 
@@ -367,15 +402,21 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
     # gallery-dl subprocess. A download that starts after the first DB check
     # either holds the shared lock until it exits or waits and starts from the
     # new active venv after this block completes.
-    async with _exclusive_venv_lock():
-        active = await _check_active_downloads()
-        if active > 0:
-            await _cleanup_new_dir(new_dir)
-            return await _fail("rejected", f"{active} download(s) queued, paused, or running", version)
+    try:
+        async with _exclusive_venv_lock():
+            active = await _check_active_downloads()
+            if active > 0:
+                await _cleanup_new_dir(new_dir)
+                return await _fail("rejected", f"{active} download(s) queued, paused, or running", version)
 
-        _swap_active_symlink(new_dir)
-        logger.info("[gallery-dl venv] Upgraded: %s → %s", old_version, new_version)
-        await _cleanup_old_versions()
+            _swap_active_symlink(new_dir)
+            logger.info("[gallery-dl venv] Upgraded: %s → %s", old_version, new_version)
+            await _cleanup_old_versions()
+    except VenvLockBusy as exc:
+        # The installed venv is still valid; drop it and let the admin retry
+        # rather than swapping while a gallery-dl process reads the old tree.
+        await _cleanup_new_dir(new_dir)
+        return await _fail("rejected", str(exc), version)
 
     invalidate_gdl_bin_cache()
 
@@ -397,29 +438,32 @@ async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
     """SAQ job: rollback gallery-dl to the previous version."""
     from core.events import EventType, emit_safe
 
-    async with _exclusive_venv_lock():
-        active = await _check_active_downloads()
-        if active > 0:
-            return await _fail("rejected", f"{active} download(s) queued, paused, or running")
+    try:
+        async with _exclusive_venv_lock():
+            active = await _check_active_downloads()
+            if active > 0:
+                return await _fail("rejected", f"{active} download(s) queued, paused, or running")
 
-        prev_dir = _previous_version_dir()
-        if prev_dir is None:
-            return await _fail("failed", "No previous version to rollback to")
+            prev_dir = _previous_version_dir()
+            if prev_dir is None:
+                return await _fail("failed", "No previous version to rollback to")
 
-        if not (prev_dir / "bin" / "gallery-dl").exists():
-            return await _fail("failed", f"Previous version {prev_dir.name} is corrupt")
+            if not (prev_dir / "bin" / "gallery-dl").exists():
+                return await _fail("failed", f"Previous version {prev_dir.name} is corrupt")
 
-        old_version = await get_current_version()
-        current_dir = _current_version_dir()
-        _swap_active_symlink(prev_dir)
+            old_version = await get_current_version()
+            current_dir = _current_version_dir()
+            _swap_active_symlink(prev_dir)
 
-        new_version = await _get_version(str(prev_dir / "bin" / "gallery-dl"))
-        logger.info("[gallery-dl venv] Rolled back: %s → %s", old_version, new_version)
+            new_version = await _get_version(str(prev_dir / "bin" / "gallery-dl"))
+            logger.info("[gallery-dl venv] Rolled back: %s → %s", old_version, new_version)
 
-        # The exclusive lock proves no gallery-dl process can still import
-        # from the version being removed.
-        if current_dir and current_dir != prev_dir:
-            await asyncio.to_thread(shutil.rmtree, current_dir, True)
+            # The exclusive lock proves no gallery-dl process can still import
+            # from the version being removed.
+            if current_dir and current_dir != prev_dir:
+                await asyncio.to_thread(shutil.rmtree, current_dir, True)
+    except VenvLockBusy as exc:
+        return await _fail("rejected", str(exc))
 
     invalidate_gdl_bin_cache()
 
