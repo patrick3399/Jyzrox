@@ -168,9 +168,7 @@ async def _check_active_downloads() -> int:
     async with AsyncSessionLocal() as session:
         return (
             await session.execute(
-                select(func.count())
-                .select_from(DownloadJob)
-                .where(DownloadJob.status.in_(_ACTIVE_DOWNLOAD_STATUSES))
+                select(func.count()).select_from(DownloadJob).where(DownloadJob.status.in_(_ACTIVE_DOWNLOAD_STATUSES))
             )
         ).scalar_one()
 

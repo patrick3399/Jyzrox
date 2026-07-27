@@ -447,11 +447,7 @@ async def _process_images(session, images: list[Image], *, commit_batch: int) ->
 
 
 async def _process_image_batch(session, images: list[Image]) -> int:
-    work = [
-        (img, resolve_blob_path(img.blob, img.external_path))
-        for img in images
-        if _blob_needs_thumbnail(img.blob)
-    ]
+    work = [(img, resolve_blob_path(img.blob, img.external_path)) for img in images if _blob_needs_thumbnail(img.blob)]
     if not work:
         return 0
 

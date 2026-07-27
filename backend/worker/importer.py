@@ -727,7 +727,9 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                     terminal_status = "complete"
                 gallery.download_status = terminal_status
                 if mode == "link" and not gallery.source_path:
-                    gallery.source_path = source_identity.real_path if source_identity is not None else os.path.realpath(src_path)
+                    gallery.source_path = (
+                        source_identity.real_path if source_identity is not None else os.path.realpath(src_path)
+                    )
                 gallery.metadata_updated_at = func.now()
                 # Capture before commit: attributes expire on commit
                 sidecar_payload = sidecar_payload_from_gallery(gallery)

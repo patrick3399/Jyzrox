@@ -162,11 +162,7 @@ async def test_link_import_rename_at_finalize_removes_deferred_symlink(
     assert not link.is_symlink()
     counts = (
         await db_session.execute(
-            text(
-                "SELECT "
-                "(SELECT COUNT(*) FROM images WHERE gallery_id=:gid), "
-                "(SELECT COUNT(*) FROM blob_locations)"
-            ),
+            text("SELECT (SELECT COUNT(*) FROM images WHERE gallery_id=:gid), (SELECT COUNT(*) FROM blob_locations)"),
             {"gid": gallery_id},
         )
     ).one()

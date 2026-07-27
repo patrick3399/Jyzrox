@@ -629,9 +629,7 @@ async def test_dedup_keep_rejects_image_bound_external_location(client, db_sessi
             "VALUES ('test', 'g_external_remap', 'External Remap', 'downloaded')"
         )
     )
-    gid = (
-        await db_session.execute(text("SELECT id FROM galleries WHERE source_id='g_external_remap'"))
-    ).scalar_one()
+    gid = (await db_session.execute(text("SELECT id FROM galleries WHERE source_id='g_external_remap'"))).scalar_one()
     await db_session.execute(
         text(
             "INSERT INTO blob_locations (blob_sha256, external_path) "

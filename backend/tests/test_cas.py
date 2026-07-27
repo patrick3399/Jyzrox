@@ -489,13 +489,17 @@ async def test_store_blob_persists_multiple_external_locations_and_bindings(db_s
         )
     )
     gallery_ids = (
-        await db_session.execute(
-            text(
-                "SELECT id FROM galleries "
-                "WHERE source_id IN ('multi-location-a', 'multi-location-b') ORDER BY source_id"
+        (
+            await db_session.execute(
+                text(
+                    "SELECT id FROM galleries "
+                    "WHERE source_id IN ('multi-location-a', 'multi-location-b') ORDER BY source_id"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     for gallery_id, path in zip(gallery_ids, paths, strict=True):
         await store_blob(path, sha256, db_session, storage="external", external_path=str(path))
@@ -511,7 +515,9 @@ async def test_store_blob_persists_multiple_external_locations_and_bindings(db_s
     await db_session.commit()
 
     location_count = (
-        await db_session.execute(select(func.count()).select_from(BlobLocation).where(BlobLocation.blob_sha256 == sha256))
+        await db_session.execute(
+            select(func.count()).select_from(BlobLocation).where(BlobLocation.blob_sha256 == sha256)
+        )
     ).scalar_one()
     image_paths = set(
         (await db_session.execute(select(Image.external_path).where(Image.blob_sha256 == sha256))).scalars().all()

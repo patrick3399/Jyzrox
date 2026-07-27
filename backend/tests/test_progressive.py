@@ -1015,9 +1015,7 @@ class TestProgressiveImporterEnsureGallery:
             await importer.ensure_gallery_from_import_data(data)
 
         insert_stmt = next(
-            call.args[0]
-            for call in session.execute.await_args_list
-            if getattr(call.args[0], "table", None) is not None
+            call.args[0] for call in session.execute.await_args_list if getattr(call.args[0], "table", None) is not None
         )
         compiled = insert_stmt.compile()
         assert compiled.params["source_pages"] == 20
