@@ -585,3 +585,117 @@ class TestRateLimitScheduleJob:
             result = await rate_limit_schedule_job({"redis": mock_redis})
 
         assert result["status"] == "active"
+
+
+# ---------------------------------------------------------------------------
+# _watcher_job_kwargs
+# ---------------------------------------------------------------------------
+
+
+class TestWatcherJobKwargs:
+    """The watchdog callback is positional; SAQ needs durable kwargs."""
+
+    def test_auto_discover_carries_a_stable_job_id_so_bursts_collapse(self):
+        """N new directories must not enqueue N full-library scans.
+
+        The watcher debounces per directory path, and auto_discover_job takes no
+        path — it rescans every library root. Without a stable SAQ key,
+        extracting a 200-folder archive queued 200 identical full scans.
+        """
+        from worker import _AUTO_DISCOVER_JOB_KEY, _watcher_job_kwargs
+
+        kwargs = _watcher_job_kwargs("auto_discover_job", ())
+        assert kwargs["_job_id"] == _AUTO_DISCOVER_JOB_KEY
+        assert kwargs["watcher_origin"] is True
+
+    def test_auto_discover_job_id_is_identical_across_directories(self):
+        """The key must not vary per event, or dedup would never trigger."""
+        from worker import _watcher_job_kwargs
+
+        first = _watcher_job_kwargs("auto_discover_job", ())
+        second = _watcher_job_kwargs("auto_discover_job", ())
+        assert first["_job_id"] == second["_job_id"]
+
+    def test_per_path_jobs_stay_distinct(self):
+        """Path-scoped jobs must NOT share a key — each path is its own work."""
+        from worker import _watcher_job_kwargs
+
+        a = _watcher_job_kwargs("rescan_by_path_job", ("/lib/a",))
+        b = _watcher_job_kwargs("rescan_by_path_job", ("/lib/b",))
+        assert a == {"dir_path": "/lib/a", "watcher_origin": True}
+        assert b == {"dir_path": "/lib/b", "watcher_origin": True}
+        assert "_job_id" not in a
+
+    def test_unsupported_callback_is_rejected(self):
+        import pytest
+
+        from worker import _watcher_job_kwargs
+
+        with pytest.raises(ValueError, match="Unsupported watcher job callback"):
+            _watcher_job_kwargs("auto_discover_job", ("unexpected",))
+
+
+class TestWatcherAutoDiscoverDedup:
+    """The stable key must actually reach SAQ as the dedup `key`.
+
+    Goes through ``_enqueue_routed`` rather than ``enqueue``: conftest replaces
+    ``core.queue.enqueue`` with an AsyncMock for the whole session, so calling it
+    here would assert nothing about the routing that builds SAQ's ``key``.
+    """
+
+    async def test_duplicate_auto_discover_enqueues_collapse_to_one_job(self):
+        """Second enqueue with the same key must not create a second job."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        queued: set[str] = set()
+
+        async def _fake_enqueue(_job_name, **kw):
+            key = kw.get("key")
+            if key is None:  # no key → SAQ always creates a new job
+                queued.add(f"anon:{len(queued)}")
+                return MagicMock()
+            if key in queued:
+                return None  # SAQ drops a duplicate key already in the queue
+            queued.add(key)
+            return MagicMock()
+
+        fake_queue = MagicMock()
+        fake_queue.enqueue = AsyncMock(side_effect=_fake_enqueue)
+
+        import core.queue
+        from worker import _watcher_job_kwargs
+
+        kwargs = _watcher_job_kwargs("auto_discover_job", ())
+        with patch("core.queue.get_queue", return_value=fake_queue):
+            for _ in range(200):
+                await core.queue._enqueue_routed("auto_discover_job", **kwargs)
+
+        assert fake_queue.enqueue.await_count == 200
+        assert queued == {"watcher-auto-discover"}, f"expected one pending scan, got {queued}"
+
+    async def test_without_the_key_every_event_would_queue_its_own_scan(self):
+        """Guards the regression: no `_job_id` → 200 events, 200 full scans."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        queued: set[str] = set()
+
+        async def _fake_enqueue(_job_name, **kw):
+            key = kw.get("key")
+            if key is None:
+                queued.add(f"anon:{len(queued)}")
+                return MagicMock()
+            if key in queued:
+                return None
+            queued.add(key)
+            return MagicMock()
+
+        fake_queue = MagicMock()
+        fake_queue.enqueue = AsyncMock(side_effect=_fake_enqueue)
+
+        import core.queue
+
+        with patch("core.queue.get_queue", return_value=fake_queue):
+            for _ in range(200):
+                await core.queue._enqueue_routed("auto_discover_job", watcher_origin=True)
+
+        assert len(queued) == 200

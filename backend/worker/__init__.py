@@ -80,10 +80,20 @@ logger = logging.getLogger("worker")
 _watcher = LibraryWatcher()
 
 
+# auto_discover_job takes no path — it rescans every library root. The watcher
+# debounces per directory, so creating N directories fires N timers that would
+# each enqueue the same full-library scan (extracting a 200-folder archive =
+# 200 full scans). A stable SAQ key collapses the burst into one pending job.
+# Trade-off: a directory appearing while a scan is already running may not be
+# picked up by that run, but the file events inside it still schedule their own
+# rescan_by_path_job, and the next scan is a full sweep either way.
+_AUTO_DISCOVER_JOB_KEY = "watcher-auto-discover"
+
+
 def _watcher_job_kwargs(job_name: str, args: tuple) -> dict:
     """Translate watchdog's positional callback into durable SAQ kwargs."""
     if job_name == "auto_discover_job" and not args:
-        return {"watcher_origin": True}
+        return {"watcher_origin": True, "_job_id": _AUTO_DISCOVER_JOB_KEY}
     if job_name == "rescan_by_path_job" and len(args) == 1:
         return {"dir_path": args[0], "watcher_origin": True}
     if job_name == "move_library_path_job" and len(args) == 4:
