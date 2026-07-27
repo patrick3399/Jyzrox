@@ -194,3 +194,139 @@ async def test_monitored_directory_move_preserves_gallery_and_user_state(
     emit_call = emit_spy.await_args
     assert emit_call is not None
     assert emit_call.kwargs["resource_id"] == gallery_id
+
+
+async def test_reconcile_skips_hashing_when_no_candidate_matches_names_and_sizes(
+    db_session,
+    db_session_factory,
+    mock_redis,
+    tmp_path,
+):
+    """The watcher pairs a create with every recent delete, so most candidates
+    are unrelated. Ruling those out must not cost a full-directory sha256 —
+    a bulk reorganisation would otherwise re-hash each moved gallery once per
+    candidate directory."""
+    from worker.scan import reconcile_library_path_job
+
+    root = tmp_path / "lib"
+    root.mkdir()
+    old_dir = root / "unrelated-gallery"
+    old_dir.mkdir()
+    (old_dir / "001.jpg").write_bytes(b"\xff\xd8\xff\xe0aaaa")
+
+    # A gallery whose recorded contents cannot match the destination.
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, import_mode, source_path, download_status) "
+            "VALUES ('local', 'unrelated-gallery', 'Unrelated', 'link', :path, 'complete')"
+        ),
+        {"path": str(old_dir)},
+    )
+    await db_session.commit()
+    gallery_id = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id='unrelated-gallery'"))
+    ).scalar_one()
+    await db_session.execute(
+        text("INSERT INTO blobs (sha256, file_size, extension, ref_count) VALUES (:sha, 5, '.jpg', 1)"),
+        {"sha": "aa" * 32},
+    )
+    await db_session.execute(
+        text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, 1, '001.jpg', :sha)"),
+        {"gid": gallery_id, "sha": "aa" * 32},
+    )
+    await db_session.commit()
+
+    # Destination has the same filename but a different size → cannot be a match.
+    new_dir = root / "brand-new-gallery"
+    new_dir.mkdir()
+    (new_dir / "001.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"z" * 500)
+    destination_stat = new_dir.stat()
+
+    mock_redis.get = AsyncMock(return_value=b"1")
+    sha_spy = MagicMock(side_effect=AssertionError("must not hash: sizes already rule this out"))
+
+    with (
+        patch("worker.scan.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan.settings", MagicMock(library_monitor_enabled=True, data_library_path=str(tmp_path))),
+        patch("worker.scan._sha256", sha_spy),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ):
+        result = await reconcile_library_path_job(
+            {"redis": mock_redis},
+            old_paths=[str(old_dir)],
+            new_path=str(new_dir),
+            destination_device=destination_stat.st_dev,
+            destination_inode=destination_stat.st_ino,
+            watcher_origin=True,
+        )
+
+    assert result["status"] == "conflict"
+    assert result["reason"] == "content_mismatch"
+    sha_spy.assert_not_called()
+
+
+async def test_reconcile_still_hashes_a_size_compatible_candidate(
+    db_session,
+    db_session_factory,
+    mock_redis,
+    tmp_path,
+):
+    """The prefilter must not become the decision: identical sizes still go to
+    the exact content signature."""
+    from worker.scan import reconcile_library_path_job
+
+    root = tmp_path / "lib"
+    root.mkdir()
+    old_dir = root / "same-size-gallery"
+    old_dir.mkdir()
+    payload = b"\xff\xd8\xff\xe0aaaa"
+
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, import_mode, source_path, download_status) "
+            "VALUES ('local', 'same-size-gallery', 'SameSize', 'link', :path, 'complete')"
+        ),
+        {"path": str(old_dir)},
+    )
+    await db_session.commit()
+    gallery_id = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id='same-size-gallery'"))
+    ).scalar_one()
+    await db_session.execute(
+        text("INSERT INTO blobs (sha256, file_size, extension, ref_count) VALUES (:sha, :size, '.jpg', 1)"),
+        {"sha": "bb" * 32, "size": len(payload)},
+    )
+    await db_session.execute(
+        text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, 1, '001.jpg', :sha)"),
+        {"gid": gallery_id, "sha": "bb" * 32},
+    )
+    await db_session.commit()
+
+    new_dir = root / "moved-here"
+    new_dir.mkdir()
+    (new_dir / "001.jpg").write_bytes(payload)  # same size, different content
+    destination_stat = new_dir.stat()
+
+    mock_redis.get = AsyncMock(return_value=b"1")
+    sha_spy = MagicMock(return_value="cc" * 32)  # not the recorded sha
+
+    with (
+        patch("worker.scan.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan.settings", MagicMock(library_monitor_enabled=True, data_library_path=str(tmp_path))),
+        patch("worker.scan._sha256", sha_spy),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ):
+        result = await reconcile_library_path_job(
+            {"redis": mock_redis},
+            old_paths=[str(old_dir)],
+            new_path=str(new_dir),
+            destination_device=destination_stat.st_dev,
+            destination_inode=destination_stat.st_ino,
+            watcher_origin=True,
+        )
+
+    sha_spy.assert_called_once()
+    assert result["status"] == "conflict"
+    assert result["reason"] == "content_mismatch"

@@ -933,7 +933,7 @@ async def reconcile_library_path_job(
                 await session.execute(
                     select(Gallery)
                     .where(Gallery.source == "local", Gallery.source_path.in_(normalized_old_paths))
-                    .options(selectinload(Gallery.images))
+                    .options(selectinload(Gallery.images).selectinload(Image.blob))
                 )
             )
             .scalars()
@@ -945,15 +945,41 @@ async def reconcile_library_path_job(
     if not media_files:
         return {"status": "conflict", "reason": "candidate_gallery_but_no_media", "new_path": new_real}
 
+    # The watcher pairs a create with every delete inside its window, so most
+    # candidates here are unrelated. Names + sizes are enough to rule those out,
+    # and cost one stat per file instead of hashing the whole directory: a bulk
+    # reorganisation would otherwise sha256 every moved gallery once per
+    # candidate directory. Only survivors get hashed, and the exact content
+    # signature below still decides the match.
+    try:
+        destination_sizes = sorted((path.name, path.stat().st_size) for path in media_files)
+    except OSError:
+        return {"status": "stale", "reason": "destination_unavailable", "new_path": new_real}
+
+    def _size_signature(gallery) -> list[tuple[str, int]]:
+        return sorted(
+            (image.filename, image.blob.file_size)
+            for image in gallery.images
+            if image.filename and image.blob is not None
+        )
+
+    plausible = [g for g in candidates if g.images and _size_signature(g) == destination_sizes]
+    if not plausible:
+        logger.info(
+            "[reconcile_library_path] no candidate matches names/sizes for %s (%d considered); skipping hashing",
+            new_real,
+            len(candidates),
+        )
+        return {"status": "conflict", "reason": "content_mismatch", "new_path": new_real}
+
     destination_signature = []
     for path in media_files:
         destination_signature.append((path.name, await asyncio.to_thread(_sha256, path)))
     destination_signature.sort()
     matches = [
         gallery
-        for gallery in candidates
-        if gallery.images
-        and sorted((image.filename, image.blob_sha256) for image in gallery.images if image.filename)
+        for gallery in plausible
+        if sorted((image.filename, image.blob_sha256) for image in gallery.images if image.filename)
         == destination_signature
     ]
     if len(matches) != 1:
