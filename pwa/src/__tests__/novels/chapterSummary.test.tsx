@@ -27,8 +27,9 @@ const h = vi.hoisted(() => ({
     { path: '作品A/第01章.md', issues: [{ rule: 'dialogue_colon_outside_bold', line: 3, text: 'x' }] },
     { path: '作品A/第02章.md', issues: [] },
   ],
-  status: vi.fn(async () => ({ head: 'headsha', ahead: 0, behind: 0, clean: true, locked: false })),
-  putSummary: vi.fn(async () => ({ head: 'newhead', pushed: true })),
+  head: 'headsha' as string,
+  status: vi.fn(async () => ({ head: h.head, ahead: 0, behind: 0, clean: true, locked: false })),
+  putSummary: vi.fn(async () => ({ ok: true, head: 'newhead', pushed: true }) as unknown),
   mutate: vi.fn(),
 }))
 
@@ -61,6 +62,8 @@ describe('chapter summaries on the work page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.role = 'member'
+    h.head = 'headsha'
+    h.putSummary.mockResolvedValue({ ok: true, head: 'newhead', pushed: true })
   })
 
   it('shows the summary and a labelled character count per chapter', () => {
@@ -76,7 +79,7 @@ describe('chapter summaries on the work page', () => {
     expect(screen.queryByLabelText('novels.editSummary')).not.toBeInTheDocument()
   })
 
-  it('saves an edited summary against a freshly read HEAD and refreshes the list', async () => {
+  it('saves an edited summary against the HEAD read when the editor opened', async () => {
     render(<NovelWorkPage />)
     await userEvent.click(screen.getAllByLabelText('novels.editSummary')[0])
     const box = screen.getByRole('textbox')
@@ -88,6 +91,68 @@ describe('chapter summaries on the work page', () => {
     expect(h.status).toHaveBeenCalled()
     expect(h.putSummary).toHaveBeenCalledWith('作品A/第01章.md', '張三回來了', 'headsha')
     expect(h.mutate).toHaveBeenCalledWith(['novel-chapters', '作品A'])
+  })
+
+  it('sends the open-time base_sha even after HEAD moves, so a stale write is rejected', async () => {
+    // Reading HEAD at save time made base_sha match by construction, which
+    // disabled the server's stale-write check entirely and let this editor
+    // silently overwrite a summary someone else had already committed.
+    render(<NovelWorkPage />)
+    await userEvent.click(screen.getAllByLabelText('novels.editSummary')[0])
+    await waitFor(() => expect(h.status).toHaveBeenCalled())
+
+    // Someone else commits while the editor is open.
+    h.head = 'somebody-elses-head'
+
+    const box = screen.getByRole('textbox')
+    await userEvent.clear(box)
+    await userEvent.type(box, '我的版本')
+    await userEvent.click(screen.getByRole('button', { name: 'novels.save' }))
+
+    await waitFor(() => expect(h.putSummary).toHaveBeenCalled())
+    expect(h.putSummary).toHaveBeenCalledWith('作品A/第01章.md', '我的版本', 'headsha')
+    expect(h.putSummary).not.toHaveBeenCalledWith(
+      '作品A/第01章.md',
+      '我的版本',
+      'somebody-elses-head',
+    )
+  })
+
+  it('keeps the editor open on a 409 instead of discarding the conflict', async () => {
+    h.putSummary.mockResolvedValue({
+      ok: false,
+      status: 409,
+      conflict: { current: '---\nsummary: 別人的摘要\n---\n', current_sha: 'theirs' },
+    })
+    render(<NovelWorkPage />)
+    await userEvent.click(screen.getAllByLabelText('novels.editSummary')[0])
+    await waitFor(() => expect(h.status).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('button', { name: 'novels.save' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    // The author's text survives and the list is NOT refreshed as if saved.
+    expect(screen.getByRole('textbox')).toHaveValue('張三離開了城市')
+    expect(h.mutate).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'novels.summaryOverwrite' })).toBeInTheDocument()
+  })
+
+  it('retries against the server sha only when the author confirms the overwrite', async () => {
+    h.putSummary.mockResolvedValue({
+      ok: false,
+      status: 409,
+      conflict: { current: '---\nsummary: 別人的摘要\n---\n', current_sha: 'theirs' },
+    })
+    render(<NovelWorkPage />)
+    await userEvent.click(screen.getAllByLabelText('novels.editSummary')[0])
+    await waitFor(() => expect(h.status).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('button', { name: 'novels.save' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+
+    h.putSummary.mockResolvedValue({ ok: true, head: 'merged', pushed: true })
+    await userEvent.click(screen.getByRole('button', { name: 'novels.summaryOverwrite' }))
+
+    await waitFor(() => expect(h.mutate).toHaveBeenCalledWith(['novel-chapters', '作品A']))
+    expect(h.putSummary).toHaveBeenLastCalledWith('作品A/第01章.md', '張三離開了城市', 'theirs')
   })
 
   it('closes the editor without writing when cancelled', async () => {

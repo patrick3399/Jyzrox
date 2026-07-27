@@ -118,6 +118,56 @@ export interface NovelAppearance {
   first_offset: number
 }
 
+/**
+ * Raw PUT for the repo-mutating novel endpoints.
+ *
+ * Custom fetch rather than `apiFetch`: a 409 carries the server's current
+ * content and sha, which `apiFetch` would collapse into a generic Error — every
+ * caller needs that payload to resolve the conflict instead of silently
+ * overwriting whoever committed first.
+ */
+async function putNovelWrite(url: string, body: unknown): Promise<NovelWriteResult> {
+  const csrf = getCookie('csrf_token')
+  const res = await fetch(url, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (res.ok) {
+    const data = (await res.json()) as { head: string; pushed: boolean }
+    return { ok: true, head: data.head, pushed: data.pushed }
+  }
+  const errBody = await res.json().catch(() => ({}))
+  const detail = (errBody as { detail?: unknown })?.detail
+  if (res.status === 409 && typeof detail === 'object' && detail !== null && 'current' in detail) {
+    const d = detail as { current: string; current_sha: string }
+    return {
+      ok: false,
+      status: 409,
+      conflict: { current: d.current, current_sha: d.current_sha },
+    }
+  }
+  // create=true against an existing path → {error: "file exists"}.
+  const detailError =
+    typeof detail === 'object' && detail !== null && 'error' in detail
+      ? (detail as { error: unknown }).error
+      : undefined
+  return {
+    ok: false,
+    status: res.status,
+    message:
+      typeof detail === 'string'
+        ? detail
+        : typeof detailError === 'string'
+          ? detailError
+          : `HTTP ${res.status}`,
+  }
+}
+
 export const novels = {
   listWorks: () => apiFetch<{ works: NovelWork[] }>('/api/novels/works'),
   listChapters: (work: string) =>
@@ -129,60 +179,13 @@ export const novels = {
       `/api/novels/works/${encodeURIComponent(work)}/files${qs({ category })}`,
     ),
   readFile: (path: string) => apiFetch<NovelFile>(`/api/novels/file${qs({ path })}`),
-  // Custom fetch: a 409 carries the server's current content, which apiFetch
-  // would collapse into a generic Error — the editor needs it for the diff hint.
-  writeFile: async (body: {
+  writeFile: (body: {
     path: string
     content: string
     base_sha?: string
     message?: string
     create?: boolean
-  }): Promise<NovelWriteResult> => {
-    const csrf = getCookie('csrf_token')
-    const res = await fetch('/api/novels/file', {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
-      },
-      body: JSON.stringify(body),
-    })
-    if (res.ok) {
-      const data = (await res.json()) as { head: string; pushed: boolean }
-      return { ok: true, head: data.head, pushed: data.pushed }
-    }
-    const errBody = await res.json().catch(() => ({}))
-    const detail = (errBody as { detail?: unknown })?.detail
-    if (
-      res.status === 409 &&
-      typeof detail === 'object' &&
-      detail !== null &&
-      'current' in detail
-    ) {
-      const d = detail as { current: string; current_sha: string }
-      return {
-        ok: false,
-        status: 409,
-        conflict: { current: d.current, current_sha: d.current_sha },
-      }
-    }
-    // create=true against an existing path → {error: "file exists"}.
-    const detailError =
-      typeof detail === 'object' && detail !== null && 'error' in detail
-        ? (detail as { error: unknown }).error
-        : undefined
-    return {
-      ok: false,
-      status: res.status,
-      message:
-        typeof detail === 'string'
-          ? detail
-          : typeof detailError === 'string'
-            ? detailError
-            : `HTTP ${res.status}`,
-    }
-  },
+  }): Promise<NovelWriteResult> => putNovelWrite('/api/novels/file', body),
   // Create a new chapter file (new work = new folder via its first chapter).
   // Reuses PUT /file with create:true; the backend refuses to clobber and needs
   // no base_sha (a new file has no base revision), so this is a single request.
@@ -196,11 +199,10 @@ export const novels = {
     })
   },
   // Writes the `summary:` frontmatter key only; an empty string clears it.
-  putSummary: (path: string, summary: string, base_sha: string) =>
-    apiFetch<{ head: string; pushed: boolean }>('/api/novels/file/summary', {
-      method: 'PUT',
-      body: JSON.stringify({ path, summary, base_sha }),
-    }),
+  // Returns the structured result so a 409 can be resolved rather than silently
+  // overwriting a summary someone else already saved.
+  putSummary: (path: string, summary: string, base_sha: string): Promise<NovelWriteResult> =>
+    putNovelWrite('/api/novels/file/summary', { path, summary, base_sha }),
   outline: (work: string) =>
     apiFetch<NovelOutline>(`/api/novels/works/${encodeURIComponent(work)}/outline`),
   // ── FORMAT.md lint / fix ──
