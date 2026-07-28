@@ -625,13 +625,24 @@ async def test_system_storage_returns_mounts_deduplicated_by_device(client):
     assert mount["percent"] == 60.0
 
 
+def _distinct_usages():
+    """Return a disk_usage side_effect giving each call a distinct capacity."""
+    call_count = 0
+
+    def fake_usage(path):
+        nonlocal call_count
+        call_count += 1
+        m = MagicMock()
+        m.total = 1_000_000_000_000 * call_count
+        m.used = 600_000_000_000 * call_count
+        m.free = 400_000_000_000 * call_count
+        return m
+
+    return fake_usage
+
+
 async def test_system_storage_shows_both_mounts_when_different_devices(client):
     """GET /api/system/storage shows both mounts when on different devices."""
-    fake_usage = MagicMock()
-    fake_usage.total = 1_000_000_000_000
-    fake_usage.used = 600_000_000_000
-    fake_usage.free = 400_000_000_000
-
     call_count = 0
 
     def fake_stat(path):
@@ -650,7 +661,7 @@ async def test_system_storage_shows_both_mounts_when_different_devices(client):
             ],
         ),
         patch("os.stat", side_effect=fake_stat),
-        patch("shutil.disk_usage", return_value=fake_usage),
+        patch("shutil.disk_usage", side_effect=_distinct_usages()),
     ):
         resp = await client.get("/api/system/storage")
 
@@ -687,11 +698,6 @@ async def test_system_storage_includes_external_mounts(client):
         m.st_dev = call_count
         return m
 
-    fake_usage = MagicMock()
-    fake_usage.total = 2_000_000_000_000
-    fake_usage.used = 1_000_000_000_000
-    fake_usage.free = 1_000_000_000_000
-
     with (
         patch(
             "routers.system._get_real_mounts",
@@ -702,7 +708,7 @@ async def test_system_storage_includes_external_mounts(client):
             ],
         ),
         patch("os.stat", side_effect=fake_stat),
-        patch("shutil.disk_usage", return_value=fake_usage),
+        patch("shutil.disk_usage", side_effect=_distinct_usages()),
     ):
         resp = await client.get("/api/system/storage")
 
@@ -712,6 +718,56 @@ async def test_system_storage_includes_external_mounts(client):
     assert len(data["mounts"]) == 3
     labels = [m["label"] for m in data["mounts"]]
     assert "nas1" in labels
+
+
+async def test_system_storage_collapses_bind_mount_reporting_same_capacity_as_root(client):
+    """Distinct st_dev but identical capacity means one filesystem, shown once.
+
+    A container's overlay "/" and a host bind mount of a directory on the same
+    disk have different device IDs while reporting the same backing filesystem,
+    which listed the same storage twice under the bind mount's directory name.
+    """
+    devs = {
+        "/data/gallery": 1,
+        "/": 2,
+        "/home/appuser/.config/gallery-dl": 3,
+    }
+    usages = {
+        "/data/gallery": (540_000_000_000, 265_000_000_000),
+        "/": (135_000_000_000, 104_000_000_000),
+        "/home/appuser/.config/gallery-dl": (135_000_000_000, 104_000_000_000),
+    }
+
+    def fake_stat(path):
+        m = MagicMock()
+        m.st_dev = devs[path]
+        return m
+
+    def fake_usage(path):
+        total, free = usages[path]
+        m = MagicMock()
+        m.total = total
+        m.free = free
+        m.used = total - free
+        return m
+
+    with (
+        patch(
+            "routers.system._get_real_mounts",
+            return_value=[
+                ("Gallery Data", "/data/gallery"),
+                ("Root Filesystem", "/"),
+                ("gallery-dl", "/home/appuser/.config/gallery-dl"),
+            ],
+        ),
+        patch("os.stat", side_effect=fake_stat),
+        patch("shutil.disk_usage", side_effect=fake_usage),
+    ):
+        resp = await client.get("/api/system/storage")
+
+    assert resp.status_code == 200
+    labels = [m["label"] for m in resp.json()["mounts"]]
+    assert labels == ["Gallery Data", "Root Filesystem"]
 
 
 async def test_system_storage_no_external_mounts_when_none_detected(client):
@@ -786,11 +842,11 @@ def test_get_real_mounts_filters_virtual_filesystems():
 
 
 def test_get_real_mounts_filters_system_paths():
-    """_get_real_mounts excludes system mount paths like /, /proc, /sys."""
+    """_get_real_mounts excludes system mount paths like /proc, /sys."""
     from routers.system import _get_real_mounts
 
     partitions = []
-    for path in ["/", "/proc", "/sys", "/dev", "/tmp"]:
+    for path in ["/proc", "/sys", "/dev", "/tmp"]:
         p = MagicMock()
         p.fstype = "ext4"
         p.mountpoint = path
@@ -800,8 +856,67 @@ def test_get_real_mounts_filters_system_paths():
         result = _get_real_mounts()
 
     paths = [r[1] for r in result]
-    for sys_path in ["/", "/proc", "/sys", "/dev", "/tmp"]:
+    for sys_path in ["/proc", "/sys", "/dev", "/tmp"]:
         assert sys_path not in paths
+
+
+def test_get_real_mounts_excludes_file_bind_mounts_under_system_dirs():
+    """Docker single-file bind mounts under excluded dirs must not become mount rows.
+
+    Compose bind-mounts secrets as /run/secrets/<name>, which psutil reports as
+    its own partition. Including it labelled the whole backing filesystem after
+    the secret file (e.g. "novel_deploy_key").
+    """
+    from routers.system import _get_real_mounts
+
+    partitions = []
+    for path in [
+        "/run/secrets/novel_deploy_key",
+        "/run/secrets/novel_known_hosts",
+        "/dev/shm/whatever",
+        "/tmp/scratch",
+    ]:
+        p = MagicMock()
+        p.fstype = "ext4"
+        p.mountpoint = path
+        partitions.append(p)
+
+    with patch("psutil.disk_partitions", return_value=partitions):
+        result = _get_real_mounts()
+
+    paths = [r[1] for r in result]
+    labels = [r[0] for r in result]
+    for excluded in [
+        "/run/secrets/novel_deploy_key",
+        "/run/secrets/novel_known_hosts",
+        "/dev/shm/whatever",
+        "/tmp/scratch",
+    ]:
+        assert excluded not in paths
+    assert "novel_deploy_key" not in labels
+    assert "novel_known_hosts" not in labels
+
+
+def test_get_real_mounts_labels_root_filesystem_instead_of_dropping_it():
+    """The root filesystem is reported explicitly rather than via a nested bind mount.
+
+    Excluding /run/secrets/* removes the accidental stand-in for the root
+    device, so "/" itself must be present with an explicit label.
+    """
+    from routers.system import _get_real_mounts
+
+    with patch("psutil.disk_partitions", return_value=[]):
+        result = _get_real_mounts()
+
+    label_map = {path: label for label, path in result}
+    assert label_map.get("/") == "Root Filesystem"
+
+    # Data paths must precede "/" so they win per-device deduplication when a
+    # deployment keeps gallery data on the root disk.
+    from core.config import settings
+
+    paths = [path for _, path in result]
+    assert paths.index(settings.data_gallery_path) < paths.index("/")
 
 
 def test_get_real_mounts_labels_known_paths_correctly():

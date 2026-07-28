@@ -160,10 +160,15 @@ export function formatNumber(n: number, options?: Intl.NumberFormatOptions): str
   return new Intl.NumberFormat(intlLocale, options).format(n)
 }
 
-/** Format bytes into a human-readable size string */
+/**
+ * Format bytes into a human-readable size string.
+ *
+ * Scales by 1024, so the units are the binary ones (KiB/MiB/GiB) rather than
+ * the SI ones -- same basis as `free -h`, which also labels them with the "i".
+ */
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   const value = bytes / Math.pow(1024, i)
   return `${formatNumber(value, { maximumFractionDigits: 1 })} ${units[i]}`

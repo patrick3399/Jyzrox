@@ -249,18 +249,25 @@ describe('formatBytes', () => {
     expect(formatBytes(0)).toBe('0 B')
   })
 
-  it('test_formatBytes_exactly1024_returns1KB', () => {
-    // 1024 bytes = 1 KB, maximumFractionDigits: 1, so "1 KB"
-    expect(formatBytes(1024)).toBe('1 KB')
+  it('test_formatBytes_exactly1024_returns1KiB', () => {
+    // 1024 bytes = 1 KiB, maximumFractionDigits: 1, so "1 KiB"
+    expect(formatBytes(1024)).toBe('1 KiB')
   })
 
-  it('test_formatBytes_1536_returns1point5KB', () => {
-    // 1536 / 1024 = 1.5 KB
-    expect(formatBytes(1536)).toBe('1.5 KB')
+  it('test_formatBytes_1536_returns1point5KiB', () => {
+    // 1536 / 1024 = 1.5 KiB
+    expect(formatBytes(1536)).toBe('1.5 KiB')
   })
 
-  it('test_formatBytes_1048576_returns1MB', () => {
-    // 1048576 = 1024^2 = 1 MB
-    expect(formatBytes(1048576)).toBe('1 MB')
+  it('test_formatBytes_1048576_returns1MiB', () => {
+    // 1048576 = 1024^2 = 1 MiB
+    expect(formatBytes(1048576)).toBe('1 MiB')
+  })
+
+  it('test_formatBytes_scalesBy1024_soUnitsAreBinaryNotSI', () => {
+    // The divisor is 1024, so labelling these as KB/MB would overstate the
+    // value by 2.4% per step. 1000 bytes stays below the first binary step.
+    expect(formatBytes(1000)).toBe('1,000 B')
+    expect(formatBytes(1_000_000)).toBe('976.6 KiB')
   })
 })

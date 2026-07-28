@@ -302,7 +302,7 @@ export default function SystemSettingsPage() {
                           {t('settings.cacheMemory')}
                         </span>
                         <span className="text-sm font-medium text-vault-text-secondary">
-                          {cacheStats.total_memory}
+                          {formatBytes(cacheStats.total_memory)}
                         </span>
                       </div>
                       <div className="flex justify-between items-center px-3 py-2">

@@ -164,6 +164,15 @@ async def system_info(_: dict = Depends(require_auth)):
     }
 
 
+# Anything nested inside an excluded system directory is excluded too. Docker
+# bind-mounts single files as their own mount entries, so secrets such as
+# /run/secrets/novel_deploy_key surface in disk_partitions() even though /run
+# itself is excluded -- and they report the whole backing filesystem's usage
+# under the file's name. "/" is skipped here because every absolute path is
+# nested under it; the root filesystem is labelled explicitly instead.
+_MOUNT_EXCLUDE_PREFIXES: tuple[str, ...] = tuple(sorted(p.rstrip("/") + "/" for p in MOUNT_EXCLUDE_PATHS if p != "/"))
+
+
 def _get_real_mounts() -> list[tuple[str, str]]:
     """Return (label, path) for all real disk mount points.
 
@@ -172,12 +181,15 @@ def _get_real_mounts() -> list[tuple[str, str]]:
     KNOWN_LABELS = {
         settings.data_gallery_path: "Gallery Data",
         settings.data_cas_path: "CAS (Content-Addressed)",
+        "/": "Root Filesystem",
     }
 
     result: list[tuple[str, str]] = []
     seen_paths: set[str] = set()
 
-    # Always include known data paths (they may share a mount with /data)
+    # Always include known data paths (they may share a mount with /data). Data
+    # paths come first so they win the caller's per-device deduplication when a
+    # deployment keeps everything on one disk.
     for path, label in KNOWN_LABELS.items():
         result.append((label, path))
         seen_paths.add(path)
@@ -187,7 +199,7 @@ def _get_real_mounts() -> list[tuple[str, str]]:
             continue
         if p.mountpoint in MOUNT_EXCLUDE_PATHS:
             continue
-        if p.mountpoint.startswith("/dev/"):
+        if p.mountpoint.startswith(_MOUNT_EXCLUDE_PREFIXES):
             continue
         if p.mountpoint in seen_paths:
             continue
@@ -224,10 +236,19 @@ async def system_storage(_: dict = Depends(_admin)):
 
     usage_results = await asyncio.gather(*usage_tasks, return_exceptions=True)
 
+    # A second pass on the reported capacity: st_dev separates superblocks, but
+    # a container's overlay "/" and a bind mount from the host both report the
+    # backing filesystem's usage under different device IDs. Identical
+    # total+free means the same storage, so keep only the first (better
+    # labelled) one.
     mounts = []
+    seen_usage: set[tuple[int, int]] = set()
     for (label, path), usage in zip(valid_mounts, usage_results, strict=False):
         if isinstance(usage, BaseException):
             continue
+        if (usage.total, usage.free) in seen_usage:
+            continue
+        seen_usage.add((usage.total, usage.free))
         percent = round(usage.used / usage.total * 100, 1) if usage.total else 0.0
         mounts.append(
             {

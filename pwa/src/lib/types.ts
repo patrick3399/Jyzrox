@@ -425,7 +425,10 @@ export interface BlockedTag {
 // ── Cache Stats ───────────────────────────────────────────────────────
 
 export interface CacheStats {
-  total_memory: string
+  /** Redis used_memory in bytes. */
+  total_memory: number
+  /** Redis used_memory_human, e.g. "10.73M". */
+  total_memory_human: string
   total_keys: number
   breakdown: Record<string, number>
 }
