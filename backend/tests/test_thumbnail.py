@@ -806,7 +806,7 @@ class TestThumbnailDecompressionBombLimit:
     """_generate_single_thumbnail_sync must cap PIL.MAX_IMAGE_PIXELS — edge case #110."""
 
     def test_max_image_pixels_set_before_open(self):
-        """After calling _generate_single_thumbnail_sync, PIL.MAX_IMAGE_PIXELS must be <= 50M.
+        """Thumbnail imports configure the approved finite 200 MP warning threshold.
 
         Before the fix there was no cap, so a crafted image with billions of pixels
         could exhaust process memory (decompression bomb).
@@ -826,9 +826,7 @@ class TestThumbnailDecompressionBombLimit:
         from PIL import Image as PILImage  # type: ignore[import]
 
         assert PILImage.MAX_IMAGE_PIXELS is not None
-        assert PILImage.MAX_IMAGE_PIXELS <= 50_000_000, (
-            f"PIL.MAX_IMAGE_PIXELS must be <= 50M, got {PILImage.MAX_IMAGE_PIXELS}"
-        )
+        assert PILImage.MAX_IMAGE_PIXELS == 200_000_000
 
 
 def test_changed_phash_invalidates_incremental_dedup_marker():

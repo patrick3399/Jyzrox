@@ -31,7 +31,10 @@ from worker.thumbhash_utils import encode_pil_thumbhash
 try:
     from PIL import Image as _PILImage
 
-    _PILImage.MAX_IMAGE_PIXELS = 50_000_000  # edge case #110: decompression bomb cap
+    # Pillow warns above this threshold and raises DecompressionBombError above
+    # twice the threshold. Keep a finite cap while allowing high-resolution
+    # source images up to the resulting 400 MP hard-error boundary.
+    _PILImage.MAX_IMAGE_PIXELS = 200_000_000  # edge case #110: decompression bomb cap
 except ImportError:
     pass
 
