@@ -1143,9 +1143,6 @@ async def thumb_proxy(
     auth: dict = Depends(require_auth),
 ):
     """Proxy EH thumbnail CDN images so the frontend never calls external URLs."""
-    if not _is_private(get_client_ip(request)):
-        await check_rate_limit(f"img_proxy:eh_thumb:{auth['user_id']}", max_requests=120, window=60)
-
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")
@@ -1169,6 +1166,13 @@ async def thumb_proxy(
             media_type="image/jpeg",
             headers={"Cache-Control": "public, max-age=604800, immutable"},  # 7d
         )
+
+    # Rate-limit the outbound CDN call, not the request. The budget exists to keep
+    # us from hammering the EH CDN, so only a cache miss — the one branch that
+    # actually leaves our network — spends it. Charging cache hits made a 50-tile
+    # browse page burn the whole 120/min budget in under three pages of scrolling.
+    if not _is_private(get_client_ip(request)):
+        await check_rate_limit(f"img_proxy:eh_thumb:{auth['user_id']}", max_requests=120, window=60)
 
     cred_json = await get_credential("ehentai")
     cookies = json.loads(cred_json) if cred_json else {}

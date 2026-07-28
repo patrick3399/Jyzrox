@@ -12,6 +12,7 @@ Auth requirement for every endpoint is verified with `unauthed_client`.
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
@@ -484,6 +485,72 @@ class TestEhThumbProxy:
             params={"url": "https://ehgt.org/test.jpg"},
         )
         assert resp.status_code == 401
+
+    async def test_thumb_proxy_cache_hit_does_not_consume_rate_limit(self, client, mock_redis):
+        """A Redis cache hit makes no outbound CDN call, so it must not spend quota.
+
+        The per-user limit exists to bound outbound traffic to the EH CDN. Charging
+        cached thumbnails against it made a browse page of 50 tiles exhaust a 120/min
+        budget in under three pages even when every tile was already cached.
+        """
+        mock_redis.get = AsyncMock(return_value=b"cached-thumb-bytes")
+
+        with (
+            # LAN clients bypass the limiter outright; the bug only bites public ones.
+            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
+            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("plugins.builtin.ehentai.browse.get_credential", new_callable=AsyncMock) as credential,
+        ):
+            resp = await client.get(
+                "/api/eh/thumb-proxy",
+                params={"url": "https://ehgt.org/cached.jpg"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.content == b"cached-thumb-bytes"
+        rate_limit.assert_not_called()
+        # A cache hit must also skip credential lookup / outbound fetch entirely.
+        credential.assert_not_called()
+
+    async def test_thumb_proxy_cache_miss_still_consumes_rate_limit(self, client, mock_redis):
+        """A cache miss does hit the CDN, so the per-user limit must still apply."""
+        mock_redis.get = AsyncMock(return_value=None)
+
+        with (
+            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
+            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch(
+                "plugins.builtin.ehentai.browse.get_credential",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("plugins.builtin.ehentai.browse.httpx.AsyncClient") as http_client,
+        ):
+            http_client.return_value.__aenter__.return_value.get = AsyncMock(side_effect=httpx.HTTPError("boom"))
+            resp = await client.get(
+                "/api/eh/thumb-proxy",
+                params={"url": "https://ehgt.org/uncached.jpg"},
+            )
+
+        assert resp.status_code == 502
+        rate_limit.assert_awaited_once()
+        # The limit must be keyed per user and bound the outbound call, not the request.
+        key = rate_limit.await_args.args[0]
+        assert key.startswith("img_proxy:eh_thumb:")
+
+    async def test_thumb_proxy_rejects_bad_domain_before_touching_rate_limit(self, client):
+        """SSRF validation stays ahead of the limiter so bad URLs cost no quota."""
+        with (
+            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
+            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+        ):
+            resp = await client.get(
+                "/api/eh/thumb-proxy",
+                params={"url": "https://evil.example.com/image.jpg"},
+            )
+
+        assert resp.status_code == 403
+        rate_limit.assert_not_called()
 
 
 # ===========================================================================

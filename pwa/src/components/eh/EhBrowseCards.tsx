@@ -6,8 +6,6 @@ import { getEhGalleryLanguage } from '@/lib/ehGalleryLanguage'
 import { t } from '@/lib/i18n'
 import type { EhBrowseGalleryStatus, EhGallery } from '@/lib/types'
 
-// ── IntersectionObserver-based lazy image ──────────────────────────────
-
 // ── EhViewer category colour system (Material Design, from EhUtils.kt) ──
 
 export const CATEGORY_META: Record<string, { color: string; label: string }> = {
@@ -78,6 +76,7 @@ export function ListCard({
           <AppImage
             src={thumbSrc}
             alt={gallery.title}
+            loading="lazy"
             className="w-full h-full object-cover"
             fallbackClassName="w-full h-full bg-vault-input"
           />
@@ -188,6 +187,7 @@ export function GridCard({
         <AppImage
           src={thumbSrc}
           alt={gallery.title}
+          loading="lazy"
           className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
           fallbackClassName="w-full h-full bg-vault-input"
         />
