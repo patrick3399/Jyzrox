@@ -129,7 +129,9 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          # Large thumbnail sources can approach the 200 MP Pillow limit and
+          # require more than 2 GiB while decoded and resized.
+          memory: 4G
         reservations:
           memory: 512M
     logging: *default-logging
