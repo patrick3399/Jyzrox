@@ -21,6 +21,7 @@ from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
+from services.download_admission import admission_key_for, next_admission_ticket
 from services.download_policy import get_credential_policy, normalize_source_options
 from services.download_presenter import serialize_download_job
 from worker.helpers import compute_job_key, enqueue_download_job
@@ -198,6 +199,7 @@ async def _enqueue(
             progress=initial_progress or {},
             options=options or {},
             user_id=user_id,
+            admission_key=admission_key_for(source, canonical_url),
         )
         db.add(job)
         await db.commit()
@@ -523,35 +525,44 @@ async def pause_resume_job(
         # job.status == "paused" or "queued" — valid transition
         await redis.delete(pause_key)
 
-        # Check if the SAQ worker coroutine is still alive.
-        # SAQ exposes job state via queue.job(key); a None return means the job
-        # has been cleared from Redis (e.g. TTL expired or never enqueued).
-        saq_job_key = compute_job_key(job.id, job.retry_count)
-        saq_job = await core.queue.get_queue().job(saq_job_key)
-        saq_job_dead = saq_job is None or saq_job.status in SAQ_TERMINAL_STATUSES
-
-        if saq_job_dead:
-            # Coroutine is dead — re-enqueue as a new SAQ job.
-            # Prepare re-enqueue before committing DB changes to avoid orphaning
-            # the job in "queued" state if the enqueue fails after commit.
-            new_retry_count = job.retry_count + 1
-            new_saq_key = compute_job_key(job.id, new_retry_count)
-            try:
-                await enqueue_download_job(job, new_saq_key)
-            except Exception:
-                raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
-
-            job.retry_count = new_retry_count
-            job.status = "queued"
-            job.error = None
-            job.finished_at = None
-            await db.commit()
-            return {"status": "queued", "restarted": True}
-        else:
-            # Coroutine still alive — just flip the flag
+        # A token proves that a live execution owns this job. Token-less paused
+        # rows need a fresh transport delivery and FIFO ticket; this is not a
+        # failed business attempt and must not consume retry_count.
+        if job.admission_token is not None:
             job.status = "running"
             await db.commit()
             return {"status": job.status}
+
+        # Compatibility for a pre-admission coroutine during a rolling
+        # upgrade. Migrated/new rows always have a ticket; only a legacy row
+        # without one may trust the old SAQ active state.
+        if job.admission_ticket is None:
+            legacy_key = compute_job_key(job.id, job.retry_count)
+            legacy_saq_job = await core.queue.get_queue().job(legacy_key)
+            if legacy_saq_job is not None and legacy_saq_job.status not in SAQ_TERMINAL_STATUSES:
+                job.status = "running"
+                await db.commit()
+                return {"status": job.status}
+
+        # Legacy rows may still have an active SAQ coroutine but no token. It
+        # cannot safely resume under the fenced admission contract, so enqueue
+        # a fresh uniquely keyed attempt.
+        # SAQ exposes job state via queue.job(key); a None return means the job
+        # has been cleared from Redis (e.g. TTL expired or never enqueued).
+        new_saq_key = f"dispatch:{job.id}:{uuid.uuid4()}"
+        try:
+            await enqueue_download_job(job, new_saq_key)
+        except Exception:
+            raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
+
+        job.admission_ticket = await next_admission_ticket(db)
+        job.admission_key = admission_key_for(job.source, job.url)
+        job.admission_token = None
+        job.status = "queued"
+        job.error = None
+        job.finished_at = None
+        await db.commit()
+        return {"status": "queued", "restarted": True}
 
 
 @router.delete("/jobs/{job_id}")
@@ -649,6 +660,9 @@ async def retry_job(
         raise HTTPException(status_code=503, detail="Failed to enqueue retry job")
 
     job.retry_count = new_retry_count
+    job.admission_ticket = await next_admission_ticket(db)
+    job.admission_key = admission_key_for(job.source, job.url)
+    job.admission_token = None
     job.status = "queued"
     job.finished_at = None
     job.error = None
@@ -673,7 +687,7 @@ async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends
     from datetime import UTC, datetime
 
     from core.adaptive import AdaptiveState, adaptive_engine
-    from core.redis_client import DownloadSemaphore, is_rate_limit_boosted
+    from core.redis_client import is_rate_limit_boosted
     from core.site_config import site_config_service
     from worker.constants import DISK_LOW_KEY
     from worker.helpers import check_disk_space
@@ -694,20 +708,24 @@ async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends
     )
     today_stmt = select(func.count()).where(DownloadJob.created_at >= today_start)
     # Combined: per-source counts + global running/queued totals in one query
+    admission_group = func.coalesce(DownloadJob.admission_key, DownloadJob.source)
     source_counts_stmt = (
-        select(DownloadJob.source, DownloadJob.status, func.count())
+        select(admission_group, DownloadJob.status, func.count())
         .where(DownloadJob.status.in_(["running", "queued"]))
-        .group_by(DownloadJob.source, DownloadJob.status)
+        .group_by(admission_group, DownloadJob.status)
+    )
+    holder_counts_stmt = (
+        select(admission_group, func.count()).where(DownloadJob.admission_token.is_not(None)).group_by(admission_group)
     )
 
     active_jobs = (await db.execute(active_stmt)).scalars().all()
     queued_jobs = (await db.execute(queued_stmt)).scalars().all()
     total_today = (await db.execute(today_stmt)).scalar_one()
     source_counts = (await db.execute(source_counts_stmt)).all()
+    holder_counts = dict((await db.execute(holder_counts_stmt)).all())
 
     # Redis calls (parallel)
-    sem_data, boost, all_params = await asyncio.gather(
-        DownloadSemaphore.get_all_active(),
+    boost, all_params = await asyncio.gather(
         is_rate_limit_boosted(),
         site_config_service.get_all_download_params(),
     )
@@ -727,23 +745,32 @@ async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends
 
     # Compute avg speed from active jobs
     source_speeds: dict[str, list[float]] = {}
+    admission_sources: dict[str, str] = {}
     for job in active_jobs:
+        key = job.admission_key or job.source or "unknown"
+        admission_sources[key] = job.source or key
         if job.progress and isinstance(job.progress, dict):
             speed = job.progress.get("speed", 0)
             if speed:
-                source_speeds.setdefault(job.source, []).append(speed)
+                source_speeds.setdefault(key, []).append(speed)
+    for job in queued_jobs:
+        key = job.admission_key or job.source or "unknown"
+        admission_sources[key] = job.source or key
 
     # Merge all known sources
-    all_sources = sorted(
-        set(sem_data.keys()) | set(all_params.keys()) | set(source_running.keys()) | set(source_queued.keys())
+    all_sources = sorted(set(all_params.keys()) | set(source_running.keys()) | set(source_queued.keys()))
+    adaptive_states = await adaptive_engine.get_states_batch(
+        sorted({admission_sources.get(src, src) for src in all_sources})
     )
-    adaptive_states = await adaptive_engine.get_states_batch(all_sources)
     site_stats: dict[str, dict] = {}
     for src in all_sources:
-        sem_info = sem_data.get(src, {"used": 0, "max": 2})
-
-        adaptive_state = adaptive_states.get(src) or AdaptiveState()
-        params = all_params.get(src)
+        config_source = admission_sources.get(src, src)
+        adaptive_state = adaptive_states.get(config_source) or AdaptiveState()
+        params = all_params.get(config_source)
+        sem_info = {
+            "used": holder_counts.get(src, 0),
+            "max": params.concurrency if params else 2,
+        }
         speeds = source_speeds.get(src, [])
         avg_speed = round(sum(speeds) / len(speeds), 2) if speeds else 0
 

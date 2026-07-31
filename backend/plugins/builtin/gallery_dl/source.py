@@ -589,7 +589,7 @@ async def _heartbeat_loop(
     callback: Callable[[], Awaitable[bool]],
     interval: float = 30.0,
 ) -> str:
-    """Periodically call semaphore heartbeat. Returns 'evicted' if slot lost."""
+    """Periodically validate the admission fence. Returns 'evicted' if ownership is lost."""
     while True:
         await asyncio.sleep(interval)
         if state.cancelled:
@@ -597,7 +597,7 @@ async def _heartbeat_loop(
         try:
             alive = await callback()
             if not alive:
-                logger.error("[gallery_dl] semaphore eviction — killing process")
+                logger.error("[gallery_dl] admission fence lost — killing process")
                 state.cancelled = True
                 await _terminate_process_tree(proc)
                 return "evicted"

@@ -295,7 +295,14 @@ class TestStaleReaperUsesHeartbeat:
     wrongly killed. Runs against the real SQLite engine.
     """
 
-    async def _insert_running_job(self, session, *, created_minutes_ago, last_update_minutes_ago):
+    async def _insert_running_job(
+        self,
+        session,
+        *,
+        created_minutes_ago,
+        last_update_minutes_ago,
+        admission_token=None,
+    ):
         from db.models import DownloadJob
 
         now = datetime.now(UTC)
@@ -311,6 +318,8 @@ class TestStaleReaperUsesHeartbeat:
             max_retries=3,
             created_at=now - timedelta(minutes=created_minutes_ago),
             progress=progress,
+            admission_key="ehentai" if admission_token else None,
+            admission_token=admission_token,
         )
         session.add(job)
         await session.commit()
@@ -348,6 +357,38 @@ class TestStaleReaperUsesHeartbeat:
         never = await db_session.get(DownloadJob, never_progressed_id)
         assert stuck.status != "running"
         assert never.status != "running"
+
+    async def test_stale_running_token_owner_is_not_reaped_or_retried(self, db_session, db_session_factory):
+        """A live fenced execution is authoritative even without a recent progress tick."""
+        token = uuid.uuid4()
+        job_id = await self._insert_running_job(
+            db_session,
+            created_minutes_ago=120,
+            last_update_minutes_ago=90,
+            admission_token=token,
+        )
+        enqueue = AsyncMock()
+
+        with (
+            patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.retry._cron_record", new_callable=AsyncMock),
+            patch("worker.retry.AsyncSessionLocal", db_session_factory),
+            patch("worker.retry.enqueue_download_job", enqueue),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            from worker.retry import retry_failed_downloads_job
+
+            result = await retry_failed_downloads_job({"redis": AsyncMock(get=AsyncMock(return_value=None))})
+
+        from db.models import DownloadJob
+
+        db_session.expire_all()
+        job = await db_session.get(DownloadJob, job_id)
+        assert result["stale_reaped"] == 0
+        assert job.status == "running"
+        assert job.admission_token == token
+        assert job.retry_count == 0
+        enqueue.assert_not_awaited()
 
 
 class TestStaleQueuedReaperChecksSaqMembership:
@@ -390,26 +431,30 @@ class TestStaleQueuedReaperChecksSaqMembership:
 
         mock_queue = MagicMock()
         mock_queue.job = AsyncMock(side_effect=_lookup)
+        mock_enqueue = AsyncMock()
 
         with (
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", db_session_factory),
             patch("worker.retry.get_queue", return_value=mock_queue),
-            patch("worker.retry.enqueue_download_job", new_callable=AsyncMock),
+            patch("worker.retry.enqueue_download_job", mock_enqueue),
             patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             from worker.retry import retry_failed_downloads_job
 
             result = await retry_failed_downloads_job({"redis": AsyncMock(get=AsyncMock(return_value=None))})
 
-        # Only the orphan (no SAQ entry) is stale; the live-queued job is preserved.
-        assert result["stale_reaped"] == 1, "a queued job with a live SAQ entry must not be reaped"
+        # A missing transport entry is repaired as delivery loss. Waiting for a
+        # source slot is not a failed download and must not consume retry budget.
+        assert result["stale_reaped"] == 0, "queued admission work must never be converted to failed"
 
         from db.models import DownloadJob
 
         orphan = await db_session.get(DownloadJob, orphan_id)
-        assert orphan.retry_count == 1, "the orphan (no SAQ entry) must be the one reaped and re-queued"
+        assert orphan.status == "queued"
+        assert orphan.retry_count == 0
+        mock_enqueue.assert_awaited_once()
 
         live = await db_session.get(DownloadJob, live_id)
         assert live.status == "queued"

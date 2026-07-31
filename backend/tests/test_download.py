@@ -1463,16 +1463,17 @@ class TestPauseResumeJobBranches:
             assert resp.json()["status"] == "running"
 
     async def test_resume_paused_job_with_dead_coroutine_re_enqueues(self, member_client, db_session, mock_redis):
-        """Resume with dead SAQ job (queue.job returns None) should re-enqueue the job."""
+        """Admission redelivery is not a failed business attempt."""
         job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=0)
 
         mock_queue = MagicMock()
         mock_queue.job = AsyncMock(return_value=None)  # None = job cleared from SAQ/Redis
+        mock_enqueue = AsyncMock()
 
         with (
             patch("routers.download.get_redis", return_value=mock_redis),
             patch("core.queue.get_queue", return_value=mock_queue),
-            patch("routers.download.enqueue_download_job", new_callable=AsyncMock),
+            patch("routers.download.enqueue_download_job", mock_enqueue),
         ):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
@@ -1483,6 +1484,12 @@ class TestPauseResumeJobBranches:
             data = resp.json()
             assert data["status"] == "queued"
             assert data.get("restarted") is True
+            from db.models import DownloadJob
+
+            db_session.expire_all()
+            refreshed = await db_session.get(DownloadJob, job_id)
+            assert refreshed.retry_count == 0
+            mock_enqueue.assert_awaited_once()
 
     async def test_resume_paused_job_with_dead_coroutine_and_retries_re_enqueues(
         self, member_client, db_session, mock_redis

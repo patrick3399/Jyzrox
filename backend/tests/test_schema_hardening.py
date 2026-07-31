@@ -7,6 +7,7 @@ added to prevent data-integrity and performance issues identified in the audit.
 from pathlib import Path
 
 _INIT_SQL = Path(__file__).parent.parent.parent / "db" / "init.sql"
+_ADMISSION_MIGRATION = Path(__file__).parent.parent / "migrations" / "versions" / "0022_download_admission.py"
 
 
 def test_init_sql_has_gallery_source_pages_contract():
@@ -21,6 +22,38 @@ def test_init_sql_binds_images_to_blob_locations():
     assert "PRIMARY KEY (blob_sha256, external_path)" in content
     assert "CONSTRAINT fk_images_blob_location" in content
     assert "idx_images_external_path" in content
+
+
+class TestDownloadAdmissionSchema:
+    """Fresh bootstrap and Alembic upgrade must expose the same FIFO contract."""
+
+    def _schema_sources(self) -> tuple[str, str]:
+        return _INIT_SQL.read_text(), _ADMISSION_MIGRATION.read_text()
+
+    def test_init_and_migration_define_ticket_sequence_and_columns(self):
+        init_sql, migration = self._schema_sources()
+        for source in (init_sql, migration):
+            assert "download_admission_ticket_seq" in source
+            assert "admission_key" in source
+            assert "admission_token" in source
+            assert "admission_ticket" in source
+            assert "nextval('download_admission_ticket_seq')" in source
+
+    def test_init_and_migration_define_fifo_and_token_fencing_indexes(self):
+        init_sql, migration = self._schema_sources()
+        for source in (init_sql, migration):
+            assert "idx_download_jobs_admission_fifo" in source
+            assert "(admission_key, admission_ticket, id)" in source
+            assert "status = 'queued' AND admission_token IS NULL" in source
+            assert "uq_download_jobs_admission_token" in source
+            assert "WHERE admission_token IS NOT NULL" in source
+
+    def test_migration_schema_operations_are_idempotent(self):
+        migration = _ADMISSION_MIGRATION.read_text()
+        assert "CREATE SEQUENCE IF NOT EXISTS" in migration
+        assert migration.count("ADD COLUMN IF NOT EXISTS") == 3
+        assert migration.count("CREATE INDEX IF NOT EXISTS") >= 1
+        assert "CREATE UNIQUE INDEX IF NOT EXISTS" in migration
 
 
 # ---------------------------------------------------------------------------

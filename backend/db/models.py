@@ -349,6 +349,12 @@ class DownloadJob(Base):
     retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
     max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    admission_key: Mapped[str | None] = mapped_column(Text)
+    admission_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    admission_ticket: Mapped[int | None] = mapped_column(
+        BigInteger,
+        server_default=text("nextval('download_admission_ticket_seq')"),
+    )
     gallery_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True
     )

@@ -172,6 +172,8 @@ const en: Record<string, string> = {
   'queue.created': 'Created',
   'queue.finished': 'Finished',
   'queue.queuedSuccess': 'Queued successfully',
+  'queue.waitingForSourceSlot': 'Waiting for {source} download slot',
+  'queue.queuePosition': 'Queue position: {position}',
   'queue.clear': 'Clear',
   'queue.clearing': 'Clearing...',
   'queue.cleared': '{count} jobs cleared',

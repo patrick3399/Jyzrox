@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,8 +10,8 @@ from urllib.parse import urlparse
 
 from core.config import settings
 from core.events import EventType, emit_safe
-from core.redis_client import DownloadSemaphore
 from services.credential import get_credential
+from services.download_admission import DownloadAdmission, admission_key_for
 from worker.constants import _IMAGE_EXTS, DISK_LOW_KEY, logger
 from worker.helpers import _set_job_progress, _set_job_status, _validate_image_magic, check_disk_space
 
@@ -150,6 +151,74 @@ async def _set_subscription_result(
         logger.warning("[download] failed to update subscription result: %s", exc)
 
 
+async def _enqueue_admission_redelivery(
+    *,
+    job_id: str,
+    url: str,
+    source: str,
+    options: dict | None,
+    total: int | None,
+    delay_seconds: float,
+) -> None:
+    import core.queue
+
+    await core.queue.enqueue(
+        "download_job",
+        _job_id=f"dispatch:{job_id}:{uuid.uuid4()}",
+        _timeout=settings.download_job_timeout,
+        _scheduled=int(time.time() + max(0.0, delay_seconds)),
+        _ttl=-1,
+        url=url,
+        source=source,
+        options=options,
+        db_job_id=job_id,
+        total=total,
+    )
+
+
+async def _wake_next_admission(key: str) -> None:
+    """Best-effort immediate transport delivery for the oldest waiter."""
+    from sqlalchemy import select
+
+    from core.database import AsyncSessionLocal
+    from db.models import DownloadJob
+
+    try:
+        async with asyncio.timeout(2):
+            async with AsyncSessionLocal() as session:
+                job = (
+                    await session.execute(
+                        select(DownloadJob)
+                        .where(
+                            DownloadJob.admission_key == key,
+                            DownloadJob.status == "queued",
+                            DownloadJob.admission_token.is_(None),
+                        )
+                        .order_by(DownloadJob.admission_ticket.asc(), DownloadJob.id.asc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if job is None:
+                    return
+                await _enqueue_admission_redelivery(
+                    job_id=str(job.id),
+                    url=job.url,
+                    source=job.source or "",
+                    options=job.options if isinstance(job.options, dict) else None,
+                    total=(job.progress or {}).get("total"),
+                    delay_seconds=0,
+                )
+    except Exception as exc:
+        logger.warning("[download] failed to wake admission waiter for %s: %s", key, exc)
+
+
+async def _admission_token_valid(job_id: str, token: uuid.UUID) -> bool:
+    from core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        return await DownloadAdmission(session).token_is_valid(job_id, token)
+
+
 async def download_job(
     ctx: dict,
     url: str,
@@ -158,25 +227,120 @@ async def download_job(
     db_job_id: str | None = None,
     total: int | None = None,
 ) -> dict:
-    """Download a gallery via the plugin registry — unified progressive import."""
+    """Claim durable source capacity before starting any expensive work."""
     logger.info("[download] url=%s", url)
-
-    await _set_job_status(db_job_id, "running")
-    started_at = datetime.now(UTC)
-
     from plugins.registry import plugin_registry
-    from services.credential import list_credentials as _list_creds
 
-    # ── 1. Find plugin ──────────────────────────────────────────────
     plugin = await plugin_registry.get_handler(url)
     if not plugin:
         plugin = plugin_registry.get_fallback()
     if not plugin:
         err = "No plugin can handle this URL"
         logger.error("[download] %s", err)
-        await _set_job_status(db_job_id, "failed", err)
-        await _set_subscription_result(db_job_id, "failed", err)
+        changed = await _set_job_status(db_job_id, "failed", err, required_current_status="queued")
+        if changed:
+            await _set_subscription_result(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
+
+    from core.site_config import site_config_service
+
+    source_id = plugin.meta.source_id
+    admission_key = plugin.meta.semaphore_key or source_id
+    if source_id == "gallery_dl":
+        from plugins.builtin.gallery_dl._sites import get_site_by_domain
+
+        domain = (urlparse(url).hostname or "unknown").removeprefix("www.")
+        effective_source_id = get_site_by_domain(domain).source_id
+        dl_params = await site_config_service.get_effective_download_params(effective_source_id)
+        if admission_key == "gallery_dl":
+            admission_key = admission_key_for("gallery_dl", url)
+    else:
+        dl_params = await site_config_service.get_effective_download_params(source_id)
+
+    if not db_job_id:
+        return await _run_download_job(
+            ctx, url, source, options, db_job_id, total, plugin=plugin, dl_params=dl_params, admission_token=None
+        )
+
+    from core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        claim = await DownloadAdmission(session).claim(db_job_id, admission_key, dl_params.concurrency)
+    if not claim.acquired:
+        # A token-less result with no queue position means the durable row is
+        # no longer queued (cancelled, paused, terminal, or a duplicate active
+        # delivery). Never schedule or mutate it from this stale attempt.
+        if claim.queue_position is None:
+            return {"status": "ignored"}
+        base_progress = {} if total is None else {"total": total}
+        await _set_job_progress(
+            db_job_id,
+            {
+                **base_progress,
+                "status_text": "Waiting for download slot...",
+                "wait_reason": "source_slot",
+                "semaphore_key": admission_key,
+                "queue_position": claim.queue_position,
+            },
+        )
+        await _enqueue_admission_redelivery(
+            job_id=db_job_id,
+            url=url,
+            source=source,
+            options=options,
+            total=total,
+            delay_seconds=5,
+        )
+        return {"status": "queued", "queue_position": claim.queue_position}
+
+    try:
+        running_confirmed = await _set_job_status(db_job_id, "running", required_current_status="running")
+        if not running_confirmed:
+            # Cancel/pause may win immediately after claim commits. Do not let
+            # this execution touch credentials, disk, metadata, importer, or
+            # the source plugin after durable state rejects the running guard.
+            return {"status": "ignored"}
+        return await _run_download_job(
+            ctx,
+            url,
+            source,
+            options,
+            db_job_id,
+            total,
+            plugin=plugin,
+            dl_params=dl_params,
+            admission_token=claim.token,
+        )
+    finally:
+        released = False
+        try:
+            async with AsyncSessionLocal() as session:
+                released = await DownloadAdmission(session).release(db_job_id, claim.token)
+        except Exception as exc:
+            logger.error("[download] failed to release admission token for %s: %s", db_job_id, exc)
+        if released:
+            await _wake_next_admission(admission_key)
+
+
+async def _run_download_job(
+    ctx: dict,
+    url: str,
+    source: str = "",
+    options: dict | None = None,
+    db_job_id: str | None = None,
+    total: int | None = None,
+    *,
+    plugin,
+    dl_params,
+    admission_token: uuid.UUID | None,
+) -> dict:
+    """Download a gallery via the plugin registry — unified progressive import."""
+    logger.info("[download] url=%s", url)
+
+    started_at = datetime.now(UTC)
+
+    from plugins.registry import plugin_registry
+    from services.credential import list_credentials as _list_creds
 
     source_id = plugin.meta.source_id
 
@@ -223,25 +387,7 @@ async def download_job(
         await emit_safe(EventType.SYSTEM_DISK_LOW, free_gb=free_gb)
         return {"status": "failed", "error": err}
 
-    # ── 5. Semaphore ────────────────────────────────────────────────
-    from core.site_config import site_config_service
-
-    sem_key = plugin.meta.semaphore_key or source_id
-    if source_id == "gallery_dl":
-        from plugins.builtin.gallery_dl._sites import get_site_by_domain as _get_site_by_domain
-
-        _url_domain = urlparse(url).netloc.removeprefix("www.")
-        _url_source_id = _get_site_by_domain(_url_domain).source_id
-        _dl_params = await site_config_service.get_effective_download_params(_url_source_id)
-    else:
-        _dl_params = await site_config_service.get_effective_download_params(source_id)
-
-    if sem_key == "gallery_dl":
-        domain = urlparse(url).netloc.removeprefix("www.")
-        sem_key = f"gallery_dl:{domain}"
-    sem = DownloadSemaphore(sem_key, max_count=_dl_params.concurrency)
     _base_progress: dict = {} if total is None else {"total": total}
-    await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
 
     # ── 6. Progressive Importer (ALL sources) ───────────────────────
     import_user_id = None
@@ -252,12 +398,18 @@ async def download_job(
         from core.database import AsyncSessionLocal
         from db.models import DownloadJob as _DJ
 
-        async with AsyncSessionLocal() as _sess:
-            _result = await _sess.execute(sa_select(_DJ.user_id, _DJ.gallery_id).where(_DJ.id == db_job_id))
-            _row = _result.one_or_none()
-            if _row:
-                import_user_id = _row.user_id
-                existing_gallery_id = _row.gallery_id
+        try:
+            async with asyncio.timeout(2):
+                async with AsyncSessionLocal() as _sess:
+                    _result = await _sess.execute(sa_select(_DJ.user_id, _DJ.gallery_id).where(_DJ.id == db_job_id))
+                    _row = _result.one_or_none()
+                    if _row:
+                        import_user_id = _row.user_id
+                        existing_gallery_id = _row.gallery_id
+        except Exception as exc:
+            # Admission already verified the durable row. Keep this lookup
+            # defensive for isolated unit execution and transient read errors.
+            logger.warning("[download] could not load persisted gallery attachment: %s", exc)
 
     from worker.constants import _MEDIA_EXTS
     from worker.progressive import ProgressiveImporter
@@ -378,7 +530,7 @@ async def download_job(
             "avg_page_ms": round(elapsed * 1000 / downloaded) if downloaded > 0 else 0,
             "last_page_ms": timing_ctx.get("last_page_ms", 0),
             "idle_ms": timing_ctx.get("idle_ms", 0),
-            "idle_timeout_ms": _dl_params.inactivity_timeout * 1000,
+            "idle_timeout_ms": dl_params.inactivity_timeout * 1000,
             "started_at": started_at.isoformat(),
             "elapsed_ms": round(elapsed * 1000),
         }
@@ -453,41 +605,30 @@ async def download_job(
         await importer.import_file(file_path, sha256=sha256)
 
     # ── 11. Execute download ────────────────────────────────────────
-    job_id_str = db_job_id or str(uuid.uuid4())
-
-    # ── Pre-semaphore pause gate (for keep_paused recovery) ────────
+    # ── Pre-download pause gate (for keep_paused recovery) ─────────
     if db_job_id:
         pause_val = await redis.get(f"download:pause:{db_job_id}")
         if pause_val is not None:
             await _set_job_status(db_job_id, "paused")
-            logger.info("[download] pre-semaphore pause gate: job %s is paused, skipping", db_job_id)
+            logger.info("[download] pre-download pause gate: job %s is paused, skipping", db_job_id)
             return {"status": "paused"}
 
     try:
-        wait_secs = await sem.acquire(job_id_str)
-        timing_ctx["semaphore_wait_ms"] = round(wait_secs * 1000)
-        if wait_secs > 0:
-            logger.info("[download] acquired slot after %.1fs wait", wait_secs)
-    except TimeoutError:
-        err = "No download slot available — timed out waiting. Please try again later."
-        logger.error("[download] %s", err)
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
 
-    try:
-        # Build heartbeat callback + inject into options
         async def _sem_heartbeat() -> bool:
-            """Return True if heartbeat succeeded, False if evicted."""
-            alive = await sem.heartbeat(job_id_str)
+            """Return whether this execution still owns its database fence."""
+            if not db_job_id or admission_token is None:
+                return True
+            alive = await _admission_token_valid(db_job_id, admission_token)
             if not alive:
-                logger.warning("[download] heartbeat lost (evicted) for %s", job_id_str)
+                logger.warning("[download] admission token lost for %s", db_job_id)
             return alive
 
         # Inject semaphore heartbeat and config isolation into options
         opts = dict(options or {})
         opts["config_id"] = db_job_id
         opts["sem_heartbeat"] = _sem_heartbeat
-        opts["inactivity_timeout"] = _dl_params.inactivity_timeout
+        opts["inactivity_timeout"] = dl_params.inactivity_timeout
         opts["timing_ctx"] = timing_ctx
         opts["diagnostic_ctx"] = diagnostic_ctx
         opts["job_context"] = (options or {}).get("job_context", "manual")
@@ -508,39 +649,36 @@ async def download_job(
         if importer.existing_page_nums:
             opts["skip_pages"] = importer.existing_page_nums
 
-        try:
-            result = await plugin.download(
-                url=url,
-                dest_dir=target_dir,
-                credentials=credentials,
-                on_progress=on_progress,
-                cancel_check=cancel_check,
-                pid_callback=pid_callback,
-                pause_check=pause_check,
-                on_file=on_file,
-                options=opts,
-            )
-            # N8: cookie writeback (updated cookies → encrypted DB)
-            if db_job_id and result.status in ("done", "partial"):
-                try:
-                    await _writeback_cookies(credentials, db_job_id)
-                except Exception as exc:
-                    logger.warning("[download] cookie writeback failed: %s", exc)
-        except Exception as exc:
-            err = f"Download failed: {exc}"
-            logger.error("[download] %s", err, exc_info=True)
-            await importer.abort()
-            await _set_job_status(db_job_id, "failed", err)
-            await _set_subscription_result(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
-        finally:
-            if pid_key:
-                try:
-                    await redis.delete(pid_key)
-                except Exception:
-                    pass
+        result = await plugin.download(
+            url=url,
+            dest_dir=target_dir,
+            credentials=credentials,
+            on_progress=on_progress,
+            cancel_check=cancel_check,
+            pid_callback=pid_callback,
+            pause_check=pause_check,
+            on_file=on_file,
+            options=opts,
+        )
+        # N8: cookie writeback (updated cookies → encrypted DB)
+        if db_job_id and result.status in ("done", "partial"):
+            try:
+                await _writeback_cookies(credentials, db_job_id)
+            except Exception as exc:
+                logger.warning("[download] cookie writeback failed: %s", exc)
+    except Exception as exc:
+        err = f"Download failed: {exc}"
+        logger.error("[download] %s", err, exc_info=True)
+        await importer.abort()
+        await _set_job_status(db_job_id, "failed", err)
+        await _set_subscription_result(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
     finally:
-        await sem.release(job_id_str)
+        if pid_key:
+            try:
+                await redis.delete(pid_key)
+            except Exception:
+                pass
         # Fallback config cleanup (in case source.py missed it)
         config_path = Path(f"/app/config/gallery-dl-{db_job_id}.json") if db_job_id else None
         if config_path:

@@ -60,6 +60,8 @@ async def enqueue(
     *,
     _job_id: str | None = None,
     _timeout: int | None = None,
+    _scheduled: int | float | None = None,
+    _ttl: int | None = None,
     **kwargs: Any,
 ) -> Any:
     """Enqueue a job, routing to the correct queue automatically.
@@ -71,7 +73,14 @@ async def enqueue(
     too short for normal application work, so callers inherit a conservative
     one-hour timeout unless they explicitly select a different limit.
     """
-    return await _enqueue_routed(job_name, _job_id=_job_id, _timeout=_timeout, **kwargs)
+    return await _enqueue_routed(
+        job_name,
+        _job_id=_job_id,
+        _timeout=_timeout,
+        _scheduled=_scheduled,
+        _ttl=_ttl,
+        **kwargs,
+    )
 
 
 async def _enqueue_routed(
@@ -79,6 +88,8 @@ async def _enqueue_routed(
     *,
     _job_id: str | None = None,
     _timeout: int | None = None,
+    _scheduled: int | float | None = None,
+    _ttl: int | None = None,
     **kwargs: Any,
 ) -> Any:
     """Build and submit a routed SAQ job; kept separate for focused tests."""
@@ -88,6 +99,10 @@ async def _enqueue_routed(
     if _job_id is not None:
         enqueue_kwargs["key"] = _job_id
     enqueue_kwargs["timeout"] = _timeout if _timeout is not None else DEFAULT_JOB_TIMEOUT
+    if _scheduled is not None:
+        enqueue_kwargs["scheduled"] = _scheduled
+    if _ttl is not None:
+        enqueue_kwargs["ttl"] = _ttl
     if kwargs:
         enqueue_kwargs["kwargs"] = kwargs
     return await q.enqueue(job_name, **enqueue_kwargs)

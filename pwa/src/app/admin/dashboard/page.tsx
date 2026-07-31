@@ -338,12 +338,17 @@ function QueuedJobRow({
   job: DownloadJob
   siteStats: Record<string, DashboardSiteStats>
 }) {
-  const stats = siteStats[job.source]
-  const waitReason = stats
+  const isWaitingForSourceSlot = job.progress?.wait_reason === 'source_slot'
+  const semaphoreKey =
+    typeof job.progress?.semaphore_key === 'string' && job.progress.semaphore_key
+      ? job.progress.semaphore_key
+      : null
+  const stats = semaphoreKey ? siteStats[semaphoreKey] : undefined
+  const detail = isWaitingForSourceSlot
     ? t('downloadDashboard.waitingForSlot', {
-        source: job.source,
-        used: String(stats.semaphore.used),
-        max: String(stats.semaphore.max),
+        source: semaphoreKey ?? job.source,
+        used: stats ? String(stats.semaphore.used) : '?',
+        max: stats ? String(stats.semaphore.max) : '?',
       })
     : job.source
 
@@ -353,7 +358,7 @@ function QueuedJobRow({
     <div className="flex items-center gap-3 py-2.5 border-b border-vault-border/50 last:border-0">
       <div className="flex-1 min-w-0">
         <p className="text-sm text-vault-text truncate">{title}</p>
-        <p className="text-xs text-vault-text-muted mt-0.5">{waitReason}</p>
+        <p className="text-xs text-vault-text-muted mt-0.5">{detail}</p>
       </div>
       <span className="text-xs text-vault-text-muted shrink-0">{job.source}</span>
     </div>

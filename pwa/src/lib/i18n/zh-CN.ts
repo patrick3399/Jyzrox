@@ -315,6 +315,8 @@ const zhCN: Record<string, string> = {
   'queue.created': '创建时间',
   'queue.finished': '完成时间',
   'queue.queuedSuccess': '已成功加入队列',
+  'queue.waitingForSourceSlot': '正在等待 {source} 下载插槽',
+  'queue.queuePosition': '队列位置：{position}',
   'queue.clear': '清除',
   'queue.clearing': '清除中...',
   'queue.cleared': '已清除 {count} 个任务',

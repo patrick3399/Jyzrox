@@ -34,6 +34,7 @@ from plugins.models import (
 )
 from services import cache
 from services.credential import get_credential
+from services.download_admission import admission_key_for
 from services.pixiv_client import PixivClient
 
 logger = logging.getLogger(__name__)
@@ -778,6 +779,7 @@ async def _enqueue_collection_sync(user_id: int, owner_user_id: int, *, full_rec
                 options={"pixiv_collection": True, "full_reconcile": full_reconcile},
                 user_id=owner_user_id,
                 subscription_id=subscription_id,
+                admission_key=admission_key_for("pixiv", url),
             )
         )
         await session.commit()

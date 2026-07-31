@@ -352,6 +352,8 @@ const zhTW: Record<string, string> = {
   'queue.created': '建立時間',
   'queue.finished': '完成時間',
   'queue.queuedSuccess': '已成功排入佇列',
+  'queue.waitingForSourceSlot': '正在等待 {source} 下載插槽',
+  'queue.queuePosition': '佇列位置：{position}',
   'queue.clear': '清除',
   'queue.clearing': '清除中...',
   'queue.cleared': '已清除 {count} 個任務',

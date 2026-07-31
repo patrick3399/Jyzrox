@@ -228,6 +228,18 @@ class TestStartupMarkFailedStrategy:
         assert job.finished_at is not None
         mock_enqueue.assert_not_awaited()
 
+    async def test_startup_clears_crashed_execution_token_before_recovery(self):
+        """A process-local token cannot survive worker death and block capacity forever."""
+        job = _make_job("job-token", status="running")
+        job.admission_token = "dead-worker-token"
+        redis = _make_redis(strategy_running="auto_retry", strategy_paused="keep_paused")
+        session = _make_session(running_jobs=[job])
+
+        await _run_startup(redis, session)
+
+        assert job.admission_token is None
+        assert job.status == "queued"
+
     async def test_startup_mark_failed_strategy_emits_correct_counts(self):
         """mark_failed strategy: running_failed count is correct in emitted event."""
         jobs = [_make_job(f"job-{i}", status="running") for i in range(3)]

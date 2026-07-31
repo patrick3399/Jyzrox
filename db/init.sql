@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS image_tags (
     PRIMARY KEY (image_id, tag_id)
 );
 
+CREATE SEQUENCE IF NOT EXISTS download_admission_ticket_seq;
+
 CREATE TABLE IF NOT EXISTS download_jobs (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     url             TEXT NOT NULL,
@@ -157,7 +159,10 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     error           TEXT,
     created_at      TIMESTAMPTZ DEFAULT now(),
     finished_at     TIMESTAMPTZ,
-    user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL
+    user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    admission_key   TEXT,
+    admission_token UUID,
+    admission_ticket BIGINT DEFAULT nextval('download_admission_ticket_seq')
 );
 
 CREATE TABLE IF NOT EXISTS read_progress (
@@ -265,6 +270,29 @@ CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_user_id ON download_jobs (user_id);
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS admission_key TEXT;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS admission_token UUID;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS admission_ticket BIGINT
+    DEFAULT nextval('download_admission_ticket_seq');
+WITH ranked AS (
+    SELECT id, row_number() OVER (ORDER BY created_at, id) AS ticket
+    FROM download_jobs
+    WHERE admission_ticket IS NULL
+)
+UPDATE download_jobs AS job
+SET admission_ticket = ranked.ticket
+FROM ranked
+WHERE job.id = ranked.id;
+SELECT setval(
+    'download_admission_ticket_seq',
+    GREATEST(COALESCE((SELECT max(admission_ticket) FROM download_jobs), 0), 1),
+    EXISTS (SELECT 1 FROM download_jobs)
+);
+CREATE INDEX IF NOT EXISTS idx_download_jobs_admission_fifo
+    ON download_jobs (admission_key, admission_ticket, id)
+    WHERE status = 'queued' AND admission_token IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_download_jobs_admission_token
+    ON download_jobs (admission_token) WHERE admission_token IS NOT NULL;
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS canonical_url TEXT;
 UPDATE download_jobs
 SET canonical_url = regexp_replace(split_part(btrim(url), '#', 1), '/+$', '')

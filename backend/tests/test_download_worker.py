@@ -10,6 +10,7 @@ Tests cover:
 import asyncio
 import os
 import sys
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -384,6 +385,37 @@ def _make_mock_sem(*, timeout: bool = False) -> MagicMock:
     return mock_sem
 
 
+def _make_mock_admission(*, acquired: bool = True, queue_position: int | None = None) -> MagicMock:
+    """Build the durable admission mock used by pipeline-focused tests."""
+    admission = MagicMock()
+    admission.claim = AsyncMock(
+        return_value=MagicMock(
+            acquired=acquired,
+            token=uuid.uuid4() if acquired else None,
+            queue_position=queue_position,
+        )
+    )
+    admission.release = AsyncMock(return_value=True)
+    admission.token_is_valid = AsyncMock(return_value=True)
+    return admission
+
+
+@pytest.fixture(autouse=True)
+def mock_download_admission_for_legacy_pipeline_tests():
+    """Keep non-admission tests focused on their original pipeline concern.
+
+    The obsolete ``DownloadSemaphore`` attribute remains patchable inside old
+    tests while durable DB admission grants the job by default. The dedicated
+    admission tests override this fixture with denied/controlled claims.
+    """
+    with (
+        patch("worker.download.DownloadAdmission", return_value=_make_mock_admission()),
+        patch("worker.download.DownloadSemaphore", MagicMock(), create=True),
+        patch("worker.download._wake_next_admission", new_callable=AsyncMock),
+    ):
+        yield
+
+
 def _make_default_site_cfg():
     """Return a minimal site config mock with default inactivity_timeout."""
     cfg = MagicMock()
@@ -446,6 +478,177 @@ def _patch_download_job_dependencies(
 
 
 # ---------------------------------------------------------------------------
+# Durable admission and scheduled redelivery
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadAdmissionRedelivery:
+    async def test_unavailable_source_slot_stays_queued_and_does_no_download_work(self):
+        """A full source must release the SAQ worker without starting the pipeline."""
+        from worker.download import download_job
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "ehentai"
+        plugin.meta.name = "E-Hentai"
+        plugin.meta.semaphore_key = "ehentai"
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.resolve_metadata = AsyncMock()
+        plugin.download = AsyncMock()
+
+        registry = MagicMock()
+        registry.get_handler = AsyncMock(return_value=plugin)
+        registry.get_fallback = MagicMock(return_value=None)
+        registry.get_downloader = MagicMock(return_value=None)
+
+        denied = MagicMock(acquired=False, token=None, queue_position=2)
+        admission = MagicMock()
+        admission.claim = AsyncMock(return_value=denied)
+        status = AsyncMock()
+        progress = AsyncMock()
+        enqueue = AsyncMock()
+        importer = MagicMock()
+
+        with (
+            patch("plugins.registry.plugin_registry", registry),
+            patch("worker.download.DownloadAdmission", return_value=admission),
+            patch("worker.download._set_job_status", status),
+            patch("worker.download._set_job_progress", progress),
+            patch("worker.download.get_credential", new_callable=AsyncMock),
+            patch("worker.download.check_disk_space", return_value=(True, 100.0)),
+            patch("worker.progressive.ProgressiveImporter", importer),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+            patch("core.queue.enqueue", enqueue),
+        ):
+            result = await download_job(
+                _make_ctx(),
+                "https://e-hentai.org/g/123/token/",
+                source="ehentai",
+                db_job_id="b225fc4c-c550-4c19-a741-93d5ef915c4e",
+            )
+
+        assert result["status"] == "queued"
+        assert all(call.args[1] not in {"running", "failed"} for call in status.await_args_list)
+        progress.assert_awaited()
+        waiting = progress.await_args_list[-1].args[1]
+        assert waiting["wait_reason"] == "source_slot"
+        assert waiting["semaphore_key"] == "ehentai"
+        assert waiting["queue_position"] == 2
+        assert enqueue.await_count == 1
+        enqueue_kwargs = enqueue.await_args.kwargs
+        assert enqueue_kwargs["_scheduled"] is not None
+        assert enqueue_kwargs["_ttl"] == -1
+        assert str(enqueue_kwargs["_job_id"]).startswith("dispatch:b225fc4c-c550-4c19-a741-93d5ef915c4e:")
+        plugin.resolve_metadata.assert_not_awaited()
+        plugin.download.assert_not_awaited()
+        importer.assert_not_called()
+
+    async def test_claim_transitions_to_running_before_plugin_download(self):
+        """The durable row becomes running only after this execution owns a token."""
+        from worker.download import download_job
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "ehentai"
+        plugin.meta.name = "E-Hentai"
+        plugin.meta.semaphore_key = "ehentai"
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = AsyncMock(return_value=_make_plugin_result(status="cancelled", downloaded=0))
+
+        registry = MagicMock()
+        registry.get_handler = AsyncMock(return_value=plugin)
+        registry.get_fallback = MagicMock(return_value=None)
+        registry.get_downloader = MagicMock(return_value=None)
+        token = uuid.uuid4()
+        claimed = MagicMock(acquired=True, token=token, queue_position=1)
+        admission = MagicMock()
+        admission.claim = AsyncMock(return_value=claimed)
+        admission.release = AsyncMock(return_value=True)
+        status = AsyncMock()
+
+        importer = MagicMock()
+        importer.gallery_id = None
+        importer.title = ""
+        importer.existing_page_nums = set()
+        importer.cleanup = AsyncMock()
+        importer.abort = AsyncMock()
+
+        with (
+            patch("plugins.registry.plugin_registry", registry),
+            patch("worker.download.DownloadAdmission", return_value=admission),
+            patch("worker.download._set_job_status", status),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("worker.download.get_credential", new_callable=AsyncMock),
+            patch("worker.download.check_disk_space", return_value=(True, 100.0)),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+            patch("worker.download._set_subscription_result", new_callable=AsyncMock),
+        ):
+            await download_job(
+                _make_ctx(),
+                "https://e-hentai.org/g/123/token/",
+                source="ehentai",
+                db_job_id="b225fc4c-c550-4c19-a741-93d5ef915c4e",
+            )
+
+        statuses = [call.args[1] for call in status.await_args_list]
+        assert statuses[0] == "running"
+        assert plugin.download.await_count == 1
+        admission.release.assert_awaited_once_with("b225fc4c-c550-4c19-a741-93d5ef915c4e", token)
+
+    async def test_cancel_race_after_claim_skips_pipeline_and_fenced_releases(self):
+        """A cancel/pause winning the running CAS must stop the claimed execution."""
+        from worker.download import download_job
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "ehentai"
+        plugin.meta.name = "E-Hentai"
+        plugin.meta.semaphore_key = "ehentai"
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.resolve_metadata = AsyncMock()
+        plugin.download = AsyncMock(return_value=_make_plugin_result(status="cancelled", downloaded=0))
+
+        registry = MagicMock()
+        registry.get_handler = AsyncMock(return_value=plugin)
+        registry.get_fallback = MagicMock(return_value=None)
+        registry.get_downloader = MagicMock(return_value=None)
+        token = uuid.uuid4()
+        admission = MagicMock()
+        admission.claim = AsyncMock(return_value=MagicMock(acquired=True, token=token, queue_position=1))
+        admission.release = AsyncMock(return_value=True)
+        credentials = AsyncMock()
+        disk_check = MagicMock(return_value=(True, 100.0))
+        importer = MagicMock()
+
+        with (
+            patch("plugins.registry.plugin_registry", registry),
+            patch("worker.download.DownloadAdmission", return_value=admission),
+            patch("worker.download._set_job_status", new_callable=AsyncMock, return_value=False),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("worker.download.get_credential", credentials),
+            patch("worker.download.check_disk_space", disk_check),
+            patch("worker.progressive.ProgressiveImporter", importer),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(
+                _make_ctx(),
+                "https://e-hentai.org/g/123/token/",
+                source="ehentai",
+                db_job_id="b225fc4c-c550-4c19-a741-93d5ef915c4e",
+            )
+
+        assert result["status"] == "ignored"
+        credentials.assert_not_awaited()
+        disk_check.assert_not_called()
+        importer.assert_not_called()
+        plugin.resolve_metadata.assert_not_awaited()
+        plugin.download.assert_not_awaited()
+        admission.release.assert_awaited_once_with("b225fc4c-c550-4c19-a741-93d5ef915c4e", token)
+
+
+# ---------------------------------------------------------------------------
 # TestDownloadJobPluginErrors
 # ---------------------------------------------------------------------------
 
@@ -471,7 +674,7 @@ class TestDownloadJobPluginErrors:
 
         assert result["status"] == "failed"
         assert "No plugin" in result["error"]
-        mock_status.assert_any_call("job-001", "failed", result["error"])
+        mock_status.assert_any_call("job-001", "failed", result["error"], required_current_status="queued")
 
     async def test_credential_required_but_missing_returns_failed(self):
         """When credentials are required but absent, download_job returns failed."""
@@ -500,6 +703,7 @@ class TestDownloadJobPluginErrors:
             patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(
                 _make_ctx(), "https://pixiv.net/artworks/123", source="pixiv", db_job_id="job-002"
@@ -536,8 +740,7 @@ class TestDownloadJobPluginErrors:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = _make_mock_sem()
-        mock_sem_cls = MagicMock(return_value=mock_sem)
+        admission = _make_mock_admission()
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -546,7 +749,7 @@ class TestDownloadJobPluginErrors:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
-            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("worker.download.DownloadAdmission", return_value=admission),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
@@ -584,8 +787,7 @@ class TestDownloadJobPluginErrors:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = _make_mock_sem()
-        mock_sem_cls = MagicMock(return_value=mock_sem)
+        admission = _make_mock_admission()
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -594,7 +796,7 @@ class TestDownloadJobPluginErrors:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
-            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("worker.download.DownloadAdmission", return_value=admission),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
@@ -631,8 +833,7 @@ class TestDownloadJobPluginErrors:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = _make_mock_sem()
-        mock_sem_cls = MagicMock(return_value=mock_sem)
+        admission = _make_mock_admission()
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -641,7 +842,7 @@ class TestDownloadJobPluginErrors:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
-            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("worker.download.DownloadAdmission", return_value=admission),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
@@ -676,10 +877,10 @@ class TestDownloadJobPluginErrors:
 
 
 class TestDownloadJobSemaphore:
-    """Tests for semaphore acquisition behaviour in download_job()."""
+    """Compatibility coverage for the durable replacement of the semaphore."""
 
-    async def test_semaphore_timeout_returns_failed(self):
-        """TimeoutError from semaphore propagates as a failed status."""
+    async def test_full_source_stays_queued_and_schedules_redelivery(self):
+        """Capacity exhaustion is queueing, not a failed download attempt."""
         from worker.download import download_job
 
         plugin = MagicMock()
@@ -695,37 +896,28 @@ class TestDownloadJobSemaphore:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = _make_mock_sem(timeout=True)
-        mock_sem_cls = MagicMock(return_value=mock_sem)
+        admission = _make_mock_admission(acquired=False, queue_position=4)
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
-            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
             patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
-            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock) as mock_progress,
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
-            patch(
-                "worker.progressive.ProgressiveImporter",
-                return_value=MagicMock(
-                    gallery_id=None,
-                    title=None,
-                    source_url=None,
-                    abort=AsyncMock(),
-                    cleanup=AsyncMock(),
-                ),
-            ),
-            patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.download.DownloadAdmission", return_value=admission),
             patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+            patch("worker.download._enqueue_admission_redelivery", new_callable=AsyncMock) as redeliver,
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-sem-01")
 
-        assert result["status"] == "failed"
-        assert "timed out" in result["error"].lower()
-        mock_status.assert_any_call("job-sem-01", "failed", result["error"])
+        assert result == {"status": "queued", "queue_position": 4}
+        mock_status.assert_not_awaited()
+        waiting = mock_progress.await_args.args[1]
+        assert waiting["wait_reason"] == "source_slot"
+        assert waiting["queue_position"] == 4
+        redeliver.assert_awaited_once()
 
-    async def test_semaphore_acquired_and_released(self):
-        """Successful download calls sem.acquire() once and sem.release() once."""
+    async def test_admission_claimed_and_token_released(self):
+        """Successful download claims capacity and releases only its token."""
         from worker.download import download_job
 
         plugin = MagicMock()
@@ -752,8 +944,8 @@ class TestDownloadJobSemaphore:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = _make_mock_sem()
-        mock_sem_cls = MagicMock(return_value=mock_sem)
+        admission = _make_mock_admission()
+        token = admission.claim.return_value.token
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -762,7 +954,7 @@ class TestDownloadJobSemaphore:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
-            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("worker.download.DownloadAdmission", return_value=admission),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
@@ -771,11 +963,11 @@ class TestDownloadJobSemaphore:
             result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-sem-02")
 
         assert result["status"] == "done"
-        mock_sem.acquire.assert_awaited_once_with("job-sem-02")
-        mock_sem.release.assert_awaited_once_with("job-sem-02")
+        admission.claim.assert_awaited_once()
+        admission.release.assert_awaited_once_with("job-sem-02", token)
 
-    async def test_semaphore_key_uses_domain_for_gallery_dl(self):
-        """For gallery_dl source, semaphore key is prefixed with domain."""
+    async def test_admission_key_uses_domain_for_gallery_dl(self):
+        """gallery-dl domains get independent admission capacity."""
         from worker.download import download_job
 
         plugin = MagicMock()
@@ -802,11 +994,7 @@ class TestDownloadJobSemaphore:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        captured_keys = []
-
-        def _capture_sem(source, max_count):
-            captured_keys.append(source)
-            return _make_mock_sem()
+        admission = _make_mock_admission()
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -815,7 +1003,7 @@ class TestDownloadJobSemaphore:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
-            patch("worker.download.DownloadSemaphore", side_effect=_capture_sem),
+            patch("worker.download.DownloadAdmission", return_value=admission),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
@@ -823,8 +1011,7 @@ class TestDownloadJobSemaphore:
         ):
             await download_job(_make_ctx(), "https://danbooru.donmai.us/posts/1", db_job_id="job-sem-03")
 
-        assert len(captured_keys) == 1
-        assert captured_keys[0].startswith("gallery_dl:danbooru.donmai.us")
+        assert admission.claim.await_args.args[1] == "gallery_dl:danbooru.donmai.us"
 
 
 # ---------------------------------------------------------------------------
@@ -1583,8 +1770,7 @@ class TestDownloadJobDiskSpace:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = _make_mock_sem()
-        mock_sem_cls = MagicMock(return_value=mock_sem)
+        admission = _make_mock_admission()
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -1593,7 +1779,7 @@ class TestDownloadJobDiskSpace:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
-            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("worker.download.DownloadAdmission", return_value=admission),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
@@ -1604,8 +1790,8 @@ class TestDownloadJobDiskSpace:
 
         # The key assertion: the job did NOT fail with a disk space error.
         assert result.get("error", "") == "" or "disk space" not in result.get("error", "").lower()
-        # It should have proceeded past the disk check and reached the semaphore.
-        mock_sem.acquire.assert_awaited_once()
+        # It should have proceeded past the disk check after admission.
+        admission.claim.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

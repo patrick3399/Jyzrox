@@ -316,6 +316,8 @@ const ja: Record<string, string> = {
   'queue.created': '作成日時',
   'queue.finished': '完了日時',
   'queue.queuedSuccess': 'キューに追加しました',
+  'queue.waitingForSourceSlot': '{source} のダウンロードスロットを待機中',
+  'queue.queuePosition': 'キュー位置：{position}',
   'queue.clear': 'クリア',
   'queue.clearing': 'クリア中...',
   'queue.cleared': '{count}件のジョブをクリアしました',

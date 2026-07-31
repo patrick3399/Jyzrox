@@ -13,6 +13,7 @@ from core.database import AsyncSessionLocal
 from core.utils import normalize_download_url
 from db.models import DownloadJob, Subscription
 from plugins.models import NewWork
+from services.download_admission import admission_key_for
 from worker.constants import GROUP_MAX_DURATION, logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
@@ -87,6 +88,7 @@ async def _enqueue_discovered_works(ctx: dict, sub, subscriber, *, force_full_sc
                     options=options,
                     user_id=sub.user_id,
                     subscription_id=sub.id,
+                    admission_key=admission_key_for(source, canonical_url),
                 )
             )
             enqueued.append((job_id, work))
@@ -286,6 +288,7 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
                     options=options,
                     user_id=sub.user_id,
                     subscription_id=sub.id,
+                    admission_key=admission_key_for(sub.source or "gallery_dl", canonical_url),
                 )
             )
             await session.commit()

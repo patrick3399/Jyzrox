@@ -3,6 +3,7 @@
 import hashlib
 import os
 import shutil
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,13 +49,21 @@ def check_disk_space(path: str = "/data", min_free_gb: float = 2.0) -> tuple[boo
         return True, -1.0
 
 
-async def _set_job_status(job_id: str | None, status: str, error: str | None = None) -> None:
+async def _set_job_status(
+    job_id: str | None,
+    status: str,
+    error: str | None = None,
+    *,
+    required_current_status: str | None = None,
+) -> bool:
     if not job_id:
-        return
+        return False
     try:
         async with AsyncSessionLocal() as session:
             job = await session.get(DownloadJob, uuid.UUID(job_id))
             if job:
+                if required_current_status is not None and job.status != required_current_status:
+                    return False
                 job.status = status
                 if error:
                     job.error = error
@@ -76,8 +85,10 @@ async def _set_job_status(job_id: str | None, status: str, error: str | None = N
                     )
                 except Exception:
                     pass
+                return True
     except (sqlalchemy.exc.SQLAlchemyError, ValueError, OSError) as exc:
         logger.error("[download] failed to update job status: %s", exc)
+    return False
 
 
 async def _set_job_progress(job_id: str | None, progress: dict) -> None:
@@ -120,6 +131,12 @@ async def enqueue_download_job(job, job_key: str) -> None:
 
     raw_options = getattr(job, "options", None)
     options = raw_options if isinstance(raw_options, dict) else {}
+    # Retry/resume/recovery enqueue before committing the DB transition (BE-T19).
+    # Delay those deliveries briefly so a different worker cannot observe the
+    # old terminal/paused/running status and discard the transport attempt.
+    transition_transport = (
+        {"_scheduled": int(time.time()) + 5, "_ttl": -1} if getattr(job, "status", "queued") != "queued" else {}
+    )
     if options.get("pixiv_collection") is True:
         from plugins.builtin.pixiv.source import PixivSourcePlugin
 
@@ -130,6 +147,7 @@ async def enqueue_download_job(job, job_key: str) -> None:
             "pixiv_collection_job",
             _job_id=job_key,
             _timeout=settings.download_job_timeout,
+            **transition_transport,
             user_id=int(match.group(1)),
             owner_user_id=job.user_id,
             db_job_id=str(job.id),
@@ -142,6 +160,7 @@ async def enqueue_download_job(job, job_key: str) -> None:
         "download_job",
         _job_id=job_key,
         _timeout=settings.download_job_timeout,
+        **transition_transport,
         url=job.url,
         source=job.source or "",
         # Policy must survive retry/recovery; queue payloads are ephemeral but

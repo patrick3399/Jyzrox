@@ -191,6 +191,13 @@ function JobRow({
   const gallerySource = job.gallery_source
   const gallerySourceId = job.gallery_source_id
   const galleryTitle = job.progress?.title
+  const isWaitingForSourceSlot =
+    job.status === 'queued' && job.progress?.wait_reason === 'source_slot'
+  const semaphoreKey =
+    typeof job.progress?.semaphore_key === 'string' && job.progress.semaphore_key
+      ? job.progress.semaphore_key
+      : job.source || t('common.auto')
+  const queuePosition = job.progress?.queue_position
 
   const isExpanded = expandedJobId === job.id
 
@@ -247,6 +254,14 @@ function JobRow({
             )}
           </div>
           {job.error && <p className="mt-1 text-xs text-red-400 break-words">{job.error}</p>}
+          {isWaitingForSourceSlot && (
+            <p className="mt-1 text-xs text-yellow-400">
+              {t('queue.waitingForSourceSlot', { source: semaphoreKey })}
+              {typeof queuePosition === 'number' && queuePosition > 0 && (
+                <> · {t('queue.queuePosition', { position: queuePosition })}</>
+              )}
+            </p>
+          )}
           {/* Retry info */}
           {job.retry_count > 0 && (
             <p className="mt-1 text-xs text-vault-text-muted">

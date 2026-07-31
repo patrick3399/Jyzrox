@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from datetime import UTC
 
 from saq import CronJob
@@ -359,6 +360,9 @@ async def startup(ctx: dict) -> None:
 
             # Re-enqueue or fail recovered jobs based on running_strategy
             for job in running_jobs:
+                # Execution tokens are process-local fences. No owner survives
+                # a worker restart, regardless of the selected recovery policy.
+                job.admission_token = None
                 if running_strategy == "auto_retry":
                     job.retry_count = (job.retry_count or 0) + 1
                     job_key = compute_job_key(job.id, job.retry_count)
@@ -370,9 +374,9 @@ async def startup(ctx: dict) -> None:
                         recovery_counts["running_retried"] += 1
                         logger.info("Re-enqueued recovered running job %s (retry=%d)", job.id, job.retry_count)
                     except Exception as exc:
-                        job.status = "failed"
-                        job.error = f"Re-enqueue failed on startup: {exc}"
-                        job.finished_at = datetime.now(UTC)
+                        job.status = "queued"
+                        job.error = f"Startup redelivery pending: {exc}"
+                        job.finished_at = None
                         logger.error("Failed to re-enqueue job %s: %s", job.id, exc)
                 else:  # mark_failed
                     job.status = "failed"
@@ -389,15 +393,17 @@ async def startup(ctx: dict) -> None:
         )
         if stale_queued:
             for job in stale_queued:
-                job_key = compute_job_key(job.id, job.retry_count)
+                job.admission_token = None
+                job_key = f"dispatch:{job.id}:{uuid.uuid4()}"
                 try:
                     await enqueue_download_job(job, job_key)
                     recovery_counts["queued_requeued"] += 1
                     logger.info("Re-enqueued stale queued job %s", job.id)
                 except Exception as exc:
-                    job.status = "failed"
-                    job.error = f"Re-enqueue failed on startup: {exc}"
-                    job.finished_at = datetime.now(UTC)
+                    # Queue delivery loss is not a failed download. Preserve
+                    # the durable queued row for cron/startup repair.
+                    job.error = f"Startup redelivery pending: {exc}"
+                    job.finished_at = None
                     logger.error("Failed to re-enqueue job %s: %s", job.id, exc)
             await session.commit()
             logger.info("Processed %d stale queued jobs", len(stale_queued))
@@ -410,6 +416,7 @@ async def startup(ctx: dict) -> None:
         paused_jobs = (await session.execute(select(DownloadJob).where(DownloadJob.status == "paused"))).scalars().all()
         if paused_jobs:
             for job in paused_jobs:
+                job.admission_token = None
                 if paused_strategy == "keep_paused":
                     job_key = compute_job_key(job.id, job.retry_count)
                     try:
@@ -454,6 +461,19 @@ async def startup(ctx: dict) -> None:
         )
         await session.commit()
         logger.info("Reset stuck subscription groups to idle")
+
+    # A crash can occur after a terminal status commit but before the worker's
+    # finally block releases its token. Clear every remaining process-local
+    # fence, not only rows selected by the recovery policies above.
+    try:
+        from services.download_admission import DownloadAdmission
+
+        async with AsyncSessionLocal() as session:
+            cleared_tokens = await DownloadAdmission(session).recover_stale_tokens()
+        if cleared_tokens:
+            logger.info("Cleared %d stale download admission token(s)", cleared_tokens)
+    except Exception as exc:
+        logger.error("Failed to clear stale download admission tokens: %s", exc)
 
     from core.events import EventType, emit_safe
 

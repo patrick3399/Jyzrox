@@ -1,6 +1,7 @@
 """Retry failed/partial download jobs with exponential backoff."""
 
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from saq.job import TERMINAL_STATUSES
@@ -10,6 +11,7 @@ from core.database import AsyncSessionLocal
 from core.queue import get_queue
 from core.queue_config import JOB_QUEUE_ROUTING, QUEUE_INTERACTIVE
 from db.models import DownloadJob
+from services.download_admission import admission_key_for, next_admission_ticket
 from worker.constants import DISK_LOW_KEY
 from worker.helpers import _cron_record, _cron_should_run, compute_job_key, enqueue_download_job
 
@@ -99,6 +101,20 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 last_update = (job.progress or {}).get("last_update_at")
                 if last_update and not _heartbeat_is_stale(last_update, stale_threshold):
                     continue  # actively progressing — leave it running
+                token = getattr(job, "admission_token", None)
+                try:
+                    has_fenced_owner = token is not None and uuid.UUID(str(token)) is not None
+                except ValueError, TypeError, AttributeError:
+                    has_fenced_owner = False
+                if has_fenced_owner:
+                    # DB progress silence does not prove the coroutine or child
+                    # process died. Its fenced token remains authoritative until
+                    # an actual worker restart/recovery clears it.
+                    logger.warning(
+                        "[stale-reaper] preserving running job %s with active admission token",
+                        job.id,
+                    )
+                    continue
                 job.status = "failed"
                 job.error = "Stale: no progress for 60+ minutes"
                 job.finished_at = now
@@ -123,7 +139,7 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 .scalars()
                 .all()
             )
-            stale_queued_ids = []
+            repaired_queued = 0
             download_queue = None
             if queued_candidates:
                 try:
@@ -138,13 +154,15 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 saq_job = await download_queue.job(compute_job_key(job.id, job.retry_count))
                 if saq_job is not None and saq_job.status not in TERMINAL_STATUSES:
                     continue  # still live in SAQ — legitimately waiting, not stale
-                job.status = "failed"
-                job.error = "Stale: queued 30+ minutes with no active queue entry"
-                job.finished_at = now
-                stale_queued_ids.append(job.id)
-                logger.warning("[stale-reaper] marked queued job %s as failed (no live SAQ entry)", job.id)
+                try:
+                    await enqueue_download_job(job, f"dispatch:{job.id}:{uuid.uuid4()}")
+                    repaired_queued += 1
+                    logger.info("[stale-reaper] restored transport for queued job %s", job.id)
+                except Exception as exc:
+                    skipped += 1
+                    logger.error("[stale-reaper] failed to restore queued job %s: %s", job.id, exc)
 
-            stale_count = len(stale_running_ids) + len(stale_queued_ids)
+            stale_count = len(stale_running_ids)
             if stale_count > 0:
                 await session.flush()
                 logger.info("[stale-reaper] marked %d stale jobs as failed", stale_count)
@@ -168,7 +186,9 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
 
             for job in jobs:
                 job.retry_count += 1
-                job.status = "queued"
+                job.admission_token = None
+                job.admission_key = admission_key_for(job.source, job.url)
+                job.admission_ticket = await next_admission_ticket(session)
                 job.finished_at = None
                 job.error = None
 
@@ -179,6 +199,7 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 job_key = compute_job_key(job.id, job.retry_count)
                 try:
                     await enqueue_download_job(job, job_key)
+                    job.status = "queued"
                     retried += 1
                     logger.info(
                         "[retry] re-queued job %s (attempt %d/%d)",
@@ -196,8 +217,15 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
 
             await session.commit()
 
-        status_msg = f"retried={retried}, skipped={skipped}, stale_reaped={stale_count}"
-        await _cron_record(ctx, "retry_downloads", "ok" if retried > 0 or stale_count > 0 else "idle", None)
+        status_msg = (
+            f"retried={retried}, skipped={skipped}, stale_reaped={stale_count}, queued_redelivered={repaired_queued}"
+        )
+        await _cron_record(
+            ctx,
+            "retry_downloads",
+            "ok" if retried > 0 or stale_count > 0 or repaired_queued > 0 else "idle",
+            None,
+        )
         logger.info("[retry] done: %s", status_msg)
         from core.events import EventType, emit_safe
 

@@ -229,6 +229,10 @@ export interface DownloadJob {
     speed?: number
     started_at?: string
     last_update_at?: string
+    wait_reason?: 'source_slot'
+    wait_started_at?: string
+    semaphore_key?: string
+    queue_position?: number
     failed_pages?: number[]
     permanently_failed?: boolean
     gallery_id?: number

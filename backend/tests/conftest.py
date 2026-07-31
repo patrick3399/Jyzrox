@@ -520,6 +520,9 @@ _SQLITE_SCHEMA = [
         retry_count INTEGER DEFAULT 0,
         max_retries INTEGER DEFAULT 3,
         next_retry_at TIMESTAMP,
+        admission_key TEXT,
+        admission_token TEXT,
+        admission_ticket INTEGER,
         gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
         subscription_id INTEGER
     )

@@ -410,6 +410,8 @@ const ko: Record<string, string> = {
   'queue.created': '생성일',
   'queue.finished': '완료일',
   'queue.queuedSuccess': '대기열에 추가됨',
+  'queue.waitingForSourceSlot': '{source} 다운로드 슬롯 대기 중',
+  'queue.queuePosition': '대기열 위치: {position}',
   'queue.clear': '지우기',
   'queue.clearing': '지우는 중...',
   'queue.cleared': '{count}개 작업 삭제됨',
