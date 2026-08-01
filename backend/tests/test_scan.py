@@ -858,40 +858,38 @@ class TestAutoDiscoverJob:
 
         assert result["discovered"] == 0
 
-    async def test_existing_galleries_not_recreated(self):
-        """Directories already in the DB should be skipped (no duplicate INSERT)."""
-        from worker.scan import auto_discover_job
+    async def test_existing_galleries_not_recreated(self, tmp_path):
+        """Existing gallery directories must not enqueue replay imports."""
+        from worker.scan import _ImportRequest, _LibrarySpec, auto_discover_job
+
+        gallery_dir = tmp_path / "my_gallery"
+        gallery_dir.mkdir()
+        (gallery_dir / "image.jpg").write_bytes(b"data")
 
         session = AsyncMock()
         session.commit = AsyncMock()
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
+        existing_res = MagicMock()
+        existing_res.scalar_one_or_none.return_value = 42
+        session.execute = AsyncMock(return_value=existing_res)
 
         r = _make_redis()
-
-        import pathlib
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            gallery_dir = pathlib.Path(tmpdir) / "my_gallery"
-            gallery_dir.mkdir()
-            (gallery_dir / "image.jpg").write_bytes(b"data")
-
-            # Simulate existing entry: (source_id="my_gallery", library_path=tmpdir)
-            existing_row = MagicMock()
-            existing_row.source_id = "my_gallery"
-            existing_row.library_path = tmpdir
-            existing_res = MagicMock()
-            existing_res.all.return_value = [existing_row]
-            session.execute = AsyncMock(return_value=existing_res)
-
-            with (
-                patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
-                patch("worker.scan.AsyncSessionLocal", return_value=session),
-            ):
-                result = await auto_discover_job({"redis": r})
+        request = _ImportRequest(gallery_id=42, source_dir=str(gallery_dir), mode="link")
+        with (
+            patch(
+                "worker.scan._get_library_specs",
+                new_callable=AsyncMock,
+                return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
+            ),
+            patch("worker.scan._discover_single_library_dir", new_callable=AsyncMock, return_value=request),
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await auto_discover_job({"redis": r})
 
         assert result["discovered"] == 0
+        mock_enqueue.assert_not_awaited()
 
     async def test_new_gallery_directories_discovered_and_created(self):
         """New directory with media files should trigger INSERT and enqueue_job."""

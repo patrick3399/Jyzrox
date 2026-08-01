@@ -824,6 +824,7 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
     logger.info("[auto_discover] Starting auto-discovery")
 
     discovered = 0
+    skipped_existing = 0
     import_requests: list[_ImportRequest] = []
     async with AsyncSessionLocal() as session:
         specs = await _get_library_specs(session, monitored_only=watcher_origin)
@@ -867,11 +868,13 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
                         select(Gallery.id).where(Gallery.source == "local", Gallery.source_id == rel_path)
                     )
                 ).scalar_one_or_none()
+                if existing is not None:
+                    skipped_existing += 1
+                    continue
 
                 import_request = await _discover_single_library_dir(session, spec, current)
                 if import_request:
-                    if existing is None:
-                        discovered += 1
+                    discovered += 1
                     import_requests.append(import_request)
                     logger.info("[auto_discover] Gallery matched: %s (%d files)", rel_path, file_count)
 
@@ -887,7 +890,11 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
             _job_id=f"local-import:{item.gallery_id}",
         )
 
-    logger.info("[auto_discover] Discovered %d new galleries", discovered)
+    logger.info(
+        "[auto_discover] Discovered %d new galleries; skipped %d existing galleries",
+        discovered,
+        skipped_existing,
+    )
 
     from core.events import EventType, emit_safe
 
