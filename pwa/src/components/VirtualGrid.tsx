@@ -221,7 +221,17 @@ export function VirtualGrid<T>({
   const totalHeight = virtualizer.getTotalSize()
 
   return (
-    <div ref={containerRef} className={className} style={{ contain: 'layout style' }}>
+    <div
+      ref={containerRef}
+      className={className}
+      style={{
+        contain: 'layout style',
+        // The virtualizer already preserves the viewport while rows are recycled
+        // and remeasured. Native scroll anchoring competing with that bookkeeping
+        // causes an upward fling to snap down and then back up on mobile browsers.
+        overflowAnchor: 'none',
+      }}
+    >
       {/* Virtual scroll container — height matches total virtual height */}
       <div
         style={{
