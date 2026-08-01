@@ -989,6 +989,9 @@ async def image_proxy(
                 image_bytes, media_type = await client.fetch_image_bytes(image_url)
         except TimeoutError:
             raise HTTPException(status_code=503, detail="EH semaphore timeout")
+        except httpx.TimeoutException as e:
+            logger.warning("EH image request timed out for gallery %s page %s: %s", gid, page, e)
+            raise HTTPException(status_code=504, detail="EH image request timed out") from e
         except PermissionError as e:
             detail = str(e)
             await push_system_alert(detail)

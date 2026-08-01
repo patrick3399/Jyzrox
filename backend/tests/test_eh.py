@@ -1358,6 +1358,21 @@ class TestEhImageProxy:
         eh_mock._http_get.assert_not_awaited()
         eh_mock.get_image_url.assert_awaited_once_with("tok025", 12345, 25)
 
+    async def test_image_proxy_upstream_timeout_returns_504(self, client):
+        """An EH client timeout should become a controlled gateway timeout response."""
+        eh_mock = _make_eh_client_mock()
+        eh_mock.get_image_url = AsyncMock(side_effect=httpx.ConnectTimeout("connect timed out"))
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
+        ):
+            resp = await client.get("/api/eh/image-proxy/12345/1")
+
+        assert resp.status_code == 504
+        assert resp.json()["detail"] == "EH image request timed out"
+
 
 # ---------------------------------------------------------------------------
 # TestEhErrorParsing

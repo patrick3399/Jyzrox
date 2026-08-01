@@ -156,7 +156,17 @@ export function saveLocalDisplayPreferences(
   }
 }
 
-export function loadLocalDisplayPreferences() {
+export function loadLocalDisplayPreferences(): Required<
+  Pick<UiPreferences, 'gallery_grid_density' | 'gallery_grid_columns' | 'font_scale'>
+> {
+  if (typeof window === 'undefined') {
+    return {
+      gallery_grid_density: 'comfortable',
+      gallery_grid_columns: 0,
+      font_scale: 1,
+    }
+  }
+
   const density = localStorage.getItem(GRID_DENSITY_KEY)
   const columns = Number(localStorage.getItem(GRID_COLUMNS_KEY))
   const fontScale = Number(localStorage.getItem(FONT_SCALE_KEY))
@@ -164,8 +174,7 @@ export function loadLocalDisplayPreferences() {
     gallery_grid_density: (['comfortable', 'compact', 'spacious'].includes(density ?? '')
       ? density
       : 'comfortable') as GridDensityPreference,
-    gallery_grid_columns:
-      Number.isInteger(columns) && columns >= 0 && columns <= 12 ? columns : 0,
+    gallery_grid_columns: Number.isInteger(columns) && columns >= 0 && columns <= 12 ? columns : 0,
     font_scale: Number.isFinite(fontScale) && fontScale >= 0.8 && fontScale <= 1.3 ? fontScale : 1,
   }
 }
