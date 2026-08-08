@@ -105,27 +105,22 @@ afterEach(() => {
 
 describe('E-Hentai browse-session URL ownership', () => {
   it('uses same-document history for Latest and Toplists without invoking the Next router', async () => {
-    const replaceState = vi.spyOn(window.history, 'replaceState')
+    // Tab switches push so the previous tab stays reachable by back, and they
+    // pass a fresh state object so the App Router's history patch engages
+    // instead of bailing out on the existing entry's `__NA`.
+    const pushState = vi.spyOn(window.history, 'pushState')
     const view = render(<Page />)
 
     fireEvent.click(screen.getByRole('button', { name: 'browse.latestTab' }))
-    expect(replaceState).toHaveBeenLastCalledWith(
-      window.history.state,
-      '',
-      '/e-hentai?tab=search',
-    )
+    expect(pushState).toHaveBeenLastCalledWith({}, '', '/e-hentai?tab=search')
     expect(replace).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'browse.toplistTab' }))
-    expect(replaceState).toHaveBeenLastCalledWith(
-      window.history.state,
-      '',
-      '/e-hentai?tab=toplist',
-    )
+    expect(pushState).toHaveBeenLastCalledWith({}, '', '/e-hentai?tab=toplist')
     expect(replace).not.toHaveBeenCalled()
 
     view.unmount()
-    replaceState.mockRestore()
+    pushState.mockRestore()
   })
 
   it('pending debounced input cannot overwrite a newer externally supplied URL identity', async () => {

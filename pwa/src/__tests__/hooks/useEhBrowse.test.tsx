@@ -257,7 +257,11 @@ describe('useEhBrowse — total normalization', () => {
 
 describe('useEhBrowse — URL sync', () => {
   it('writes identity to the URL but never the view buffer', async () => {
+    // A tab change pushes and a same-tab change replaces, so assert on whichever
+    // entry was written last: the invariant is what the URL carries, not how the
+    // entry was created.
     const replaceState = vi.spyOn(window.history, 'replaceState')
+    const pushState = vi.spyOn(window.history, 'pushState')
     ;(api.eh.search as ReturnType<typeof vi.fn>).mockResolvedValue({
       galleries: [{ gid: 1, token: 'a' }],
       total: 1,
@@ -269,11 +273,14 @@ describe('useEhBrowse — URL sync', () => {
     await act(async () => {
       await result.current.loadMore()
     })
-    const lastUrl = String(replaceState.mock.calls.at(-1)?.[2])
+    const written = [...replaceState.mock.calls, ...pushState.mock.calls]
+    expect(written).not.toHaveLength(0)
+    const lastUrl = String(written.at(-1)?.[2])
     expect(lastUrl).toContain('q=kittens')
     expect(lastUrl).not.toMatch(/gid|scroll|next_gid/i)
     expect(replace).not.toHaveBeenCalled()
     replaceState.mockRestore()
+    pushState.mockRestore()
   })
 })
 

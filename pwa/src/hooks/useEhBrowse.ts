@@ -23,6 +23,7 @@ import {
   isEhFavCategoryMeta,
   isEhGallery,
 } from '@/lib/browse/ehentai'
+import { commitBrowseUrl, type BrowseHistoryMode } from '@/lib/browse/browseHistory'
 import { createBrowseSnapshotStore, type BrowseSnapshotScope } from '@/lib/browse/snapshotStore'
 import { getBrowseTabId } from '@/lib/browse/tabScope'
 import { useBrowseSession } from '@/hooks/useBrowseSession'
@@ -85,18 +86,20 @@ function isValidEhCursor(value: unknown): boolean {
 }
 
 export type EhBrowseScope = { userId?: string; tabId?: string }
-export type EhHistoryMode = 'push' | 'replace'
+export type EhHistoryMode = BrowseHistoryMode
 
-function updateEhBrowseUrl(url: string, historyMode: EhHistoryMode): void {
-  // These are same-page identity transitions. Going through Next's router makes
-  // it fetch an RSC payload even though the local reducer already owns the view,
-  // and iOS standalone Safari can subsequently fall back to a document
-  // navigation with an empty query string. Native History API calls are
-  // integrated with the App Router and keep useSearchParams/popstate in sync
-  // without introducing that RSC navigation window.
-  const state = window.history.state
-  if (historyMode === 'push') window.history.pushState(state, '', url)
-  else window.history.replaceState(state, '', url)
+/** Which identity changes are worth a history entry.
+ *
+ *  A tab is a place the user navigated to, so it must be reachable by back: the
+ *  browse list has no back FAB, and on mobile the edge swipe is the only back
+ *  affordance, so collapsing popular -> favorites into one entry means backing
+ *  out of E-Hentai entirely instead of stepping back a tab.
+ *
+ *  Filters inside a tab are not places. Their controls stay on screen, and
+ *  banking an entry per favourite-category pill or per advanced-search checkbox
+ *  would make leaving the section take one swipe per pill the user touched. */
+function historyModeFor(previous: EhBrowseState, next: EhBrowseState): EhHistoryMode {
+  return previous.tab === next.tab ? 'replace' : 'push'
 }
 
 export function useEhBrowse(scopeInput?: EhBrowseScope) {
@@ -311,7 +314,7 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
   })
 
   const commitIdentity = useCallback(
-    (actions: Action[], historyMode: EhHistoryMode) => {
+    (actions: Action[], historyMode?: EhHistoryMode) => {
       let preview = identityStateRef.current
       for (const action of actions) preview = reducer(preview, action)
       if (queryKey(preview) === queryKey(identityStateRef.current)) {
@@ -330,7 +333,7 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
       for (const action of actions) identityDispatch(action)
       const params = identityToUrlParams(preview).toString()
       const url = params ? `/e-hentai?${params}` : '/e-hentai'
-      updateEhBrowseUrl(url, historyMode)
+      commitBrowseUrl(url, historyMode ?? historyModeFor(identityStateRef.current, preview))
     },
     [cancelPending, retention, sessionCheckpoint],
   )
@@ -342,9 +345,9 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
         identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>,
         historyMode: EhHistoryMode,
       ) => commitIdentity([{ type: 'APPLY_IDENTITY', identity }], historyMode),
-      setTab: (tab: Tab, historyMode: EhHistoryMode = 'replace') =>
+      setTab: (tab: Tab, historyMode?: EhHistoryMode) =>
         commitIdentity([{ type: 'SET_TAB', tab }], historyMode),
-      commitQuery: (query: string, historyMode: EhHistoryMode = 'replace') =>
+      commitQuery: (query: string, historyMode?: EhHistoryMode) =>
         commitIdentity(
           [
             { type: 'SET_TAB', tab: 'search' },
@@ -352,11 +355,11 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
           ],
           historyMode,
         ),
-      setFilter: (patch: Partial<Filters>, historyMode: EhHistoryMode = 'replace') =>
+      setFilter: (patch: Partial<Filters>, historyMode?: EhHistoryMode) =>
         commitIdentity([{ type: 'SET_FILTER', patch }], historyMode),
       applyIdentity: (
         identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>,
-        historyMode: EhHistoryMode = 'replace',
+        historyMode?: EhHistoryMode,
       ) => commitIdentity([{ type: 'APPLY_IDENTITY', identity }], historyMode),
       showExternalResults: (items: EhGallery[], total: number) => {
         cancelPending()
@@ -381,7 +384,7 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
         )
         identityDispatch({ type: 'SHOW_EXTERNAL_RESULTS', session: imageSession, items, total })
         const params = identityToUrlParams(next).toString()
-        updateEhBrowseUrl(`/e-hentai?${params}`, 'replace')
+        commitBrowseUrl(`/e-hentai?${params}`, 'replace')
       },
       setScroll: (scrollY: number) => {
         const current = liveViewRef.current
