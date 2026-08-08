@@ -337,6 +337,31 @@ describe('qs() query-string builder', () => {
   })
 })
 
+describe('search.galleries request cancellation', () => {
+  it('forwards RequestInit and its AbortSignal to apiFetch', async () => {
+    const { api } = await import('../lib/api')
+    const controller = new AbortController()
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ jsonBody: { query: 'artist:a', items: [], has_next: false } }),
+    )
+
+    await api.search.galleries(
+      'artist:a',
+      { cursor: 'cursor-a', limit: 24, sort: 'rating' },
+      { signal: controller.signal, cache: 'no-store' },
+    )
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    const params = new URL(url as string, 'http://localhost').searchParams
+    expect(params.get('q')).toBe('artist:a')
+    expect(params.get('cursor')).toBe('cursor-a')
+    expect(params.get('limit')).toBe('24')
+    expect(params.get('sort')).toBe('rating')
+    expect((init as RequestInit).signal).toBe(controller.signal)
+    expect((init as RequestInit).cache).toBe('no-store')
+  })
+})
+
 // ── CSRF token handling ───────────────────────────────────────────────
 
 describe('apiFetch — CSRF handling', () => {

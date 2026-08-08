@@ -1081,11 +1081,14 @@ class EhClient:
 
         matches = list(dict.fromkeys((int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)))
         if not matches:
-            return {"galleries": []}
+            return {"galleries": [], "total": 0}
 
         gid_list = [[gid, tok] for gid, tok in matches]
         galleries = await self._gdata(gid_list)
-        return {"galleries": galleries}
+        # The popular page has no result counter, but callers consume this
+        # payload through the same browse contract as search and toplists,
+        # which requires a numeric total.
+        return {"galleries": galleries, "total": len(galleries)}
 
     async def get_toplist(self, tl: int, page: int = 0) -> dict:
         """

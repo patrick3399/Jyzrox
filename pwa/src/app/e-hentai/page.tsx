@@ -3,8 +3,10 @@
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
+import { useProfile } from '@/hooks/useProfile'
 import {
   EH_ADVANCED_SEARCH_BITS,
+  initialFilters,
   parseEhSavedSearch,
   queryKey,
   serializeEhSavedSearchParams,
@@ -18,7 +20,8 @@ import { useCreateSubscription, useSubscriptions } from '@/hooks/useSubscription
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
-import { useScrollPositionRestore } from '@/hooks/useScrollRestore'
+import { decideAnchorRestore, type BrowseAnchor } from '@/lib/browse/anchor'
+import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
 
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -178,7 +181,16 @@ export default function BrowsePageWrapper() {
 
 function BrowsePage() {
   const router = useRouter()
-  const { state, actions, loadMore, favCategories } = useEhBrowse()
+  const { data: profile } = useProfile()
+  const browseUserId = profile?.username
+  const {
+    state,
+    actions,
+    loadMore,
+    favCategories,
+    restoreInstruction,
+    acknowledgeRestore,
+  } = useEhBrowse({ userId: browseUserId })
 
   // ── Local UI state (not part of query identity) ──
   const [inputValue, setInputValue] = useState(state.query)
@@ -191,6 +203,21 @@ function BrowsePage() {
   const [colCount, setColCount] = useState(3)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const favDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const imageSearchAbortRef = useRef<AbortController | null>(null)
+  const itemElementsRef = useRef(new Map<number, HTMLElement>())
+  const visibleStartRef = useRef(0)
+  const layoutRef = useRef<BrowseLayoutSnapshot>({ columns: 3, width: 0, mode: viewMode })
+  const pendingRestoreRef = useRef<{
+    key: string
+    identityKey: string
+    index: number
+    offset: number
+  } | null>(null)
+  const [restoreRequest, setRestoreRequest] = useState<{
+    key: string
+    identityKey: string
+    index: number
+  }>()
 
   // Keep the search box text in sync when identity changes externally (tag deep-links)
   useEffect(() => {
@@ -273,23 +300,166 @@ function BrowsePage() {
   const loading = state.status === 'seeding' || state.status === 'loading'
 
   // ── Seed whenever the query identity changes and nothing is loaded ──
-  const seedKey = useMemo(() => queryKey(state), [state.tab, state.query, state.filters]) // eslint-disable-line react-hooks/exhaustive-deps
+  const seedKey = queryKey(state)
+  // A pending input timer belongs to the identity in which it was created. A
+  // popstate, saved-search, or tab transition must invalidate it before it can
+  // overwrite the newly supplied URL.
   useEffect(() => {
-    if (items.length === 0 && state.hasMore && state.status === 'idle') {
-      // Favorites requires credentials
-      if (tab === 'favorites' && !ehConfigured) return
-      loadMore()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedKey, ehConfigured])
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (favDebounceRef.current) clearTimeout(favDebounceRef.current)
+  }, [seedKey])
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (favDebounceRef.current) clearTimeout(favDebounceRef.current)
+      imageSearchAbortRef.current?.abort()
+    },
+    [],
+  )
+  useEffect(() => {
+    if (!browseUserId || items.length !== 0 || !state.hasMore || state.status !== 'idle') return
+    // Favorites requires credentials. Deferring one task lets the coordinator's
+    // restore effect hydrate an existing snapshot before a seed request races it.
+    if (tab === 'favorites' && !ehConfigured) return
+    const timer = setTimeout(() => void loadMore(), 0)
+    return () => clearTimeout(timer)
+  }, [browseUserId, ehConfigured, items.length, loadMore, seedKey, state.hasMore, state.status, tab])
 
-  // The EH snapshot owns buffer/cursor persistence, while the shared restore
-  // hook owns the one-shot-per-identity scroll lifecycle.
-  useScrollPositionRestore({
-    scrollY: state.scrollY > 0 ? state.scrollY : null,
-    isReady: items.length > 0,
-    restoreKey: seedKey,
-  })
+  const previousRestoreIdentityRef = useRef(seedKey)
+  const handledRestoreKeyRef = useRef<string | null>(null)
+  const scheduledRestoreKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (previousRestoreIdentityRef.current === seedKey) return
+    previousRestoreIdentityRef.current = seedKey
+    pendingRestoreRef.current = null
+    setRestoreRequest(undefined)
+  }, [seedKey])
+  useEffect(() => {
+    if (!restoreInstruction || restoreInstruction.identityKey !== seedKey) {
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current = null
+        setRestoreRequest(undefined)
+      }
+      return
+    }
+    if (handledRestoreKeyRef.current === restoreInstruction.key) return
+    if (restoreInstruction.target.kind === 'top') {
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current = null
+        setRestoreRequest(undefined)
+      }
+      if (scheduledRestoreKeyRef.current === restoreInstruction.key) return
+      scheduledRestoreKeyRef.current = restoreInstruction.key
+      const frame = requestAnimationFrame(() => {
+        window.scrollTo(0, 0)
+        handledRestoreKeyRef.current = restoreInstruction.key
+        scheduledRestoreKeyRef.current = null
+        acknowledgeRestore(restoreInstruction.key)
+      })
+      return () => {
+        cancelAnimationFrame(frame)
+        if (scheduledRestoreKeyRef.current === restoreInstruction.key)
+          scheduledRestoreKeyRef.current = null
+      }
+    }
+    const anchor = restoreInstruction.target.view.anchor
+    if (!anchor) {
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current = null
+        setRestoreRequest(undefined)
+      }
+      if (scheduledRestoreKeyRef.current === restoreInstruction.key) return
+      scheduledRestoreKeyRef.current = restoreInstruction.key
+      const frame = requestAnimationFrame(() => {
+        window.scrollTo(0, 0)
+        handledRestoreKeyRef.current = restoreInstruction.key
+        scheduledRestoreKeyRef.current = null
+        acknowledgeRestore(restoreInstruction.key)
+      })
+      return () => {
+        cancelAnimationFrame(frame)
+        if (scheduledRestoreKeyRef.current === restoreInstruction.key)
+          scheduledRestoreKeyRef.current = null
+      }
+    }
+    const decision = decideAnchorRestore(anchor, items, (gallery) => gallery.gid)
+    if (decision.kind === 'anchor' && viewMode === 'grid') {
+      const nextPending = {
+        key: restoreInstruction.key,
+        identityKey: seedKey,
+        index: decision.index,
+        offset: decision.offset,
+      }
+      const pending = pendingRestoreRef.current
+      if (
+        pending?.key === nextPending.key &&
+        pending.identityKey === nextPending.identityKey &&
+        pending.index === nextPending.index &&
+        pending.offset === nextPending.offset
+      )
+        return
+      pendingRestoreRef.current = nextPending
+      setRestoreRequest({
+        key: restoreInstruction.key,
+        identityKey: seedKey,
+        index: decision.index,
+      })
+      return
+    }
+    if (pendingRestoreRef.current) {
+      pendingRestoreRef.current = null
+      setRestoreRequest(undefined)
+    }
+    if (scheduledRestoreKeyRef.current === restoreInstruction.key) return
+    scheduledRestoreKeyRef.current = restoreInstruction.key
+    const frame = requestAnimationFrame(() => {
+      if (decision.kind === 'anchor') {
+        const item = items[decision.index]
+        const element = item ? itemElementsRef.current.get(item.gid) : null
+        if (element) {
+          window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - decision.offset)
+          handledRestoreKeyRef.current = restoreInstruction.key
+          scheduledRestoreKeyRef.current = null
+          acknowledgeRestore(restoreInstruction.key)
+          return
+        }
+      }
+      if (decision.kind === 'pixel') window.scrollTo(0, decision.scrollY)
+      else if (decision.kind === 'top') window.scrollTo(0, 0)
+      else window.scrollTo(0, anchor.scrollY)
+      handledRestoreKeyRef.current = restoreInstruction.key
+      scheduledRestoreKeyRef.current = null
+      acknowledgeRestore(restoreInstruction.key)
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      if (scheduledRestoreKeyRef.current === restoreInstruction.key)
+        scheduledRestoreKeyRef.current = null
+    }
+  }, [acknowledgeRestore, items, restoreInstruction, seedKey, viewMode])
+
+  const handleGridRestoreApplied = useCallback(
+    (request: { key: string; index: number }) => {
+      const pending = pendingRestoreRef.current
+      if (
+        !pending ||
+        handledRestoreKeyRef.current === request.key ||
+        pending.identityKey !== seedKey ||
+        pending.key !== request.key ||
+        pending.index !== request.index
+      )
+        return
+      const item = items[request.index]
+      const element = item ? itemElementsRef.current.get(item.gid) : null
+      if (!element) return
+      window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - pending.offset)
+      pendingRestoreRef.current = null
+      setRestoreRequest(undefined)
+      handledRestoreKeyRef.current = pending.key
+      acknowledgeRestore(pending.key)
+    },
+    [acknowledgeRestore, items, seedKey],
+  )
 
   // Load saved searches
   const refreshSavedSearches = useCallback(() => {
@@ -451,22 +621,75 @@ function BrowsePage() {
     actions.reset()
   }, [actions])
 
-  const navigateToGallery = useCallback(
+  const captureAnchor = useCallback(
+    (preferred?: EhGallery): BrowseAnchor => {
+      const fallbackIndex = Math.min(visibleStartRef.current, Math.max(0, items.length - 1))
+      const listAnchor =
+        viewMode === 'list'
+          ? items.find((item) => {
+              const rect = itemElementsRef.current.get(item.gid)?.getBoundingClientRect()
+              return !!rect && rect.bottom > 0
+            })
+          : items[fallbackIndex]
+      const gallery = preferred ?? listAnchor
+      const element = gallery ? itemElementsRef.current.get(gallery.gid) : null
+      return {
+        itemId: gallery?.gid ?? null,
+        offset: element?.getBoundingClientRect().top ?? 0,
+        scrollY: window.scrollY,
+      }
+    },
+    [items, viewMode],
+  )
+
+  // This page is the sole owner of the E-Hentai scroll lifecycle: capture the
+  // full logical anchor cheaply, then persist after settling or lifecycle exit.
+  useEffect(() => {
+    let frame: number | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let latestAnchor: BrowseAnchor | null = null
+    const save = () => {
+      if (pendingRestoreRef.current) return
+      const anchor = latestAnchor ?? captureAnchor()
+      actions.checkpoint(anchor, layoutRef.current)
+    }
+    const capture = () => {
+      frame = undefined
+      if (pendingRestoreRef.current) return
+      latestAnchor = captureAnchor()
+      actions.setAnchor(latestAnchor)
+      clearTimeout(timer)
+      timer = setTimeout(save, 250)
+    }
+    const onScroll = () => {
+      if (frame === undefined) frame = requestAnimationFrame(capture)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('pagehide', save)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('pagehide', save)
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      clearTimeout(timer)
+    }
+  }, [actions, captureAnchor])
+
+  const openItem = useCallback(
     (g: EhGallery) => {
+      actions.checkpoint(captureAnchor(g), layoutRef.current)
       const fav = tab === 'favorites' ? '?fav=1' : ''
       router.push(`/e-hentai/${g.gid}/${g.token}${fav}`)
     },
-    [router, tab],
+    [actions, captureAnchor, router, tab],
   )
 
   const searchUploader = useCallback(
     (uploader: string) => {
       const value = `uploader:${uploader.includes(' ') ? `"${uploader}"` : uploader}`
       setInputValue(value)
-      actions.setTab('search')
       commitSearch(value)
     },
-    [actions, commitSearch],
+    [commitSearch],
   )
 
   const handleSaveSearch = useCallback(async () => {
@@ -534,39 +757,47 @@ function BrowsePage() {
         const value = new URL(url).searchParams.get('f_search') || ''
         if (!value) return
         setInputValue(value)
-        actions.setTab('search')
         commitSearch(value)
       } catch {
         toast.error(t('browse.failedLoadResults'))
       }
     },
-    [actions, commitSearch],
+    [commitSearch],
   )
 
   const openRandomLoadedGallery = useCallback(() => {
     if (items.length === 0) return
     const gallery = items[Math.floor(Math.random() * items.length)]
-    navigateToGallery(gallery)
-  }, [items, navigateToGallery])
+    openItem(gallery)
+  }, [items, openItem])
 
   const submitImageSearch = useCallback(async () => {
     if (!imageSearchFile) return
+    imageSearchAbortRef.current?.abort()
+    const controller = new AbortController()
+    imageSearchAbortRef.current = controller
     setImageSearchLoading(true)
     try {
-      const result = await api.eh.imageSearch(imageSearchFile, {
-        similar: imageSearchSimilar,
-        covers: imageSearchCovers,
-        expunged: imageSearchExpunged,
-      })
+      const result = await api.eh.imageSearch(
+        imageSearchFile,
+        {
+          similar: imageSearchSimilar,
+          covers: imageSearchCovers,
+          expunged: imageSearchExpunged,
+        },
+        { signal: controller.signal },
+      )
+      if (controller.signal.aborted) return
       setInputValue('')
       actions.showExternalResults(result.galleries, result.total)
       setShowImageSearch(false)
       setImageSearchFile(null)
       toast.success(t('browse.imageSearchResults', { count: result.total.toLocaleString() }))
     } catch (error) {
+      if (controller.signal.aborted) return
       toast.error(error instanceof Error ? error.message : t('browse.failedLoadResults'))
     } finally {
-      setImageSearchLoading(false)
+      if (imageSearchAbortRef.current === controller) setImageSearchLoading(false)
     }
   }, [actions, imageSearchCovers, imageSearchExpunged, imageSearchFile, imageSearchSimilar])
 
@@ -576,7 +807,7 @@ function BrowsePage() {
     colCount,
     onEnter: (i) => {
       const g = items[i]
-      if (g) navigateToGallery(g)
+      if (g) openItem(g)
     },
     enabled: viewMode === 'grid',
   })
@@ -1154,6 +1385,7 @@ function BrowsePage() {
       {!query && (
         <div className="flex gap-1 border-b border-vault-border overflow-x-auto scrollbar-hide">
           <button
+            type="button"
             onClick={() => actions.setTab('popular')}
             className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               tab === 'popular'
@@ -1164,6 +1396,7 @@ function BrowsePage() {
             {t('browse.popularTab')}
           </button>
           <button
+            type="button"
             onClick={() => actions.setTab('search')}
             className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               tab === 'search'
@@ -1174,6 +1407,7 @@ function BrowsePage() {
             {t('browse.latestTab')}
           </button>
           <button
+            type="button"
             onClick={() => actions.setTab('toplist')}
             className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               tab === 'toplist'
@@ -1185,6 +1419,7 @@ function BrowsePage() {
           </button>
           {ehConfigured && (
             <button
+              type="button"
               onClick={() => actions.setTab('favorites')}
               className={`shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 tab === 'favorites'
@@ -1446,7 +1681,7 @@ function BrowsePage() {
           </div>
 
           {/* Results header */}
-          {total !== null && (
+          {typeof total === 'number' && (
             <div className="flex items-center justify-between text-xs text-vault-text-muted">
               <span>
                 {query
@@ -1521,7 +1756,7 @@ function BrowsePage() {
                      text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors"
           />
 
-          {total !== null && (
+          {typeof total === 'number' && (
             <div className="flex items-center justify-between text-xs text-vault-text-muted">
               <span>
                 {total.toLocaleString()} {t('browse.favorited')}
@@ -1552,7 +1787,7 @@ function BrowsePage() {
       )}
 
       {/* ── Popular header ── */}
-      {!query && tab === 'popular' && total !== null && (
+      {!query && tab === 'popular' && typeof total === 'number' && (
         <div className="text-xs text-vault-text-muted">
           {items.length} {t('browse.results')}
         </div>
@@ -1578,35 +1813,83 @@ function BrowsePage() {
         </div>
       )}
 
+      {state.status === 'expired' && (
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-3 rounded-lg border border-vault-border bg-vault-card p-6 text-center"
+        >
+          <p className="font-medium text-vault-text">{t('error.session_expired')}</p>
+          <p className="text-sm text-vault-text-muted">{t('browse.imageSessionExpiredHelp')}</p>
+          <button
+            type="button"
+            className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white hover:bg-vault-accent/90"
+            onClick={() =>
+              actions.commitIdentity(
+                { tab: 'search', query: '', filters: initialFilters },
+                'replace',
+              )
+            }
+          >
+            {t('browse.startNewSearch')}
+          </button>
+        </div>
+      )}
+
       {/* Gallery grid / list */}
       {items.length > 0 && (
         <>
           {viewMode === 'list' ? (
             <div className="space-y-2">
               {items.map((g) => (
-                <ListCard
+                <div
                   key={`${g.gid}-${g.token}`}
-                  gallery={g}
-                  status={browseStatuses[String(g.gid)]}
-                  onClick={() => navigateToGallery(g)}
-                  onUploaderClick={() => searchUploader(g.uploader)}
-                />
+                  ref={(element) => {
+                    if (element) itemElementsRef.current.set(g.gid, element)
+                    else itemElementsRef.current.delete(g.gid)
+                  }}
+                >
+                  <ListCard
+                    gallery={g}
+                    status={browseStatuses[String(g.gid)]}
+                    onClick={() => openItem(g)}
+                    onUploaderClick={() => searchUploader(g.uploader)}
+                  />
+                </div>
               ))}
             </div>
           ) : (
             <VirtualGrid
               items={items}
+              getItemKey={(gallery) => gallery.gid}
               columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
               gap={8}
               estimateHeight={220}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
+              onRegisterElement={(index, element) => {
+                const gallery = items[index]
+                if (!gallery) return
+                if (element) itemElementsRef.current.set(gallery.gid, element)
+                else itemElementsRef.current.delete(gallery.gid)
+              }}
+              onVisibleRangeChange={({ startIndex }) => {
+                visibleStartRef.current = startIndex
+              }}
+              onLayoutChange={({ colCount: columns, containerWidth }) => {
+                const layout = { columns, width: containerWidth, mode: viewMode }
+                layoutRef.current = layout
+                actions.setLayout(layout)
+              }}
+              restoreRequest={
+                restoreRequest?.identityKey === seedKey ? restoreRequest : undefined
+              }
+              onRestoreApplied={handleGridRestoreApplied}
               renderItem={(g) => (
                 <GridCard
                   key={`${g.gid}-${g.token}`}
                   gallery={g}
                   status={browseStatuses[String(g.gid)]}
-                  onClick={() => navigateToGallery(g)}
+                  onClick={() => openItem(g)}
                   onUploaderClick={() => searchUploader(g.uploader)}
                 />
               )}

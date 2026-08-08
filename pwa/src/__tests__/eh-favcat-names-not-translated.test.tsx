@@ -22,6 +22,10 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(searchStr),
 }))
 
+vi.mock('@/hooks/useProfile', () => ({
+  useProfile: () => ({ data: { username: 'qa-user' }, isLoading: false }),
+}))
+
 let searchStr = 'tab=favorites'
 
 vi.mock('@/lib/api', () => ({

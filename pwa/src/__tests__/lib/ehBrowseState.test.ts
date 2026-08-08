@@ -13,6 +13,7 @@ import {
   parseEhSavedSearch,
   serializeEhSavedSearchParams,
   toggleSelectedCategory,
+  SNAPSHOT_HISTORY_CAP,
 } from '@/lib/ehBrowseState'
 
 describe('ehBrowseState — queryKey & identity reset', () => {
@@ -39,11 +40,23 @@ describe('ehBrowseState — queryKey & identity reset', () => {
     expect(after.scrollY).toBe(0)
   })
 
-  it('toggling advancedOpen changes queryKey (it affects search semantics)', () => {
-    const s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
-    const adv = reducer(s, { type: 'SET_FILTER', patch: { advancedOpen: true } })
-    expect(queryKey(s)).not.toBe(queryKey(adv))
-    expect(adv.items).toHaveLength(0)
+  it('ignores advanced panel expansion but includes result-changing advanced filters', () => {
+    let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
+    s = reducer(s, {
+      type: 'SEED',
+      items: [{ gid: 1, token: 'a' } as never],
+      total: 1,
+      cursor: null,
+      hasMore: false,
+    })
+
+    const panelOpen = reducer(s, { type: 'SET_FILTER', patch: { advancedOpen: true } })
+    expect(queryKey(panelOpen)).toBe(queryKey(s))
+    expect(panelOpen.items).toHaveLength(1)
+
+    const filtered = reducer(panelOpen, { type: 'SET_FILTER', patch: { minRating: 4 } })
+    expect(queryKey(filtered)).not.toBe(queryKey(panelOpen))
+    expect(filtered.items).toHaveLength(0)
   })
 
   it('ALL_CATS has all 10 categories', () => {
@@ -211,26 +224,29 @@ describe('ehBrowseState — snapshot', () => {
   })
 
   it('keeps one snapshot per identity, MRU-first, evicting beyond the history cap', () => {
-    // 6 different search identities → oldest falls out of the 5-slot store.
+    expect(SNAPSHOT_HISTORY_CAP).toBeGreaterThanOrEqual(8)
+    const identityCount = SNAPSHOT_HISTORY_CAP + 1
     let raw: string | null = null
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < identityCount; i++) {
       let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
       s = reducer(s, { type: 'COMMIT_QUERY', query: `q${i}` })
       s = reducer(s, { type: 'SEED', items: [g(i)], total: 1, cursor: null, hasMore: false })
       raw = serializeSnapshot(s, raw)
     }
     const store = JSON.parse(raw!)
-    expect(store.snaps).toHaveLength(5)
-    // MRU order: q5 first, q1 last; q0 evicted.
-    expect(store.snaps[0].items[0].gid).toBe(5)
+    expect(store.snaps).toHaveLength(SNAPSHOT_HISTORY_CAP)
+    // MRU order retains the full approved deep chain and evicts only the oldest overflow.
+    expect(store.snaps[0].items[0].gid).toBe(identityCount - 1)
+    expect(store.snaps.at(-1).items[0].gid).toBe(1)
     expect(store.snaps.some((x: { items: { gid: number }[] }) => x.items[0].gid === 0)).toBe(false)
 
     // Re-banking an existing identity replaces its slot instead of duplicating.
+    const retainedIndex = Math.floor(SNAPSHOT_HISTORY_CAP / 2)
     let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
-    s = reducer(s, { type: 'COMMIT_QUERY', query: 'q3' })
+    s = reducer(s, { type: 'COMMIT_QUERY', query: `q${retainedIndex}` })
     s = reducer(s, { type: 'SEED', items: [g(99)], total: 1, cursor: null, hasMore: false })
     const store2 = JSON.parse(serializeSnapshot(s, raw))
-    expect(store2.snaps).toHaveLength(5)
+    expect(store2.snaps).toHaveLength(SNAPSHOT_HISTORY_CAP)
     expect(store2.snaps[0].items[0].gid).toBe(99)
     expect(
       store2.snaps.filter((x: { queryKey: string }) => x.queryKey === queryKey(s)),

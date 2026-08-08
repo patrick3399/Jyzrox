@@ -1199,6 +1199,8 @@ const ko: Record<string, string> = {
   'browse.coversOnly': '표지만 검색',
   'browse.includeExpunged': '삭제된 항목 포함',
   'browse.imageSearchResults': '이미지 검색 결과 {count}개',
+  'browse.imageSessionExpiredHelp': '업로드한 이미지의 검색 결과가 만료되었습니다. 새 검색을 시작하세요.',
+  'browse.startNewSearch': '새 검색 시작',
   'browse.openRandom': '불러온 결과 무작위로 열기',
   'browse.watched': '감시 중',
   'browse.language': '언어',

@@ -14,10 +14,51 @@ import { useLayoutEffect } from 'react'
 
 let searchStr = ''
 const push = vi.fn()
+const gridRestoreApplied = vi.fn()
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push }),
   useSearchParams: () => new URLSearchParams(searchStr),
 }))
+vi.mock('@/hooks/useProfile', () => ({
+  useProfile: () => ({ data: { username: 'qa-user' }, isLoading: false }),
+}))
+vi.mock('@/components/VirtualGrid', async () => {
+  const { useEffect } = await import('react')
+  return {
+    VirtualGrid: ({
+      items,
+      onRegisterElement,
+      onRestoreApplied,
+      restoreRequest,
+      renderItem,
+    }: {
+      items: Array<{ gid: number }>
+      onRegisterElement?: (index: number, element: HTMLElement | null) => void
+      onRestoreApplied?: (request: { key: string; index: number }) => void
+      restoreRequest?: { key: string; index: number }
+      renderItem: (item: { gid: number }, index: number) => React.ReactNode
+    }) => {
+      useEffect(() => {
+        if (restoreRequest) {
+          gridRestoreApplied(restoreRequest)
+          onRestoreApplied?.(restoreRequest)
+        }
+      }, [onRestoreApplied, restoreRequest])
+      return (
+        <div>
+          {items.map((item, index) => (
+            <div
+              key={item.gid}
+              ref={(element) => onRegisterElement?.(index, element)}
+            >
+              {renderItem(item, index)}
+            </div>
+          ))}
+        </div>
+      )
+    },
+  }
+})
 vi.mock('@/lib/api', () => ({
   api: {
     eh: {
@@ -34,6 +75,7 @@ vi.mock('@/lib/api', () => ({
 import Page from '@/app/e-hentai/page'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { snapshotStorageKey } from '@/lib/browse/snapshotStore'
 
 const g = (gid: number, title: string) =>
   ({
@@ -174,8 +216,24 @@ describe('e-hentai favorites snapshot round-trip', () => {
     // "incoming page", whose layout effect resets scroll and emits the event.
     view.rerender(<Shell browse={false} />)
 
-    const store = JSON.parse(sessionStorage.getItem('eh_browse_snapshot')!)
-    expect(store.snaps[0].scrollY).toBe(5000)
+    const tabId = sessionStorage.getItem('browse_session_tab_id_v1')
+    expect(tabId).not.toBeNull()
+    const scopedKey = snapshotStorageKey({
+      userId: 'qa-user',
+      tabId: tabId!,
+      sourceId: 'ehentai',
+      schemaVersion: 1,
+    })
+    const store = JSON.parse(sessionStorage.getItem(scopedKey)!) as {
+      entries: Array<{
+        identityKey: string
+        snapshot: { anchor: { scrollY: number } | null }
+      }>
+    }
+    const favoriteEntry = store.entries.find((entry) =>
+      entry.identityKey.includes('"surface":"favorites"'),
+    )
+    expect(favoriteEntry?.snapshot.anchor?.scrollY).toBe(5000)
   })
 
   it('restores buffer and scroll position after an in-page tab switch away and back', async () => {
@@ -211,6 +269,165 @@ describe('e-hentai favorites snapshot round-trip', () => {
     // Banked scroll position re-applied even though the page never remounted.
     await flushRaf()
     expect(scrollTo).toHaveBeenCalledWith(0, 5000)
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps pointer-navigation pages under gid 314 and never writes its view into the next identity', async () => {
+    searchStr = 'tab=favorites&favcat=3'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [g(314, 'Pointer 314')],
+      total: 1,
+      has_next: false,
+      next_cursor: null,
+      categories: [],
+    })
+
+    render(<Page />)
+    await waitFor(() => expect(screen.getByText('Pointer 314')).toBeInTheDocument())
+    setScrollY(3140)
+    fireEvent.scroll(window)
+    await flushRaf()
+    fireEvent.click(screen.getByText('Pointer 314'))
+    expect(push).toHaveBeenCalledWith('/e-hentai/314/t314?fav=1')
+
+    fireEvent.click(screen.getAllByText(t('browse.popularTab'))[0])
+    await waitFor(() => expect(api.eh.getPopular).toHaveBeenCalled())
+
+    const tabId = sessionStorage.getItem('browse_session_tab_id_v1')
+    expect(tabId).not.toBeNull()
+    const scopedKey = snapshotStorageKey({
+      userId: 'qa-user',
+      tabId: tabId!,
+      sourceId: 'ehentai',
+      schemaVersion: 1,
+    })
+    const store = JSON.parse(sessionStorage.getItem(scopedKey)!) as {
+      entries: Array<{
+        identityKey: string
+        snapshot: {
+          pages: Array<Array<{ gid: number }>>
+          anchor: { itemId: number | null } | null
+        }
+      }>
+    }
+    const favorite = store.entries.find((entry) =>
+      entry.identityKey.includes('"surface":"favorites"'),
+    )
+    const popular = store.entries.find((entry) =>
+      entry.identityKey.includes('"surface":"popular"'),
+    )
+    expect(favorite?.snapshot.pages.flat().map((item) => item.gid)).toContain(314)
+    expect(popular?.snapshot.anchor?.itemId ?? null).not.toBe(314)
+  })
+
+  it('re-applies an already-restored list anchor after another same-mount round-trip', async () => {
+    searchStr = 'tab=favorites&favcat=3'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [g(1, 'Alpha'), g(2, 'Beta')],
+      total: 2,
+      has_next: true,
+      next_cursor: 'A',
+      categories: [],
+    })
+
+    render(<Page />)
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+    const scrollTo = vi.fn()
+    vi.stubGlobal('scrollTo', scrollTo)
+    await flushRaf()
+    scrollTo.mockClear()
+
+    setScrollY(5000)
+    fireEvent.click(screen.getAllByText(t('browse.popularTab'))[0])
+    await waitFor(() => expect(screen.queryByText('Alpha')).not.toBeInTheDocument())
+    await flushRaf()
+    expect(scrollTo).toHaveBeenCalledOnce()
+    expect(scrollTo).toHaveBeenCalledWith(0, 0)
+    scrollTo.mockClear()
+    setScrollY(0)
+    fireEvent.click(screen.getAllByText(t('browse.favoritesTab'))[0])
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+    await flushRaf()
+    expect(scrollTo).toHaveBeenCalledWith(0, 5000)
+
+    scrollTo.mockClear()
+    setScrollY(7000)
+    fireEvent.scroll(window)
+    await flushRaf()
+    fireEvent.click(screen.getAllByText(t('browse.popularTab'))[0])
+    await waitFor(() => expect(screen.queryByText('Alpha')).not.toBeInTheDocument())
+    await flushRaf()
+    expect(scrollTo).toHaveBeenCalledOnce()
+    expect(scrollTo).toHaveBeenCalledWith(0, 0)
+    scrollTo.mockClear()
+    setScrollY(0)
+    fireEvent.click(screen.getAllByText(t('browse.favoritesTab'))[0])
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+    await flushRaf()
+
+    expect(scrollTo).toHaveBeenCalledWith(0, 7000)
+    vi.unstubAllGlobals()
+  })
+
+  it('re-applies an already-restored grid anchor after another same-mount round-trip', async () => {
+    localStorage.setItem('eh_view_mode', 'grid')
+    searchStr = 'tab=favorites&favcat=3'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [g(1, 'Alpha'), g(2, 'Beta')],
+      total: 2,
+      has_next: true,
+      next_cursor: 'A',
+      categories: [],
+    })
+
+    render(<Page />)
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+    const scrollTo = vi.fn()
+    vi.stubGlobal('scrollTo', scrollTo)
+    await flushRaf()
+    scrollTo.mockClear()
+
+    setScrollY(5000)
+    fireEvent.scroll(window)
+    await flushRaf()
+    expect(scrollTo).not.toHaveBeenCalled()
+    fireEvent.click(screen.getAllByText(t('browse.popularTab'))[0])
+    await waitFor(() => expect(screen.queryByText('Alpha')).not.toBeInTheDocument())
+    await flushRaf()
+    expect(scrollTo).toHaveBeenCalledOnce()
+    expect(scrollTo).toHaveBeenCalledWith(0, 0)
+    scrollTo.mockClear()
+    setScrollY(0)
+    fireEvent.click(screen.getAllByText(t('browse.favoritesTab'))[0])
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+    await flushRaf()
+    expect(gridRestoreApplied).toHaveBeenCalledTimes(1)
+    expect(scrollTo).toHaveBeenCalledOnce()
+    expect(gridRestoreApplied.mock.invocationCallOrder[0]).toBeLessThan(
+      scrollTo.mock.invocationCallOrder[0],
+    )
+    const firstRestoreKey = gridRestoreApplied.mock.calls[0]?.[0]?.key
+
+    scrollTo.mockClear()
+    gridRestoreApplied.mockClear()
+    setScrollY(7000)
+    fireEvent.scroll(window)
+    await flushRaf()
+    fireEvent.click(screen.getAllByText(t('browse.popularTab'))[0])
+    await waitFor(() => expect(screen.queryByText('Alpha')).not.toBeInTheDocument())
+    await flushRaf()
+    expect(scrollTo).toHaveBeenCalledOnce()
+    expect(scrollTo).toHaveBeenCalledWith(0, 0)
+    scrollTo.mockClear()
+    expect(gridRestoreApplied).not.toHaveBeenCalled()
+    setScrollY(0)
+    fireEvent.click(screen.getAllByText(t('browse.favoritesTab'))[0])
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+    await flushRaf()
+
+    expect(gridRestoreApplied).toHaveBeenCalledTimes(1)
+    expect(gridRestoreApplied.mock.calls[0]?.[0]?.key).not.toBe(firstRestoreKey)
+    expect(scrollTo).toHaveBeenCalledOnce()
     vi.unstubAllGlobals()
   })
 })

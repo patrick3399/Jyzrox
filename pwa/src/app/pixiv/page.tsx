@@ -1,174 +1,29 @@
 'use client'
 
-import { useState, useEffect, useRef, Suspense } from 'react'
-import Link from 'next/link'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LayoutGrid, List } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
-import useSWRInfinite from 'swr/infinite'
-import { LayoutGrid, List } from 'lucide-react'
-import { api } from '@/lib/api'
+import { CredentialBanner } from '@/components/CredentialBanner'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
-import { CredentialBanner } from '@/components/CredentialBanner'
-import { toast } from 'sonner'
-import { t } from '@/lib/i18n'
-import { useLocale } from '@/components/LocaleProvider'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
-import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useIllustActions } from '@/hooks/useIllustActions'
-import type { PixivIllust, PixivSearchResult, PixivUserPreview } from '@/lib/types'
-
-// ── Pixiv illust list-view row ────────────────────────────────────────
-
-function IllustListRow({ illust, onNavigate }: { illust: PixivIllust; onNavigate?: () => void }) {
-  const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } =
-    useIllustActions(illust)
-  const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
-
-  const visibleTags = illust.tags.slice(0, 4)
-  const extraTagCount = illust.tags.length - visibleTags.length
-
-  return (
-    <Link
-      href={`/pixiv/illust/${illust.id}`}
-      onClick={onNavigate}
-      className="group flex gap-3 p-3 bg-vault-card border border-vault-border rounded-lg hover:border-vault-accent transition-colors"
-    >
-      {/* Thumbnail */}
-      <div className="shrink-0 w-[72px] h-[72px] rounded overflow-hidden bg-vault-input relative">
-        <img
-          src={thumbUrl}
-          alt={illust.title}
-          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-          loading="lazy"
-          onError={(e) => {
-            ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-          }}
-        />
-        {illust.page_count > 1 && (
-          <span className="absolute top-1 right-1 bg-black/70 text-white text-[9px] px-1 py-0.5 rounded font-medium leading-none">
-            {illust.page_count}
-          </span>
-        )}
-      </div>
-
-      {/* Metadata */}
-      <div className="flex flex-col flex-1 min-w-0 gap-1">
-        <p className="text-sm font-medium text-vault-text truncate">{illust.title}</p>
-        <p className="text-xs text-vault-text-secondary truncate">{illust.user.name}</p>
-
-        {/* Tags */}
-        {visibleTags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-0.5">
-            {visibleTags.map((tag) => (
-              <span
-                key={tag.name}
-                className="px-1.5 py-0.5 rounded text-[10px] bg-vault-input text-vault-text-muted border border-vault-border truncate max-w-[100px]"
-              >
-                {tag.name}
-              </span>
-            ))}
-            {extraTagCount > 0 && (
-              <span className="px-1 py-0.5 text-[10px] text-vault-text-muted">
-                +{extraTagCount}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Bottom row */}
-        <div className="flex items-center gap-3 mt-auto text-[10px] text-vault-text-secondary">
-          {illust.total_view > 0 && (
-            <span>
-              {illust.total_view.toLocaleString()} {t('pixiv.views')}
-            </span>
-          )}
-          {illust.total_bookmarks > 0 && (
-            <span>
-              {illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}
-            </span>
-          )}
-          <div className="ml-auto flex items-center gap-1.5">
-            <button
-              onClick={handleBookmark}
-              disabled={bookmarking}
-              className={`text-sm transition-colors disabled:opacity-50 ${bookmarked ? 'text-yellow-400' : 'text-vault-text-muted hover:text-yellow-400'}`}
-            >
-              {bookmarked ? '★' : '☆'}
-            </button>
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="px-2 py-0.5 rounded bg-vault-accent text-white text-[10px] hover:bg-vault-accent/80 disabled:opacity-50 transition-colors"
-            >
-              {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Link>
-  )
-}
-
-// ── Illust card ──────────────────────────────────────────────────────────
-
-function IllustCard({ illust, onNavigate }: { illust: PixivIllust; onNavigate?: () => void }) {
-  const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } =
-    useIllustActions(illust)
-  const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
-
-  return (
-    <Link href={`/pixiv/illust/${illust.id}`} onClick={onNavigate} className="group block">
-      <div className="relative aspect-square overflow-hidden rounded-lg bg-vault-input">
-        <img
-          src={thumbUrl}
-          alt={illust.title}
-          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-          loading="lazy"
-          onError={(e) => {
-            ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-          }}
-        />
-        {illust.page_count > 1 && (
-          <span className="absolute top-1.5 right-1.5 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
-            {illust.page_count} {t('pixiv.pages')}
-          </span>
-        )}
-        <button
-          onClick={handleBookmark}
-          disabled={bookmarking}
-          className={`absolute top-1.5 left-1.5 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity bg-black/70 text-white text-xs px-1.5 py-0.5 rounded disabled:opacity-50 ${bookmarked ? 'text-yellow-400' : ''}`}
-        >
-          {bookmarked ? '★' : '☆'}
-        </button>
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity duration-200" />
-        <button
-          onClick={handleDownload}
-          disabled={downloading}
-          className="absolute bottom-2 right-2 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity bg-vault-accent text-white text-xs px-2 py-1 rounded hover:bg-vault-accent/80 disabled:opacity-50"
-        >
-          {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-        </button>
-      </div>
-      <div className="mt-1.5 px-0.5">
-        <p className="text-sm text-vault-text truncate font-medium">{illust.title}</p>
-        <p className="text-xs text-vault-text-secondary truncate">{illust.user.name}</p>
-        {(illust.total_view > 0 || illust.total_bookmarks > 0) && (
-          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-vault-text-secondary">
-            <span>
-              {illust.total_view.toLocaleString()} {t('pixiv.views')}
-            </span>
-            <span>
-              {illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}
-            </span>
-          </div>
-        )}
-      </div>
-    </Link>
-  )
-}
-
-// ── Sort/Duration option constants ───────────────────────────────────────
+import { usePixivBrowseSession } from '@/hooks/usePixivBrowseSession'
+import { useProfile } from '@/hooks/useProfile'
+import { api } from '@/lib/api'
+import { decideAnchorRestore, type BrowseAnchor } from '@/lib/browse/anchor'
+import {
+  parsePixivIdentity,
+  serializePixivIdentity,
+  type PixivBrowseIdentity,
+  type PixivBrowseItem,
+} from '@/lib/browse/pixiv'
+import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
+import { t } from '@/lib/i18n'
+import type { PixivIllust, PixivUserPreview } from '@/lib/types'
+import { useLocale } from '@/components/LocaleProvider'
+import { toast } from 'sonner'
 
 const SORT_OPTIONS = [
   { value: 'date_desc', label: () => t('pixiv.sortDateDesc') },
@@ -182,565 +37,6 @@ const DURATION_OPTIONS = [
   { value: 'within_last_week', label: () => t('pixiv.durationWeek') },
   { value: 'within_last_month', label: () => t('pixiv.durationMonth') },
 ]
-
-// ── SearchResults component ──────────────────────────────────────────────
-
-function SearchResults({
-  query,
-  credentialsMissing,
-  onClear,
-  sort,
-  onSortChange,
-  duration,
-  onDurationChange,
-  focusedIndex,
-  onColCountChange,
-  saveScroll: _saveScroll,
-  viewMode,
-}: {
-  query: string
-  credentialsMissing: boolean
-  onClear: () => void
-  sort: string
-  onSortChange: (v: string) => void
-  duration: string
-  onDurationChange: (v: string) => void
-  focusedIndex: number | null
-  onColCountChange: (count: number) => void
-  saveScroll: () => void
-  viewMode: 'grid' | 'list'
-}) {
-  // Map sort values for public API: date_desc→date_d, date_asc→date, popular_desc→popular_d
-  const publicOrder =
-    sort === 'date_asc' ? 'date' : sort === 'popular_desc' ? 'popular_d' : 'date_d'
-
-  const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
-    if (!query) return null
-    if (pageIndex > 0 && previous?.next_offset === null) return null
-    const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
-    if (credentialsMissing) {
-      const page = Math.floor(offset / 60) + 1
-      return ['/pixiv/search-public', query, publicOrder, page]
-    }
-    return ['/pixiv/search', query, sort, duration, offset]
-  }
-
-  const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
-    getKey,
-    (key, { signal }: { signal?: AbortSignal } = {}) => {
-      if (key[0] === '/pixiv/search-public') {
-        const [, word, order, page] = key as [string, string, string, number]
-        return api.pixiv.searchPublic({ word, order, page }, { signal })
-      }
-      const [, word, s, d, offset] = key as [string, string, string, string, number]
-      return api.pixiv.search({
-        word,
-        sort: s,
-        duration: d || undefined,
-        offset,
-      }, { signal })
-    },
-    { revalidateFirstPage: false },
-  )
-
-  const allIllusts = data?.flatMap((page) => page.illusts) ?? []
-  const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
-  const isLoading = !data && isValidating
-
-  return (
-    <div className="space-y-4">
-      {/* Results header with clear button */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-vault-text-secondary">
-          <span>{t('browse.resultsFor', { query })}</span>
-        </div>
-        <button
-          onClick={onClear}
-          className="text-xs text-vault-text-muted hover:text-vault-text transition-colors"
-        >
-          {t('browse.clearSearch')}
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
-        <select
-          value={sort}
-          onChange={(e) => onSortChange(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
-        >
-          {SORT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label()}
-            </option>
-          ))}
-        </select>
-        {!credentialsMissing && (
-          <select
-            value={duration}
-            onChange={(e) => onDurationChange(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
-          >
-            {DURATION_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label()}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {/* Loading / Error / Empty / Results */}
-      {isLoading && (
-        <div className="flex justify-center py-12">
-          <LoadingSpinner />
-        </div>
-      )}
-
-      {error && (
-        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-          <p className="text-red-400">{t('browse.failedLoadResults')}</p>
-        </div>
-      )}
-
-      {!isLoading && !error && allIllusts.length === 0 && (
-        <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
-      )}
-
-      <VirtualGrid
-        items={allIllusts}
-        columns={viewMode === 'list' ? { base: 1 } : { base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
-        gap={viewMode === 'list' ? 8 : 12}
-        estimateHeight={viewMode === 'list' ? 100 : 200}
-        focusedIndex={focusedIndex}
-        onColCountChange={onColCountChange}
-        renderItem={(illust) =>
-          viewMode === 'list' ? (
-            <IllustListRow key={illust.id} illust={illust} />
-          ) : (
-            <IllustCard key={illust.id} illust={illust} />
-          )
-        }
-        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
-        hasMore={hasMore}
-        isLoading={isValidating}
-      />
-    </div>
-  )
-}
-
-// Returns SWR fallbackData+initialSize options only when pages is non-empty; empty means "no restore"
-function swrFallback<T>(pages: T[] | null) {
-  return pages ? { fallbackData: pages, initialSize: pages.length } : {}
-}
-
-// ── Feed Tab ─────────────────────────────────────────────────────────────
-
-function FeedTab({
-  credentialsMissing,
-  focusedIndex,
-  onColCountChange,
-  saveScroll,
-  restoredPages,
-  viewMode,
-}: {
-  credentialsMissing: boolean
-  focusedIndex: number | null
-  onColCountChange: (count: number) => void
-  saveScroll: (pages: PixivSearchResult[]) => void
-  restoredPages: PixivSearchResult[] | null
-  viewMode: 'grid' | 'list'
-}) {
-  const router = useRouter()
-  const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
-    if (credentialsMissing) return null
-    if (pageIndex > 0 && previous?.next_offset === null) return null
-    const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
-    return ['/pixiv/following/feed', offset]
-  }
-
-  const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
-    getKey,
-    ([, offset], { signal }: { signal?: AbortSignal } = {}) =>
-      api.pixiv.getFollowingFeed(offset as number, { signal }),
-    { revalidateFirstPage: false, ...swrFallback(restoredPages) },
-  )
-
-  const allIllusts = data?.flatMap((page) => page.illusts) ?? []
-  const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
-  const isLoading = !data && isValidating
-
-  // Grid keyboard navigation
-  const [colCount, setColCount] = useState(2)
-  useGridKeyboard({
-    totalItems: allIllusts.length,
-    colCount,
-    onEnter: (i) => {
-      saveScroll(data ?? [])
-      router.push(`/pixiv/illust/${allIllusts[i].id}`)
-    },
-    enabled: allIllusts.length > 0,
-  })
-
-  const handleColCountChange = (count: number) => {
-    setColCount(count)
-    onColCountChange(count)
-  }
-
-  if (credentialsMissing) {
-    return (
-      <div className="text-center py-16 text-vault-text-secondary">
-        <p>{t('pixiv.noCredentials')}</p>
-        <Link href="/credentials" className="text-vault-accent underline mt-2 inline-block">
-          {t('nav.credentials')}
-        </Link>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-12">
-        <LoadingSpinner />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-        <p className="text-red-400">{t('common.failedToLoad')}</p>
-      </div>
-    )
-  }
-
-  if (allIllusts.length === 0) {
-    return <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
-  }
-
-  return (
-    <div className="space-y-4">
-      <VirtualGrid
-        items={allIllusts}
-        columns={viewMode === 'list' ? { base: 1 } : { base: 2, sm: 3, md: 4, lg: 6, xl: 8 }}
-        gap={viewMode === 'list' ? 8 : 12}
-        estimateHeight={viewMode === 'list' ? 100 : 200}
-        focusedIndex={focusedIndex}
-        onColCountChange={handleColCountChange}
-        renderItem={(illust) =>
-          viewMode === 'list' ? (
-            <IllustListRow key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
-          ) : (
-            <IllustCard key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
-          )
-        }
-        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
-        hasMore={hasMore}
-        isLoading={isValidating}
-      />
-    </div>
-  )
-}
-
-// ── UserPreviewCard ───────────────────────────────────────────────────────
-
-function UserPreviewCard({ preview }: { preview: PixivUserPreview }) {
-  const [followed, setFollowed] = useState(true) // all users in following list are followed
-  const [toggling, setToggling] = useState(false)
-
-  const handleToggleFollow = async (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (toggling) return
-    setToggling(true)
-    try {
-      if (followed) {
-        await api.pixiv.unfollowUser(preview.user.id)
-        setFollowed(false)
-      } else {
-        await api.pixiv.followUser(preview.user.id)
-        setFollowed(true)
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
-    } finally {
-      setToggling(false)
-    }
-  }
-
-  return (
-    <Link
-      href={`/pixiv/user/${preview.user.id}`}
-      className="group block rounded-lg bg-vault-card border border-vault-border overflow-hidden hover:border-vault-accent transition-colors"
-    >
-      {/* Recent works grid */}
-      {preview.illusts.length > 0 ? (
-        <div className="grid grid-cols-3 gap-0.5">
-          {preview.illusts.slice(0, 3).map((illust) => (
-            <div key={illust.id} className="relative aspect-square w-full bg-vault-input">
-              <img
-                src={api.pixiv.imageProxyUrl(illust.image_urls.square_medium)}
-                alt=""
-                className="absolute inset-0 w-full h-full object-cover"
-                onError={(e) => {
-                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div
-          className="flex items-center justify-center bg-vault-input"
-          style={{ aspectRatio: '3/1' }}
-        >
-          <span className="text-[10px] text-vault-text-muted uppercase tracking-widest">
-            {t('pixiv.noWorks')}
-          </span>
-        </div>
-      )}
-      {/* Artist info row */}
-      <div className="flex items-center gap-2 p-2">
-        {preview.user.profile_image ? (
-          <img
-            src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
-            alt={preview.user.name}
-            className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0"
-            onError={(e) => {
-              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-            }}
-          />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-vault-input shrink-0" />
-        )}
-        <p className="text-xs font-medium text-vault-text truncate flex-1">{preview.user.name}</p>
-        <button
-          onClick={handleToggleFollow}
-          disabled={toggling}
-          className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded transition-colors disabled:opacity-50 ${
-            followed ? 'text-vault-text-secondary hover:text-red-400' : 'text-vault-accent'
-          }`}
-        >
-          {toggling ? '...' : followed ? t('pixiv.unfollow') : t('pixiv.follow')}
-        </button>
-      </div>
-    </Link>
-  )
-}
-
-// ── Following Tab ────────────────────────────────────────────────────────
-
-function FollowingTab({
-  credentialsMissing,
-  focusedIndex,
-  onColCountChange,
-}: {
-  credentialsMissing: boolean
-  focusedIndex: number | null
-  onColCountChange: (count: number) => void
-}) {
-  const getKey = (
-    pageIndex: number,
-    previous: { user_previews: PixivUserPreview[]; next_offset: number | null } | null,
-  ) => {
-    if (credentialsMissing) return null
-    if (pageIndex > 0 && previous?.next_offset === null) return null
-    const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
-    return ['/pixiv/following', offset]
-  }
-
-  const { data, size, setSize, isValidating, error } = useSWRInfinite(
-    getKey,
-    ([, offset]) => api.pixiv.getFollowing('public', offset as number),
-    { revalidateFirstPage: false },
-  )
-
-  const allPreviews = data?.flatMap((page) => page.user_previews) ?? []
-  const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
-  const isLoading = !data && isValidating
-
-  if (credentialsMissing) {
-    return (
-      <div className="text-center py-16 text-vault-text-secondary">
-        <p>{t('pixiv.noCredentials')}</p>
-        <Link href="/credentials" className="text-vault-accent underline mt-2 inline-block">
-          {t('nav.credentials')}
-        </Link>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-12">
-        <LoadingSpinner />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-        <p className="text-red-400">{t('common.failedToLoad')}</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      {allPreviews.length === 0 && !isValidating && (
-        <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
-      )}
-
-      <VirtualGrid
-        items={allPreviews}
-        columns={{ base: 2, sm: 3, md: 4, lg: 5 }}
-        gap={12}
-        estimateHeight={180}
-        focusedIndex={focusedIndex}
-        onColCountChange={onColCountChange}
-        renderItem={(preview: PixivUserPreview) => (
-          <UserPreviewCard key={preview.user.id} preview={preview} />
-        )}
-        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
-        hasMore={hasMore}
-        isLoading={isValidating}
-      />
-    </div>
-  )
-}
-
-// ── Bookmarks Tab ────────────────────────────────────────────────────────
-
-function BookmarksTab({
-  credentialsMissing,
-  restrict,
-  onRestrictChange,
-  focusedIndex,
-  onColCountChange,
-  saveScroll,
-  restoredPages,
-  viewMode,
-}: {
-  credentialsMissing: boolean
-  restrict: string
-  onRestrictChange: (v: string) => void
-  focusedIndex: number | null
-  onColCountChange: (count: number) => void
-  saveScroll: (pages: PixivSearchResult[]) => void
-  restoredPages: PixivSearchResult[] | null
-  viewMode: 'grid' | 'list'
-}) {
-  const router = useRouter()
-  const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
-    if (credentialsMissing) return null
-    if (pageIndex > 0 && previous?.next_offset === null) return null
-    const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
-    return ['/pixiv/bookmarks', restrict, offset]
-  }
-
-  const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
-    getKey,
-    ([, r, offset]) => api.pixiv.getMyBookmarks(r as string, offset as number),
-    { revalidateFirstPage: false, ...swrFallback(restoredPages) },
-  )
-
-  const allIllusts = data?.flatMap((page) => page.illusts) ?? []
-  const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
-  const isLoading = !data && isValidating
-
-  // Grid keyboard navigation
-  const [colCount, setColCount] = useState(2)
-  useGridKeyboard({
-    totalItems: allIllusts.length,
-    colCount,
-    onEnter: (i) => {
-      saveScroll(data ?? [])
-      router.push(`/pixiv/illust/${allIllusts[i].id}`)
-    },
-    enabled: allIllusts.length > 0,
-  })
-
-  const handleColCountChange = (count: number) => {
-    setColCount(count)
-    onColCountChange(count)
-  }
-
-  if (credentialsMissing) {
-    return (
-      <div className="text-center py-16 text-vault-text-secondary">
-        <p>{t('pixiv.noCredentials')}</p>
-        <Link href="/credentials" className="text-vault-accent underline mt-2 inline-block">
-          {t('nav.credentials')}
-        </Link>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end gap-2">
-        <select
-          value={restrict}
-          onChange={(e) => onRestrictChange(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
-        >
-          <option value="public">{t('pixiv.visibilityPublic')}</option>
-          <option value="private">{t('pixiv.visibilityPrivate')}</option>
-        </select>
-      </div>
-
-      {isLoading && (
-        <div className="flex justify-center py-12">
-          <LoadingSpinner />
-        </div>
-      )}
-
-      {error && (
-        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-          <p className="text-red-400">{t('common.failedToLoad')}</p>
-        </div>
-      )}
-
-      {!isLoading && !error && allIllusts.length === 0 && (
-        <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
-      )}
-
-      <VirtualGrid
-        items={allIllusts}
-        columns={viewMode === 'list' ? { base: 1 } : { base: 2, sm: 3, md: 4, lg: 6, xl: 8 }}
-        gap={viewMode === 'list' ? 8 : 12}
-        estimateHeight={viewMode === 'list' ? 100 : 200}
-        focusedIndex={focusedIndex}
-        onColCountChange={handleColCountChange}
-        renderItem={(illust) =>
-          viewMode === 'list' ? (
-            <IllustListRow key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
-          ) : (
-            <IllustCard key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
-          )
-        }
-        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
-        hasMore={hasMore}
-        isLoading={isValidating}
-      />
-    </div>
-  )
-}
-
-// ── Ranking Tab ───────────────────────────────────────────────────────────
-
-type RankingPage = {
-  contents: Array<Record<string, unknown>>
-  rank_total: number
-  mode: string
-  content: string
-  date: string
-  page: number
-  prev_date: string | null
-  next_date: string | null
-  has_next?: boolean
-}
 
 const RANKING_MODES = [
   { value: 'daily', label: () => t('browse.rankingDaily') },
@@ -756,462 +52,1008 @@ const RANKING_CONTENT = [
   { value: 'ugoira', label: () => t('browse.rankingUgoira') },
 ]
 
-function RankingTab({
-  credentialsMissing,
-  mode,
-  onModeChange,
-  content,
-  onContentChange,
-  r18,
-  onR18Change,
-  focusedIndex,
-  onColCountChange,
-  saveScroll,
-  restoredPages,
-  viewMode: _viewMode,
+type Tab = 'feed' | 'following' | 'ranking' | 'bookmarks'
+type ViewMode = 'grid' | 'list'
+
+function pixivItemKey(item: PixivBrowseItem): string {
+  switch (item.kind) {
+    case 'illust':
+      return `illust:${item.illust.id}`
+    case 'ranking':
+      return `ranking:${item.entry.illust_id}`
+    case 'user':
+      return `user:${item.preview.user.id}`
+  }
+}
+
+function IllustCard({
+  illust,
+  viewMode,
+  onNavigate,
+  onBookmark,
 }: {
-  credentialsMissing: boolean
-  mode: string
-  onModeChange: (v: string) => void
-  content: string
-  onContentChange: (v: string) => void
-  r18: boolean
-  onR18Change: (v: boolean) => void
-  focusedIndex: number | null
-  onColCountChange: (count: number) => void
-  saveScroll: (pages: RankingPage[]) => void
-  restoredPages: RankingPage[] | null
-  viewMode: 'grid' | 'list'
+  illust: PixivIllust
+  viewMode: ViewMode
+  onNavigate: () => void
+  onBookmark: (illustId: number, bookmarked: boolean) => void
 }) {
-  const router = useRouter()
-
-  // R18 only supports daily/weekly; reset mode if incompatible
-  const handleR18Toggle = () => {
-    const next = !r18
-    if (next && mode !== 'daily' && mode !== 'weekly') {
-      onModeChange('daily')
-    }
-    onR18Change(next)
-  }
-
-  const getKey = (pageIndex: number, previous: RankingPage | null) => {
-    if (pageIndex > 0 && previous) {
-      const hasNext = (previous as Record<string, unknown>).has_next
-      const shouldStop = hasNext !== undefined ? !hasNext : previous.contents.length < 50
-      if (shouldStop) return null
-    }
-    const effectiveMode = r18 ? `${mode}_r18` : mode
-    return ['/pixiv/ranking', effectiveMode, r18 ? 'all' : content, pageIndex + 1]
-  }
-
-  const { data, size, setSize, isValidating, error } = useSWRInfinite<RankingPage>(
-    getKey,
-    ([, m, c, p]) =>
-      api.pixiv.ranking({ mode: m as string, content: c as string, page: p as number }),
-    { revalidateFirstPage: false, ...swrFallback(restoredPages) },
+  const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } = useIllustActions(
+    illust,
+    (nextBookmarked) => onBookmark(illust.id, nextBookmarked),
   )
+  const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
+  const tags = illust.tags ?? []
+  const visibleTags = tags.slice(0, 4)
+  const extraTagCount = tags.length - visibleTags.length
+  const imageError = (event: React.SyntheticEvent<HTMLImageElement>) => {
+    event.currentTarget.style.display = 'none'
+  }
 
-  const allContents = data?.flatMap((page) => page.contents) ?? []
-  const lastPage = data?.[data.length - 1]
-  const hasMore = lastPage
-    ? (lastPage as Record<string, unknown>).has_next !== undefined
-      ? Boolean((lastPage as Record<string, unknown>).has_next)
-      : (lastPage.contents.length ?? 0) >= 50
-    : false
-  const isLoading = !data && isValidating
-
-  // Grid keyboard navigation for ranking items
-  const [colCount, setColCount] = useState(3)
-  useGridKeyboard({
-    totalItems: allContents.length,
-    colCount,
-    onEnter: (i) => {
-      saveScroll(data ?? [])
-      const illustId = allContents[i]?.illust_id as number | undefined
-      if (illustId) router.push(`/pixiv/illust/${illustId}`)
-    },
-    enabled: allContents.length > 0,
-  })
-
-  const handleColCountChange = (count: number) => {
-    setColCount(count)
-    onColCountChange(count)
+  if (viewMode === 'list') {
+    return (
+      <div className="group flex w-full gap-3 rounded-lg border border-vault-border bg-vault-card p-3 text-left hover:border-vault-accent">
+        <button type="button" onClick={onNavigate} className="flex min-w-0 flex-1 gap-3 text-left">
+          <img
+            src={thumbUrl}
+            alt={illust.title}
+            className="h-[72px] w-[72px] shrink-0 rounded object-cover"
+            loading="lazy"
+            onError={imageError}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-vault-text">
+              {illust.title}
+            </span>
+            <span className="block truncate text-xs text-vault-text-secondary">
+              {illust.user.name}
+            </span>
+            {visibleTags.length > 0 && (
+              <span className="mt-1 flex flex-wrap gap-1">
+                {visibleTags.map((tag) => (
+                  <span
+                    key={tag.name}
+                    className="max-w-[100px] truncate rounded border border-vault-border bg-vault-input px-1.5 py-0.5 text-[10px] text-vault-text-muted"
+                  >
+                    {tag.name}
+                  </span>
+                ))}
+                {extraTagCount > 0 && (
+                  <span className="text-[10px] text-vault-text-muted">+{extraTagCount}</span>
+                )}
+              </span>
+            )}
+            <span className="mt-1 flex gap-3 text-[10px] text-vault-text-secondary">
+              <span>
+                {(illust.total_view ?? 0).toLocaleString()} {t('pixiv.views')}
+              </span>
+              <span>
+                {(illust.total_bookmarks ?? 0).toLocaleString()} {t('pixiv.bookmarks')}
+              </span>
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={handleBookmark}
+          disabled={bookmarking}
+          className={bookmarked ? 'text-yellow-400' : 'text-vault-text-muted'}
+        >
+          {bookmarked ? '★' : '☆'}
+        </button>
+        <button
+          type="button"
+          onClick={handleDownload}
+          disabled={downloading}
+          className="rounded bg-vault-accent px-2 py-1 text-xs text-white disabled:opacity-50"
+        >
+          {downloading ? t('pixiv.downloading') : t('pixiv.download')}
+        </button>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
-        <select
-          value={mode}
-          onChange={(e) => onModeChange(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
-        >
-          {RANKING_MODES.filter((o) => !r18 || o.value === 'daily' || o.value === 'weekly').map(
-            (o) => (
-              <option key={o.value} value={o.value}>
-                {o.label()}
-              </option>
-            ),
+    <div className="group relative block w-full text-left">
+      <button type="button" onClick={onNavigate} className="block w-full text-left">
+        <span className="relative block aspect-square overflow-hidden rounded-lg bg-vault-input">
+          <img
+            src={thumbUrl}
+            alt={illust.title}
+            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            loading="lazy"
+            onError={imageError}
+          />
+          {illust.page_count > 1 && (
+            <span className="absolute right-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
+              {illust.page_count} {t('pixiv.pages')}
+            </span>
           )}
-        </select>
-        <button
-          type="button"
-          onClick={handleR18Toggle}
-          disabled={credentialsMissing}
-          title={credentialsMissing ? t('browse.r18RequiresCredentials') : undefined}
-          className={[
-            'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-            r18
-              ? 'bg-pink-600 border-pink-500 text-white'
-              : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text',
-            credentialsMissing ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
-          ].join(' ')}
-        >
-          {t('browse.r18')}
-        </button>
-        {!r18 && (
-          <select
-            value={content}
-            onChange={(e) => onContentChange(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
-          >
-            {RANKING_CONTENT.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label()}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {isLoading && (
-        <div className="flex justify-center py-12">
-          <LoadingSpinner />
-        </div>
-      )}
-      {error && (
-        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-          <p className="text-red-400">{t('browse.failedLoadResults')}</p>
-        </div>
-      )}
-
-      {!isLoading && !error && allContents.length === 0 && (
-        <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
-      )}
-
-      <VirtualGrid
-        items={allContents}
-        columns={{ base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }}
-        gap={8}
-        estimateHeight={180}
-        focusedIndex={focusedIndex}
-        onColCountChange={handleColCountChange}
-        renderItem={(item: Record<string, unknown>) => {
-          const illustId = item.illust_id as number
-          const title = item.title as string
-          const userName = item.user_name as string
-          const thumbUrl = api.pixiv.imageProxyUrl(item.url as string)
-          return (
-            <Link key={illustId} href={`/pixiv/illust/${illustId}`} onClick={() => saveScroll(data ?? [])} className="group block">
-              <div className="relative aspect-square overflow-hidden rounded-lg bg-vault-input">
-                <img
-                  src={thumbUrl}
-                  alt={title}
-                  className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                  loading="lazy"
-                  onError={(e) => {
-                    ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                  }}
-                />
-                <div className="absolute top-1.5 left-1.5 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
-                  #{item.rank as number}
-                </div>
-              </div>
-              <div className="mt-1.5 px-0.5">
-                <p className="text-sm text-vault-text truncate font-medium">{title}</p>
-                <p className="text-xs text-vault-text-secondary truncate">{userName}</p>
-              </div>
-            </Link>
-          )
-        }}
-        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
-        hasMore={hasMore}
-        isLoading={isValidating}
-      />
+        </span>
+        <span className="mt-1.5 block truncate text-sm font-medium text-vault-text">
+          {illust.title}
+        </span>
+        <span className="block truncate text-xs text-vault-text-secondary">{illust.user.name}</span>
+        <span className="mt-0.5 flex gap-2 text-[10px] text-vault-text-secondary">
+          <span>
+            {(illust.total_view ?? 0).toLocaleString()} {t('pixiv.views')}
+          </span>
+          <span>
+            {(illust.total_bookmarks ?? 0).toLocaleString()} {t('pixiv.bookmarks')}
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={handleBookmark}
+        disabled={bookmarking}
+        className={`absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 ${bookmarked ? 'text-yellow-400' : 'text-white'}`}
+      >
+        {bookmarked ? '★' : '☆'}
+      </button>
+      <button
+        type="button"
+        onClick={handleDownload}
+        disabled={downloading}
+        className="absolute bottom-12 right-2 rounded bg-vault-accent px-2 py-1 text-xs text-white disabled:opacity-50"
+      >
+        {downloading ? t('pixiv.downloading') : t('pixiv.download')}
+      </button>
     </div>
   )
 }
 
-// ── Main Page ────────────────────────────────────────────────────────────
+function RankingCard({ entry, onOpen }: { entry: Record<string, unknown>; onOpen: () => void }) {
+  const title = typeof entry.title === 'string' ? entry.title : ''
+  const userName = typeof entry.user_name === 'string' ? entry.user_name : ''
+  const imageUrl = typeof entry.url === 'string' ? api.pixiv.imageProxyUrl(entry.url) : ''
+  return (
+    <button type="button" onClick={onOpen} className="group block w-full text-left">
+      <span className="relative block aspect-square overflow-hidden rounded-lg bg-vault-input">
+        {imageUrl && (
+          <img
+            src={imageUrl}
+            alt={title}
+            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            loading="lazy"
+          />
+        )}
+        <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white">
+          #{String(entry.rank ?? '')}
+        </span>
+      </span>
+      <span className="mt-1.5 block truncate text-sm font-medium text-vault-text">{title}</span>
+      <span className="block truncate text-xs text-vault-text-secondary">{userName}</span>
+    </button>
+  )
+}
 
-type Tab = 'feed' | 'following' | 'ranking' | 'bookmarks'
+function UserPreviewCard({
+  preview,
+  onOpen,
+  onFollow,
+}: {
+  preview: PixivUserPreview
+  onOpen: () => void
+  onFollow: () => void
+}) {
+  const [followed, setFollowed] = useState(true)
+  const [toggling, setToggling] = useState(false)
+
+  const handleToggleFollow = async (event: React.MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (toggling) return
+    setToggling(true)
+    try {
+      if (followed) await api.pixiv.unfollowUser(preview.user.id)
+      else await api.pixiv.followUser(preview.user.id)
+      setFollowed((value) => !value)
+      onFollow()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('common.failedToSave'))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <div className="group relative block w-full overflow-hidden rounded-lg border border-vault-border bg-vault-card text-left hover:border-vault-accent">
+      <button type="button" onClick={onOpen} className="block w-full text-left">
+        {preview.illusts.length > 0 ? (
+          <span className="grid grid-cols-3 gap-0.5">
+            {preview.illusts.slice(0, 3).map((illust) => (
+              <img
+                key={illust.id}
+                src={api.pixiv.imageProxyUrl(illust.image_urls.square_medium)}
+                alt=""
+                className="aspect-square h-full w-full bg-vault-input object-cover"
+                onError={(event) => {
+                  event.currentTarget.style.display = 'none'
+                }}
+              />
+            ))}
+          </span>
+        ) : (
+          <span className="flex aspect-[3/1] items-center justify-center bg-vault-input text-[10px] uppercase tracking-widest text-vault-text-muted">
+            {t('pixiv.noWorks')}
+          </span>
+        )}
+        <span className="flex items-center gap-2 p-2 pr-20">
+          {preview.user.profile_image ? (
+            <img
+              src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
+              alt={preview.user.name}
+              className="h-7 w-7 shrink-0 rounded-full bg-vault-input object-cover"
+              onError={(event) => {
+                event.currentTarget.style.display = 'none'
+              }}
+            />
+          ) : (
+            <span className="h-7 w-7 shrink-0 rounded-full bg-vault-input" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-vault-text">
+            {preview.user.name}
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={handleToggleFollow}
+        disabled={toggling}
+        className="absolute bottom-2 right-2 rounded px-1.5 py-0.5 text-[10px] text-vault-text-secondary disabled:opacity-50"
+      >
+        {toggling ? '…' : followed ? t('pixiv.unfollow') : t('pixiv.follow')}
+      </button>
+    </div>
+  )
+}
 
 function PixivPageInner() {
   useLocale()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const rawTab = searchParams.get('tab') as Tab | null
+  const searchString = searchParams.toString()
+  const { data: credentials, isLoading: credentialsLoading } = useSWR(
+    '/api/settings/credentials',
+    () => api.settings.getCredentials(),
+  )
+  const { data: profile, isLoading: profileLoading } = useProfile()
+  const credentialsMissing = credentialsLoading ? false : !credentials?.pixiv?.configured
+  const searchBackend = credentialsMissing ? 'public' : 'authenticated'
+  const [initialIdentity] = useState(() =>
+    parsePixivIdentity(new URLSearchParams(searchString), searchBackend),
+  )
   const initialTab: Tab =
-    rawTab === 'feed' || rawTab === 'following' || rawTab === 'bookmarks' ? rawTab : 'ranking'
+    initialIdentity.surface === 'feed' ||
+    initialIdentity.surface === 'following' ||
+    initialIdentity.surface === 'bookmarks'
+      ? initialIdentity.surface
+      : 'ranking'
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
-
-  // ── View mode state ──
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+  const [searchQuery, setSearchQuery] = useState(
+    initialIdentity.surface === 'search' ? initialIdentity.query : '',
+  )
+  const [submittedQuery, setSubmittedQuery] = useState(
+    initialIdentity.surface === 'search' ? initialIdentity.query : '',
+  )
+  const [searchSort, setSearchSort] = useState(
+    initialIdentity.surface === 'search' ? initialIdentity.sort : 'date_desc',
+  )
+  const [searchDuration, setSearchDuration] = useState(
+    initialIdentity.surface === 'search' ? initialIdentity.duration : '',
+  )
+  const [rankingMode, setRankingMode] = useState(
+    initialIdentity.surface === 'ranking' ? initialIdentity.mode : 'daily',
+  )
+  const [rankingContent, setRankingContent] = useState(
+    initialIdentity.surface === 'ranking' ? initialIdentity.content : 'all',
+  )
+  const [rankingR18, setRankingR18] = useState(
+    initialIdentity.surface === 'ranking' && initialIdentity.r18,
+  )
+  const [bookmarksRestrict, setBookmarksRestrict] = useState<'public' | 'private'>(
+    initialIdentity.surface === 'bookmarks' ? initialIdentity.restrict : 'public',
+  )
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window === 'undefined') return 'grid'
-    return (localStorage.getItem('pixiv_view_mode') as 'grid' | 'list') ?? 'grid'
+    try {
+      return window.localStorage.getItem('pixiv_view_mode') === 'list' ? 'list' : 'grid'
+    } catch {
+      return 'grid'
+    }
   })
-  const handleViewModeChange = (mode: 'grid' | 'list') => {
-    setViewMode(mode)
-    localStorage.setItem('pixiv_view_mode', mode)
+
+  useEffect(() => {
+    const incoming = parsePixivIdentity(new URLSearchParams(searchString), searchBackend)
+    if (incoming.surface === 'search') {
+      setSearchQuery(incoming.query)
+      setSubmittedQuery(incoming.query)
+      setSearchSort(incoming.sort)
+      setSearchDuration(incoming.duration)
+      return
+    }
+    setSearchQuery('')
+    setSubmittedQuery('')
+    if (incoming.surface === 'ranking') {
+      setActiveTab('ranking')
+      setRankingMode(incoming.mode)
+      setRankingContent(incoming.content)
+      setRankingR18(incoming.r18)
+    } else if (incoming.surface === 'bookmarks') {
+      setActiveTab('bookmarks')
+      setBookmarksRestrict(incoming.restrict)
+    } else {
+      setActiveTab(incoming.surface)
+    }
+  }, [searchBackend, searchString])
+
+  const handleViewModeChange = (nextMode: ViewMode) => {
+    setViewMode(nextMode)
+    try {
+      window.localStorage.setItem('pixiv_view_mode', nextMode)
+    } catch {
+      // View preference is best effort.
+    }
   }
 
-  // ── Ranking sub-filter state (lifted for URL sync) ──
-  const [rankingMode, setRankingMode] = useState(searchParams.get('mode') ?? 'daily')
-  const [rankingContent, setRankingContent] = useState(searchParams.get('content') ?? 'all')
-  const [rankingR18, setRankingR18] = useState(false)
-
-  // ── Search sub-filter state (lifted for URL sync) ──
-  const [searchSort, setSearchSort] = useState(searchParams.get('sort') ?? 'date_desc')
-  const [searchDuration, setSearchDuration] = useState(searchParams.get('duration') ?? '')
-
-  // ── Bookmarks sub-filter state (lifted for URL sync) ──
-  const [bookmarksRestrict, setBookmarksRestrict] = useState(
-    searchParams.get('restrict') ?? 'public',
-  )
-
-  // Each tab manages its own colCount internally; this no-op satisfies the prop interface
-  const noop = () => {}
-
-  const handleTabChange = (tab: Tab) => {
-    setActiveTab(tab)
-    // URL update is handled by the useEffect below
-  }
-
-  // URL sync for active tab + sub-filters
-  useEffect(() => {
-    const params = new URLSearchParams()
-    params.set('tab', activeTab)
-    if (activeTab === 'ranking') {
-      if (rankingMode !== 'daily') params.set('mode', rankingMode)
-      if (rankingContent !== 'all' && !rankingR18) params.set('content', rankingContent)
-    }
-    if (activeTab === 'bookmarks' && bookmarksRestrict !== 'public') {
-      params.set('restrict', bookmarksRestrict)
-    }
-    router.replace(`/pixiv?${params.toString()}`, { scroll: false })
-  }, [activeTab, rankingMode, rankingContent, rankingR18, bookmarksRestrict, router])
-
-  // URL sync for search sub-filters (only when search is active)
-  // search query is transient — not persisted to URL to keep it simple
-
-  // Search state — initialize from URL ?q= param (e.g., from tag click navigation)
-  const urlQ = searchParams.get('q') ?? ''
-  const [searchQuery, setSearchQuery] = useState(urlQ)
-  const [submittedQuery, setSubmittedQuery] = useState(urlQ)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-
-  // Check credentials
-  const { data: credData, isLoading: credLoading } = useSWR('/api/settings/credentials', () =>
-    api.settings.getCredentials(),
-  )
-  const credentialsMissing = credLoading ? false : !credData?.['pixiv']?.configured
-
-  // Dismiss search on Escape key
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && submittedQuery) {
-        setSubmittedQuery('')
-        setSearchQuery('')
+  const identity = useMemo<PixivBrowseIdentity>(() => {
+    if (submittedQuery) {
+      return {
+        surface: 'search',
+        query: submittedQuery,
+        sort: searchSort,
+        duration: searchDuration,
+        backend: searchBackend,
       }
     }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [submittedQuery])
-
-  const handleSearchSubmit = () => {
-    if (searchQuery.trim()) {
-      setSubmittedQuery(searchQuery.trim())
+    if (activeTab === 'ranking') {
+      return {
+        surface: 'ranking',
+        mode: rankingMode,
+        content: rankingContent,
+        r18: rankingR18,
+      }
     }
-  }
+    if (activeTab === 'bookmarks') {
+      return { surface: 'bookmarks', restrict: bookmarksRestrict }
+    }
+    if (activeTab === 'following') return { surface: 'following', restrict: 'public' }
+    return { surface: 'feed' }
+  }, [
+    activeTab,
+    bookmarksRestrict,
+    rankingContent,
+    rankingMode,
+    rankingR18,
+    searchBackend,
+    searchDuration,
+    searchSort,
+    submittedQuery,
+  ])
 
-  const handleClearSearch = () => {
-    setSubmittedQuery('')
-    setSearchQuery('')
-    searchInputRef.current?.focus()
-  }
+  const session = usePixivBrowseSession({
+    identity,
+    profileReady: !profileLoading,
+    credentialsReady: !credentialsLoading,
+    credentialsConfigured: !credentialsMissing,
+    userId: profile?.username,
+  })
+  const {
+    state,
+    checkpoint,
+    loadMore,
+    refresh,
+    retry,
+    restoreInstruction,
+    acknowledgeRestore,
+    updateView,
+  } = session
+  const visibleRangeRef = useRef({ startIndex: 0, endIndex: 0 })
+  const layoutRef = useRef<BrowseLayoutSnapshot | null>(null)
+  const [measuredLayout, setMeasuredLayout] = useState<BrowseLayoutSnapshot | null>(null)
+  const elementRef = useRef(new Map<number, HTMLElement>())
+  const scrollYRef = useRef(0)
+  const liveViewRevisionRef = useRef(0)
+  const persistedViewRevisionRef = useRef(0)
+  const handledRestoreKeyRef = useRef<string | null>(null)
+  const scrollAnimationFrameRef = useRef<number | null>(null)
+  const checkpointTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ── Scroll restoration (per tab) ──
-  // isReady is approximated by active tab match; actual data readiness is inside each tab
-  const { saveScroll: saveRankingScroll, restoredPages: rankingRestoredPages } =
-    useScrollRestore<RankingPage>('pixiv_ranking_scrollY', activeTab === 'ranking', {
-      persist: true,
-    })
-  const { saveScroll: saveFeedScroll, restoredPages: feedRestoredPages } =
-    useScrollRestore<PixivSearchResult>('pixiv_feed_scrollY', activeTab === 'feed', {
-      persist: true,
-    })
-  const { saveScroll: saveBookmarksScroll, restoredPages: bookmarksRestoredPages } =
-    useScrollRestore<PixivSearchResult>('pixiv_bookmarks_scrollY', activeTab === 'bookmarks', {
-      persist: true,
-    })
-  const { saveScroll: saveSearchScroll } = useScrollRestore(
-    'pixiv_search_scrollY',
-    submittedQuery.length > 0,
-    { persist: true },
+  const captureView = useCallback(() => {
+    const index = visibleRangeRef.current.startIndex
+    const item = state.items[index]
+    const element = elementRef.current.get(index)
+    const anchor: BrowseAnchor = {
+      itemId: item ? pixivItemKey(item) : null,
+      offset: element?.getBoundingClientRect().top ?? 0,
+      scrollY: scrollYRef.current,
+    }
+    return { anchor, layout: layoutRef.current }
+  }, [state.items])
+
+  const persistView = useCallback(() => {
+    checkpoint(captureView())
+    persistedViewRevisionRef.current = liveViewRevisionRef.current
+  }, [captureView, checkpoint])
+
+  const flushPendingViewWork = useCallback(() => {
+    if (scrollAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(scrollAnimationFrameRef.current)
+      scrollAnimationFrameRef.current = null
+    }
+    if (checkpointTimerRef.current !== null) {
+      clearTimeout(checkpointTimerRef.current)
+      checkpointTimerRef.current = null
+    }
+    scrollYRef.current = window.scrollY
+    liveViewRevisionRef.current += 1
+  }, [])
+
+  const replaceIdentity = useCallback(
+    (nextIdentity: PixivBrowseIdentity) => {
+      flushPendingViewWork()
+      checkpoint(captureView())
+      persistedViewRevisionRef.current = liveViewRevisionRef.current
+      router.replace(`/pixiv?${serializePixivIdentity(nextIdentity).toString()}`, {
+        scroll: false,
+      })
+    },
+    [captureView, checkpoint, flushPendingViewWork, router],
   )
 
-  // focusedIndex is managed inside each tab component using useGridKeyboard
-  // we only need to pass down saveScroll and onColCountChange
+  const openPixivItem = useCallback(
+    (illustId: number) => {
+      flushPendingViewWork()
+      checkpoint(captureView())
+      persistedViewRevisionRef.current = liveViewRevisionRef.current
+      router.push(`/pixiv/illust/${illustId}`)
+    },
+    [captureView, checkpoint, flushPendingViewWork, router],
+  )
+  const openPixivUser = useCallback(
+    (userId: number) => {
+      flushPendingViewWork()
+      checkpoint(captureView())
+      persistedViewRevisionRef.current = liveViewRevisionRef.current
+      router.push(`/pixiv/user/${userId}`)
+    },
+    [captureView, checkpoint, flushPendingViewWork, router],
+  )
+
+  useEffect(() => {
+    scrollYRef.current = window.scrollY
+    const onScroll = () => {
+      if (scrollAnimationFrameRef.current !== null)
+        cancelAnimationFrame(scrollAnimationFrameRef.current)
+      scrollAnimationFrameRef.current = requestAnimationFrame(() => {
+        scrollAnimationFrameRef.current = null
+        scrollYRef.current = window.scrollY
+        liveViewRevisionRef.current += 1
+        updateView(captureView())
+      })
+      if (checkpointTimerRef.current !== null) clearTimeout(checkpointTimerRef.current)
+      checkpointTimerRef.current = setTimeout(() => {
+        checkpointTimerRef.current = null
+        persistView()
+      }, 250)
+    }
+    const onPageHide = () => {
+      if (checkpointTimerRef.current !== null) {
+        clearTimeout(checkpointTimerRef.current)
+        checkpointTimerRef.current = null
+      }
+      scrollYRef.current = window.scrollY
+      persistView()
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('pagehide', onPageHide)
+      if (scrollAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(scrollAnimationFrameRef.current)
+        scrollAnimationFrameRef.current = null
+      }
+      if (checkpointTimerRef.current !== null) {
+        clearTimeout(checkpointTimerRef.current)
+        checkpointTimerRef.current = null
+      }
+    }
+  }, [captureView, persistView, updateView])
+
+  const restoreDecision = useMemo(
+    () =>
+      restoreInstruction?.target.kind === 'view' && restoreInstruction.target.view.anchor
+        ? decideAnchorRestore(restoreInstruction.target.view.anchor, state.items, pixivItemKey)
+        : null,
+    [restoreInstruction, state.items],
+  )
+  const restoreKey = restoreInstruction?.key ?? null
+  const layoutReady = measuredLayout !== null
+  const restoreRequest =
+    layoutReady && restoreKey && restoreDecision?.kind === 'anchor'
+      ? { key: restoreKey, index: restoreDecision.index }
+      : undefined
+
+  useEffect(() => {
+    if (!restoreInstruction || restoreInstruction.identityKey !== state.identityKey) return
+    if (handledRestoreKeyRef.current === restoreInstruction.key) return
+    if (restoreInstruction.target.kind === 'top') {
+      handledRestoreKeyRef.current = restoreInstruction.key
+      window.scrollTo({ top: 0 })
+      acknowledgeRestore(restoreInstruction.key)
+      return
+    }
+    if (!layoutReady) return
+    if (!restoreInstruction.target.view.anchor) {
+      handledRestoreKeyRef.current = restoreInstruction.key
+      window.scrollTo({ top: 0 })
+      acknowledgeRestore(restoreInstruction.key)
+      return
+    }
+    if (restoreDecision?.kind !== 'pixel' && restoreDecision?.kind !== 'top') return
+    handledRestoreKeyRef.current = restoreInstruction.key
+    window.scrollTo({ top: restoreDecision.kind === 'pixel' ? restoreDecision.scrollY : 0 })
+    acknowledgeRestore(restoreInstruction.key)
+  }, [
+    acknowledgeRestore,
+    layoutReady,
+    restoreDecision,
+    restoreInstruction,
+    state.identityKey,
+  ])
+
+  const handleRestoreApplied = useCallback(
+    (request: { key: string; index: number }) => {
+      if (
+        !restoreInstruction ||
+        handledRestoreKeyRef.current === request.key ||
+        restoreInstruction.identityKey !== state.identityKey ||
+        request.key !== restoreInstruction.key ||
+        restoreDecision?.kind !== 'anchor'
+      )
+        return
+      const element = elementRef.current.get(request.index)
+      if (!element) return
+      window.scrollBy({ top: element.getBoundingClientRect().top - restoreDecision.offset })
+      updateView(captureView())
+      handledRestoreKeyRef.current = request.key
+      acknowledgeRestore(request.key)
+    },
+    [
+      acknowledgeRestore,
+      captureView,
+      restoreDecision,
+      restoreInstruction,
+      state.identityKey,
+      updateView,
+    ],
+  )
+
+  const onBookmark = useCallback(() => {
+    void refresh()
+  }, [refresh])
+  const patchItemsFromServer = useCallback(() => {
+    void refresh()
+  }, [refresh])
+  const onFollow = useCallback(() => patchItemsFromServer(), [patchItemsFromServer])
+  const loadMoreRetry = retry
+
+  const [colCount, setColCount] = useState(2)
+  const handleKeyboardEnter = useCallback(
+    (index: number) => {
+      const item = state.items[index]
+      if (item?.kind === 'illust') openPixivItem(item.illust.id)
+      else if (item?.kind === 'ranking') openPixivItem(item.entry.illust_id)
+      else if (item?.kind === 'user') openPixivUser(item.preview.user.id)
+    },
+    [openPixivItem, openPixivUser, state.items],
+  )
+  const { focusedIndex, registerElement } = useGridKeyboard({
+    totalItems: state.items.length,
+    colCount,
+    onEnter: handleKeyboardEnter,
+    enabled: state.items.length > 0,
+  })
+  const handleRegisterElement = useCallback(
+    (index: number, element: HTMLElement | null) => {
+      if (element) elementRef.current.set(index, element)
+      else elementRef.current.delete(index)
+      registerElement(index, element)
+    },
+    [registerElement],
+  )
+  const handleVisibleRange = useCallback((range: { startIndex: number; endIndex: number }) => {
+    visibleRangeRef.current = range
+  }, [])
+  const handleLayout = useCallback(
+    (layout: { colCount: number; containerWidth: number; scrollMargin: number }) => {
+      layoutRef.current = {
+        columns: layout.colCount,
+        width: layout.containerWidth,
+        mode: viewMode,
+      }
+      setMeasuredLayout(layoutRef.current)
+      setColCount(layout.colCount)
+    },
+    [viewMode],
+  )
+
+  const handleSearchSubmit = () => {
+    const query = searchQuery.trim()
+    if (!query) return
+    setSubmittedQuery(query)
+    replaceIdentity({
+      surface: 'search',
+      query,
+      sort: searchSort,
+      duration: searchDuration,
+      backend: searchBackend,
+    })
+  }
+  const handleClearSearch = () => {
+    setSearchQuery('')
+    setSubmittedQuery('')
+    replaceIdentity({
+      surface: activeTab === 'ranking' ? 'ranking' : activeTab,
+      ...(activeTab === 'ranking'
+        ? { mode: rankingMode, content: rankingContent, r18: rankingR18 }
+        : activeTab === 'bookmarks'
+          ? { restrict: bookmarksRestrict }
+          : activeTab === 'following'
+            ? { restrict: 'public' as const }
+            : {}),
+    } as PixivBrowseIdentity)
+  }
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab)
+    setSearchQuery('')
+    setSubmittedQuery('')
+    if (tab === 'ranking')
+      replaceIdentity({
+        surface: 'ranking',
+        mode: rankingMode,
+        content: rankingContent,
+        r18: rankingR18,
+      })
+    else if (tab === 'bookmarks')
+      replaceIdentity({ surface: 'bookmarks', restrict: bookmarksRestrict })
+    else if (tab === 'following') replaceIdentity({ surface: 'following', restrict: 'public' })
+    else replaceIdentity({ surface: 'feed' })
+  }
+
+  const isPrivateSurface =
+    identity.surface === 'feed' ||
+    identity.surface === 'following' ||
+    identity.surface === 'bookmarks' ||
+    (identity.surface === 'search' && identity.backend === 'authenticated')
+  const isSessionLoading = state.status === 'loading'
+  const initialLoading = isSessionLoading && state.items.length === 0
+  const showCredentialGate = credentialsMissing && isPrivateSurface
+  const gridColumns =
+    identity.surface === 'following'
+      ? { base: 2, sm: 3, md: 4, lg: 5 }
+      : identity.surface === 'ranking'
+        ? { base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }
+        : viewMode === 'list'
+          ? { base: 1 }
+          : { base: 2, sm: 3, md: 4, lg: 6, xl: 8 }
 
   return (
     <div className="space-y-4">
       {credentialsMissing && <CredentialBanner source="pixiv" />}
-
-      {/* Search bar — always visible */}
       <div className="flex gap-2">
         <input
-          ref={searchInputRef}
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSearchSubmit()
-            else if (e.key === 'Escape') handleClearSearch()
+          onChange={(event) => setSearchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') handleSearchSubmit()
+            if (event.key === 'Escape') handleClearSearch()
           }}
           placeholder={t('pixiv.searchPlaceholder')}
-          className="flex-1 bg-vault-card border border-vault-border rounded-lg px-4 py-2.5 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors"
+          className="flex-1 rounded-lg border border-vault-border bg-vault-card px-4 py-2.5 text-sm text-vault-text"
         />
         <button
+          type="button"
           onClick={handleSearchSubmit}
-          className="px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
+          className="rounded-lg bg-vault-accent px-4 py-2.5 text-sm font-medium text-white"
         >
           {t('pixiv.search')}
         </button>
-        <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
+        <div className="flex overflow-hidden rounded-lg border border-vault-border">
           <button
+            type="button"
             onClick={() => handleViewModeChange('grid')}
-            className={`px-3 py-2 transition-colors ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+            aria-label={t('browse.gridView')}
+            aria-pressed={viewMode === 'grid'}
+            className={`px-3 ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted'}`}
           >
             <LayoutGrid size={18} />
           </button>
           <button
+            type="button"
             onClick={() => handleViewModeChange('list')}
-            className={`px-3 py-2 transition-colors ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+            aria-label={t('browse.listView')}
+            aria-pressed={viewMode === 'list'}
+            className={`px-3 ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted'}`}
           >
             <List size={18} />
           </button>
         </div>
       </div>
 
-      {/* Search results mode */}
-      {submittedQuery ? (
-        <SearchResults
-          query={submittedQuery}
-          credentialsMissing={credentialsMissing}
-          onClear={handleClearSearch}
-          sort={searchSort}
-          onSortChange={setSearchSort}
-          duration={searchDuration}
-          onDurationChange={setSearchDuration}
-          focusedIndex={null}
-          onColCountChange={noop}
-          saveScroll={saveSearchScroll}
-          viewMode={viewMode}
-        />
-      ) : (
-        <>
-          {/* Tab bar — Feed & Following only shown when credentials available */}
-          <div className="flex gap-1 border-b border-vault-border overflow-x-auto scrollbar-hide">
-            <button
-              onClick={() => handleTabChange('ranking')}
-              className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'ranking'
-                  ? 'border-vault-accent text-vault-text'
-                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
-              }`}
+      {identity.surface === 'search' ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-auto text-sm text-vault-text-secondary">
+            {t('browse.resultsFor', { query: identity.query })}
+          </span>
+          <select
+            value={searchSort}
+            onChange={(event) => {
+              const sort = event.target.value
+              setSearchSort(sort)
+              replaceIdentity({ ...identity, sort })
+            }}
+            className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label()}
+              </option>
+            ))}
+          </select>
+          {!credentialsMissing && (
+            <select
+              value={searchDuration}
+              onChange={(event) => {
+                const duration = event.target.value
+                setSearchDuration(duration)
+                replaceIdentity({ ...identity, duration })
+              }}
+              className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
             >
-              {t('browse.ranking')}
-            </button>
-            {!credentialsMissing && (
-              <>
-                <button
-                  onClick={() => handleTabChange('feed')}
-                  className={`shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === 'feed'
-                      ? 'border-blue-400 text-vault-text'
-                      : 'border-transparent text-vault-text-muted hover:text-vault-text'
-                  }`}
-                >
-                  {t('pixiv.feedTab')}
-                </button>
-                <button
-                  onClick={() => handleTabChange('following')}
-                  className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === 'following'
-                      ? 'border-[#e91e63] text-vault-text'
-                      : 'border-transparent text-vault-text-muted hover:text-vault-text'
-                  }`}
-                >
-                  {t('pixiv.followingTab')}
-                </button>
-                <button
-                  onClick={() => handleTabChange('bookmarks')}
-                  className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === 'bookmarks'
-                      ? 'border-[#ff9800] text-vault-text'
-                      : 'border-transparent text-vault-text-muted hover:text-vault-text'
-                  }`}
-                >
-                  {t('pixiv.bookmarks') || 'Bookmarks'}
-                </button>
-              </>
-            )}
-          </div>
+              {DURATION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label()}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={handleClearSearch}
+            className="text-xs text-vault-text-muted"
+          >
+            {t('browse.clearSearch')}
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-1 overflow-x-auto border-b border-vault-border">
+          <button
+            type="button"
+            onClick={() => handleTabChange('ranking')}
+            aria-current={activeTab === 'ranking' ? 'page' : undefined}
+            className={`border-b-2 px-4 py-2 text-sm ${activeTab === 'ranking' ? 'border-vault-accent text-vault-text' : 'border-transparent text-vault-text-muted'}`}
+          >
+            {t('browse.ranking')}
+          </button>
+          {!credentialsMissing && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleTabChange('feed')}
+                aria-current={activeTab === 'feed' ? 'page' : undefined}
+                className={`border-b-2 px-4 py-2 text-sm ${activeTab === 'feed' ? 'border-blue-400 text-vault-text' : 'border-transparent text-vault-text-muted'}`}
+              >
+                {t('pixiv.feedTab')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTabChange('following')}
+                aria-current={activeTab === 'following' ? 'page' : undefined}
+                className={`border-b-2 px-4 py-2 text-sm ${activeTab === 'following' ? 'border-[#e91e63] text-vault-text' : 'border-transparent text-vault-text-muted'}`}
+              >
+                {t('pixiv.followingTab')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTabChange('bookmarks')}
+                aria-current={activeTab === 'bookmarks' ? 'page' : undefined}
+                className={`border-b-2 px-4 py-2 text-sm ${activeTab === 'bookmarks' ? 'border-[#ff9800] text-vault-text' : 'border-transparent text-vault-text-muted'}`}
+              >
+                {t('pixiv.bookmarks')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
-          {/* Tab content */}
-          {activeTab === 'ranking' && (
-            <RankingTab
-              credentialsMissing={credentialsMissing}
-              mode={rankingMode}
-              onModeChange={setRankingMode}
-              content={rankingContent}
-              onContentChange={setRankingContent}
-              r18={rankingR18}
-              onR18Change={setRankingR18}
-              focusedIndex={null}
-              onColCountChange={noop}
-              saveScroll={saveRankingScroll}
-              restoredPages={rankingRestoredPages}
-              viewMode={viewMode}
-            />
+      {identity.surface === 'ranking' && (
+        <div className="flex flex-wrap gap-2">
+          <select
+            value={rankingMode}
+            onChange={(event) => {
+              const mode = event.target.value
+              setRankingMode(mode)
+              replaceIdentity({ ...identity, mode })
+            }}
+            className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
+          >
+            {RANKING_MODES.filter(
+              (option) => !rankingR18 || option.value === 'daily' || option.value === 'weekly',
+            ).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label()}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              const r18 = !rankingR18
+              setRankingR18(r18)
+              replaceIdentity({ ...identity, r18 })
+            }}
+            disabled={credentialsMissing}
+            aria-pressed={rankingR18}
+            className={`rounded-lg border px-3 py-1.5 text-sm ${rankingR18 ? 'border-pink-500 bg-pink-600 text-white' : 'border-vault-border bg-vault-input text-vault-text-secondary'}`}
+          >
+            {t('browse.r18')}
+          </button>
+          {!rankingR18 && (
+            <select
+              value={rankingContent}
+              onChange={(event) => {
+                const content = event.target.value
+                setRankingContent(content)
+                replaceIdentity({ ...identity, content })
+              }}
+              className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
+            >
+              {RANKING_CONTENT.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label()}
+                </option>
+              ))}
+            </select>
           )}
-          {activeTab === 'feed' && !credentialsMissing && (
-            <FeedTab
-              credentialsMissing={false}
-              focusedIndex={null}
-              onColCountChange={noop}
-              saveScroll={saveFeedScroll}
-              restoredPages={feedRestoredPages}
-              viewMode={viewMode}
-            />
-          )}
-          {activeTab === 'following' && !credentialsMissing && (
-            <FollowingTab credentialsMissing={false} focusedIndex={null} onColCountChange={noop} />
-          )}
-          {activeTab === 'bookmarks' && !credentialsMissing && (
-            <BookmarksTab
-              credentialsMissing={false}
-              restrict={bookmarksRestrict}
-              onRestrictChange={setBookmarksRestrict}
-              focusedIndex={null}
-              onColCountChange={noop}
-              saveScroll={saveBookmarksScroll}
-              restoredPages={bookmarksRestoredPages}
-              viewMode={viewMode}
-            />
-          )}
-        </>
+        </div>
+      )}
+
+      {identity.surface === 'bookmarks' && (
+        <div className="flex justify-end">
+          <select
+            value={bookmarksRestrict}
+            onChange={(event) => {
+              const restrict = event.target.value === 'private' ? 'private' : 'public'
+              setBookmarksRestrict(restrict)
+              replaceIdentity({ surface: 'bookmarks', restrict })
+            }}
+            className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
+          >
+            <option value="public">{t('pixiv.visibilityPublic')}</option>
+            <option value="private">{t('pixiv.visibilityPrivate')}</option>
+          </select>
+        </div>
+      )}
+
+      {showCredentialGate && (
+        <div className="py-16 text-center text-vault-text-secondary">
+          <p>{t('pixiv.noCredentials')}</p>
+          <button
+            type="button"
+            onClick={() => router.push('/credentials')}
+            className="mt-2 text-vault-accent underline"
+          >
+            {t('nav.credentials')}
+          </button>
+        </div>
+      )}
+
+      {initialLoading && (
+        <div className="flex justify-center py-12">
+          <LoadingSpinner />
+        </div>
+      )}
+      {state.status === 'error' && (
+        <div className="rounded-lg border border-red-800/50 bg-red-900/20 p-4 text-sm">
+          <p className="text-red-400">{t('common.failedToLoad')}</p>
+          <button
+            type="button"
+            onClick={() => void loadMoreRetry()}
+            className="mt-2 text-vault-accent"
+          >
+            {t('common.retry')}
+          </button>
+        </div>
+      )}
+      {!showCredentialGate &&
+        !initialLoading &&
+        state.items.length === 0 &&
+        state.status !== 'error' && (
+          <p className="py-8 text-center text-vault-text-secondary">{t('pixiv.noResults')}</p>
+        )}
+
+      {!showCredentialGate && (
+        <VirtualGrid
+          items={state.items}
+          columns={gridColumns}
+          getItemKey={pixivItemKey}
+          gap={viewMode === 'list' ? 8 : identity.surface === 'ranking' ? 8 : 12}
+          estimateHeight={viewMode === 'list' ? 100 : identity.surface === 'following' ? 180 : 200}
+          focusedIndex={focusedIndex}
+          onColCountChange={setColCount}
+          onRegisterElement={handleRegisterElement}
+          onVisibleRangeChange={handleVisibleRange}
+          onLayoutChange={handleLayout}
+          restoreRequest={restoreRequest}
+          onRestoreApplied={handleRestoreApplied}
+          renderItem={(item) => {
+            if (item.kind === 'user') {
+              const preview = item.preview as unknown as PixivUserPreview
+              return (
+                <UserPreviewCard
+                  preview={preview}
+                  onOpen={() => openPixivUser(preview.user.id)}
+                  onFollow={onFollow}
+                />
+              )
+            }
+            if (item.kind === 'ranking') {
+              return (
+                <RankingCard
+                  entry={item.entry}
+                  onOpen={() => openPixivItem(item.entry.illust_id)}
+                />
+              )
+            }
+            const illust = item.illust as unknown as PixivIllust
+            if (identity.surface === 'search')
+              return (
+                <IllustCard
+                  illust={illust}
+                  viewMode={viewMode}
+                  onNavigate={() => openPixivItem(illust.id)}
+                  onBookmark={onBookmark}
+                />
+              )
+            if (identity.surface === 'feed')
+              return (
+                <IllustCard
+                  illust={illust}
+                  viewMode={viewMode}
+                  onNavigate={() => openPixivItem(illust.id)}
+                  onBookmark={onBookmark}
+                />
+              )
+            if (identity.surface === 'bookmarks')
+              return (
+                <IllustCard
+                  illust={illust}
+                  viewMode={viewMode}
+                  onNavigate={() => openPixivItem(illust.id)}
+                  onBookmark={onBookmark}
+                />
+              )
+            return (
+              <IllustCard
+                illust={illust}
+                viewMode={viewMode}
+                onNavigate={() => openPixivItem(illust.id)}
+                onBookmark={onBookmark}
+              />
+            )
+          }}
+          onLoadMore={state.status === 'error' ? undefined : state.hasMore ? loadMore : undefined}
+          hasMore={state.hasMore && state.status !== 'error'}
+          isLoading={isSessionLoading}
+        />
+      )}
+      {state.items.length > 0 && !state.hasMore && state.status !== 'loading' && (
+        <p className="py-4 text-center text-xs text-vault-text-muted">
+          {t('browse.noMoreResults')}
+        </p>
       )}
     </div>
   )
@@ -1221,7 +1063,7 @@ export default function PixivPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="flex min-h-[60vh] items-center justify-center">
           <LoadingSpinner size="lg" />
         </div>
       }

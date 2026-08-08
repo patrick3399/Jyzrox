@@ -1,6 +1,14 @@
 'use client'
 
-import { useState, useCallback, Suspense, useEffect, useMemo } from 'react'
+import {
+  useState,
+  useCallback,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react'
 import { useRouter } from 'next/navigation'
 import {
   BookOpen,
@@ -12,14 +20,10 @@ import {
   BookmarkCheck,
   HelpCircle,
 } from 'lucide-react'
-import {
-  useGalleryCategories,
-  useLibrarySources,
-  useSearchGalleries,
-} from '@/hooks/useGalleries'
+import { useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
 import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
-import { useScrollRestore } from '@/hooks/useScrollRestore'
+import { useLibraryBrowseSession } from '@/hooks/useLibraryBrowseSession'
 import { useCollections } from '@/hooks/useCollections'
 import { useAddDatasetMembers, useDatasets } from '@/hooks/useDatasets'
 import { useProfile } from '@/hooks/useProfile'
@@ -33,19 +37,15 @@ import { t, formatNumber } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { galleryHref } from '@/lib/galleryRoutes'
-import { useSWRConfig } from 'swr'
-import type { SearchGalleryItem, SearchGalleriesResponse } from '@/lib/api'
+import type { SearchGalleryItem } from '@/lib/api'
+import { decideAnchorRestore, type BrowseAnchor } from '@/lib/browse/anchor'
+import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
 import {
   estimateLibraryGridRowHeight,
   getLibraryGridColumns,
   getLibraryGridGap,
 } from '@/lib/libraryLayout'
 import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
-import {
-  clearLibraryKeyboardTarget,
-  consumeLibraryKeyboardTarget,
-  saveLibraryKeyboardTarget,
-} from '@/lib/libraryKeyboardState'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -54,8 +54,6 @@ const SORT_OPTIONS = [
   { value: 'pages', label: () => t('library.pagesSort') },
   { value: 'title', label: () => t('library.titleSort') },
 ] as const
-
-const PAGE_SIZE = 24
 
 function mapSearchItemToGallery(item: SearchGalleryItem): Gallery {
   return {
@@ -87,7 +85,6 @@ function mapSearchItemToGallery(item: SearchGalleryItem): Gallery {
 
 function LibraryContent() {
   const router = useRouter()
-  const { mutate: globalMutate } = useSWRConfig()
 
   const {
     rawQuery,
@@ -149,6 +146,21 @@ function LibraryContent() {
   // Collections stay eager because they also populate the normal filter panel.
   const { data: collectionsData } = useCollections()
   const { data: profile } = useProfile()
+  const {
+    state,
+    loadMore,
+    refresh,
+    retry,
+    checkpoint,
+    updateView,
+    restoreInstruction,
+    acknowledgeRestore,
+  } =
+    useLibraryBrowseSession({
+      query: rawQuery,
+      enabled: profile !== undefined,
+      userId: profile?.username,
+    })
   const canManageDatasets = profile?.role === 'member' || profile?.role === 'admin'
   // Datasets are only ever read by the batch-action bar, so don't pay for the
   // request until that bar is actually on screen.
@@ -166,30 +178,190 @@ function LibraryContent() {
       : parsed.source
     : ''
 
-  // Must be before useSearchGalleries so restoredPages is available as fallbackData
-  const { saveScroll, restoredPages } = useScrollRestore<SearchGalleriesResponse>(
-    'library_scrollY',
-    true,
-    { persist: true },
-  )
-
-  const { items: searchItems, data: searchData, total, isLoading, error, isReachingEnd, loadMore, mutate } =
-    useSearchGalleries(rawQuery || ' ', {
-      sort: sortValue,
-      limit: PAGE_SIZE,
-      fallbackData: restoredPages ?? undefined,
-    })
-
   const displayGalleries = useMemo<Gallery[]>(
-    () => (searchItems ? searchItems.map(mapSearchItemToGallery) : []),
-    [searchItems],
+    () => state.items.map(mapSearchItemToGallery),
+    [state.items],
   )
-  const [keyboardReturnGalleryId] = useState(() => consumeLibraryKeyboardTarget(rawQuery))
-  const keyboardReturnIndex = useMemo(() => {
-    if (keyboardReturnGalleryId === null) return null
-    const index = displayGalleries.findIndex((gallery) => gallery.id === keyboardReturnGalleryId)
-    return index >= 0 ? index : null
-  }, [displayGalleries, keyboardReturnGalleryId])
+  const total = state.total
+  const error = state.error
+  const isSessionLoading = state.status === 'loading'
+  const itemElementsRef = useRef(new Map<number, HTMLElement>())
+  const visibleStartRef = useRef(0)
+  const layoutRef = useRef<BrowseLayoutSnapshot>({ columns: 4, width: 0, mode: viewMode })
+  const pendingRestoreRef = useRef<{
+    key: string
+    identityKey: string
+    index: number
+    offset: number
+  } | null>(null)
+  const liveViewRef = useRef<{
+    anchor: BrowseAnchor | null
+    layout: BrowseLayoutSnapshot | null
+  } | null>(null)
+  const previousIdentityRef = useRef(state.identityKey)
+  const handledRestoreKeyRef = useRef<string | null>(null)
+  const scheduledRestoreKeyRef = useRef<string | null>(null)
+  const [restoreRequest, setRestoreRequest] = useState<{
+    key: string
+    identityKey: string
+    index: number
+  }>()
+
+  useEffect(() => {
+    if (previousIdentityRef.current === state.identityKey) return
+    previousIdentityRef.current = state.identityKey
+    pendingRestoreRef.current = null
+    liveViewRef.current = null
+    setRestoreRequest(undefined)
+  }, [state.identityKey])
+
+  useEffect(() => {
+    if (!restoreInstruction || restoreInstruction.identityKey !== state.identityKey) {
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current = null
+        setRestoreRequest(undefined)
+      }
+      return
+    }
+    if (handledRestoreKeyRef.current === restoreInstruction.key) return
+    if (restoreInstruction.target.kind === 'top') {
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current = null
+        setRestoreRequest(undefined)
+      }
+      if (scheduledRestoreKeyRef.current === restoreInstruction.key) return
+      scheduledRestoreKeyRef.current = restoreInstruction.key
+      const frame = requestAnimationFrame(() => {
+        window.scrollTo(0, 0)
+        handledRestoreKeyRef.current = restoreInstruction.key
+        scheduledRestoreKeyRef.current = null
+        acknowledgeRestore(restoreInstruction.key)
+      })
+      return () => {
+        cancelAnimationFrame(frame)
+        if (scheduledRestoreKeyRef.current === restoreInstruction.key)
+          scheduledRestoreKeyRef.current = null
+      }
+    }
+    const anchor = restoreInstruction.target.view.anchor
+    if (!anchor) {
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current = null
+        setRestoreRequest(undefined)
+      }
+      if (scheduledRestoreKeyRef.current === restoreInstruction.key) return
+      scheduledRestoreKeyRef.current = restoreInstruction.key
+      const frame = requestAnimationFrame(() => {
+        window.scrollTo(0, 0)
+        handledRestoreKeyRef.current = restoreInstruction.key
+        scheduledRestoreKeyRef.current = null
+        acknowledgeRestore(restoreInstruction.key)
+      })
+      return () => {
+        cancelAnimationFrame(frame)
+        if (scheduledRestoreKeyRef.current === restoreInstruction.key)
+          scheduledRestoreKeyRef.current = null
+      }
+    }
+    const decision = decideAnchorRestore(anchor, displayGalleries, (gallery) => gallery.id)
+    if (decision.kind === 'anchor') {
+      const nextPending = {
+        key: restoreInstruction.key,
+        identityKey: state.identityKey,
+        index: decision.index,
+        offset: decision.offset,
+      }
+      const pending = pendingRestoreRef.current
+      if (
+        pending?.key === nextPending.key &&
+        pending.identityKey === nextPending.identityKey &&
+        pending.index === nextPending.index &&
+        pending.offset === nextPending.offset
+      )
+        return
+      pendingRestoreRef.current = nextPending
+      setRestoreRequest({
+        key: restoreInstruction.key,
+        identityKey: state.identityKey,
+        index: decision.index,
+      })
+      return
+    }
+    if (pendingRestoreRef.current) {
+      pendingRestoreRef.current = null
+      setRestoreRequest(undefined)
+    }
+    if (scheduledRestoreKeyRef.current === restoreInstruction.key) return
+    scheduledRestoreKeyRef.current = restoreInstruction.key
+    const frame = requestAnimationFrame(() => {
+      window.scrollTo(0, decision.kind === 'pixel' ? decision.scrollY : 0)
+      handledRestoreKeyRef.current = restoreInstruction.key
+      scheduledRestoreKeyRef.current = null
+      acknowledgeRestore(restoreInstruction.key)
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      if (scheduledRestoreKeyRef.current === restoreInstruction.key)
+        scheduledRestoreKeyRef.current = null
+    }
+  }, [acknowledgeRestore, displayGalleries, restoreInstruction, state.identityKey])
+
+  const captureAnchor = useCallback(
+    (preferred?: Gallery): BrowseAnchor => {
+      const fallbackIndex = Math.min(
+        visibleStartRef.current,
+        Math.max(0, displayGalleries.length - 1),
+      )
+      const gallery = preferred ?? displayGalleries[fallbackIndex]
+      const element = gallery ? itemElementsRef.current.get(gallery.id) : null
+      return {
+        itemId: gallery?.id ?? null,
+        offset: element?.getBoundingClientRect().top ?? 0,
+        scrollY: window.scrollY,
+      }
+    },
+    [displayGalleries],
+  )
+
+  const openGallery = useCallback(
+    (gallery: Gallery) => {
+      checkpoint({ anchor: captureAnchor(gallery), layout: layoutRef.current })
+      router.push(galleryHref(gallery.source, gallery.source_id))
+    },
+    [captureAnchor, checkpoint, router],
+  )
+
+  useLayoutEffect(() => {
+    let frame: number | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const save = () => {
+      const view = liveViewRef.current ?? {
+        anchor: captureAnchor(),
+        layout: layoutRef.current,
+      }
+      checkpoint(view)
+    }
+    const capture = () => {
+      frame = undefined
+      if (pendingRestoreRef.current) return
+      const view = { anchor: captureAnchor(), layout: layoutRef.current }
+      liveViewRef.current = view
+      updateView(view)
+      clearTimeout(timer)
+      timer = setTimeout(save, 250)
+    }
+    const onScroll = () => {
+      if (frame === undefined) frame = requestAnimationFrame(capture)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('pagehide', save)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('pagehide', save)
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      clearTimeout(timer)
+    }
+  }, [captureAnchor, checkpoint, updateView])
 
   const handleFavoriteToggle = useCallback(
     async (gallery: Gallery) => {
@@ -198,12 +370,12 @@ function LibraryContent() {
           favorited: !gallery.is_favorited,
         })
         toast.success(gallery.is_favorited ? t('library.unfavorited') : t('library.favorited'))
-        mutate()
+        await refresh()
       } catch {
         toast.error(t('library.updateFailed'))
       }
     },
-    [mutate],
+    [refresh],
   )
 
   const handleDelete = useCallback(
@@ -212,12 +384,12 @@ function LibraryContent() {
       try {
         await api.library.deleteGallery(gallery.source, gallery.source_id)
         toast.success(t('library.deleted'))
-        mutate()
+        await refresh()
       } catch {
         toast.error(t('library.updateFailed'))
       }
     },
-    [mutate],
+    [refresh],
   )
 
   const handleReadingListToggle = useCallback(
@@ -226,11 +398,7 @@ function LibraryContent() {
         await api.library.updateGallery(g.source, g.source_id, {
           in_reading_list: !g.in_reading_list,
         })
-        globalMutate(
-          (key: unknown) => Array.isArray(key) && key[0] === 'search/galleries',
-          undefined,
-          { revalidate: true },
-        )
+        await refresh()
         toast.success(
           g.in_reading_list
             ? t('contextMenu.removeFromReadingList')
@@ -240,23 +408,52 @@ function LibraryContent() {
         toast.error(t('common.failedToLoad'))
       }
     },
-    [globalMutate],
+    [refresh],
   )
 
   // ── Keyboard grid navigation ────────────────────────────
   const { focusedIndex, registerElement } = useGridKeyboard({
     totalItems: displayGalleries.length,
     colCount,
-    restoreFocusedIndex: keyboardReturnIndex,
     onEnter: (i) => {
       const g = displayGalleries[i]
-      if (g) {
-        saveLibraryKeyboardTarget(rawQuery, g.id)
-        saveScroll(searchData ?? [])
-        router.push(galleryHref(g.source, g.source_id))
-      }
+      if (g) openGallery(g)
     },
   })
+
+  const handleRegisterElement = useCallback(
+    (index: number, element: HTMLElement | null) => {
+      registerElement(index, element)
+      const gallery = displayGalleries[index]
+      if (!gallery) return
+      if (element) itemElementsRef.current.set(gallery.id, element)
+      else itemElementsRef.current.delete(gallery.id)
+    },
+    [displayGalleries, registerElement],
+  )
+
+  const handleGridRestoreApplied = useCallback(
+    (request: { key: string; index: number }) => {
+      const pending = pendingRestoreRef.current
+      if (
+        !pending ||
+        handledRestoreKeyRef.current === request.key ||
+        pending.identityKey !== state.identityKey ||
+        pending.key !== request.key ||
+        pending.index !== request.index
+      )
+        return
+      const gallery = displayGalleries[request.index]
+      const element = gallery ? itemElementsRef.current.get(gallery.id) : null
+      if (!element) return
+      window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - pending.offset)
+      pendingRestoreRef.current = null
+      setRestoreRequest(undefined)
+      handledRestoreKeyRef.current = pending.key
+      acknowledgeRestore(pending.key)
+    },
+    [acknowledgeRestore, displayGalleries, state.identityKey],
+  )
 
   const toggleSelectedId = useCallback(
     (id: number) => {
@@ -430,9 +627,7 @@ function LibraryContent() {
                     </label>
                     <select
                       value={parsed.collection ?? ''}
-                      onChange={(e) =>
-                        setFilter('collection', e.target.value || null)
-                      }
+                      onChange={(e) => setFilter('collection', e.target.value || null)}
                       className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                     >
                       <option value="">{t('collections.allCollections')}</option>
@@ -452,7 +647,10 @@ function LibraryContent() {
                   <select
                     value={sortValue}
                     onChange={(e) => {
-                      setFilter('sort', e.target.value === 'added_at' ? null : e.target.value || null)
+                      setFilter(
+                        'sort',
+                        e.target.value === 'added_at' ? null : e.target.value || null,
+                      )
                     }}
                     className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                   >
@@ -482,9 +680,7 @@ function LibraryContent() {
                   <input
                     type="checkbox"
                     checked={parsed.readingList}
-                    onChange={(e) =>
-                      setFilter('rl', e.target.checked ? 'true' : null)
-                    }
+                    onChange={(e) => setFilter('rl', e.target.checked ? 'true' : null)}
                     className="rounded border-vault-border"
                   />
                   {t('library.readingListOnly')}
@@ -527,7 +723,7 @@ function LibraryContent() {
         </div>
       )}
 
-      {total !== undefined && (
+      {total !== null && (
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm text-vault-text-muted">
             {`${formatNumber(total)} ${t('library.galleries')}`}
@@ -552,27 +748,46 @@ function LibraryContent() {
         </div>
       )}
 
-      {isLoading && <SkeletonGrid />}
+      {isSessionLoading && displayGalleries.length === 0 && <SkeletonGrid />}
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400">
-          {error.message || t('common.failedToLoad')}
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400 flex items-center justify-between gap-3">
+          <span>{error.message || t('common.failedToLoad')}</span>
+          <button
+            type="button"
+            onClick={() => void retry()}
+            className="shrink-0 rounded border border-red-400/40 px-3 py-1.5 text-sm hover:bg-red-500/10"
+          >
+            {t('common.retry')}
+          </button>
         </div>
       )}
 
-      {!isLoading && displayGalleries.length > 0 && (
+      {displayGalleries.length > 0 && (
         <VirtualGrid
           items={displayGalleries}
+          getItemKey={(gallery) => gallery.id}
           columns={viewMode === 'list' ? { base: 1 } : gridColumns}
-          gap={
-            viewMode === 'list' ? 8 : getLibraryGridGap(displayPreferences.gallery_grid_density)
-          }
+          gap={viewMode === 'list' ? 8 : getLibraryGridGap(displayPreferences.gallery_grid_density)}
           estimateHeight={viewMode === 'list' ? 150 : estimateLibraryGridRowHeight}
           measureRows={false}
           overscan={viewMode === 'list' ? 8 : 6}
           focusedIndex={focusedIndex}
           onColCountChange={setColCount}
-          onRegisterElement={registerElement}
+          onRegisterElement={handleRegisterElement}
+          onVisibleRangeChange={({ startIndex }) => {
+            visibleStartRef.current = startIndex
+          }}
+          onLayoutChange={({ colCount: columns, containerWidth }) => {
+            layoutRef.current = { columns, width: containerWidth, mode: viewMode }
+          }}
+          restoreRequest={
+            restoreRequest?.identityKey === state.identityKey ? restoreRequest : undefined
+          }
+          onRestoreApplied={handleGridRestoreApplied}
+          onLoadMore={state.status === 'error' ? undefined : loadMore}
+          hasMore={state.hasMore}
+          isLoading={isSessionLoading}
           renderItem={(gallery) => {
             const Card = viewMode === 'list' ? GalleryListCard : LibraryGalleryCard
             if (selectMode) {
@@ -600,24 +815,17 @@ function LibraryContent() {
               <Card
                 gallery={gallery}
                 thumbUrl={gallery.cover_thumb ?? undefined}
-                onClick={() => {
-                  clearLibraryKeyboardTarget()
-                  saveScroll(searchData ?? [])
-                  router.push(galleryHref(gallery.source, gallery.source_id))
-                }}
+                onClick={() => openGallery(gallery)}
                 onFavoriteToggle={handleFavoriteToggle}
                 onReadingListToggle={handleReadingListToggle}
                 onDelete={handleDelete}
               />
             )
           }}
-          onLoadMore={loadMore}
-          hasMore={!isReachingEnd}
-          isLoading={isLoading}
         />
       )}
 
-      {!isLoading && displayGalleries.length === 0 && !error && (
+      {!isSessionLoading && displayGalleries.length === 0 && !error && (
         <EmptyState icon={BookOpen} title={t('library.noGalleries')} />
       )}
 
@@ -628,9 +836,7 @@ function LibraryContent() {
               {t('library.selectedCount', { count: String(selectedIds.size) })}
             </span>
             <button
-              onClick={() =>
-                setSelectedIds(new Set(displayGalleries.map((g) => g.id)))
-              }
+              onClick={() => setSelectedIds(new Set(displayGalleries.map((g) => g.id)))}
               className="text-xs text-vault-accent hover:underline"
             >
               {t('library.selectAll')}
@@ -651,7 +857,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  globalMutate(() => true)
+                  await refresh()
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -668,7 +874,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  globalMutate(() => true)
+                  await refresh()
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -685,7 +891,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  globalMutate(() => true)
+                  await refresh()
                   setSelectedIds(new Set())
                   setSelectMode(false)
                 } catch {
@@ -705,7 +911,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  globalMutate(() => true)
+                  await refresh()
                   setSelectedIds(new Set())
                   setSelectMode(false)
                 } catch {
@@ -729,7 +935,7 @@ function LibraryContent() {
                     rating,
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  globalMutate(() => true)
+                  await refresh()
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -761,6 +967,7 @@ function LibraryContent() {
                     toast.success(
                       t('collections.addedToCollection', { count: String(res.affected) }),
                     )
+                    await refresh()
                     setSelectedIds(new Set())
                     setSelectMode(false)
                   } catch {
@@ -841,7 +1048,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('trash.movedToTrash'))
-                  globalMutate(() => true)
+                  await refresh()
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -926,7 +1133,7 @@ function LibraryContent() {
                     toast.success(t('library.batchSuccess', { count: String(res.affected) }))
                     setBatchTagMode(null)
                     setBatchTagList([])
-                    globalMutate(() => true)
+                    await refresh()
                   } catch {
                     toast.error(t('library.updateFailed'))
                   }

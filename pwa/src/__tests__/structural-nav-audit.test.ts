@@ -88,9 +88,33 @@ describe('structural-nav-audit — E-hentai browse state architecture', () => {
 
   it('test_ehentai_persistsSnapshotOnPageLifecycle', () => {
     const hook = src('hooks/useEhBrowse.ts')
-    expect(hook).toContain('SNAPSHOT_KEY')
-    expect(hook).toContain("window.addEventListener('pagehide'")
-    expect(hook).toContain("document.addEventListener('visibilitychange'")
+    const kernel = src('hooks/useBrowseSession.ts')
+    const page = src('app/e-hentai/page.tsx')
+    const lifecycle = page.slice(
+      page.indexOf('// This page is the sole owner of the E-Hentai scroll lifecycle'),
+      page.indexOf('const openItem'),
+    )
+    expect(hook).toContain("import { useBrowseSession } from '@/hooks/useBrowseSession'")
+    expect(hook).toContain('createBrowseSnapshotStore<EhGallery, Cursor>({')
+    expect(hook).toContain('validateCursor: isValidEhCursor')
+    expect(hook).toContain('validateItem: isEhGallery')
+    expect(hook).toContain('validateMeta: isEhFavCategoryMeta')
+    expect(kernel).toContain('saveState(\n        store,')
+    expect(hook).not.toContain("window.addEventListener('scroll'")
+    expect(lifecycle).toContain("window.addEventListener('pagehide', save)")
+    expect(lifecycle).toContain('timer = setTimeout(save, 250)')
+    expect(lifecycle).not.toContain('clearTimeout(timer)\n      save()')
+  })
+
+  it('clears an obsolete E-Hentai grid request before same-key fallback restore', () => {
+    const page = src('app/e-hentai/page.tsx')
+    const restoreLifecycle = page.slice(
+      page.indexOf('if (!restoreInstruction || restoreInstruction.identityKey !== seedKey)'),
+      page.indexOf('const handleGridRestoreApplied'),
+    )
+    const fallback = restoreLifecycle.slice(restoreLifecycle.indexOf('if (scheduledRestoreKeyRef'))
+    expect(fallback).toContain('pendingRestoreRef.current = null')
+    expect(fallback).toContain('setRestoreRequest(undefined)')
   })
 
   it('test_ehentai_restoreIsScopedToMatchingQueryKey', () => {
@@ -102,8 +126,18 @@ describe('structural-nav-audit — E-hentai browse state architecture', () => {
 
   it('test_ehentai_emptyUrlResetsToHome', () => {
     const hook = src('hooks/useEhBrowse.ts')
-    expect(hook).toContain('searchStr')
-    expect(hook).toContain("dispatch({ type: 'RESET' })")
+    expect(hook).toContain('const searchString = searchParams.toString()')
+    expect(hook).toContain('const params = new URLSearchParams(searchString)')
+    expect(hook).toContain('...parseUrlToIdentity(params)')
+    expect(hook).toContain("identityDispatch({ type: 'APPLY_IDENTITY', identity })")
+
+    const stateLib = src('lib/ehBrowseState.ts')
+    const parser = stateLib.slice(
+      stateLib.indexOf('export function parseUrlToIdentity'),
+      stateLib.indexOf('export function serializeEhSavedSearchParams'),
+    )
+    expect(parser).toContain(": 'popular'")
+    expect(parser).toContain('...initialFilters')
   })
 
   it('test_ehentai_urlCarriesIdentityNotView', () => {

@@ -238,8 +238,26 @@ describe('useEhBrowse — in-page identity switch restores the previous view', (
   })
 })
 
+describe('useEhBrowse — total normalization', () => {
+  it('stores null rather than undefined when a source payload omits total', async () => {
+    // Regression: /api/eh/popular shipped only { galleries }, so `total:
+    // response.total` put undefined into a state field typed number | null.
+    // Consumers guarding with `!== null` then dereferenced undefined.
+    ;(api.eh.getPopular as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      galleries: [{ gid: 9, token: 'p' }],
+    })
+    const { result } = renderHook(() => useEhBrowse())
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(result.current.state.items.map((g) => g.gid)).toEqual([9])
+    expect(result.current.state.total).toBeNull()
+  })
+})
+
 describe('useEhBrowse — URL sync', () => {
   it('writes identity to the URL but never the view buffer', async () => {
+    const replaceState = vi.spyOn(window.history, 'replaceState')
     ;(api.eh.search as ReturnType<typeof vi.fn>).mockResolvedValue({
       galleries: [{ gid: 1, token: 'a' }],
       total: 1,
@@ -251,9 +269,11 @@ describe('useEhBrowse — URL sync', () => {
     await act(async () => {
       await result.current.loadMore()
     })
-    const lastUrl = replace.mock.calls.at(-1)?.[0] as string
+    const lastUrl = String(replaceState.mock.calls.at(-1)?.[2])
     expect(lastUrl).toContain('q=kittens')
     expect(lastUrl).not.toMatch(/gid|scroll|next_gid/i)
+    expect(replace).not.toHaveBeenCalled()
+    replaceState.mockRestore()
   })
 })
 

@@ -260,6 +260,47 @@ class TestParseGmetadata:
         assert result["expunged"] is True
 
 
+class TestGetPopular:
+    """The popular listing feeds the same browse payload contract as search and
+    toplists, so it must report a total even though the popular page has no
+    result counter of its own.
+    """
+
+    async def test_popular_result_reports_total_for_scraped_galleries(self):
+        """Regression: get_popular() returned only "galleries" while the client
+        types /api/eh/popular as a search result, so the browse session stored
+        an undefined total and the Latest tab crashed reading it.
+        """
+        from services.eh_client import EhClient
+
+        client = EhClient(cookies={})
+        response = MagicMock(spec=httpx.Response)
+        response.text = '<html><a href="https://e-hentai.org/g/12345/abcdef1234/">Popular</a></html>'
+        response.headers = {}
+        response.raise_for_status = MagicMock()
+        client._http_get = AsyncMock(return_value=response)
+        client._gdata = AsyncMock(return_value=[{"gid": 12345, "token": "abcdef1234"}])
+
+        result = await client.get_popular()
+
+        assert result["total"] == 1
+
+    async def test_empty_popular_page_reports_total_zero(self):
+        """The no-matches branch returned early and dropped the same field."""
+        from services.eh_client import EhClient
+
+        client = EhClient(cookies={})
+        response = MagicMock(spec=httpx.Response)
+        response.text = "<html>No popular galleries right now.</html>"
+        response.headers = {}
+        response.raise_for_status = MagicMock()
+        client._http_get = AsyncMock(return_value=response)
+
+        result = await client.get_popular()
+
+        assert result == {"galleries": [], "total": 0}
+
+
 class TestImageSearch:
     async def test_posts_original_jpeg_and_parses_gallery_results(self):
         from services.eh_client import EhClient

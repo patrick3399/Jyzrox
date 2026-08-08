@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
 let searchStr = ''
@@ -6,6 +6,9 @@ const push = vi.fn()
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push }),
   useSearchParams: () => new URLSearchParams(searchStr),
+}))
+vi.mock('@/hooks/useProfile', () => ({
+  useProfile: () => ({ data: { username: 'qa-user' }, isLoading: false }),
 }))
 vi.mock('@/lib/api', () => ({
   api: {
@@ -54,6 +57,10 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('e-hentai back-nav restores the scroll buffer', () => {
   it('restores accumulated buffer without re-fetching, first item unshifted', async () => {
     searchStr = 'tab=search&q=foo'
@@ -73,6 +80,28 @@ describe('e-hentai back-nav restores the scroll buffer', () => {
     expect(screen.getByText('Two')).toBeInTheDocument()
     // Buffer restored → no seed fetch fired, first item not shifted.
     expect(api.eh.search).not.toHaveBeenCalled()
+  })
+
+  it('persists one settled checkpoint for one scroll event', async () => {
+    searchStr = 'tab=search&q=single-owner'
+    ;(api.eh.search as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [g(9, 'Single owner')],
+      total: 1,
+      next_gid: null,
+    })
+    render(<Page />)
+    await waitFor(() => expect(screen.getByText('Single owner')).toBeInTheDocument())
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+    setItem.mockClear()
+    Object.defineProperty(window, 'scrollY', { value: 640, configurable: true })
+
+    fireEvent.scroll(window)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    const browseWrites = setItem.mock.calls.filter(([key]) =>
+      String(key).startsWith('browse_session_v1:'),
+    )
+    expect(browseWrites).toHaveLength(1)
   })
 })
 

@@ -815,6 +815,8 @@ const en: Record<string, string> = {
   'browse.coversOnly': 'Search covers only',
   'browse.includeExpunged': 'Include expunged',
   'browse.imageSearchResults': '{count} image search results',
+  'browse.imageSessionExpiredHelp': 'These uploaded-image results are no longer available. Start a new search to continue.',
+  'browse.startNewSearch': 'Start a new search',
   'browse.openRandom': 'Open a random loaded result',
   'browse.watched': 'Watched',
   'browse.language': 'Language',

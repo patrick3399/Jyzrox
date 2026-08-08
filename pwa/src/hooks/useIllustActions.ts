@@ -4,7 +4,10 @@ import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import type { PixivIllust } from '@/lib/types'
 
-export function useIllustActions(illust: PixivIllust) {
+export function useIllustActions(
+  illust: PixivIllust,
+  onBookmarkChanged?: (bookmarked: boolean) => void | Promise<void>,
+) {
   const [downloading, setDownloading] = useState(false)
   const [bookmarked, setBookmarked] = useState(illust.is_bookmarked)
   const [bookmarking, setBookmarking] = useState(false)
@@ -37,9 +40,11 @@ export function useIllustActions(illust: PixivIllust) {
         if (bookmarked) {
           await api.pixiv.deleteBookmark(illust.id)
           setBookmarked(false)
+          await onBookmarkChanged?.(false)
         } else {
           await api.pixiv.addBookmark(illust.id)
           setBookmarked(true)
+          await onBookmarkChanged?.(true)
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
@@ -47,7 +52,7 @@ export function useIllustActions(illust: PixivIllust) {
         setBookmarking(false)
       }
     },
-    [illust.id, bookmarked, bookmarking],
+    [illust.id, bookmarked, bookmarking, onBookmarkChanged],
   )
 
   return { downloading, bookmarked, bookmarking, handleDownload, handleBookmark }

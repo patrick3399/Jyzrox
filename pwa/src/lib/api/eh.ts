@@ -18,13 +18,17 @@ export const eh = {
   search: (params: EhSearchParams = {}, init?: RequestInit) =>
     apiFetch<EhSearchResult>(`/api/eh/search${qs(params as Record<string, unknown>)}`, init),
 
-  imageSearch: (image: File, options: { similar: boolean; covers: boolean; expunged: boolean }) => {
+  imageSearch: (
+    image: File,
+    options: { similar: boolean; covers: boolean; expunged: boolean },
+    init?: RequestInit,
+  ) => {
     const body = new FormData()
     body.append('image', image)
     body.append('similar', String(options.similar))
     body.append('covers', String(options.covers))
     body.append('expunged', String(options.expunged))
-    return apiFetch<EhSearchResult>('/api/eh/image-search', { method: 'POST', body })
+    return apiFetch<EhSearchResult>('/api/eh/image-search', { ...init, method: 'POST', body })
   },
 
   getBrowseStatus: (gids: number[], init?: RequestInit) =>

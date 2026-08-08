@@ -17,6 +17,7 @@ export interface ColumnConfig {
 export interface VirtualGridProps<T> {
   items: T[]
   columns: ColumnConfig
+  getItemKey?: (item: T) => string | number
   gap?: number // gap in px (default 16 = gap-4)
   estimateHeight?:
     | number
@@ -33,6 +34,14 @@ export interface VirtualGridProps<T> {
   onScrollToIndex?: (index: number) => void
   onColCountChange?: (count: number) => void
   onRegisterElement?: (index: number, el: HTMLElement | null) => void
+  onVisibleRangeChange?: (range: { startIndex: number; endIndex: number }) => void
+  onLayoutChange?: (layout: {
+    colCount: number
+    containerWidth: number
+    scrollMargin: number
+  }) => void
+  restoreRequest?: { key: string; index: number }
+  onRestoreApplied?: (request: { key: string; index: number }) => void
 }
 
 export function getColumnCount(width: number, config: ColumnConfig): number {
@@ -47,6 +56,7 @@ export function getColumnCount(width: number, config: ColumnConfig): number {
 export function VirtualGrid<T>({
   items,
   columns,
+  getItemKey,
   gap = 16,
   estimateHeight = 280,
   renderItem,
@@ -60,10 +70,21 @@ export function VirtualGrid<T>({
   focusedIndex,
   onColCountChange,
   onRegisterElement,
+  onVisibleRangeChange,
+  onLayoutChange,
+  restoreRequest,
+  onRestoreApplied,
 }: VirtualGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
   const prevScrollMarginRef = useRef(0)
+  const [hasMeasuredLayout, setHasMeasuredLayout] = useState(false)
+  const [materializedRestore, setMaterializedRestore] = useState<string | null>(null)
+  const registeredElementsRef = useRef(new Map<number, HTMLElement>())
+  const restoreRequestRef = useRef(restoreRequest)
+  useEffect(() => {
+    restoreRequestRef.current = restoreRequest
+  }, [restoreRequest])
   const [colCount, setColCount] = useState<number>(() => {
     if (typeof window === 'undefined') return columns.base
     return getColumnCount(window.innerWidth, columns)
@@ -78,9 +99,11 @@ export function VirtualGrid<T>({
 
   // Keep onColCountChange in a ref so the ResizeObserver effect doesn't need it as a dependency
   const onColCountChangeRef = useRef(onColCountChange)
+  const onLayoutChangeRef = useRef(onLayoutChange)
   useEffect(() => {
     onColCountChangeRef.current = onColCountChange
-  }, [onColCountChange])
+    onLayoutChangeRef.current = onLayoutChange
+  }, [onColCountChange, onLayoutChange])
 
   // Emit the initial column count on mount. The ResizeObserver below only calls
   // onColCountChange when it detects a CHANGE from this initial value, so without
@@ -96,6 +119,7 @@ export function VirtualGrid<T>({
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    setHasMeasuredLayout(false)
 
     // Set initial scrollMargin (guarded to skip redundant state update)
     const initialMargin = el.offsetTop
@@ -104,11 +128,17 @@ export function VirtualGrid<T>({
       setScrollMargin(initialMargin)
     }
     setContainerWidth(el.getBoundingClientRect().width)
+    onLayoutChangeRef.current?.({
+      colCount,
+      containerWidth: el.getBoundingClientRect().width,
+      scrollMargin: initialMargin,
+    })
 
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (!entry) return
       const width = entry.contentRect.width
+      setHasMeasuredLayout(true)
       setContainerWidth(width)
       const next = getColumnCount(width, columns)
       setColCount((prev) => {
@@ -124,6 +154,11 @@ export function VirtualGrid<T>({
         prevScrollMarginRef.current = newMargin
         setScrollMargin(newMargin)
       }
+      onLayoutChangeRef.current?.({
+        colCount: next,
+        containerWidth: width,
+        scrollMargin: newMargin,
+      })
     })
 
     ro.observe(el)
@@ -157,6 +192,22 @@ export function VirtualGrid<T>({
   })
 
   const virtualItems = virtualizer.getVirtualItems()
+  const firstVirtualRow = virtualItems[0]?.index
+  const lastVirtualRow = virtualItems[virtualItems.length - 1]?.index
+
+  useEffect(() => {
+    if (
+      firstVirtualRow === undefined ||
+      lastVirtualRow === undefined ||
+      items.length === 0
+    ) {
+      return
+    }
+    onVisibleRangeChange?.({
+      startIndex: firstVirtualRow * colCount,
+      endIndex: Math.min(items.length - 1, (lastVirtualRow + 1) * colCount - 1),
+    })
+  }, [colCount, firstVirtualRow, items.length, lastVirtualRow, onVisibleRangeChange])
 
   // Keep a stable ref to the virtualizer so the scrollToIndex effect
   // doesn't need the virtualizer instance (which changes every render) as a dep
@@ -172,6 +223,28 @@ export function VirtualGrid<T>({
     const rowIndex = Math.floor(focusedIndex / colCount)
     virtualizerRef.current.scrollToIndex(rowIndex, { align: 'auto' })
   }, [focusedIndex, colCount])
+
+  const restoreIssuedRef = useRef<string | null>(null)
+  const restoreAppliedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!restoreRequest) {
+      restoreIssuedRef.current = null
+      restoreAppliedRef.current = null
+      return
+    }
+    if (!hasMeasuredLayout) return
+    if (restoreRequest.index < 0 || restoreRequest.index >= items.length) return
+    const token = `${restoreRequest.key}:${restoreRequest.index}`
+    if (restoreAppliedRef.current === token) return
+    if (restoreIssuedRef.current !== token) {
+      restoreIssuedRef.current = token
+      const rowIndex = Math.floor(restoreRequest.index / colCount)
+      virtualizerRef.current.scrollToIndex(rowIndex, { align: 'start' })
+    }
+    if (!registeredElementsRef.current.has(restoreRequest.index)) return
+    restoreAppliedRef.current = token
+    onRestoreApplied?.(restoreRequest)
+  }, [colCount, hasMeasuredLayout, items.length, materializedRestore, onRestoreApplied, restoreRequest])
 
   // Keep a ref to onLoadMore so the effect never needs it as a dependency
   const onLoadMoreRef = useRef(onLoadMore)
@@ -283,8 +356,16 @@ export function VirtualGrid<T>({
                   const globalIndex = virtualRow.index * colCount + colIdx
                   return (
                     <div
-                      key={globalIndex}
-                      ref={(el) => onRegisterElement?.(globalIndex, el)}
+                      key={getItemKey?.(item) ?? globalIndex}
+                      ref={(el) => {
+                        if (el) registeredElementsRef.current.set(globalIndex, el)
+                        else registeredElementsRef.current.delete(globalIndex)
+                        const pendingRestore = restoreRequestRef.current
+                        if (el && pendingRestore?.index === globalIndex) {
+                          setMaterializedRestore(`${pendingRestore.key}:${pendingRestore.index}`)
+                        }
+                        onRegisterElement?.(globalIndex, el)
+                      }}
                       data-grid-index={globalIndex}
                       tabIndex={-1}
                       className="rounded-lg outline-none focus:ring-2 focus:ring-vault-accent focus:ring-offset-1 focus:ring-offset-vault-bg"

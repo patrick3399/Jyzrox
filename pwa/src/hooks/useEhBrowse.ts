@@ -1,316 +1,479 @@
 'use client'
 
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
-  useReducer,
-  useRef,
-  useCallback,
-  useMemo,
-  useEffect,
-  useLayoutEffect,
-  useState,
-} from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import {
-  reducer,
-  initialState,
-  parseUrlToIdentity,
-  parseSnapshot,
-  serializeSnapshot,
-  identityToUrlParams,
-  buildParams,
-  queryKey,
+  buildParamsFromIdentity,
   EH_PAGE_SIZE,
-  type EhBrowseState,
+  identityToUrlParams,
+  initialState,
+  parseSnapshot,
+  parseUrlToIdentity,
+  queryKey,
+  reducer,
   type Action,
+  type Cursor,
+  type EhBrowseState,
   type Filters,
   type Tab,
-  type Cursor,
-  type FetchPlan,
 } from '@/lib/ehBrowseState'
+import {
+  canonicalEhIdentity,
+  ehentaiBrowseAdapter,
+  isEhFavCategoryMeta,
+  isEhGallery,
+} from '@/lib/browse/ehentai'
+import { createBrowseSnapshotStore, type BrowseSnapshotScope } from '@/lib/browse/snapshotStore'
+import { getBrowseTabId } from '@/lib/browse/tabScope'
+import { useBrowseSession } from '@/hooks/useBrowseSession'
+import { useBrowseTabScope } from '@/hooks/useBrowseTabScope'
 import { api } from '@/lib/api'
-import type { EhGallery, EhFavCategory } from '@/lib/types'
+import type { EhFavCategory, EhGallery } from '@/lib/types'
 
-const SNAPSHOT_KEY = 'eh_browse_snapshot'
-
-// useLayoutEffect warns during SSR; the server never scrolls, so useEffect is fine there.
+const LEGACY_SNAPSHOT_KEY = 'eh_browse_snapshot'
+const UNSCOPED_PARTITION_USER_ID = 'unscoped'
+const IMAGE_SESSION_TTL_MS = 12 * 60 * 60 * 1000
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
-function initFromUrl(search: string): EhBrowseState {
-  const identity = parseUrlToIdentity(new URLSearchParams(search))
-  const base: EhBrowseState = { ...initialState, ...identity }
-  if (typeof window === 'undefined') return base
-  // Restore the accumulated buffer + scroll position when the snapshot belongs to
-  // the exact same query identity we're mounting with (back-nav / tab round-trip).
-  const snap = parseSnapshot(sessionStorage.getItem(SNAPSHOT_KEY), queryKey(base))
-  return snap ? { ...base, ...snap } : base
+class MemoryStorage implements Storage {
+  private values = new Map<string, string>()
+  get length() {
+    return this.values.size
+  }
+  clear() {
+    this.values.clear()
+  }
+  getItem(key: string) {
+    return this.values.get(key) ?? null
+  }
+  key(index: number) {
+    return [...this.values.keys()][index] ?? null
+  }
+  removeItem(key: string) {
+    this.values.delete(key)
+  }
+  setItem(key: string, value: string) {
+    this.values.set(key, value)
+  }
 }
 
-export function useEhBrowse() {
-  const router = useRouter()
+const serverStorage = new MemoryStorage()
+
+function initFromUrl(search: string): EhBrowseState {
+  const params = new URLSearchParams(search)
+  return {
+    ...initialState,
+    ...parseUrlToIdentity(params),
+    ephemeralSession: params.get('image_session'),
+  }
+}
+
+function isValidEhCursor(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const cursor = value as Record<string, unknown>
+  return (
+    (cursor.kind === 'gid' &&
+      typeof cursor.nextGid === 'number' &&
+      Number.isInteger(cursor.nextGid) &&
+      cursor.nextGid > 0) ||
+    (cursor.kind === 'fav' && typeof cursor.next === 'string' && cursor.next.length > 0) ||
+    (cursor.kind === 'page' &&
+      typeof cursor.page === 'number' &&
+      Number.isInteger(cursor.page) &&
+      cursor.page >= 0)
+  )
+}
+
+export type EhBrowseScope = { userId?: string; tabId?: string }
+export type EhHistoryMode = 'push' | 'replace'
+
+function updateEhBrowseUrl(url: string, historyMode: EhHistoryMode): void {
+  // These are same-page identity transitions. Going through Next's router makes
+  // it fetch an RSC payload even though the local reducer already owns the view,
+  // and iOS standalone Safari can subsequently fall back to a document
+  // navigation with an empty query string. Native History API calls are
+  // integrated with the App Router and keep useSearchParams/popstate in sync
+  // without introducing that RSC navigation window.
+  const state = window.history.state
+  if (historyMode === 'push') window.history.pushState(state, '', url)
+  else window.history.replaceState(state, '', url)
+}
+
+export function useEhBrowse(scopeInput?: EhBrowseScope) {
   const searchParams = useSearchParams()
-  const [state, dispatch] = useReducer(reducer, searchParams.toString(), initFromUrl)
-
-  // stateRef must be fresh BEFORE child components' passive effects run: VirtualGrid
-  // fires onLoadMore from an effect in the very commit an append renders, and child
-  // effects flush before parent effects. With a passive-effect sync, loadMore would
-  // read the previous commit's status ('loading'), swallow the call, and — since
-  // VirtualGrid's fired-at gate only reopens when items.length grows — wedge the
-  // infinite scroll permanently. Layout effects (parent included) all flush before
-  // any passive effect, so this closes the race.
-  const stateRef = useRef(state)
+  const browserStorage = typeof window === 'undefined' ? serverStorage : sessionStorage
+  const implicitDefaultScope = scopeInput === undefined
+  // Callers that supply no scope share one partition. The page always passes
+  // the authenticated user, so this is a harness affordance — named, not
+  // "default", so an unscoped partition is recognizable if it ever reaches a
+  // real browser instead of silently reading as a legitimate user id.
+  const resolvedUserId = implicitDefaultScope ? UNSCOPED_PARTITION_USER_ID : scopeInput.userId
+  const prerequisitesReady = typeof resolvedUserId === 'string' && resolvedUserId.length > 0
+  const storage = useMemo<Storage>(
+    () => (prerequisitesReady ? browserStorage : new MemoryStorage()),
+    [browserStorage, prerequisitesReady],
+  )
+  const [identityState, identityDispatch] = useReducer(
+    reducer,
+    searchParams.toString(),
+    initFromUrl,
+  )
+  const identityStateRef = useRef(identityState)
   useIsomorphicLayoutEffect(() => {
-    stateRef.current = state
+    identityStateRef.current = identityState
   })
-  const inflightRef = useRef<AbortController | null>(null)
-  // View-adjacent metadata (favourite-category names/counts) — not part of identity.
-  const [favCategories, setFavCategories] = useState<EhFavCategory[]>([])
 
-  // Fetch a single page for the given plan, normalising every tab to
-  // { galleries, cursor, hasMore, total }.
+  const requestedTabId =
+    scopeInput?.tabId ?? (implicitDefaultScope ? getBrowseTabId(browserStorage) : undefined)
+  const tabScope = useBrowseTabScope({
+    storage: browserStorage,
+    enabled: prerequisitesReady,
+    requestedTabId,
+  })
+  const scopeReady = prerequisitesReady && tabScope.ready
+  const tabId = tabScope.tabId
+  const scope = useMemo<BrowseSnapshotScope>(
+    () => ({
+      userId: resolvedUserId || 'pending',
+      tabId,
+      sourceId: ehentaiBrowseAdapter.sourceId,
+      schemaVersion: ehentaiBrowseAdapter.schemaVersion,
+    }),
+    [resolvedUserId, tabId],
+  )
+  const canonicalIdentity = canonicalEhIdentity(identityState)
+  const canonicalKey = queryKey(identityState)
+
   const fetchPage = useCallback(
-    async (
-      plan: FetchPlan,
-      signal: AbortSignal,
-    ): Promise<{
-      galleries: EhGallery[]
-      cursor: Cursor
-      hasMore: boolean
-      total: number | null
-    }> => {
+    async (identity: typeof canonicalIdentity, cursor: Cursor, signal: AbortSignal) => {
+      if (!scopeReady) {
+        return { items: [], cursor: null, hasMore: false, total: 0 }
+      }
+      const plan = buildParamsFromIdentity(identity, cursor)
+      // The kernel's total is number | null. A source payload that omits the
+      // field must degrade to "unknown", never to undefined: consumers guard
+      // on null and would otherwise dereference it.
       if (plan.kind === 'search') {
-        const res = await api.eh.search(plan.args, { signal })
+        const response = await api.eh.search(plan.args, { signal })
         return {
-          galleries: res.galleries,
-          cursor: res.next_gid != null ? { kind: 'gid', nextGid: res.next_gid } : null,
-          hasMore: res.next_gid != null,
-          total: res.total,
+          items: response.galleries,
+          cursor:
+            response.next_gid != null ? ({ kind: 'gid', nextGid: response.next_gid } as Cursor) : null,
+          hasMore: response.next_gid != null,
+          total: response.total ?? null,
         }
       }
       if (plan.kind === 'toplist') {
-        const res = await api.eh.getToplist(plan.args, { signal })
-        const hasMore = res.galleries.length >= EH_PAGE_SIZE
+        const response = await api.eh.getToplist(plan.args, { signal })
+        const hasMore = response.galleries.length >= EH_PAGE_SIZE
         return {
-          galleries: res.galleries,
-          cursor: hasMore ? { kind: 'page', page: plan.args.page + 1 } : null,
+          items: response.galleries,
+          cursor: hasMore ? ({ kind: 'page', page: plan.args.page + 1 } as Cursor) : null,
           hasMore,
-          total: res.total,
+          total: response.total ?? null,
         }
       }
       if (plan.kind === 'popular') {
-        const res = await api.eh.getPopular({ signal })
-        return { galleries: res.galleries, cursor: null, hasMore: false, total: res.total }
+        const response = await api.eh.getPopular({ signal })
+        return {
+          items: response.galleries,
+          cursor: null,
+          hasMore: false,
+          total: response.total ?? null,
+        }
       }
-      const res = await api.eh.getFavorites(plan.args, { signal })
-      if (res.categories?.length) setFavCategories(res.categories)
+      const response = await api.eh.getFavorites(plan.args, { signal })
       return {
-        galleries: res.galleries,
-        cursor: res.has_next && res.next_cursor ? { kind: 'fav', next: res.next_cursor } : null,
-        hasMore: res.has_next,
-        total: res.total,
+        items: response.galleries,
+        cursor:
+          response.has_next && response.next_cursor
+            ? ({ kind: 'fav', next: response.next_cursor } as Cursor)
+            : null,
+        hasMore: response.has_next,
+        total: response.total ?? null,
+        meta: response.categories ?? [],
       }
     },
-    [],
+    [scopeReady],
+  )
+  const adapter = useMemo(
+    () => ({
+      getItemId: ehentaiBrowseAdapter.getItemKey,
+      fetchPage,
+      isReplayableIdentity: (identity: typeof canonicalIdentity) => identity.surface !== 'image-search',
+      validateItem: isEhGallery,
+      validateMeta: isEhFavCategoryMeta,
+      validateCursor: isValidEhCursor,
+    }),
+    [fetchPage],
+  )
+  const retention = useMemo(
+    () =>
+      identityState.ephemeralSession
+        ? { replayable: false, ttlMs: IMAGE_SESSION_TTL_MS }
+        : undefined,
+    [identityState.ephemeralSession],
+  )
+  const scopedStore = useMemo(
+    () =>
+      createBrowseSnapshotStore<EhGallery, Cursor>({
+        storage,
+        scope,
+        validateCursor: isValidEhCursor,
+        validateItem: isEhGallery,
+        validateMeta: isEhFavCategoryMeta,
+      }),
+    [scope, storage],
   )
 
-  const loadMore = useCallback(async () => {
-    const s0 = stateRef.current
-    if (s0.status === 'seeding' || s0.status === 'loading') return
-    if (s0.items.length > 0 && !s0.hasMore) return
-
-    const keyAtStart = queryKey(s0)
-    const seeding = s0.items.length === 0
-    inflightRef.current?.abort()
-    const ac = new AbortController()
-    inflightRef.current = ac
-    dispatch({ type: 'LOAD_START', seeding })
-
-    let page: { galleries: EhGallery[]; cursor: Cursor; hasMore: boolean; total: number | null }
-    try {
-      page = await fetchPage(buildParams(s0), ac.signal)
-    } catch (err) {
-      if (ac.signal.aborted) return
-      dispatch({ type: 'LOAD_ERROR', error: err instanceof Error ? err.message : 'failed' })
-      return
+  // Compatibility is a destructive, per-tab/schema handoff. The coordinator
+  // runs it during commit immediately before restoring the scoped partition.
+  const migrateLegacy = useCallback(() => {
+    if (!scopeReady || identityState.ephemeralSession) return
+    const migrationMarker = `eh_browse_migrated_v${ehentaiBrowseAdapter.schemaVersion}:${tabId}`
+    if (browserStorage.getItem(migrationMarker) === '1') return
+    const legacy = parseSnapshot(browserStorage.getItem(LEGACY_SNAPSHOT_KEY), canonicalKey)
+    if (legacy) {
+      const legacyScrollY = legacy.scrollY ?? 0
+      scopedStore.save(canonicalKey, {
+        pages: [legacy.items ?? []],
+        cursor: legacy.cursor ?? null,
+        hasMore: legacy.hasMore ?? true,
+        total: legacy.total ?? null,
+        anchor:
+          legacy.anchor ??
+          (legacyScrollY > 0 ? { itemId: null, offset: 0, scrollY: legacyScrollY } : null),
+        layout: legacy.layout ?? null,
+      })
     }
+    browserStorage.removeItem(LEGACY_SNAPSHOT_KEY)
+    browserStorage.setItem(migrationMarker, '1')
+  }, [browserStorage, canonicalKey, identityState.ephemeralSession, scopeReady, scopedStore, tabId])
 
-    if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
-
-    let { cursor, hasMore } = page
-    // A page that yields nothing new AND leaves the cursor where it was would just
-    // refetch itself forever — treat it as the end. (Genuinely overlapping pages that
-    // still advance the cursor keep hasMore, and the grid retries from the new cursor.)
-    const seen = new Set(s0.items.map((g) => g.gid))
-    const freshCount = page.galleries.filter((g) => !seen.has(g.gid)).length
-    if (
-      freshCount === 0 &&
-      hasMore &&
-      (cursor == null || JSON.stringify(cursor) === JSON.stringify(s0.cursor))
-    ) {
-      hasMore = false
-      cursor = null
+  const session = useBrowseSession<EhGallery, Cursor, typeof canonicalIdentity>({
+    identity: canonicalIdentity,
+    identityKey: canonicalKey,
+    adapter,
+    scope,
+    storage,
+    retention,
+    ready: scopeReady,
+    autoLoad: false,
+    preHydrate: migrateLegacy,
+  })
+  const cancelPending = session.cancelPending
+  const sessionCheckpoint = session.checkpoint
+  const updateSessionView = session.updateView
+  const replacePage = session.replacePage
+  const liveViewRef = useRef<{
+    anchor: EhBrowseState['anchor']
+    layout: EhBrowseState['layout']
+  } | null>(null)
+  const lastRestoreKeyRef = useRef<string | null>(null)
+  const liveViewIdentityRef = useRef(session.state.identityKey)
+  const restoreInstruction = session.restoreInstruction
+  useIsomorphicLayoutEffect(() => {
+    if (liveViewIdentityRef.current !== session.state.identityKey) {
+      liveViewIdentityRef.current = session.state.identityKey
+      liveViewRef.current = null
+      lastRestoreKeyRef.current = null
     }
+    if (restoreInstruction && restoreInstruction.key !== lastRestoreKeyRef.current) {
+      lastRestoreKeyRef.current = restoreInstruction.key
+      liveViewRef.current =
+        restoreInstruction.target.kind === 'view' ? restoreInstruction.target.view : null
+    }
+  }, [restoreInstruction, session.state.identityKey])
+  const restoredView =
+    restoreInstruction?.target.kind === 'view' ? restoreInstruction.target.view : null
 
-    dispatch(
-      seeding
-        ? { type: 'SEED', items: page.galleries, total: page.total, cursor, hasMore }
-        : { type: 'APPEND', items: page.galleries, cursor, hasMore },
-    )
-  }, [fetchPage])
+  const returnedState: EhBrowseState = {
+    ...identityState,
+    items: session.state.items,
+    cursor: session.state.cursor,
+    hasMore: session.state.hasMore,
+    total: session.state.total,
+    status: session.state.terminal
+      ? 'expired'
+      : session.state.status === 'loading'
+        ? session.state.items.length === 0
+          ? 'seeding'
+          : 'loading'
+        : session.state.status,
+    error: session.state.error?.message ?? null,
+    anchor: restoredView?.anchor ?? identityState.anchor,
+    layout: restoredView?.layout ?? identityState.layout,
+    scrollY: restoredView?.anchor?.scrollY ?? identityState.scrollY,
+  }
+  const stateRef = useRef(returnedState)
+  useIsomorphicLayoutEffect(() => {
+    stateRef.current = returnedState
+  })
 
-  // Last scroll position produced by the USER (scroll events / explicit calls).
-  // The unmount write must use this instead of live window.scrollY: on a push
-  // navigation Next resets the window scroll in the new page's layout phase,
-  // and React runs this page's passive unmount cleanup after that — reading
-  // window.scrollY there would bank 0 and lose the position.
-  const lastScrollYRef = useRef(0)
-
-  // Bank the current view (buffer/cursor/scroll) into the per-identity snapshot
-  // store. Used both by the lifecycle persistence below and by identity switches.
-  const persistView = useCallback((s: EhBrowseState, scrollYOverride?: number) => {
-    if (typeof window === 'undefined' || s.items.length === 0) return
-    const scrollY = scrollYOverride ?? window.scrollY
-    const prev = sessionStorage.getItem(SNAPSHOT_KEY)
-    try {
-      sessionStorage.setItem(SNAPSHOT_KEY, serializeSnapshot({ ...s, scrollY }, prev))
-    } catch {
-      // Quota fallback must reset cursor and scroll together with the buffer.
-      // Keeping a late cursor beside an empty item list would skip results.
-      try {
-        sessionStorage.setItem(
-          SNAPSHOT_KEY,
-          serializeSnapshot({
-            ...s,
-            items: [],
-            total: null,
-            cursor: null,
-            hasMore: true,
-            scrollY: 0,
-          }),
-        )
-      } catch {
-        /* give up silently */
+  const commitIdentity = useCallback(
+    (actions: Action[], historyMode: EhHistoryMode) => {
+      let preview = identityStateRef.current
+      for (const action of actions) preview = reducer(preview, action)
+      if (queryKey(preview) === queryKey(identityStateRef.current)) {
+        for (const action of actions) identityDispatch(action)
+        return
       }
-    }
-  }, [])
-
-  // Identity-changing dispatch: bank the outgoing view first, then bring the
-  // incoming identity's banked view back (RESTORE) instead of reseeding from
-  // page 1 — this is what keeps buffer + scroll across in-page tab switches.
-  // Multi-action form folds compound updates (e.g. commitQuery = SET_TAB +
-  // COMMIT_QUERY) so the restore lookup targets the FINAL identity.
-  const dispatchIdentityChange = useCallback(
-    (...batch: Action[]) => {
-      const s0 = stateRef.current
-      const next = batch.reduce(reducer, s0)
-      const nextKey = queryKey(next)
-      const identityChanged = nextKey !== queryKey(s0)
-      if (identityChanged) persistView(s0)
-      for (const a of batch) dispatch(a)
-      if (!identityChanged || typeof window === 'undefined') return
-      const snap = parseSnapshot(sessionStorage.getItem(SNAPSHOT_KEY), nextKey)
-      if (snap) dispatch({ type: 'RESTORE', snapshot: snap })
+      const current = stateRef.current
+      const liveView = liveViewRef.current
+      const liveAnchor = {
+        itemId: liveView?.anchor?.itemId ?? current.anchor?.itemId ?? null,
+        offset: liveView?.anchor?.offset ?? current.anchor?.offset ?? 0,
+        scrollY: window.scrollY,
+      }
+      sessionCheckpoint({ anchor: liveAnchor, layout: liveView?.layout ?? current.layout }, retention)
+      cancelPending()
+      for (const action of actions) identityDispatch(action)
+      const params = identityToUrlParams(preview).toString()
+      const url = params ? `/e-hentai?${params}` : '/e-hentai'
+      updateEhBrowseUrl(url, historyMode)
     },
-    [persistView],
+    [cancelPending, retention, sessionCheckpoint],
   )
 
+  const imageSessionCounterRef = useRef(0)
   const actions = useMemo(
     () => ({
-      setTab: (tab: Tab) => dispatchIdentityChange({ type: 'SET_TAB', tab }),
-      commitQuery: (query: string) =>
-        dispatchIdentityChange({ type: 'SET_TAB', tab: 'search' }, { type: 'COMMIT_QUERY', query }),
-      setFilter: (patch: Partial<Filters>) => dispatchIdentityChange({ type: 'SET_FILTER', patch }),
-      applyIdentity: (identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>) =>
-        dispatchIdentityChange({ type: 'APPLY_IDENTITY', identity }),
+      commitIdentity: (
+        identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>,
+        historyMode: EhHistoryMode,
+      ) => commitIdentity([{ type: 'APPLY_IDENTITY', identity }], historyMode),
+      setTab: (tab: Tab, historyMode: EhHistoryMode = 'replace') =>
+        commitIdentity([{ type: 'SET_TAB', tab }], historyMode),
+      commitQuery: (query: string, historyMode: EhHistoryMode = 'replace') =>
+        commitIdentity(
+          [
+            { type: 'SET_TAB', tab: 'search' },
+            { type: 'COMMIT_QUERY', query },
+          ],
+          historyMode,
+        ),
+      setFilter: (patch: Partial<Filters>, historyMode: EhHistoryMode = 'replace') =>
+        commitIdentity([{ type: 'SET_FILTER', patch }], historyMode),
+      applyIdentity: (
+        identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>,
+        historyMode: EhHistoryMode = 'replace',
+      ) => commitIdentity([{ type: 'APPLY_IDENTITY', identity }], historyMode),
       showExternalResults: (items: EhGallery[], total: number) => {
-        dispatchIdentityChange(
-          { type: 'SET_TAB', tab: 'search' },
-          { type: 'COMMIT_QUERY', query: '' },
+        cancelPending()
+        const imageSession = `${Date.now()}-${++imageSessionCounterRef.current}`
+        const next = reducer(identityStateRef.current, {
+          type: 'SHOW_EXTERNAL_RESULTS',
+          session: imageSession,
+          items,
+          total,
+        })
+        scopedStore.save(
+          queryKey(next),
+          {
+            pages: [items],
+            cursor: null,
+            hasMore: false,
+            total,
+            anchor: null,
+            layout: null,
+          },
+          { replayable: false, ttlMs: IMAGE_SESSION_TTL_MS },
         )
-        dispatch({ type: 'SEED', items, total, cursor: null, hasMore: false })
+        identityDispatch({ type: 'SHOW_EXTERNAL_RESULTS', session: imageSession, items, total })
+        const params = identityToUrlParams(next).toString()
+        updateEhBrowseUrl(`/e-hentai?${params}`, 'replace')
       },
-      setScroll: (scrollY: number) => dispatch({ type: 'SET_SCROLL', scrollY }),
-      reset: () => dispatch({ type: 'RESET' }),
+      setScroll: (scrollY: number) => {
+        const current = liveViewRef.current
+        const view = {
+          anchor: current?.anchor
+            ? { ...current.anchor, scrollY }
+            : scrollY > 0
+              ? { itemId: null, offset: 0, scrollY }
+              : null,
+          layout: current?.layout ?? stateRef.current.layout,
+        }
+        liveViewRef.current = view
+        updateSessionView(view)
+      },
+      setAnchor: (anchor: EhBrowseState['anchor']) => {
+        const view = { anchor, layout: liveViewRef.current?.layout ?? stateRef.current.layout }
+        liveViewRef.current = view
+        updateSessionView(view)
+      },
+      setLayout: (layout: EhBrowseState['layout']) => {
+        const view = { anchor: liveViewRef.current?.anchor ?? stateRef.current.anchor, layout }
+        liveViewRef.current = view
+        updateSessionView(view)
+      },
+      checkpoint: (anchor?: EhBrowseState['anchor'], layout?: EhBrowseState['layout']) => {
+        const current = stateRef.current
+        const liveView = liveViewRef.current
+        const view = {
+          anchor:
+            anchor === undefined
+              ? liveView?.anchor ??
+                current.anchor ??
+                (current.scrollY > 0
+                  ? { itemId: null, offset: 0, scrollY: current.scrollY }
+                  : null)
+              : anchor,
+          layout: layout === undefined ? liveView?.layout ?? current.layout : layout,
+        }
+        liveViewRef.current = view
+        sessionCheckpoint(view, retention)
+      },
+      reset: () => commitIdentity([{ type: 'RESET' }], 'replace'),
     }),
-    [dispatchIdentityChange],
+    [cancelPending, commitIdentity, retention, scopedStore, sessionCheckpoint, updateSessionView],
   )
 
-  // ── URL sync: identity → URL. View (buffer/cursor/scroll) never goes in the URL.
-  const identityKey = useMemo(
-    () => identityToUrlParams(state).toString(),
-    // Only the identity fields matter; recomputing on view (items/scroll) changes is wasteful.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.tab, state.query, state.filters],
-  )
-  const firstUrlSync = useRef(true)
-  useEffect(() => {
-    if (firstUrlSync.current) {
-      firstUrlSync.current = false
-      return
-    }
-    router.replace(identityKey ? `/e-hentai?${identityKey}` : '/e-hentai', { scroll: false })
-  }, [identityKey, router])
-
-  // React to external URL changes while the page stays mounted (saved-search links,
-  // browser history, or tapping the active nav item). useReducer's initializer only
-  // reads the URL on mount, so without this sync a new non-empty identity could appear
-  // in the address bar while requests still used the previous filters.
-  const searchStr = searchParams.toString()
-  useEffect(() => {
-    const current = stateRef.current
-    if (searchStr === '') {
-      if (queryKey(current) === queryKey(initialState)) return
-      if (typeof window !== 'undefined') sessionStorage.removeItem(SNAPSHOT_KEY)
-      dispatch({ type: 'RESET' })
-      return
-    }
-
-    const identity = parseUrlToIdentity(new URLSearchParams(searchStr))
-    const next = { ...current, ...identity }
-    if (queryKey(current) === queryKey(next)) return
-    dispatchIdentityChange({ type: 'APPLY_IDENTITY', identity })
-  }, [dispatchIdentityChange, searchStr])
-
-  // ── Snapshot persistence: continuous scroll capture + write on every exit.
-  // MUST be a layout effect: on a push navigation Next resets window scroll in
-  // the incoming page's layout phase, and the reset's scroll event fires in the
-  // browser's rendering step — usually BEFORE React's passive cleanups flush.
-  // With a passive effect the reset event would hit the still-attached listener
-  // and poison lastScrollYRef with 0 (intermittently — it's a race). Layout
-  // cleanups of a removed tree run in the mutation phase, strictly before the
-  // incoming page's layout effects, so the listener is detached before the
-  // reset can happen at all.
-  useIsomorphicLayoutEffect(() => {
-    if (typeof window === 'undefined') return
-    // Init to 0, not live scrollY: this runs before the router's own scroll
-    // handling for the new page, so window.scrollY may still be the PREVIOUS
-    // page's position. Real positions arrive via scroll events (user scrolling,
-    // our restore's scrollTo, or the browser's popstate restoration).
-    lastScrollYRef.current = 0
-    const write = () => persistView(stateRef.current)
-    let persistTimer: ReturnType<typeof setTimeout> | undefined
-    const onScroll = () => {
-      lastScrollYRef.current = window.scrollY
-      clearTimeout(persistTimer)
-      persistTimer = setTimeout(write, 250)
-    }
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') {
-        clearTimeout(persistTimer)
-        write()
+  const compatibilityDispatch = useCallback(
+    (action: Action) => {
+      if (action.type === 'SEED') {
+        replacePage({
+          items: action.items,
+          cursor: action.cursor,
+          hasMore: action.hasMore,
+          total: action.total,
+        })
+        return
       }
-    }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    window.addEventListener('pagehide', write)
-    document.addEventListener('visibilitychange', onHide)
-    return () => {
-      // Bank the last USER position, never live scrollY — see effect comment.
-      persistView(stateRef.current, lastScrollYRef.current)
-      window.removeEventListener('scroll', onScroll)
-      window.removeEventListener('pagehide', write)
-      document.removeEventListener('visibilitychange', onHide)
-      clearTimeout(persistTimer)
-    }
-  }, [persistView])
+      if (action.type === 'RESTORE') {
+        replacePage({
+          items: action.snapshot.items ?? [],
+          cursor: action.snapshot.cursor ?? null,
+          hasMore: action.snapshot.hasMore ?? true,
+          total: action.snapshot.total ?? null,
+        })
+        return
+      }
+      identityDispatch(action)
+    },
+    [replacePage],
+  )
 
-  return { state, dispatch: dispatch as React.Dispatch<Action>, actions, loadMore, favCategories }
+  const searchString = searchParams.toString()
+  useEffect(() => {
+    const params = new URLSearchParams(searchString)
+    const identity = {
+      ...parseUrlToIdentity(params),
+      ephemeralSession: params.get('image_session'),
+    }
+    const next = { ...identityStateRef.current, ...identity }
+    if (queryKey(identityStateRef.current) !== queryKey(next)) {
+      cancelPending()
+      identityDispatch({ type: 'APPLY_IDENTITY', identity })
+    }
+  }, [cancelPending, searchString])
+
+  return {
+    state: returnedState,
+    dispatch: compatibilityDispatch as React.Dispatch<Action>,
+    actions,
+    loadMore: session.loadMore,
+    restoreInstruction,
+    acknowledgeRestore: session.acknowledgeRestore,
+    favCategories: (Array.isArray(session.state.meta) ? session.state.meta : []) as EhFavCategory[],
+  }
 }

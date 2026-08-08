@@ -42,12 +42,13 @@ export const search = {
   galleries: (
     q: string,
     options?: { cursor?: string; page?: number; limit?: number; sort?: string },
+    init?: RequestInit,
   ): Promise<SearchGalleriesResponse> => {
     const params = new URLSearchParams({ q })
     if (options?.cursor) params.set('cursor', options.cursor)
     if (options?.page) params.set('page', String(options.page))
     if (options?.limit) params.set('limit', String(options.limit))
     if (options?.sort) params.set('sort', options.sort)
-    return apiFetch(`/api/search/?${params}`)
+    return apiFetch(`/api/search/?${params}`, init)
   },
 }

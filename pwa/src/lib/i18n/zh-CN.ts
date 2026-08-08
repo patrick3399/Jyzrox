@@ -1028,6 +1028,8 @@ const zhCN: Record<string, string> = {
   'browse.coversOnly': '仅搜索封面',
   'browse.includeExpunged': '包含已删除项目',
   'browse.imageSearchResults': '图片搜索找到 {count} 条结果',
+  'browse.imageSessionExpiredHelp': '这份上传图片的搜索结果已失效，请开始新的搜索。',
+  'browse.startNewSearch': '开始新的搜索',
   'browse.openRandom': '随机打开已加载的结果',
   'browse.watched': '监看中',
   'browse.language': '语言',

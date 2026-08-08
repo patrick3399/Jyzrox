@@ -1,4 +1,17 @@
 import type { EhGallery, EhSearchParams } from '@/lib/types'
+import type { BrowseAnchor } from '@/lib/browse/anchor'
+import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
+import {
+  canonicalEhIdentity,
+  ehIdentityKey,
+  normalizeEhAdvancedSearch,
+  normalizeEhCategories,
+  normalizeEhFavoriteCategory,
+  normalizeEhPageBound,
+  normalizeEhRating,
+  normalizeEhToplistPeriod,
+  type EhCanonicalIdentity,
+} from '@/lib/browse/ehentai'
 
 export type Tab = 'search' | 'favorites' | 'popular' | 'toplist'
 
@@ -21,7 +34,7 @@ export type Filters = {
   toplistTl: number
 }
 
-export type Status = 'idle' | 'seeding' | 'loading' | 'error'
+export type Status = 'idle' | 'seeding' | 'loading' | 'error' | 'expired'
 
 export type EhBrowseState = {
   tab: Tab
@@ -34,6 +47,10 @@ export type EhBrowseState = {
   status: Status
   error: string | null
   scrollY: number
+  anchor: BrowseAnchor | null
+  layout: BrowseLayoutSnapshot | null
+  /** Unique, non-replayable identity for reverse-image results. */
+  ephemeralSession: string | null
 }
 
 export const CATEGORY_BITMASK: Record<string, number> = {
@@ -101,6 +118,9 @@ export const initialState: EhBrowseState = {
   status: 'idle',
   error: null,
   scrollY: 0,
+  anchor: null,
+  layout: null,
+  ephemeralSession: null,
 }
 
 const EMPTY_VIEW = {
@@ -111,18 +131,13 @@ const EMPTY_VIEW = {
   status: 'idle' as Status,
   error: null,
   scrollY: 0,
+  anchor: null as BrowseAnchor | null,
+  layout: null as BrowseLayoutSnapshot | null,
 }
 
 /** Stable identity string: tab + query + filters. Same identity === same results. */
 export function queryKey(s: EhBrowseState): string {
-  return JSON.stringify({
-    tab: s.tab,
-    query: s.query,
-    f: {
-      ...s.filters,
-      selectedCats: [...s.filters.selectedCats].sort(),
-    },
-  })
+  return ehIdentityKey(s)
 }
 
 export type Action =
@@ -131,7 +146,8 @@ export type Action =
   | { type: 'SET_FILTER'; patch: Partial<Filters> }
   | {
       type: 'APPLY_IDENTITY'
-      identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>
+      identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'> &
+        Partial<Pick<EhBrowseState, 'ephemeralSession'>>
     }
   | {
       type: 'SEED'
@@ -144,6 +160,9 @@ export type Action =
   | { type: 'LOAD_START'; seeding: boolean }
   | { type: 'LOAD_ERROR'; error: string }
   | { type: 'SET_SCROLL'; scrollY: number }
+  | { type: 'SET_ANCHOR'; anchor: BrowseAnchor | null }
+  | { type: 'SET_LAYOUT'; layout: BrowseLayoutSnapshot | null }
+  | { type: 'SHOW_EXTERNAL_RESULTS'; session: string; items: EhGallery[]; total: number }
   | { type: 'RESTORE'; snapshot: Partial<EhBrowseState> }
   | { type: 'RESET' }
 
@@ -154,16 +173,21 @@ function withIdentityReset(prev: EhBrowseState, next: EhBrowseState): EhBrowseSt
 export function reducer(state: EhBrowseState, action: Action): EhBrowseState {
   switch (action.type) {
     case 'SET_TAB':
-      return withIdentityReset(state, { ...state, tab: action.tab })
+      return withIdentityReset(state, { ...state, tab: action.tab, ephemeralSession: null })
     case 'COMMIT_QUERY':
-      return withIdentityReset(state, { ...state, query: action.query })
+      return withIdentityReset(state, { ...state, query: action.query, ephemeralSession: null })
     case 'SET_FILTER':
       return withIdentityReset(state, {
         ...state,
+        ephemeralSession: null,
         filters: { ...state.filters, ...action.patch },
       })
     case 'APPLY_IDENTITY':
-      return withIdentityReset(state, { ...state, ...action.identity })
+      return withIdentityReset(state, {
+        ...state,
+        ...action.identity,
+        ephemeralSession: action.identity.ephemeralSession ?? null,
+      })
     case 'LOAD_START':
       return { ...state, status: action.seeding ? 'seeding' : 'loading', error: null }
     case 'SEED':
@@ -192,6 +216,22 @@ export function reducer(state: EhBrowseState, action: Action): EhBrowseState {
       return { ...state, status: 'error', error: action.error }
     case 'SET_SCROLL':
       return { ...state, scrollY: action.scrollY }
+    case 'SET_ANCHOR':
+      return { ...state, anchor: action.anchor }
+    case 'SET_LAYOUT':
+      return { ...state, layout: action.layout }
+    case 'SHOW_EXTERNAL_RESULTS':
+      return {
+        ...state,
+        ...EMPTY_VIEW,
+        tab: 'search',
+        query: '',
+        ephemeralSession: action.session,
+        items: action.items,
+        total: action.total,
+        cursor: null,
+        hasMore: false,
+      }
     case 'RESTORE':
       return { ...state, ...action.snapshot }
     case 'RESET':
@@ -207,68 +247,75 @@ export type FetchPlan =
   | { kind: 'toplist'; args: { tl: number; page: number } }
   | { kind: 'popular'; args: Record<string, never> }
 
-function computeFCats(f: Filters): number | undefined {
+function computeFCats(selectedCats: readonly string[]): number | undefined {
   // Category selection is always active (independent of the advanced panel).
   // Empty === all categories === no filter.
-  const sel = f.selectedCats
+  const sel = selectedCats
   if (sel.length === 0 || sel.length === ALL_CATS.length) return undefined
   let mask = 0
   for (const c of sel) mask |= CATEGORY_BITMASK[c] ?? 0
   return ALL_CATS_MASK ^ mask
 }
 
-export function buildParams(s: EhBrowseState): FetchPlan {
-  const nextGid = s.cursor?.kind === 'gid' ? s.cursor.nextGid : undefined
-  switch (s.tab) {
+export function buildParamsFromIdentity(
+  identity: EhCanonicalIdentity,
+  cursor: Cursor,
+): FetchPlan {
+  const nextGid = cursor?.kind === 'gid' ? cursor.nextGid : undefined
+  switch (identity.surface) {
     case 'favorites':
       return {
         kind: 'favorites',
         args: {
-          favcat: s.filters.favCat,
-          q: s.filters.favSearch || undefined,
-          ...(s.cursor?.kind === 'fav' ? { next: s.cursor.next } : {}),
+          favcat: identity.category,
+          q: identity.query || undefined,
+          ...(cursor?.kind === 'fav' ? { next: cursor.next } : {}),
         },
       }
     case 'toplist':
       return {
         kind: 'toplist',
         args: {
-          tl: s.filters.toplistTl,
-          page: s.cursor?.kind === 'page' ? s.cursor.page : 0,
+          tl: identity.period,
+          page: cursor?.kind === 'page' ? cursor.page : 0,
         },
       }
     case 'popular':
       return { kind: 'popular', args: {} }
-    case 'search':
-    default: {
-      const f = s.filters
+    case 'latest':
+    case 'search': {
       const advanced =
-        f.advancedOpen &&
-        (f.advSearch !== 0 ||
-          f.minRating !== null ||
-          f.pageFrom !== null ||
-          f.pageTo !== null ||
-          !!f.language)
+        identity.advSearch !== 0 ||
+        identity.minRating !== null ||
+        identity.pageFrom !== null ||
+        identity.pageTo !== null ||
+        !!identity.language
       return {
         kind: 'search',
         args: {
-          q: s.query || undefined,
+          q: identity.query || undefined,
           ...(nextGid != null ? { next_gid: nextGid } : {}),
-          f_cats: computeFCats(f),
+          f_cats: computeFCats(identity.categories),
           ...(advanced
             ? {
                 advance: true,
-                adv_search: f.advSearch || undefined,
-                min_rating: f.minRating ?? undefined,
-                page_from: f.pageFrom ?? undefined,
-                page_to: f.pageTo ?? undefined,
-                language: f.language || undefined,
+                adv_search: identity.advSearch || undefined,
+                min_rating: identity.minRating ?? undefined,
+                page_from: identity.pageFrom ?? undefined,
+                page_to: identity.pageTo ?? undefined,
+                language: identity.language || undefined,
               }
             : {}),
         },
       }
     }
+    case 'image-search':
+      throw new Error('Image-search sessions cannot be fetched from E-Hentai')
   }
+}
+
+export function buildParams(s: EhBrowseState): FetchPlan {
+  return buildParamsFromIdentity(canonicalEhIdentity(s), s.cursor)
 }
 
 type Snapshot = {
@@ -278,6 +325,8 @@ type Snapshot = {
   cursor: Cursor
   hasMore: boolean
   scrollY: number
+  anchor?: BrowseAnchor | null
+  layout?: BrowseLayoutSnapshot | null
 }
 
 // The active snapshot must keep its item buffer, cursor, and scroll position as
@@ -286,7 +335,7 @@ type Snapshot = {
 // Keep the current view whole and evict older identities to stay within a
 // conservative sessionStorage budget.
 type SnapshotStore = { version: 2; snaps: Snapshot[] }
-export const SNAPSHOT_HISTORY_CAP = 5
+export const SNAPSHOT_HISTORY_CAP = 8
 export const SNAPSHOT_STORE_CHAR_CAP = 2_000_000
 
 function parseStore(raw: string | null): Snapshot[] {
@@ -311,6 +360,8 @@ export function serializeSnapshot(s: EhBrowseState, prevRaw: string | null = nul
     cursor: s.cursor,
     hasMore: s.hasMore,
     scrollY: s.scrollY,
+    anchor: s.anchor,
+    layout: s.layout,
   }
   const rest = parseStore(prevRaw).filter((x) => x.queryKey !== snap.queryKey)
   const selected: Snapshot[] = []
@@ -331,6 +382,8 @@ export function serializeSnapshot(s: EhBrowseState, prevRaw: string | null = nul
         cursor: null,
         hasMore: true,
         scrollY: 0,
+        anchor: null,
+        layout: null,
       }
       return JSON.stringify({ version: 2, snaps: [reset] } satisfies SnapshotStore)
     }
@@ -352,6 +405,8 @@ export function parseSnapshot(
     cursor: snap.cursor,
     hasMore: snap.hasMore,
     scrollY: snap.scrollY,
+    anchor: snap.anchor ?? null,
+    layout: snap.layout ?? null,
     status: 'idle',
   }
 }
@@ -360,22 +415,31 @@ const CATEGORY_KEYS = new Set(ALL_CATS)
 
 export function identityToUrlParams(s: EhBrowseState): URLSearchParams {
   const p = new URLSearchParams()
-  if (s.query) p.set('q', s.query)
+  if (s.ephemeralSession) {
+    p.set('tab', 'search')
+    p.set('image_session', s.ephemeralSession)
+    return p
+  }
+  if (s.tab === 'search' && s.query) p.set('q', s.query)
   // The Latest tab is `search` + empty query. `q=` alone implies the search tab,
   // so a query search omits `tab`; but with no query we MUST still mark the tab,
   // otherwise it serializes to a bare URL — indistinguishable from the popular
   // home default, which useEhBrowse treats as an external "reset to popular".
   if (s.tab !== 'search' || !s.query) p.set('tab', s.tab)
   const f = s.filters
-  if (f.advancedOpen) p.set('adv_open', '1')
-  if (f.selectedCats.length > 0 && f.selectedCats.length < ALL_CATS.length) {
-    p.set('cat', [...f.selectedCats].sort().join(','))
+  if (s.tab === 'search') {
+    if (f.advancedOpen) p.set('adv_open', '1')
+    const categories = normalizeEhCategories(f.selectedCats)
+    if (categories.length > 0 && categories.length < ALL_CATS.length) {
+      p.set('cat', categories.join(','))
+    }
+    const advSearch = normalizeEhAdvancedSearch(f.advSearch)
+    if (advSearch !== 0) p.set('adv', String(advSearch))
+    if (f.minRating !== null) p.set('minrating', String(f.minRating))
+    if (f.pageFrom !== null) p.set('pfrom', String(f.pageFrom))
+    if (f.pageTo !== null) p.set('pto', String(f.pageTo))
+    if (f.language) p.set('language', f.language)
   }
-  if (f.advSearch !== 0) p.set('adv', String(f.advSearch))
-  if (f.minRating !== null) p.set('minrating', String(f.minRating))
-  if (f.pageFrom !== null) p.set('pfrom', String(f.pageFrom))
-  if (f.pageTo !== null) p.set('pto', String(f.pageTo))
-  if (f.language) p.set('language', f.language)
   if (s.tab === 'favorites' && f.favCat !== 'all') p.set('favcat', f.favCat)
   if (s.tab === 'favorites' && f.favSearch) p.set('favsearch', f.favSearch)
   if (s.tab === 'toplist' && f.toplistTl !== 11) p.set('tl', String(f.toplistTl))
@@ -394,23 +458,25 @@ export function parseUrlToIdentity(
         ? 'search'
         : 'popular'
   const catParam = sp.get('cat')
-  const selectedCats = catParam ? catParam.split(',').filter((k) => CATEGORY_KEYS.has(k)) : []
+  const selectedCats = normalizeEhCategories(
+    catParam ? catParam.split(',').filter((k) => CATEGORY_KEYS.has(k)) : [],
+  )
   const num = (v: string | null): number | null => (v != null && v !== '' ? Number(v) : null)
   return {
     tab,
-    query: q,
+    query: tab === 'search' ? q : '',
     filters: {
       ...initialFilters,
       advancedOpen: sp.get('adv_open') === '1',
       selectedCats,
-      advSearch: sp.get('adv') ? Number(sp.get('adv')) : 0,
-      minRating: num(sp.get('minrating')),
-      pageFrom: num(sp.get('pfrom')),
-      pageTo: num(sp.get('pto')),
+      advSearch: normalizeEhAdvancedSearch(sp.get('adv') ? Number(sp.get('adv')) : 0),
+      minRating: normalizeEhRating(num(sp.get('minrating'))),
+      pageFrom: normalizeEhPageBound(num(sp.get('pfrom'))),
+      pageTo: normalizeEhPageBound(num(sp.get('pto'))),
       language: sp.get('language') || '',
-      favCat: sp.get('favcat') || 'all',
+      favCat: normalizeEhFavoriteCategory(sp.get('favcat') || 'all'),
       favSearch: sp.get('favsearch') || '',
-      toplistTl: sp.get('tl') ? Number(sp.get('tl')) : 11,
+      toplistTl: normalizeEhToplistPeriod(sp.get('tl') ? Number(sp.get('tl')) : 11),
     },
   }
 }

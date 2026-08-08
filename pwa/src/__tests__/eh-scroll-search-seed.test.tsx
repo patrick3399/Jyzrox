@@ -43,6 +43,10 @@ vi.mock('@/hooks/useSubscriptions', () => ({
   useSubscriptions: () => ({ data: { subscriptions: [] }, mutate: vi.fn() }),
 }))
 
+vi.mock('@/hooks/useProfile', () => ({
+  useProfile: () => ({ data: { username: 'qa-user' }, isLoading: false }),
+}))
+
 vi.mock('swr', () => ({
   default: () => ({ data: { ehentai: { configured: true } }, isLoading: false }),
 }))
@@ -151,6 +155,7 @@ describe('E-Hentai search seeding', () => {
   })
 
   it('clearing a search also clears its advanced filters', async () => {
+    const replaceState = vi.spyOn(window.history, 'replaceState')
     const { default: Page } = await import('@/app/e-hentai/page')
     mockSearchParams.set('q', 'language:chinese')
     mockSearchParams.set('adv_open', '1')
@@ -161,9 +166,14 @@ describe('E-Hentai search seeding', () => {
     fireEvent.click(screen.getByRole('button', { name: 'browse.clearSearch' }))
 
     await waitFor(() =>
-      expect(replaceMock).toHaveBeenCalledWith('/e-hentai?tab=popular', { scroll: false }),
+      expect(replaceState).toHaveBeenCalledWith(
+        window.history.state,
+        '',
+        '/e-hentai?tab=popular',
+      ),
     )
-    const urls = replaceMock.mock.calls.map(([url]) => String(url))
+    const urls = replaceState.mock.calls.map(([, , url]) => String(url))
     expect(urls.at(-1)).not.toMatch(/q=|adv_open=|minrating=/)
+    replaceState.mockRestore()
   })
 })

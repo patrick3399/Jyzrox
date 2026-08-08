@@ -1010,6 +1010,8 @@ const zhTW: Record<string, string> = {
   'browse.coversOnly': '僅搜尋封面',
   'browse.includeExpunged': '包含已刪除項目',
   'browse.imageSearchResults': '圖片搜尋找到 {count} 筆結果',
+  'browse.imageSessionExpiredHelp': '這份上傳圖片的搜尋結果已失效，請開始新的搜尋。',
+  'browse.startNewSearch': '開始新的搜尋',
   'browse.openRandom': '隨機開啟已載入的結果',
   'browse.watched': '監看中',
   'browse.language': '語言',

@@ -946,6 +946,8 @@ const ja: Record<string, string> = {
   'browse.coversOnly': '表紙のみ検索',
   'browse.includeExpunged': '削除済みを含める',
   'browse.imageSearchResults': '画像検索結果 {count} 件',
+  'browse.imageSessionExpiredHelp': 'アップロード画像の検索結果は期限切れです。新しい検索を開始してください。',
+  'browse.startNewSearch': '新しい検索を開始',
   'browse.openRandom': '読み込み済みの結果をランダムに開く',
   'browse.watched': 'ウォッチ中',
   'browse.language': '言語',
