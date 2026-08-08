@@ -327,22 +327,37 @@ describe('Pixiv Phase 2 final blockers', () => {
     expect(testState.gridProps?.restoreRequest).toBeUndefined()
   })
 
+  // A surface change pushes so the previous surface stays reachable by back; a
+  // filter change inside the surface replaces. Either way there is exactly one
+  // outbound transition, and the view checkpoint must precede it.
   it.each([
-    ['tab', () => fireEvent.click(screen.getByRole('button', { name: 'pixiv.feedTab' }))],
+    [
+      'tab',
+      () => fireEvent.click(screen.getByRole('button', { name: 'pixiv.feedTab' })),
+      'push' as const,
+    ],
     [
       'filter',
       () => fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'weekly' } }),
+      'replace' as const,
     ],
-  ])('checkpoints before exactly one outbound %s identity transition', (_kind, transition) => {
-    render(<PixivPage />)
-    transition()
+  ])(
+    'checkpoints before exactly one outbound %s identity transition',
+    (_kind, transition, expectedMethod) => {
+      render(<PixivPage />)
+      transition()
 
-    expect(testState.checkpoint).toHaveBeenCalledTimes(1)
-    expect(testState.replace).toHaveBeenCalledTimes(1)
-    expect(testState.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(
-      testState.replace.mock.invocationCallOrder[0],
-    )
-  })
+      const used = expectedMethod === 'push' ? testState.push : testState.replace
+      const unused = expectedMethod === 'push' ? testState.replace : testState.push
+
+      expect(testState.checkpoint).toHaveBeenCalledTimes(1)
+      expect(used).toHaveBeenCalledTimes(1)
+      expect(unused).not.toHaveBeenCalled()
+      expect(testState.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(
+        used.mock.invocationCallOrder[0],
+      )
+    },
+  )
 
   it('does not checkpoint again when delayed navigation unmounts after the transition task', async () => {
     const view = render(<PixivPage />)

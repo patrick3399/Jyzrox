@@ -98,16 +98,20 @@ describe('Pixiv URL identity owner', () => {
     expect(replace).not.toHaveBeenCalledWith('/pixiv?tab=ranking', expect.anything())
   })
 
+  // Submitting a search moves off the ranking surface, so it pushes: the surface
+  // the user came from has to stay reachable by back.
   it('emits exactly one outbound URL transition for a submitted search', () => {
     render(<PixivPage />)
     replace.mockClear()
+    push.mockClear()
     const input = screen.getByPlaceholderText('pixiv.searchPlaceholder')
 
     fireEvent.change(input, { target: { value: 'miku' } })
     fireEvent.click(screen.getByRole('button', { name: 'pixiv.search' }))
 
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace).toHaveBeenCalledWith('/pixiv?tab=search&q=miku', { scroll: false })
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith('/pixiv?tab=search&q=miku', { scroll: false })
+    expect(replace).not.toHaveBeenCalled()
   })
 
   it('emits exactly one canonical URL transition for each search filter change', () => {

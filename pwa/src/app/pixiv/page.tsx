@@ -330,6 +330,10 @@ function PixivPageInner() {
       ? initialIdentity.surface
       : 'ranking'
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
+  // Which surface the current history entry belongs to, so a commit can tell a
+  // surface change from a filter change. Kept in sync with URLs that arrive from
+  // outside the page (back/forward) as well as ones this page writes.
+  const identitySurfaceRef = useRef(initialIdentity.surface)
   const [searchQuery, setSearchQuery] = useState(
     initialIdentity.surface === 'search' ? initialIdentity.query : '',
   )
@@ -365,6 +369,7 @@ function PixivPageInner() {
 
   useEffect(() => {
     const incoming = parsePixivIdentity(new URLSearchParams(searchString), searchBackend)
+    identitySurfaceRef.current = incoming.surface
     if (incoming.surface === 'search') {
       setSearchQuery(incoming.query)
       setSubmittedQuery(incoming.query)
@@ -489,14 +494,25 @@ function PixivPageInner() {
     liveViewRevisionRef.current += 1
   }, [])
 
-  const replaceIdentity = useCallback(
+  /** Commit a new browse identity to the URL.
+   *
+   *  A surface is a place the user navigated to, so it must be reachable by
+   *  back: this page has no back FAB, and on mobile the edge swipe is the only
+   *  back affordance, so collapsing ranking -> feed into one entry means backing
+   *  out of Pixiv entirely instead of stepping back a surface. Filters inside a
+   *  surface are not places — their controls stay on screen, and one entry per
+   *  ranking-mode change would make leaving take one swipe per control touched.
+   *  Same rule as the E-Hentai tabs. */
+  const commitIdentity = useCallback(
     (nextIdentity: PixivBrowseIdentity) => {
       flushPendingViewWork()
       checkpoint(captureView())
       persistedViewRevisionRef.current = liveViewRevisionRef.current
-      router.replace(`/pixiv?${serializePixivIdentity(nextIdentity).toString()}`, {
-        scroll: false,
-      })
+      const url = `/pixiv?${serializePixivIdentity(nextIdentity).toString()}`
+      const changesSurface = nextIdentity.surface !== identitySurfaceRef.current
+      identitySurfaceRef.current = nextIdentity.surface
+      if (changesSurface) router.push(url, { scroll: false })
+      else router.replace(url, { scroll: false })
     },
     [captureView, checkpoint, flushPendingViewWork, router],
   )
@@ -683,7 +699,7 @@ function PixivPageInner() {
     const query = searchQuery.trim()
     if (!query) return
     setSubmittedQuery(query)
-    replaceIdentity({
+    commitIdentity({
       surface: 'search',
       query,
       sort: searchSort,
@@ -694,7 +710,7 @@ function PixivPageInner() {
   const handleClearSearch = () => {
     setSearchQuery('')
     setSubmittedQuery('')
-    replaceIdentity({
+    commitIdentity({
       surface: activeTab === 'ranking' ? 'ranking' : activeTab,
       ...(activeTab === 'ranking'
         ? { mode: rankingMode, content: rankingContent, r18: rankingR18 }
@@ -710,16 +726,16 @@ function PixivPageInner() {
     setSearchQuery('')
     setSubmittedQuery('')
     if (tab === 'ranking')
-      replaceIdentity({
+      commitIdentity({
         surface: 'ranking',
         mode: rankingMode,
         content: rankingContent,
         r18: rankingR18,
       })
     else if (tab === 'bookmarks')
-      replaceIdentity({ surface: 'bookmarks', restrict: bookmarksRestrict })
-    else if (tab === 'following') replaceIdentity({ surface: 'following', restrict: 'public' })
-    else replaceIdentity({ surface: 'feed' })
+      commitIdentity({ surface: 'bookmarks', restrict: bookmarksRestrict })
+    else if (tab === 'following') commitIdentity({ surface: 'following', restrict: 'public' })
+    else commitIdentity({ surface: 'feed' })
   }
 
   const isPrivateSurface =
@@ -793,7 +809,7 @@ function PixivPageInner() {
             onChange={(event) => {
               const sort = event.target.value
               setSearchSort(sort)
-              replaceIdentity({ ...identity, sort })
+              commitIdentity({ ...identity, sort })
             }}
             className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
           >
@@ -809,7 +825,7 @@ function PixivPageInner() {
               onChange={(event) => {
                 const duration = event.target.value
                 setSearchDuration(duration)
-                replaceIdentity({ ...identity, duration })
+                commitIdentity({ ...identity, duration })
               }}
               className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
             >
@@ -876,7 +892,7 @@ function PixivPageInner() {
             onChange={(event) => {
               const mode = event.target.value
               setRankingMode(mode)
-              replaceIdentity({ ...identity, mode })
+              commitIdentity({ ...identity, mode })
             }}
             className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
           >
@@ -893,7 +909,7 @@ function PixivPageInner() {
             onClick={() => {
               const r18 = !rankingR18
               setRankingR18(r18)
-              replaceIdentity({ ...identity, r18 })
+              commitIdentity({ ...identity, r18 })
             }}
             disabled={credentialsMissing}
             aria-pressed={rankingR18}
@@ -907,7 +923,7 @@ function PixivPageInner() {
               onChange={(event) => {
                 const content = event.target.value
                 setRankingContent(content)
-                replaceIdentity({ ...identity, content })
+                commitIdentity({ ...identity, content })
               }}
               className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
             >
@@ -928,7 +944,7 @@ function PixivPageInner() {
             onChange={(event) => {
               const restrict = event.target.value === 'private' ? 'private' : 'public'
               setBookmarksRestrict(restrict)
-              replaceIdentity({ surface: 'bookmarks', restrict })
+              commitIdentity({ surface: 'bookmarks', restrict })
             }}
             className="rounded-lg border border-vault-border bg-vault-input px-3 py-1.5 text-sm"
           >
