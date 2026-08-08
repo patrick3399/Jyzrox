@@ -1,6 +1,14 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { LayoutGrid, List } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
@@ -476,10 +484,21 @@ function PixivPageInner() {
     return { anchor, layout: layoutRef.current }
   }, [state.items])
 
+  // `captureView` is rebuilt whenever `state.items` changes, so the scroll
+  // subscription must not depend on it (directly or through `persistView`): an
+  // append that commits before a scheduled capture frame fires would tear the
+  // effect down, cancel the frame, and drop that scroll position without
+  // rescheduling it. Infinite scroll makes that window routine, since scrolling
+  // is what triggers the append.
+  const captureViewRef = useRef(captureView)
+  useLayoutEffect(() => {
+    captureViewRef.current = captureView
+  }, [captureView])
+
   const persistView = useCallback(() => {
-    checkpoint(captureView())
+    checkpoint(captureViewRef.current())
     persistedViewRevisionRef.current = liveViewRevisionRef.current
-  }, [captureView, checkpoint])
+  }, [checkpoint])
 
   const flushPendingViewWork = useCallback(() => {
     if (scrollAnimationFrameRef.current !== null) {
@@ -545,7 +564,7 @@ function PixivPageInner() {
         scrollAnimationFrameRef.current = null
         scrollYRef.current = window.scrollY
         liveViewRevisionRef.current += 1
-        updateView(captureView())
+        updateView(captureViewRef.current())
       })
       if (checkpointTimerRef.current !== null) clearTimeout(checkpointTimerRef.current)
       checkpointTimerRef.current = setTimeout(() => {
@@ -575,7 +594,7 @@ function PixivPageInner() {
         checkpointTimerRef.current = null
       }
     }
-  }, [captureView, persistView, updateView])
+  }, [persistView, updateView])
 
   const restoreDecision = useMemo(
     () =>

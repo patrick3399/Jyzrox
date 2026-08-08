@@ -1,6 +1,14 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  Suspense,
+} from 'react'
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
 import { useProfile } from '@/hooks/useProfile'
@@ -642,6 +650,18 @@ function BrowsePage() {
     [items, viewMode],
   )
 
+  // `captureAnchor` is rebuilt whenever `items` changes, so the scroll
+  // subscription below must not depend on it directly: an append that commits
+  // before a scheduled capture frame fires would tear the effect down, cancel
+  // the frame, and drop that scroll position without rescheduling it. Infinite
+  // scroll makes that window routine, since scrolling is what triggers the
+  // append. Read the current implementation through a ref instead, and keep the
+  // subscription alive for the page's whole lifetime.
+  const captureAnchorRef = useRef(captureAnchor)
+  useLayoutEffect(() => {
+    captureAnchorRef.current = captureAnchor
+  }, [captureAnchor])
+
   // This page is the sole owner of the E-Hentai scroll lifecycle: capture the
   // full logical anchor cheaply, then persist after settling or lifecycle exit.
   useEffect(() => {
@@ -650,13 +670,13 @@ function BrowsePage() {
     let latestAnchor: BrowseAnchor | null = null
     const save = () => {
       if (pendingRestoreRef.current) return
-      const anchor = latestAnchor ?? captureAnchor()
+      const anchor = latestAnchor ?? captureAnchorRef.current()
       actions.checkpoint(anchor, layoutRef.current)
     }
     const capture = () => {
       frame = undefined
       if (pendingRestoreRef.current) return
-      latestAnchor = captureAnchor()
+      latestAnchor = captureAnchorRef.current()
       actions.setAnchor(latestAnchor)
       clearTimeout(timer)
       timer = setTimeout(save, 250)
@@ -672,7 +692,7 @@ function BrowsePage() {
       if (frame !== undefined) cancelAnimationFrame(frame)
       clearTimeout(timer)
     }
-  }, [actions, captureAnchor])
+  }, [actions])
 
   const openItem = useCallback(
     (g: EhGallery) => {

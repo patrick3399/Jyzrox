@@ -331,12 +331,22 @@ function LibraryContent() {
     [captureAnchor, checkpoint, router],
   )
 
+  // `captureAnchor` is rebuilt whenever the gallery list changes, so the scroll
+  // subscription below must not depend on it directly: an append that commits
+  // before a scheduled capture frame fires would tear the effect down, cancel the
+  // frame, and drop that scroll position without rescheduling it. Infinite scroll
+  // makes that window routine, since scrolling is what triggers the append.
+  const captureAnchorRef = useRef(captureAnchor)
+  useLayoutEffect(() => {
+    captureAnchorRef.current = captureAnchor
+  }, [captureAnchor])
+
   useLayoutEffect(() => {
     let frame: number | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     const save = () => {
       const view = liveViewRef.current ?? {
-        anchor: captureAnchor(),
+        anchor: captureAnchorRef.current(),
         layout: layoutRef.current,
       }
       checkpoint(view)
@@ -344,7 +354,7 @@ function LibraryContent() {
     const capture = () => {
       frame = undefined
       if (pendingRestoreRef.current) return
-      const view = { anchor: captureAnchor(), layout: layoutRef.current }
+      const view = { anchor: captureAnchorRef.current(), layout: layoutRef.current }
       liveViewRef.current = view
       updateView(view)
       clearTimeout(timer)
@@ -361,7 +371,7 @@ function LibraryContent() {
       if (frame !== undefined) cancelAnimationFrame(frame)
       clearTimeout(timer)
     }
-  }, [captureAnchor, checkpoint, updateView])
+  }, [checkpoint, updateView])
 
   const handleFavoriteToggle = useCallback(
     async (gallery: Gallery) => {
