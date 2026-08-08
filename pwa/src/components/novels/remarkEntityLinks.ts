@@ -45,7 +45,7 @@ export function remarkEntityLinks(
             hName: 'a',
             hProperties: {
               href: hrefFor(name),
-              className: 'text-vault-accent underline decoration-dotted',
+              className: ['text-vault-accent', 'underline', 'decoration-dotted'],
               'data-entity': name,
             },
             hChildren: [{ type: 'text', value: name }],

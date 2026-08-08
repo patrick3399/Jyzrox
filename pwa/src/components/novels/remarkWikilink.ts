@@ -34,7 +34,7 @@ export const remarkWikilink: Plugin<[], Root> = () => {
           data: {
             hName: 'span',
             hProperties: {
-              className: 'text-vault-accent underline decoration-dotted',
+              className: ['text-vault-accent', 'underline', 'decoration-dotted'],
               'data-wikilink': name,
             },
             hChildren: [{ type: 'text', value: name }],
