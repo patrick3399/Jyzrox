@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
-const mockRouter = { back: vi.fn(), push: vi.fn() }
+const mockRouter = { back: vi.fn(), push: vi.fn(), replace: vi.fn() }
 
 vi.mock('next/navigation', () => ({
   useRouter: () => mockRouter,
@@ -78,15 +78,30 @@ describe('BackButton — hierarchical up after a tab-restore arrival', () => {
     render(<BackButton fallback="/e-hentai" />)
     fireEvent.click(screen.getByRole('button', { name: /common\.back/i }))
 
-    expect(mockRouter.push).toHaveBeenCalledWith('/e-hentai?tab=favorites')
+    expect(mockRouter.replace).toHaveBeenCalledWith('/e-hentai?tab=favorites')
     expect(mockRouter.back).not.toHaveBeenCalled()
+  })
+
+  // Regression: the climb used push, so the restored gallery stayed one step
+  // forward in history — pressing back and then swiping back returned the user
+  // to the very page they had just dismissed, and repeating it grew the stack
+  // without bound. Climbing replaces the arrival entry instead.
+  it('climbing up replaces the restored entry instead of stacking on top of it', () => {
+    rememberLocation(ROOTS, '/e-hentai', 'tab=favorites')
+    markTabRestore('/e-hentai/123/abc?fav=1')
+
+    render(<BackButton fallback="/e-hentai" />)
+    fireEvent.click(screen.getByRole('button', { name: /common\.back/i }))
+
+    expect(mockRouter.push).not.toHaveBeenCalled()
+    expect(mockRouter.replace).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to the bare section root on tab-restore arrival without a list visit', () => {
     markTabRestore('/e-hentai/123/abc?fav=1')
     render(<BackButton fallback="/e-hentai" />)
     fireEvent.click(screen.getByRole('button', { name: /common\.back/i }))
-    expect(mockRouter.push).toHaveBeenCalledWith('/e-hentai')
+    expect(mockRouter.replace).toHaveBeenCalledWith('/e-hentai')
     expect(mockRouter.back).not.toHaveBeenCalled()
   })
 
@@ -109,7 +124,7 @@ describe('BackButton — hierarchical up after a tab-restore arrival', () => {
     render(<BackButton fallback="/e-hentai" />)
     const btn = screen.getByRole('button', { name: /common\.back/i })
     fireEvent.click(btn)
-    expect(mockRouter.push).toHaveBeenCalledWith('/e-hentai?tab=favorites')
+    expect(mockRouter.replace).toHaveBeenCalledWith('/e-hentai?tab=favorites')
     Object.defineProperty(window, 'history', {
       value: { length: 2 },
       writable: true,

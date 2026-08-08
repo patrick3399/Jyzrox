@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { t } from '@/lib/i18n'
-import { consumeTabRestore, getListHref } from '@/lib/navMemory'
+import { smartBack } from '@/lib/navBack'
 
 interface BackButtonProps {
   fallback: string
@@ -13,23 +13,6 @@ interface BackButtonProps {
    *  level up the tree, not return to whatever page was visited previously
    *  (e.g. a chapter reached from search should go up to its chapter list). */
   toParent?: boolean
-}
-
-/** History back that stays inside the section: when this page was reached via
- *  a nav-tab restore of a deep URL, history's previous entry is whatever the
- *  user detoured through (e.g. /trash) — climb to the section's last
- *  list-level URL instead. Otherwise plain history back with a fallback. */
-export function smartBack(router: { back: () => void; push: (href: string) => void }, fallback: string): void {
-  const sectionRoot = fallback.split('?')[0]
-  if (consumeTabRestore(window.location.pathname + window.location.search)) {
-    router.push(getListHref(sectionRoot))
-    return
-  }
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push(fallback)
-  }
 }
 
 export function BackButton({ fallback, toParent = false }: BackButtonProps) {

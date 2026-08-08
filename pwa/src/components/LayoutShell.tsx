@@ -12,6 +12,7 @@ import { FloatingActions } from './FloatingActions'
 import { WsProvider } from '@/lib/ws'
 import { WsInvalidationBridge } from '@/lib/wsInvalidation'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
+import { isReaderPath } from '@/lib/readerRoutes'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { useLocale } from '@/components/LocaleProvider'
 import { UiPreferencesSync } from '@/components/UiPreferencesSync'
@@ -27,7 +28,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isAuth = AUTH_PATHS.includes(pathname)
   const isPublic = PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  const isReader = pathname.startsWith('/reader/')
+  const isReader = isReaderPath(pathname)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const handleDrawerClose = useCallback(() => setDrawerOpen(false), [])
   const handleDrawerOpen = useCallback(() => setDrawerOpen(true), [])

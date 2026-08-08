@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import { smartBack } from '@/lib/navBack'
 
 const EDGE_THRESHOLD = 24
 const MIN_SWIPE = 60
@@ -48,12 +49,11 @@ export function useSwipeBack({ enabled = true }: UseSwipeBackOptions = {}) {
       const deltaY = touch.clientY - startYRef.current
 
       if (deltaX >= MIN_SWIPE && deltaX / Math.abs(deltaY) > DIR_RATIO) {
-        const fallback = getFallback(pathname)
-        if (window.history.length > 1) {
-          router.back()
-        } else {
-          router.push(fallback)
-        }
+        // Must resolve the destination exactly like the back FAB: in a
+        // standalone app this gesture is the only back affordance, and a page
+        // reached by a nav-tab restore has an unrelated section as its previous
+        // history entry.
+        smartBack(router, getFallback(pathname))
       }
     }
 
