@@ -14,8 +14,9 @@ Strategy:
   _download_image_bytes on the instance.
 """
 
+import asyncio
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -299,6 +300,107 @@ class TestGetPopular:
         result = await client.get_popular()
 
         assert result == {"galleries": [], "total": 0}
+
+
+class TestWeakDhFallback:
+    """H@H nodes whose TLS offers only a 1024-bit DH group.
+
+    OpenSSL 3 rejects the handshake with DH_KEY_TOO_SMALL. E-Hentai keeps
+    handing out the same node for a given page (the nl server switch returns an
+    identical URL), and such a page has no other_url, so without a transport
+    fallback the page is permanently unfetchable — every repair run fails on it.
+    """
+
+    def _client(self):
+        from services.eh_client import EhClient
+
+        c = EhClient(cookies={})
+        c._http = AsyncMock()
+        c._img_http = AsyncMock()
+        return c
+
+    @staticmethod
+    def _dh_error() -> httpx.ConnectError:
+        return httpx.ConnectError("[SSL: DH_KEY_TOO_SMALL] dh key too small (_ssl.c:1082)")
+
+    def test_fallback_tls_context_still_verifies_certificates(self):
+        """The fallback drops finite-field DH only — not certificate validation."""
+        import ssl
+
+        from services.eh_client import _weak_dh_fallback_ssl_context
+
+        ctx = _weak_dh_fallback_ssl_context()
+
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+        # No finite-field DHE cipher survives, so the weak group is never used.
+        assert not [c for c in ctx.get_ciphers() if c["kea"] == "kx-dhe"]
+
+    async def test_img_get_retries_over_fallback_when_dh_key_too_small(self):
+        import services.eh_client as mod
+
+        client = self._client()
+        client._img_http.get = AsyncMock(side_effect=self._dh_error())
+        fallback = AsyncMock()
+        fallback.get = AsyncMock(return_value=MagicMock(spec=httpx.Response))
+        fallback.cookies = httpx.Cookies()
+
+        with patch.object(mod, "_get_shared_img_http_weak_dh", return_value=fallback):
+            resp = await client._img_get("https://node.hath.network:1234/h/img.webp")
+
+        assert resp is fallback.get.return_value
+        fallback.get.assert_awaited_once()
+
+    async def test_img_get_does_not_use_fallback_for_unrelated_connect_error(self):
+        """Only the weak-DH handshake earns a downgraded connection."""
+        import services.eh_client as mod
+
+        client = self._client()
+        client._img_http.get = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
+        fallback = AsyncMock()
+
+        with patch.object(mod, "_get_shared_img_http_weak_dh", return_value=fallback):
+            with pytest.raises(httpx.ConnectError, match="connection refused"):
+                await client._img_get("https://node.hath.network:1234/h/img.webp")
+
+        fallback.get.assert_not_awaited()
+
+    async def test_http_get_retries_over_fallback_when_dh_key_too_small(self):
+        """The browse proxy fetches H@H images through the HTML client too."""
+        import services.eh_client as mod
+
+        client = self._client()
+        client._http.get = AsyncMock(side_effect=self._dh_error())
+        fallback = AsyncMock()
+        fallback.get = AsyncMock(return_value=MagicMock(spec=httpx.Response))
+        fallback.cookies = httpx.Cookies()
+
+        with patch.object(mod, "_get_shared_http_weak_dh", return_value=fallback):
+            resp = await client._http_get("https://node.hath.network:1234/h/img.webp")
+
+        assert resp is fallback.get.return_value
+
+    async def test_download_image_bytes_survives_weak_dh_node(self):
+        """End-to-end for the reported failure: the page downloads on retry."""
+        import services.eh_client as mod
+
+        client = self._client()
+        client._img_http.get = AsyncMock(side_effect=self._dh_error())
+        payload = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        ok = MagicMock(spec=httpx.Response)
+        ok.content = payload
+        ok.raise_for_status = MagicMock()
+        fallback = AsyncMock()
+        fallback.get = AsyncMock(return_value=ok)
+        fallback.cookies = httpx.Cookies()
+
+        with patch.object(mod, "_get_shared_img_http_weak_dh", return_value=fallback):
+            data, media_type, ext = await client._download_image_bytes(
+                "https://node.hath.network:1234/h/img.webp", 3497420, 288, "ik"
+            )
+
+        assert data == payload
+        assert ext == "jpg"
 
 
 class TestImageSearch:
@@ -846,3 +948,88 @@ class TestDownloadImageWithRetry:
         # First call has empty nl, second call forwards the nl_param from the first result
         assert received_nls[0] == ""
         assert received_nls[1] == "server2param"
+
+    async def test_connect_error_on_primary_switches_server_instead_of_propagating(self):
+        """A transport-level connect failure must exhaust the nl retry loop.
+
+        An H@H node with weak TLS parameters raises httpx.ConnectError
+        ([SSL: DH_KEY_TOO_SMALL]) during the handshake, which is neither a
+        TimeoutException nor an HTTPStatusError. Letting it escape the phase-1
+        `except` skips server switching entirely, so every repair run re-fetches
+        the same page from the same broken node and fails identically.
+        """
+        from services.eh_client import ShowpageResult
+
+        client = self._client()
+        received_nls: list[str] = []
+
+        async def _api(showkey, gid, page, imgkey, nl=""):
+            received_nls.append(nl)
+            return ShowpageResult(image_url="https://h.example.com/img.jpg", nl_param="server2param")
+
+        client.get_image_url_via_api = _api
+        client._download_image_bytes = AsyncMock(
+            side_effect=[
+                httpx.ConnectError("[SSL: DH_KEY_TOO_SMALL] dh key too small (_ssl.c:1082)"),
+                (self._FAKE_BYTES, "image/jpeg", "jpg"),
+            ]
+        )
+
+        data, _, _ = await client.download_image_with_retry("sk", 1, 288, "ik", max_retries=3)
+
+        assert data == self._FAKE_BYTES
+        # The retry actually happened AND asked E-Hentai for a different server.
+        assert received_nls == ["", "server2param"]
+
+    async def test_connect_error_on_primary_still_reaches_other_url_fallback(self):
+        """Connect failures on every attempt must still fall through to other_url."""
+        from services.eh_client import ShowpageResult
+
+        client = self._client()
+        client.get_image_url_via_api = AsyncMock(
+            return_value=ShowpageResult(
+                image_url="https://h.example.com/img.jpg",
+                other_url="https://skip.example.com/img.jpg",
+            )
+        )
+        download_urls: list[str] = []
+
+        async def _download(url, gid, page, imgkey):
+            download_urls.append(url)
+            if "skip.example.com" in url:
+                return self._FAKE_BYTES, "image/jpeg", "jpg"
+            raise httpx.ConnectError("[SSL: DH_KEY_TOO_SMALL] dh key too small (_ssl.c:1082)")
+
+        client._download_image_bytes = _download
+
+        data, _, _ = await client.download_image_with_retry("sk", 1, 288, "ik", max_retries=2)
+
+        assert data == self._FAKE_BYTES
+        assert any("skip.example.com" in u for u in download_urls)
+
+    async def test_unexpected_error_type_is_reported_as_page_failure_not_raw(self):
+        """Any non-509 per-page error must surface as the RuntimeError summary.
+
+        The caller distinguishes "this page is lost" from "abort the gallery"
+        (Image509Error / CancelledError) by exception type, so an unexpected
+        error class must not tunnel out of the retry chain unchanged.
+        """
+        from services.eh_client import ShowpageResult
+
+        client = self._client()
+        client.get_image_url_via_api = AsyncMock(return_value=ShowpageResult(image_url="https://h.example.com/img.jpg"))
+        client._download_image_bytes = AsyncMock(side_effect=OSError("broken pipe"))
+
+        with pytest.raises(RuntimeError, match="Failed to download page 288"):
+            await client.download_image_with_retry("sk", 1, 288, "ik", max_retries=2)
+
+    async def test_cancellation_is_not_swallowed_by_retry_loop(self):
+        """asyncio.CancelledError must abort the page, not be retried as a failure."""
+        from services.eh_client import ShowpageResult
+
+        client = self._client()
+        client.get_image_url_via_api = AsyncMock(return_value=ShowpageResult(image_url="https://h.example.com/img.jpg"))
+        client._download_image_bytes = AsyncMock(side_effect=asyncio.CancelledError())
+
+        with pytest.raises(asyncio.CancelledError):
+            await client.download_image_with_retry("sk", 1, 288, "ik", max_retries=2)

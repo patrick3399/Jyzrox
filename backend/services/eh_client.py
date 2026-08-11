@@ -9,6 +9,7 @@ References:
 import dataclasses
 import logging
 import re
+import ssl
 from typing import Any
 from urllib.parse import urlencode
 
@@ -28,6 +29,37 @@ logger = logging.getLogger(__name__)
 
 _shared_http: httpx.AsyncClient | None = None
 _shared_img_http: httpx.AsyncClient | None = None
+# Weak-DH fallback pair — see _weak_dh_fallback_ssl_context().
+_shared_http_weak_dh: httpx.AsyncClient | None = None
+_shared_img_http_weak_dh: httpx.AsyncClient | None = None
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def _weak_dh_fallback_ssl_context() -> ssl.SSLContext:
+    """TLS context for H@H nodes that only offer a 1024-bit DH group.
+
+    Some Hentai@Home nodes still negotiate DHE with a 1024-bit group, which
+    OpenSSL 3 refuses outright (``[SSL: DH_KEY_TOO_SMALL]``). Retrying does not
+    help: E-Hentai's nl server switch keeps returning the same node for a given
+    page, and such pages often expose no other_url — so the page is simply
+    unfetchable, and every repair run fails on exactly it.
+
+    Excluding finite-field DH makes the handshake fall back to a key exchange
+    the node can do safely, rather than lowering OpenSSL's security level.
+    Certificate chain and hostname verification stay fully enabled, so the peer
+    is still authenticated; only forward secrecy is given up, and only on
+    connections that would otherwise fail outright.
+    """
+    ctx = ssl.create_default_context()
+    ctx.set_ciphers("DEFAULT:!kDHE")
+    return ctx
+
+
+def _is_weak_dh_error(exc: Exception) -> bool:
+    return "DH_KEY_TOO_SMALL" in str(exc)
 
 
 def _get_shared_http() -> httpx.AsyncClient:
@@ -35,11 +67,7 @@ def _get_shared_http() -> httpx.AsyncClient:
     if _shared_http is None or _shared_http.is_closed:
         _shared_http = httpx.AsyncClient(
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
+                "User-Agent": _BROWSER_UA,
                 "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
             },
@@ -55,11 +83,7 @@ def _get_shared_img_http() -> httpx.AsyncClient:
     if _shared_img_http is None or _shared_img_http.is_closed:
         _shared_img_http = httpx.AsyncClient(
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
+                "User-Agent": _BROWSER_UA,
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
             },
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
@@ -69,13 +93,45 @@ def _get_shared_img_http() -> httpx.AsyncClient:
     return _shared_img_http
 
 
+def _get_shared_http_weak_dh() -> httpx.AsyncClient:
+    global _shared_http_weak_dh
+    if _shared_http_weak_dh is None or _shared_http_weak_dh.is_closed:
+        _shared_http_weak_dh = httpx.AsyncClient(
+            headers={
+                "User-Agent": _BROWSER_UA,
+                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=settings.eh_request_timeout,
+            follow_redirects=True,
+            verify=_weak_dh_fallback_ssl_context(),
+        )
+    return _shared_http_weak_dh
+
+
+def _get_shared_img_http_weak_dh() -> httpx.AsyncClient:
+    global _shared_img_http_weak_dh
+    if _shared_img_http_weak_dh is None or _shared_img_http_weak_dh.is_closed:
+        _shared_img_http_weak_dh = httpx.AsyncClient(
+            headers={
+                "User-Agent": _BROWSER_UA,
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=20,
+            follow_redirects=True,
+            verify=_weak_dh_fallback_ssl_context(),
+        )
+    return _shared_img_http_weak_dh
+
+
 async def shutdown_shared_clients() -> None:
     """Close shared httpx clients. Called from FastAPI lifespan shutdown."""
-    global _shared_http, _shared_img_http
-    if _shared_http and not _shared_http.is_closed:
-        await _shared_http.aclose()
-    if _shared_img_http and not _shared_img_http.is_closed:
-        await _shared_img_http.aclose()
+    global _shared_http, _shared_img_http, _shared_http_weak_dh, _shared_img_http_weak_dh
+    for client in (_shared_http, _shared_img_http, _shared_http_weak_dh, _shared_img_http_weak_dh):
+        if client and not client.is_closed:
+            await client.aclose()
 
 
 EH_API_URL = "https://api.e-hentai.org/api.php"
@@ -258,11 +314,24 @@ class EhClient:
         if isinstance(client.cookies, httpx.Cookies):
             client.cookies.clear()
 
+    async def _get_via_weak_dh_fallback(self, fallback: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+        logger.warning("[eh_client] weak DH handshake at %s — retrying without finite-field DH", url)
+        try:
+            return await fallback.get(url, **kwargs)
+        finally:
+            self._clear_client_cookie_jar(fallback)
+
     async def _http_get(self, url: str, **kwargs) -> httpx.Response:
         kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
         client = self._http_client_or_raise()
         try:
-            return await client.get(url, **kwargs)
+            try:
+                return await client.get(url, **kwargs)
+            except httpx.ConnectError as exc:
+                # The browse proxy fetches H@H images through this client too.
+                if not _is_weak_dh_error(exc):
+                    raise
+                return await self._get_via_weak_dh_fallback(_get_shared_http_weak_dh(), url, **kwargs)
         finally:
             self._clear_client_cookie_jar(client)
 
@@ -278,7 +347,12 @@ class EhClient:
         kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
         client = self._image_client_or_raise()
         try:
-            return await client.get(url, **kwargs)
+            try:
+                return await client.get(url, **kwargs)
+            except httpx.ConnectError as exc:
+                if not _is_weak_dh_error(exc):
+                    raise
+                return await self._get_via_weak_dh_fallback(_get_shared_img_http_weak_dh(), url, **kwargs)
         finally:
             self._clear_client_cookie_jar(client)
 
@@ -844,7 +918,15 @@ class EhClient:
                 return data
             except Image509Error:
                 raise  # Do not retry 509
-            except (httpx.TimeoutException, httpx.HTTPStatusError, ValueError) as exc:
+            # Any per-page failure must feed the nl switch and the fallback
+            # phases below — an exception class this loop does not catch escapes
+            # the whole chain and loses the page on its first attempt. That is
+            # not hypothetical: an H@H node with weak TLS parameters fails the
+            # handshake with httpx.ConnectError ([SSL: DH_KEY_TOO_SMALL]), which
+            # is neither TimeoutException nor HTTPStatusError, so repairing the
+            # gallery kept re-fetching the same page from the same broken node.
+            # asyncio.CancelledError is a BaseException and still propagates.
+            except Exception as exc:
                 last_error = exc
                 logger.warning("[eh_download] page %d attempt %d failed: %s", page, attempt + 1, exc)
                 if last_result and last_result.nl_param:
