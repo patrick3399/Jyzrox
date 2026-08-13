@@ -1,6 +1,7 @@
 """Thumbnail generation job for the worker package."""
 
 import asyncio
+import concurrent.futures
 import json
 import os
 import subprocess
@@ -40,6 +41,8 @@ except ImportError:
 
 _thumbnail_semaphore: asyncio.Semaphore | None = None
 _thumbnail_semaphore_size: int | None = None
+_thumbnail_executor: concurrent.futures.ThreadPoolExecutor | None = None
+_thumbnail_executor_size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,9 +77,33 @@ def _get_thumbnail_semaphore() -> asyncio.Semaphore:
     return _thumbnail_semaphore
 
 
+def _get_thumbnail_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Dedicated pool so decode threads — and their glibc arenas — stay bounded.
+
+    `asyncio.to_thread` dispatches to the process-wide default executor, which
+    also serves file hashing and every other worker `to_thread` call, so decodes
+    land on arbitrary threads. glibc gives each thread its own arena, and with
+    `MALLOC_ARENA_MAX=2` two sequential decodes on two threads retain two
+    full-size arenas — roughly 2.5 GB for a 100 MP source, past the 2 GB
+    container cap. The semaphore below bounds how many decodes run at once but
+    says nothing about how many threads they are spread across, which is why
+    THUMBNAIL_WORKERS=1 alone did not stop the 2026-08-13 OOM kills.
+    """
+    global _thumbnail_executor, _thumbnail_executor_size
+
+    size = _thumbnail_workers()
+    if _thumbnail_executor is None or _thumbnail_executor_size != size:
+        if _thumbnail_executor is not None:
+            _thumbnail_executor.shutdown(wait=False)
+        _thumbnail_executor = concurrent.futures.ThreadPoolExecutor(max_workers=size, thread_name_prefix="thumbnail")
+        _thumbnail_executor_size = size
+    return _thumbnail_executor
+
+
 async def _run_thumbnail_in_thread(*args) -> _ThumbnailResult | None:
     async with _get_thumbnail_semaphore():
-        return await asyncio.to_thread(_generate_single_thumbnail_sync, *args)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_get_thumbnail_executor(), _generate_single_thumbnail_sync, *args)
 
 
 def _unique_tmp_path(dest: Path) -> Path:

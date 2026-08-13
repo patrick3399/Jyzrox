@@ -625,24 +625,35 @@ class TestThumbnailJob:
         assert seen == ["b" * 64]
         assert session.commit.await_count == 1
 
-    async def test_thumbnail_workers_limits_to_thread_concurrency(self):
-        """THUMBNAIL_WORKERS should bound concurrent to_thread calls."""
+    async def test_thumbnail_workers_limits_concurrent_decodes(self):
+        """THUMBNAIL_WORKERS should bound how many decodes run at once.
+
+        Exercises the real dispatch path — the dedicated executor plus the
+        semaphore — rather than mocking the dispatcher, so the assertion keeps
+        holding if that mechanism changes again.
+        """
+        import threading
+        import time
+
         from worker.thumbnail import _run_thumbnail_in_thread, _ThumbnailResult
 
         active = 0
         max_active = 0
+        lock = threading.Lock()
 
-        async def _fake_to_thread(func, *args):
+        def _fake_sync(*args):
             nonlocal active, max_active
-            active += 1
-            max_active = max(max_active, active)
-            await asyncio.sleep(0.01)
-            active -= 1
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.01)
+            with lock:
+                active -= 1
             return _ThumbnailResult(width=1, height=1)
 
         with (
             patch.dict("os.environ", {"THUMBNAIL_WORKERS": "2"}),
-            patch("worker.thumbnail.asyncio.to_thread", new_callable=AsyncMock, side_effect=_fake_to_thread),
+            patch("worker.thumbnail._generate_single_thumbnail_sync", side_effect=_fake_sync),
         ):
             results = await asyncio.gather(
                 *[_run_thumbnail_in_thread("a" * 64, "image", Path("/tmp/image.jpg")) for _ in range(5)]

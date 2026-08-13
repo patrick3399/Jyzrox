@@ -14,11 +14,19 @@ The full-resolution allocations were:
 - ``pil.convert("RGB")`` for the tier source
 - ``_resize_width_tier`` copying before ``Image.thumbnail()``, once per tier
 
+``encode_pil_thumbhash`` itself is unchanged: it is now handed an
+already-downscaled image, and its only other caller
+(``worker/thumbhash_backfill.py``) passes a 160 px thumbnail, so no
+full-resolution path reaches it.
+
 phash deliberately still runs at source resolution: it feeds dedup Tier-1 and
 existing rows must stay comparable. It converts to mode "L" (1 byte/px), the
 cheapest of the full-size derivations, so these tests allow it.
 """
 
+import asyncio
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -117,3 +125,53 @@ def test_generate_thumbnail_writes_every_tier(
         assert dest.is_file(), f"missing tier {size}"
         with PILImage.open(dest) as written:
             assert written.size[0] == size, f"tier {size} written at width {written.size[0]}"
+
+
+async def test_decodes_stay_within_thumbnail_workers_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Peak memory follows arena count, and arena count follows thread count.
+
+    `asyncio.to_thread` dispatches to the process-wide default executor, which
+    also serves file hashing and every other worker `to_thread` call, so
+    decodes land on arbitrary threads. glibc gives each thread its own arena
+    and `MALLOC_ARENA_MAX=2` then retains two full-size arenas even though the
+    THUMBNAIL_WORKERS semaphore permitted only one decode at a time. That is
+    why THUMBNAIL_WORKERS=1 still OOM-killed a one-off container on
+    2026-08-13 after only five of gallery 523409's images.
+    """
+    from worker import thumbnail as thumbnail_module
+
+    monkeypatch.setenv("THUMBNAIL_WORKERS", "2")
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore", None)
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore_size", None)
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor", None, raising=False)
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor_size", None, raising=False)
+
+    seen: set[str] = set()
+    lock = threading.Lock()
+
+    def fake_sync(*args):
+        with lock:
+            seen.add(threading.current_thread().name)
+        # Hold the slot long enough that a wider pool would visibly fan out.
+        time.sleep(0.02)
+        return None
+
+    monkeypatch.setattr(thumbnail_module, "_generate_single_thumbnail_sync", fake_sync)
+
+    # Grow the default executor first. Without this the shared pool may happen
+    # to hold exactly THUMBNAIL_WORKERS threads and the count assertion below
+    # would pass while still using the wrong pool.
+    await asyncio.gather(*[asyncio.to_thread(time.sleep, 0.02) for _ in range(8)])
+
+    await asyncio.gather(
+        *[thumbnail_module._run_thumbnail_in_thread(SHA_A, "image", Path("unused")) for _ in range(24)]
+    )
+
+    # Deterministic: names come from the dedicated pool's thread_name_prefix,
+    # so this fails whatever the scheduler does with the shared executor.
+    assert all(name.startswith("thumbnail") for name in seen), (
+        f"decodes ran outside the dedicated thumbnail pool: {sorted(seen)}"
+    )
+    assert len(seen) <= 2, f"decodes spread across {len(seen)} threads (= glibc arenas)"
