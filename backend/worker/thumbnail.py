@@ -115,6 +115,21 @@ def _write_thumbnail_version(td: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _downscale_to_width(image, size: int):
+    """Return `image` no wider than `size`, allocating only the destination.
+
+    `Image.thumbnail()` mutates in place, so a caller has to copy first — at
+    source resolution that copy is one of the largest allocations in the
+    pipeline (300 MB for a 100 MP source). `resize()` allocates the
+    destination only.
+    """
+    width, height = image.size
+    if width <= size:
+        return image.copy()
+    target_height = max(1, round(height * size / width))
+    return image.resize((size, target_height), _PILImage.Resampling.LANCZOS)
+
+
 def _resize_width_tier(image, size: int):
     """Downscale to a width tier while preserving the complete aspect ratio."""
     thumbnail = image.copy()
@@ -334,12 +349,25 @@ def _generate_single_thumbnail_sync(
         from PIL import ImageOps
 
         with PILImage.open(src) as source_image:
-            pil = ImageOps.exif_transpose(source_image)
-            phash = str(imagehash.phash(pil))
-            phash_values = _phash_parts(phash)
-            thumbhash = _encode_thumbhash(pil)
+            # in_place skips exif_transpose's full-resolution image.copy() on
+            # the common path where there is no orientation tag to apply.
+            ImageOps.exif_transpose(source_image, in_place=True)
+            source_size = source_image.size
 
-            rgb = pil.convert("RGB")
+            # phash stays at source resolution: it feeds dedup Tier-1, so
+            # existing rows must stay comparable. It converts to mode "L"
+            # (1 byte/px), the cheapest of the full-size derivations.
+            phash = str(imagehash.phash(source_image))
+            phash_values = _phash_parts(phash)
+
+            # Everything below needs at most the largest tier, so derive it
+            # once. A 3-4 byte/px buffer at source resolution costs 300-400 MB
+            # for a 100 MP image, and two of those concurrently is what
+            # OOM-killed the 2 GB worker container (2026-08-13).
+            base = _downscale_to_width(source_image, max(THUMBNAIL_SIZES))
+            thumbhash = _encode_thumbhash(base)
+
+            rgb = base.convert("RGB")
             wrote_thumbnail = False
             for size in THUMBNAIL_SIZES:
                 dest = td / f"thumb_{size}.webp"
@@ -352,8 +380,8 @@ def _generate_single_thumbnail_sync(
                 _write_thumbnail_version(td)
 
             return _ThumbnailResult(
-                width=pil.size[0],
-                height=pil.size[1],
+                width=source_size[0],
+                height=source_size[1],
                 phash=phash,
                 thumbhash=thumbhash,
                 **phash_values,

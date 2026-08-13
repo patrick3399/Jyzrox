@@ -126,6 +126,11 @@ def _make_pil_mocks(width=100, height=100):
     mock_rgba.tobytes.return_value = b"\x00" * (mock_rgba.size[0] * mock_rgba.size[1] * 4)
 
     mock_pil_img.convert = MagicMock(side_effect=lambda m: mock_rgb if m == "RGB" else mock_rgba)
+    # The thumbnail path downscales to the largest tier before deriving
+    # anything, so resize()/copy() must stay on the same self-similar mock for
+    # the convert() chain below to keep applying.
+    mock_pil_img.resize = MagicMock(return_value=mock_pil_img)
+    mock_pil_img.copy = MagicMock(return_value=mock_pil_img)
 
     mock_image_cls = MagicMock()
     mock_image_cls.open.return_value = mock_pil_img
@@ -133,7 +138,9 @@ def _make_pil_mocks(width=100, height=100):
 
     mock_pil_module = MagicMock()
     mock_pil_module.Image = mock_image_cls
-    mock_pil_module.ImageOps.exif_transpose.side_effect = lambda image: image
+    # Mirrors PIL >= 9.5: exif_transpose(image, *, in_place=False), which
+    # mutates and returns None when in_place is set.
+    mock_pil_module.ImageOps.exif_transpose.side_effect = lambda image, *, in_place=False: None if in_place else image
 
     return mock_pil_img, mock_pil_module
 
