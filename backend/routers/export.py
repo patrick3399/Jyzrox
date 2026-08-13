@@ -5,7 +5,8 @@ import json
 import os
 import re
 import zipfile
-from io import BytesIO
+from dataclasses import dataclass
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -20,6 +21,111 @@ from services.cas import resolve_blob_path
 from services.dataset_export import DatasetExportImage, DatasetExportOptions, build_dataset_archive, safe_component
 
 _SAFE_ARCNAME = re.compile(r"[^\w.\-]")
+
+# ── Streamed ZIP_STORED archive ──────────────────────────────────────────
+#
+# The gallery export used to build the archive in a BytesIO and then hand it to
+# StreamingResponse as iter([buf.getvalue()]) — getvalue() copies the whole
+# buffer, so the archive and its copy were live at once. Against the endpoint's
+# 2 GB source cap that approaches the api container's 4 GB limit; a 1048 MB
+# gallery measured 1100.8 MB of unreclaimable anon.
+#
+# The contents are JPEG/PNG/WebP, already entropy-coded, so DEFLATE was earning
+# 0.2% on a JPEG gallery and 0.0% on a PNG one for 40x the wall time. Dropping
+# it to ZIP_STORED makes the archive size exactly computable up front, which is
+# what lets the response keep a correct Content-Length while streaming.
+_ZIP_LOCAL_HEADER_BYTES = 30
+_ZIP_DATA_DESCRIPTOR_BYTES = 16
+_ZIP_CENTRAL_HEADER_BYTES = 46
+_ZIP_EOCD_BYTES = 22
+# Past either limit zipfile emits ZIP64 records, which widen every header and
+# invalidate the size arithmetic below.
+_ZIP64_SIZE_LIMIT = 0xFFFFFFFF
+_ZIP64_ENTRY_LIMIT = 0xFFFF
+_COPY_CHUNK_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class _ArchiveEntry:
+    """One archive member: either a file to stream, or literal bytes."""
+
+    arcname: str
+    path: Path | None = None
+    payload: bytes | None = None
+    declared_size: int | None = None  # tests only; overrides the on-disk size
+
+    @property
+    def size(self) -> int:
+        if self.declared_size is not None:
+            return self.declared_size
+        if self.payload is not None:
+            return len(self.payload)
+        return self.path.stat().st_size if self.path else 0
+
+
+def _stored_zip_size(entries: list[_ArchiveEntry]) -> int:
+    """Exact byte length of the archive :func:`_stream_stored_zip` will emit.
+
+    Raises ``ValueError`` if the input would push zipfile into ZIP64, because
+    the declared Content-Length would then be wrong — a worse failure than
+    refusing, since the client would hang or truncate.
+    """
+    if len(entries) > _ZIP64_ENTRY_LIMIT:
+        raise ValueError(f"archive needs ZIP64: {len(entries)} entries")
+    total = _ZIP_EOCD_BYTES
+    for entry in entries:
+        size = entry.size
+        if size > _ZIP64_SIZE_LIMIT:
+            raise ValueError(f"archive needs ZIP64: {entry.arcname} is {size} bytes")
+        name_bytes = len(entry.arcname.encode("utf-8"))
+        total += _ZIP_LOCAL_HEADER_BYTES + name_bytes + size + _ZIP_DATA_DESCRIPTOR_BYTES
+        total += _ZIP_CENTRAL_HEADER_BYTES + name_bytes
+    if total > _ZIP64_SIZE_LIMIT:
+        raise ValueError(f"archive needs ZIP64: {total} bytes total")
+    return total
+
+
+class _ChunkSink:
+    """Non-seekable sink: zipfile then emits data descriptors instead of
+    seeking back to patch local headers, so output can leave as it is produced."""
+
+    def __init__(self) -> None:
+        self._chunks: list[bytes] = []
+
+    def write(self, data) -> int:
+        self._chunks.append(bytes(data))
+        return len(data)
+
+    def flush(self) -> None:  # pragma: no cover - zipfile calls this on close
+        pass
+
+    def drain(self):
+        while self._chunks:
+            yield self._chunks.pop(0)
+
+
+def _stream_stored_zip(entries: list[_ArchiveEntry]):
+    """Yield the archive in chunks, holding at most one copy chunk at a time.
+
+    Members are written through ``ZipFile.open(name, "w")`` rather than
+    ``ZipFile.write(path)`` so a single large image cannot be buffered whole.
+    """
+    sink = _ChunkSink()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED) as archive:
+        for entry in entries:
+            if entry.payload is not None:
+                archive.writestr(entry.arcname, entry.payload)
+                yield from sink.drain()
+                continue
+            if entry.path is None:  # pragma: no cover - defensive
+                continue
+            with archive.open(entry.arcname, "w") as destination, open(entry.path, "rb") as source:
+                while chunk := source.read(_COPY_CHUNK_BYTES):
+                    destination.write(chunk)
+                    yield from sink.drain()
+            yield from sink.drain()
+    yield from sink.drain()
+
 
 # Namespaces that are not trainable concepts and pollute captions
 _DEFAULT_EXCLUDED_NAMESPACES = "rating,language,metadata"
@@ -224,57 +330,65 @@ async def export_kohya(
     if total_size > _MAX_ZIP_SIZE:
         raise HTTPException(status_code=413, detail="Gallery too large to export (max 2 GB)")
 
-    # Build the ZIP in a worker thread: the compression loop is fully
-    # synchronous and can chew through gigabytes of source data (AIT-002)
-    def _build_zip() -> BytesIO:
-        zip_buffer = BytesIO()
+    # Decide every archive member up front so the exact size can be declared
+    # before a byte is produced (see _stored_zip_size).
+    def _plan_entries() -> list[_ArchiveEntry]:
+        entries: list[_ArchiveEntry] = []
         excluded_files: list[dict] = []
         used_arcnames: set[str] = set()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for i, img in enumerate(images):
-                file_path = _file_path(img)
-                if not file_path:
-                    continue
+        for i, img in enumerate(images):
+            file_path = _file_path(img)
+            if not file_path:
+                continue
 
-                raw_name = img.filename if img.filename else f"image_{i}"
+            raw_name = img.filename if img.filename else f"image_{i}"
 
-                ext = ((img.blob.extension if img.blob else None) or os.path.splitext(raw_name)[1]).lower()
-                if ext not in _TRAINABLE_EXTS:
-                    excluded_files.append({"filename": raw_name, "reason": "unsupported_extension"})
-                    continue
+            ext = ((img.blob.extension if img.blob else None) or os.path.splitext(raw_name)[1]).lower()
+            if ext not in _TRAINABLE_EXTS:
+                excluded_files.append({"filename": raw_name, "reason": "unsupported_extension"})
+                continue
 
-                basename = _SAFE_ARCNAME.sub("_", os.path.basename(raw_name)) or f"image_{i}"
-                page = img.page_num if img.page_num is not None else i + 1
-                arcname = f"{page:04d}_{basename}"
-                if arcname in used_arcnames:
-                    arcname = f"{page:04d}_{i}_{basename}"
-                used_arcnames.add(arcname)
+            basename = _SAFE_ARCNAME.sub("_", os.path.basename(raw_name)) or f"image_{i}"
+            page = img.page_num if img.page_num is not None else i + 1
+            arcname = f"{page:04d}_{basename}"
+            if arcname in used_arcnames:
+                arcname = f"{page:04d}_{i}_{basename}"
+            used_arcnames.add(arcname)
 
-                # Add image file to zip
-                zip_file.write(str(file_path), arcname=arcname)
+            entries.append(_ArchiveEntry(arcname=arcname, path=file_path))
 
-                # Combine gallery tags and specific image tags
-                all_tags = set(gallery_tags)
-                if img.tags_array:
-                    all_tags.update(img.tags_array)
+            # Combine gallery tags and specific image tags
+            all_tags = set(gallery_tags)
+            if img.tags_array:
+                all_tags.update(img.tags_array)
 
-                # Create tag text file
-                base, _ = os.path.splitext(arcname)
-                txt_filename = base + ".txt"
-                tag_string = ", ".join(_caption_tags(all_tags, excluded, underscores_to_spaces))
+            base, _ = os.path.splitext(arcname)
+            tag_string = ", ".join(_caption_tags(all_tags, excluded, underscores_to_spaces))
+            entries.append(_ArchiveEntry(arcname=base + ".txt", payload=tag_string.encode("utf-8")))
 
-                zip_file.writestr(txt_filename, tag_string)
+        if excluded_files:
+            entries.append(
+                _ArchiveEntry(
+                    arcname="manifest.json",
+                    payload=json.dumps({"excluded": excluded_files}, indent=2).encode("utf-8"),
+                )
+            )
+        return entries
 
-            if excluded_files:
-                zip_file.writestr("manifest.json", json.dumps({"excluded": excluded_files}, indent=2))
-
-        zip_buffer.seek(0)
-        return zip_buffer
-
-    zip_buffer = await asyncio.to_thread(_build_zip)
+    # Planning stats every source file, so keep it off the event loop (AIT-002).
+    entries = await asyncio.to_thread(_plan_entries)
+    try:
+        content_length = _stored_zip_size(entries)
+    except ValueError as exc:
+        # Declaring a length that does not match the body would hang or truncate
+        # the client, so refuse instead. Unreachable under the 2 GB cap above.
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
     return StreamingResponse(
-        iter([zip_buffer.getvalue()]),
+        _stream_stored_zip(entries),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=gallery_{gallery_id}_kohya.zip"},
+        headers={
+            "Content-Disposition": f"attachment; filename=gallery_{gallery_id}_kohya.zip",
+            "Content-Length": str(content_length),
+        },
     )
