@@ -475,6 +475,19 @@ async def startup(ctx: dict) -> None:
     except Exception as exc:
         logger.error("Failed to clear stale download admission tokens: %s", exc)
 
+    # HR-019: a SIGKILL (container OOM) kills local_import_job before its
+    # terminal-status write, leaving the gallery on `importing` with no queue
+    # entry and no scan path that will ever retry it. Startup is the moment
+    # right after the death that stranded it. Guarded so a recovery failure
+    # never blocks the worker from booting.
+    try:
+        from worker.import_recovery import requeue_orphaned_imports
+
+        recovery_counts["imports_requeued"] = (await requeue_orphaned_imports(ctx))["requeued"]
+    except Exception as exc:
+        recovery_counts["imports_requeued"] = 0
+        logger.error("Failed to requeue orphaned local imports: %s", exc)
+
     from core.events import EventType, emit_safe
 
     await emit_safe(

@@ -797,6 +797,30 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             error=str(exc),
         )
         return payload
+    except Exception as exc:
+        # HR-019: any other in-process failure (LibraryDirCollisionError, an
+        # OSError while hashing or symlinking) must still leave a terminal
+        # status. A gallery stuck on `importing` is invisible to every later
+        # scan path: auto_discover_job skips existing source_ids and
+        # rescan_library_job only rewrites pages when it removed an image.
+        #
+        # This cannot cover the SIGKILL case that stranded four galleries on
+        # 2026-08-13 — Python never runs then. That is what the startup sweeper
+        # in worker/import_recovery.py is for; the two are not alternatives.
+        logger.exception("[local_import] gallery_id=%d failed: %s", gallery_id, exc)
+        async with AsyncSessionLocal() as status_session:
+            gallery = await status_session.get(Gallery, gallery_id)
+            if gallery is not None and gallery.deleted_at is None:
+                existing_count = (
+                    await status_session.execute(select(func.count(Image.id)).where(Image.gallery_id == gallery_id))
+                ).scalar_one()
+                gallery.pages = existing_count
+                gallery.download_status = "partial" if existing_count else "failed"
+                gallery.metadata_updated_at = func.now()
+                await status_session.commit()
+        # Re-raise so SAQ still records the job as failed; only the DB state
+        # left behind changes.
+        raise
 
     # Disaster-recovery sidecar (best-effort)
     if sidecar_payload is not None:
