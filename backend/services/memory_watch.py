@@ -66,22 +66,29 @@ async def sample_once() -> dict:
     rss = read_self_rss()
     rss_mb = round(rss / (1024 * 1024), 1) if rss is not None else None
 
-    mem = memory_diag.read_container_memory()
+    mem = memory_diag.read_container_memory_detail()
     if mem is None:
         logger.info("[memory_watch] pid=%d rss=%sMB (no cgroup limit)", pid, rss_mb)
         return {"status": "ok", "pid": pid, "rss_mb": rss_mb}
 
-    used_bytes, limit_bytes = mem
-    used_mb = round(used_bytes / (1024 * 1024), 1)
+    # See services/memory_diag.ContainerMemory: `current` includes reclaimable
+    # page cache, so the alert follows `anon`. `peak` is reported because a
+    # spike between two ticks is invisible to any sampling interval.
+    limit_bytes = mem.limit
+    used_mb = round(mem.anon / (1024 * 1024), 1)
+    current_mb = round(mem.current / (1024 * 1024), 1)
+    peak_mb = None if mem.peak is None else round(mem.peak / (1024 * 1024), 1)
     limit_mb = round(limit_bytes / (1024 * 1024), 1)
-    pct = round(used_bytes / limit_bytes * 100, 1)
+    pct = round(mem.anon / limit_bytes * 100, 1)
     logger.info(
-        "[memory_watch] pid=%d rss=%sMB cgroup=%.1f/%.0fMB (%.1f%%)",
+        "[memory_watch] pid=%d rss=%sMB cgroup anon=%.1f/%.0fMB (%.1f%%) current=%.1fMB peak=%s",
         pid,
         rss_mb,
         used_mb,
         limit_mb,
         pct,
+        current_mb,
+        "unknown" if peak_mb is None else f"{peak_mb:.0f}MB",
     )
 
     if tracemalloc.is_tracing():
@@ -99,7 +106,9 @@ async def sample_once() -> dict:
             EventType.SYSTEM_MEMORY_HIGH,
             resource_type="system",
             component="api",
-            used_mb=used_mb,
+            anon_mb=used_mb,
+            current_mb=current_mb,
+            peak_mb=peak_mb,
             limit_mb=limit_mb,
             pct=pct,
             threshold_pct=threshold,

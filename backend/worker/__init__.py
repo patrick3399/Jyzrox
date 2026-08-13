@@ -789,14 +789,21 @@ async def memory_monitor_job(ctx: dict) -> dict:
             )
     redis_is_alert = redis_status in {"high", "unbounded", "unsafe_policy"}
 
-    mem = _mem.read_container_memory()
+    mem = _mem.read_container_memory_detail()
     if mem is None:
         return {"status": "high" if redis_is_alert else "unknown", "redis_status": redis_status}
 
-    used_bytes, limit_bytes = mem
-    used_mb = used_bytes / (1024 * 1024)
+    # Alert on `anon`, not `current`: page cache counts toward memory.current
+    # but is reclaimed under pressure rather than causing a kill, so an import
+    # streaming image files pins `current` at 100% with no risk attached. Peak
+    # is the kernel's own high-water mark, which is the only figure that
+    # survives a spike between two samples.
+    limit_bytes = mem.limit
+    used_mb = mem.anon / (1024 * 1024)
+    current_mb = mem.current / (1024 * 1024)
+    peak_mb = None if mem.peak is None else mem.peak / (1024 * 1024)
     limit_mb = limit_bytes / (1024 * 1024)
-    pct = used_bytes / limit_bytes * 100
+    pct = mem.anon / limit_bytes * 100
     threshold = settings.memory_alert_pct
 
     # DEBUG-only history recording (hardcoded switch, default off — see worker.memory).
@@ -821,29 +828,35 @@ async def memory_monitor_job(ctx: dict) -> dict:
         await emit_safe(
             EventType.SYSTEM_MEMORY_HIGH,
             resource_type="system",
-            used_mb=round(used_mb, 1),
+            anon_mb=round(used_mb, 1),
+            current_mb=round(current_mb, 1),
+            peak_mb=None if peak_mb is None else round(peak_mb, 1),
             limit_mb=round(limit_mb, 1),
             pct=round(pct, 1),
             threshold_pct=threshold,
         )
         logger.warning(
-            "[memory_monitor] HIGH: %.0f MB / %.0f MB (%.1f%%, threshold %.0f%%)",
+            "[memory_monitor] HIGH: anon %.0f MB / %.0f MB (%.1f%%, threshold %.0f%%); current %.0f MB, peak %s",
             used_mb,
             limit_mb,
             pct,
             threshold,
+            current_mb,
+            "unknown" if peak_mb is None else f"{peak_mb:.0f} MB",
         )
         return {
             "status": "high",
             "pct": round(pct, 1),
-            "used_mb": round(used_mb, 1),
+            "anon_mb": round(used_mb, 1),
+            "peak_mb": None if peak_mb is None else round(peak_mb, 1),
             "redis_status": redis_status,
         }
 
     return {
         "status": "high" if redis_is_alert else "ok",
         "pct": round(pct, 1),
-        "used_mb": round(used_mb, 1),
+        "anon_mb": round(used_mb, 1),
+        "peak_mb": None if peak_mb is None else round(peak_mb, 1),
         "redis_status": redis_status,
     }
 

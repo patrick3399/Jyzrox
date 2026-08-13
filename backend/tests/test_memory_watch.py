@@ -40,11 +40,23 @@ def test_read_self_rss_no_vmrss_line_returns_none(tmp_path):
 # sample_once
 # ---------------------------------------------------------------------------
 
+_LIMIT_BYTES = 2048 * 1024 * 1024
+
+
+def _anon_mb(mb: int):
+    """A reading with `mb` of unreclaimable memory and no page cache.
+
+    sample_once alerts on `anon`; `current` would also count reclaimable cache
+    (see services/memory_diag.ContainerMemory).
+    """
+    used = mb * 1024 * 1024
+    return memory_diag.ContainerMemory(current=used, anon=used, peak=used, limit=_LIMIT_BYTES)
+
 
 @pytest.mark.asyncio
 async def test_sample_once_reports_ok_below_threshold(monkeypatch):
     monkeypatch.setattr(memory_watch, "read_self_rss", lambda *a: 150 * 1024 * 1024)
-    monkeypatch.setattr(memory_diag, "read_container_memory", lambda *a: (300 * 1024 * 1024, 2048 * 1024 * 1024))
+    monkeypatch.setattr(memory_diag, "read_container_memory_detail", lambda *a: _anon_mb(300))
     emit = AsyncMock()
     monkeypatch.setattr("core.events.emit_safe", emit)
 
@@ -58,7 +70,7 @@ async def test_sample_once_reports_ok_below_threshold(monkeypatch):
 @pytest.mark.asyncio
 async def test_sample_once_alerts_when_cgroup_usage_exceeds_threshold(monkeypatch):
     monkeypatch.setattr(memory_watch, "read_self_rss", lambda *a: 900 * 1024 * 1024)
-    monkeypatch.setattr(memory_diag, "read_container_memory", lambda *a: (1900 * 1024 * 1024, 2048 * 1024 * 1024))
+    monkeypatch.setattr(memory_diag, "read_container_memory_detail", lambda *a: _anon_mb(1900))
     emit = AsyncMock()
     monkeypatch.setattr("core.events.emit_safe", emit)
 
@@ -75,7 +87,7 @@ async def test_sample_once_alerts_when_cgroup_usage_exceeds_threshold(monkeypatc
 async def test_sample_once_survives_missing_cgroup(monkeypatch):
     """Dev machines without cgroup v2 must still get the RSS log line."""
     monkeypatch.setattr(memory_watch, "read_self_rss", lambda *a: 150 * 1024 * 1024)
-    monkeypatch.setattr(memory_diag, "read_container_memory", lambda *a: None)
+    monkeypatch.setattr(memory_diag, "read_container_memory_detail", lambda *a: None)
 
     result = await memory_watch.sample_once()
 
@@ -85,7 +97,7 @@ async def test_sample_once_survives_missing_cgroup(monkeypatch):
 @pytest.mark.asyncio
 async def test_sample_once_records_per_pid_history_when_enabled(monkeypatch):
     monkeypatch.setattr(memory_watch, "read_self_rss", lambda *a: 150 * 1024 * 1024)
-    monkeypatch.setattr(memory_diag, "read_container_memory", lambda *a: (300 * 1024 * 1024, 2048 * 1024 * 1024))
+    monkeypatch.setattr(memory_diag, "read_container_memory_detail", lambda *a: _anon_mb(300))
     monkeypatch.setattr(memory_diag, "MEMORY_HISTORY_ENABLED", True)
     persist = AsyncMock()
     monkeypatch.setattr(memory_diag, "persist_memory_history", persist)
@@ -100,7 +112,7 @@ async def test_sample_once_records_per_pid_history_when_enabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_sample_once_skips_history_when_disabled(monkeypatch):
     monkeypatch.setattr(memory_watch, "read_self_rss", lambda *a: 150 * 1024 * 1024)
-    monkeypatch.setattr(memory_diag, "read_container_memory", lambda *a: (300 * 1024 * 1024, 2048 * 1024 * 1024))
+    monkeypatch.setattr(memory_diag, "read_container_memory_detail", lambda *a: _anon_mb(300))
     monkeypatch.setattr(memory_diag, "MEMORY_HISTORY_ENABLED", False)
     persist = AsyncMock()
     monkeypatch.setattr(memory_diag, "persist_memory_history", persist)

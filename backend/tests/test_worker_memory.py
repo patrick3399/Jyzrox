@@ -117,6 +117,22 @@ def test_read_container_memory_returns_none_when_files_missing(tmp_path):
 # memory_monitor_job — log/event alert when over threshold
 # ---------------------------------------------------------------------------
 
+_LIMIT = 2_000_000_000
+
+
+def _anon_at(fraction: float):
+    """A reading whose unreclaimable share is `fraction` of the limit.
+
+    The alert follows `anon`, not `current` — page cache reaches the limit
+    without risking a kill (see services/memory_diag.ContainerMemory). These
+    tests carry no page cache so `fraction` means exactly what the test names
+    say.
+    """
+    from services.memory_diag import ContainerMemory
+
+    used = int(_LIMIT * fraction)
+    return ContainerMemory(current=used, anon=used, peak=used, limit=_LIMIT)
+
 
 async def test_memory_monitor_job_warns_when_usage_exceeds_threshold(monkeypatch):
     from unittest.mock import AsyncMock
@@ -125,7 +141,7 @@ async def test_memory_monitor_job_warns_when_usage_exceeds_threshold(monkeypatch
     from core import events
 
     # 90% of a 2 GB limit, default threshold 85% → must alert
-    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.90), 2_000_000_000))
+    monkeypatch.setattr("worker.memory.read_container_memory_detail", lambda: _anon_at(0.90))
     emit = AsyncMock()
     monkeypatch.setattr(events, "emit_safe", emit)
 
@@ -142,7 +158,7 @@ async def test_memory_monitor_job_silent_when_usage_below_threshold(monkeypatch)
     import worker
     from core import events
 
-    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.50), 2_000_000_000))
+    monkeypatch.setattr("worker.memory.read_container_memory_detail", lambda: _anon_at(0.50))
     emit = AsyncMock()
     monkeypatch.setattr(events, "emit_safe", emit)
 
@@ -155,7 +171,7 @@ async def test_memory_monitor_job_silent_when_usage_below_threshold(monkeypatch)
 async def test_memory_monitor_job_unknown_when_cgroup_unavailable(monkeypatch):
     import worker
 
-    monkeypatch.setattr("worker.memory.read_container_memory", lambda: None)
+    monkeypatch.setattr("worker.memory.read_container_memory_detail", lambda: None)
 
     result = await worker.memory_monitor_job({})
 
@@ -204,7 +220,7 @@ async def test_memory_monitor_job_records_worker_and_host_when_flag_on(monkeypat
     from core import events
     from worker import memory as m
 
-    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.50), 2_000_000_000))
+    monkeypatch.setattr("worker.memory.read_container_memory_detail", lambda: _anon_at(0.50))
     monkeypatch.setattr("worker.memory.read_host_memory", lambda: (int(8_000_000_000 * 0.50), 8_000_000_000))
     monkeypatch.setattr(events, "emit_safe", AsyncMock())
     monkeypatch.setattr(m, "MEMORY_HISTORY_ENABLED", True)
@@ -225,7 +241,7 @@ async def test_memory_monitor_job_skips_history_when_flag_off(monkeypatch):
     from core import events
     from worker import memory as m
 
-    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.50), 2_000_000_000))
+    monkeypatch.setattr("worker.memory.read_container_memory_detail", lambda: _anon_at(0.50))
     monkeypatch.setattr(events, "emit_safe", AsyncMock())
     monkeypatch.setattr(m, "MEMORY_HISTORY_ENABLED", False)
     persist = AsyncMock()

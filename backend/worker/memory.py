@@ -22,8 +22,10 @@ import logging
 from services.memory_diag import (  # noqa: F401
     MEMORY_HISTORY_ENABLED,
     MEMORY_HISTORY_RETENTION_DAYS,
+    ContainerMemory,
     persist_memory_history,
     read_container_memory,
+    read_container_memory_detail,
     read_host_memory,
 )
 

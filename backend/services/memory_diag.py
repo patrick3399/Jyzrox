@@ -8,11 +8,31 @@ every job module into the api process).
 """
 
 import logging
+from typing import NamedTuple
 
 logger = logging.getLogger("services.memory_diag")
 
 _CGROUP_MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _CGROUP_MEMORY_MAX = "/sys/fs/cgroup/memory.max"
+_CGROUP_MEMORY_STAT = "/sys/fs/cgroup/memory.stat"
+_CGROUP_MEMORY_PEAK = "/sys/fs/cgroup/memory.peak"
+
+
+class ContainerMemory(NamedTuple):
+    """A cgroup v2 memory reading, split by what can actually reach the limit.
+
+    ``current`` counts reclaimable page cache, so a job streaming image files
+    drives it to the limit without being anywhere near an OOM kill. ``anon`` is
+    the unreclaimable part and is what the kernel cannot free to avoid one.
+    ``peak`` is the kernel's own high-water mark, so a spike between two samples
+    is still visible afterwards — periodic sampling can never catch one.
+    """
+
+    current: int
+    anon: int
+    peak: int | None
+    limit: int
+
 
 # ── DEBUG memory history ─────────────────────────────────────────────────
 # Hardcoded debug switch: flip to True (and redeploy api/worker) to record a
@@ -48,22 +68,48 @@ def read_host_memory(path: str = "/proc/meminfo") -> tuple[int, int] | None:
     return (total_kb - avail_kb) * 1024, total_kb * 1024
 
 
-def read_container_memory(
+def _read_int(path: str) -> int | None:
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except Exception:  # absent (older kernel) / unreadable / non-numeric
+        return None
+
+
+def _read_stat_anon(path: str) -> int | None:
+    """Return ``anon`` bytes from ``memory.stat``, or ``None`` if unavailable."""
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith("anon "):
+                    return int(line.split()[1])
+    except Exception:
+        return None
+    return None
+
+
+def read_container_memory_detail(
     current_path: str = _CGROUP_MEMORY_CURRENT,
     max_path: str = _CGROUP_MEMORY_MAX,
-) -> tuple[int, int] | None:
-    """Return ``(used_bytes, limit_bytes)`` from cgroup v2.
+    stat_path: str = _CGROUP_MEMORY_STAT,
+    peak_path: str = _CGROUP_MEMORY_PEAK,
+) -> ContainerMemory | None:
+    """Return a split cgroup v2 reading, or ``None`` when no limit applies.
 
-    Returns ``None`` if the cgroup files are unreadable (non-Linux / cgroup v1)
-    or when no memory limit is set (``memory.max`` == ``"max"``), where a
-    percentage would be meaningless.
+    ``None`` means the cgroup files are unreadable (non-Linux / cgroup v1) or
+    ``memory.max`` is ``"max"``, where a percentage would be meaningless.
+
+    When ``memory.stat`` cannot be read, ``anon`` falls back to ``current``:
+    without the split the pessimistic figure is the safe one, and that is the
+    behaviour this module had before the split existed.
     """
+    current = _read_int(current_path)
+    if current is None:
+        return None
     try:
-        with open(current_path) as f:
-            used = int(f.read().strip())
         with open(max_path) as f:
             raw = f.read().strip()
-    except Exception:  # cgroup unreadable / non-numeric → no usable figure
+    except Exception:
         return None
     if raw == "max":
         return None
@@ -73,7 +119,28 @@ def read_container_memory(
         return None
     if limit <= 0:
         return None
-    return used, limit
+
+    anon = _read_stat_anon(stat_path)
+    return ContainerMemory(
+        current=current,
+        anon=current if anon is None else anon,
+        peak=_read_int(peak_path),
+        limit=limit,
+    )
+
+
+def read_container_memory(
+    current_path: str = _CGROUP_MEMORY_CURRENT,
+    max_path: str = _CGROUP_MEMORY_MAX,
+) -> tuple[int, int] | None:
+    """Return ``(current_bytes, limit_bytes)`` from cgroup v2.
+
+    Kept for callers that only need the raw pair. Anything deciding whether
+    memory pressure is real should use :func:`read_container_memory_detail`
+    instead — ``current`` includes reclaimable page cache.
+    """
+    detail = read_container_memory_detail(current_path=current_path, max_path=max_path)
+    return None if detail is None else (detail.current, detail.limit)
 
 
 async def persist_memory_history(samples: list[tuple[str, float, float, float]]) -> None:
