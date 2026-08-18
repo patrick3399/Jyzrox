@@ -83,6 +83,10 @@ class EventType(StrEnum):
     SYSTEM_ALERT = "system.alert"
     SYSTEM_DISK_LOW = "system.disk_low"
     SYSTEM_MEMORY_HIGH = "system.memory_high"
+    # A kill the container survived (cgroup `oom_kill`) vs. one that took the
+    # whole run down (detected at startup from a leftover run marker).
+    SYSTEM_OOM_KILLED = "system.oom_killed"
+    SYSTEM_WORKER_UNCLEAN_EXIT = "system.worker_unclean_exit"
     ADAPTIVE_BLOCKED = "adaptive.blocked"
 
     # System config

@@ -17,6 +17,7 @@ from core.config import get_monitored_library_paths, settings
 from core.redis_client import close_redis
 from core.scheduled_task_catalog import CATALOG
 from core.watcher import LibraryWatcher
+from services.memory_diag import read_container_oom_kills
 from worker.backup import database_backup_job
 from worker.captioning import caption_job
 from worker.dedup_scan import dedup_scan_job
@@ -38,6 +39,12 @@ from worker.importer import (
     batch_import_job,
     import_job,
     local_import_job,
+)
+from worker.liveness import (
+    clear_run_marker,
+    detect_unclean_exit,
+    record_memory_sample,
+    start_run_marker,
 )
 from worker.memory import after_process_hook
 from worker.novel_index import novel_index_job
@@ -237,6 +244,37 @@ async def _migrate_default_queue(r) -> None:
     logger.info("[startup] Migrated %d / %d jobs from 'default' queue", migrated, len(old_keys))
 
 
+async def _report_unclean_exit(r) -> None:
+    """Emit + log when the previous run never reached ``shutdown()``.
+
+    The 2026-08-13 kill stranded four local imports and produced no alert of any
+    kind; the incident was only reconstructed afterwards from nginx logs. The
+    marker carries the last memory sample the monitor took, which is what
+    separates "killed for memory" from "host rebooted".
+    """
+    previous = await detect_unclean_exit(r)
+    if previous is None:
+        return
+
+    from core.events import EventType, emit_safe
+
+    await emit_safe(
+        EventType.SYSTEM_WORKER_UNCLEAN_EXIT,
+        resource_type="worker",
+        started_at=previous.get("started_at"),
+        last_sample_at=previous.get("last_sample_at"),
+        last_anon_mb=previous.get("last_anon_mb"),
+        last_pct=previous.get("last_pct"),
+    )
+    logger.error(
+        "[liveness] previous worker run ended without shutting down (last sample: %s MB anon, %s%% at %s). "
+        "An OOM kill of the worker process looks like this; check the memory alerts around that time.",
+        previous.get("last_anon_mb", "unknown"),
+        previous.get("last_pct", "unknown"),
+        previous.get("last_sample_at", "unknown"),
+    )
+
+
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
     # Fail fast if the DB is not migrated to this image's schema head (e.g. a
@@ -250,6 +288,12 @@ async def startup(ctx: dict) -> None:
     await init_redis()
     r = get_redis()
     ctx["redis"] = r  # plain Redis client
+    # Before anything else touches state: did the previous run get to shut down?
+    # A leftover marker is the only evidence that survives an OOM kill of pid 1,
+    # because the restart hands the container a fresh cgroup whose counters read
+    # zero. Recovery below will quietly repair the damage, so report first.
+    await _report_unclean_exit(r)
+    await start_run_marker(r)
     # Migrate any jobs left in the legacy 'default' queue (one-time, idempotent)
     await _migrate_default_queue(r)
     from core.log_handler import apply_log_level_from_redis, install_log_handler
@@ -558,6 +602,9 @@ async def shutdown(ctx: dict) -> None:
     r = ctx.get("redis")
     if r is not None:
         await r.delete("watcher:status")
+        # Reaching here means the run ended on its own terms, so the next boot
+        # must not report it as a crash.
+        await clear_run_marker(r)
     await close_redis()
 
 
@@ -739,6 +786,41 @@ async def disk_monitor_job(ctx: dict) -> dict:
     return {"status": "ok", "free_gb": free_gb}
 
 
+async def _check_oom_kills(ctx: dict) -> int | None:
+    """Alert on any rise in the cgroup's cumulative ``oom_kill`` count.
+
+    Returns the current count. The baseline lives in ``ctx`` on purpose: the
+    counter and the worker process share a lifetime, because the restart that
+    resets the cgroup is the same restart that clears ``ctx``. Persisting the
+    baseline would make a fresh run compare against a dead cgroup's total.
+    """
+    oom_kills = read_container_oom_kills()
+    if oom_kills is None:
+        return None
+
+    seen = ctx.get("_oom_kill_seen")
+    ctx["_oom_kill_seen"] = oom_kills
+    if seen is None or oom_kills <= seen:
+        return oom_kills
+
+    from core.events import EventType, emit_safe
+
+    killed = oom_kills - seen
+    await emit_safe(
+        EventType.SYSTEM_OOM_KILLED,
+        resource_type="worker",
+        killed=killed,
+        total=oom_kills,
+    )
+    logger.error(
+        "[memory_monitor] OOM KILL: %d process(es) killed under the container limit since the last tick "
+        "(cgroup total %d). The worker survived, so a job died silently — check for stalled work.",
+        killed,
+        oom_kills,
+    )
+    return oom_kills
+
+
 async def memory_monitor_job(ctx: dict) -> dict:
     """Cron: warn when worker or Redis memory crosses its alert threshold.
 
@@ -806,6 +888,16 @@ async def memory_monitor_job(ctx: dict) -> dict:
     pct = mem.anon / limit_bytes * 100
     threshold = settings.memory_alert_pct
 
+    # A kill the container survived leaves no trace in any level reading — the
+    # kill frees the memory it was triggered by — but the kernel counts it.
+    # First tick after a restart only seeds the baseline: the cgroup is fresh,
+    # so its count says nothing about this run.
+    oom_kills = await _check_oom_kills(ctx)
+
+    # Refresh the crash marker with the newest sample. If this run is killed
+    # outright, this is the last thing startup will have to go on.
+    await record_memory_sample(ctx.get("redis"), anon_mb=round(used_mb, 1), pct=round(pct, 1))
+
     # DEBUG-only history recording (hardcoded switch, default off — see worker.memory).
     if _mem.MEMORY_HISTORY_ENABLED:
         samples = [("worker", round(used_mb, 1), round(limit_mb, 1), round(pct, 1))]
@@ -849,6 +941,7 @@ async def memory_monitor_job(ctx: dict) -> dict:
             "pct": round(pct, 1),
             "anon_mb": round(used_mb, 1),
             "peak_mb": None if peak_mb is None else round(peak_mb, 1),
+            "oom_kills": oom_kills,
             "redis_status": redis_status,
         }
 
@@ -857,6 +950,7 @@ async def memory_monitor_job(ctx: dict) -> dict:
         "pct": round(pct, 1),
         "anon_mb": round(used_mb, 1),
         "peak_mb": None if peak_mb is None else round(peak_mb, 1),
+        "oom_kills": oom_kills,
         "redis_status": redis_status,
     }
 

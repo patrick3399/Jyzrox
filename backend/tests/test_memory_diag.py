@@ -211,3 +211,100 @@ class TestMemoryAlertUsesAnon:
         kwargs = emit.await_args.kwargs
         assert kwargs["anon_mb"] == 1900.0
         assert kwargs["peak_mb"] == 2048.0, "the spike must survive into the alert"
+
+
+class TestReadContainerOomKills:
+    """`memory.events` is the only record of a kill that needs no sampling luck.
+
+    Measured 2026-08-18 on the live stack: a child process killed under the
+    container limit increments `oom_kill` while pid 1 keeps running, so the
+    worker survives with a job silently dead and nothing reports it.
+    """
+
+    def test_reads_oom_kill_count_from_memory_events(self, tmp_path: Path) -> None:
+        from services.memory_diag import read_container_oom_kills
+
+        events_file = tmp_path / "memory.events"
+        events_file.write_text("low 0\nhigh 0\nmax 1782\noom 3\noom_kill 2\noom_group_kill 0\n")
+
+        assert read_container_oom_kills(str(events_file)) == 2
+
+    def test_missing_memory_events_degrades_to_none(self, tmp_path: Path) -> None:
+        """A non-Linux dev box has no cgroup files; that is not an alert."""
+        from services.memory_diag import read_container_oom_kills
+
+        assert read_container_oom_kills(str(tmp_path / "absent")) is None
+
+
+class TestOomKillAlert:
+    """A kill that leaves pid 1 alive is invisible to every level reading."""
+
+    async def test_oom_kill_increase_since_last_tick_alerts(self, monkeypatch):
+        import worker
+        from core import events
+        from services.memory_diag import ContainerMemory
+
+        limit = 3072 * 1024 * 1024
+        monkeypatch.setattr(
+            "worker.memory.read_container_memory_detail",
+            lambda: ContainerMemory(current=limit, anon=180 * 1024 * 1024, peak=limit, limit=limit),
+        )
+        monkeypatch.setattr("worker.read_container_oom_kills", lambda: 1)
+        TestMemoryAlertUsesAnon._quiet_redis(monkeypatch)
+        emit = AsyncMock()
+        monkeypatch.setattr(events, "emit_safe", emit)
+
+        ctx = {"redis": AsyncMock(), "_oom_kill_seen": 0}
+        result = await worker.memory_monitor_job(ctx)
+
+        assert result["oom_kills"] == 1
+        emit.assert_awaited_once()
+        assert emit.await_args.args[0] is events.EventType.SYSTEM_OOM_KILLED
+        assert emit.await_args.kwargs["killed"] == 1
+
+    async def test_unchanged_oom_kill_count_does_not_realert(self, monkeypatch):
+        """The counter is cumulative, so re-reading it must not re-alert."""
+        import worker
+        from core import events
+        from services.memory_diag import ContainerMemory
+
+        limit = 3072 * 1024 * 1024
+        monkeypatch.setattr(
+            "worker.memory.read_container_memory_detail",
+            lambda: ContainerMemory(current=limit, anon=180 * 1024 * 1024, peak=limit, limit=limit),
+        )
+        monkeypatch.setattr("worker.read_container_oom_kills", lambda: 2)
+        TestMemoryAlertUsesAnon._quiet_redis(monkeypatch)
+        emit = AsyncMock()
+        monkeypatch.setattr(events, "emit_safe", emit)
+
+        ctx = {"redis": AsyncMock(), "_oom_kill_seen": 2}
+        await worker.memory_monitor_job(ctx)
+
+        emit.assert_not_awaited()
+
+    async def test_first_tick_records_baseline_without_alerting(self, monkeypatch):
+        """A worker restarted by an OOM kill starts from a fresh cgroup counter.
+
+        The first tick has no predecessor to compare against, so it must seed
+        the baseline rather than report every historical kill as new.
+        """
+        import worker
+        from core import events
+        from services.memory_diag import ContainerMemory
+
+        limit = 3072 * 1024 * 1024
+        monkeypatch.setattr(
+            "worker.memory.read_container_memory_detail",
+            lambda: ContainerMemory(current=limit, anon=180 * 1024 * 1024, peak=limit, limit=limit),
+        )
+        monkeypatch.setattr("worker.read_container_oom_kills", lambda: 4)
+        TestMemoryAlertUsesAnon._quiet_redis(monkeypatch)
+        emit = AsyncMock()
+        monkeypatch.setattr(events, "emit_safe", emit)
+
+        ctx = {"redis": AsyncMock()}
+        await worker.memory_monitor_job(ctx)
+
+        emit.assert_not_awaited()
+        assert ctx["_oom_kill_seen"] == 4

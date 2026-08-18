@@ -16,6 +16,7 @@ _CGROUP_MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _CGROUP_MEMORY_MAX = "/sys/fs/cgroup/memory.max"
 _CGROUP_MEMORY_STAT = "/sys/fs/cgroup/memory.stat"
 _CGROUP_MEMORY_PEAK = "/sys/fs/cgroup/memory.peak"
+_CGROUP_MEMORY_EVENTS = "/sys/fs/cgroup/memory.events"
 
 
 class ContainerMemory(NamedTuple):
@@ -84,6 +85,30 @@ def _read_stat_anon(path: str) -> int | None:
                 if line.startswith("anon "):
                     return int(line.split()[1])
     except Exception:
+        return None
+    return None
+
+
+def read_container_oom_kills(path: str = _CGROUP_MEMORY_EVENTS) -> int | None:
+    """Return the cgroup's cumulative ``oom_kill`` count, or ``None`` if absent.
+
+    This is the only kill record that needs no sampling luck: the kernel
+    maintains it, so a kill between two monitor ticks is still visible
+    afterwards. It covers exactly the kills the container *survives* — a decode
+    thread or child process killed under the limit increments it while pid 1
+    keeps running, which no level reading (``anon``, ``peak``) can reveal
+    because the memory is freed by the kill itself.
+
+    It cannot see a kill that takes pid 1 down: the restart gives the container
+    a fresh cgroup and the counter comes back at 0. ``worker.liveness`` covers
+    that half.
+    """
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith("oom_kill "):
+                    return int(line.split()[1])
+    except Exception:  # absent (non-Linux / cgroup v1) / unreadable
         return None
     return None
 
