@@ -8,7 +8,6 @@ Strategy:
   to avoid pg_insert / on_conflict usage in the test setup.
 - Mock filesystem helpers (library_dir, thumb_dir) where filesystem interaction
   is needed; use tmp_path to create real directories for removal tests.
-- Mock settings.tag_model_enabled=False to prevent tagger job enqueue in finalize().
 """
 
 from contextlib import asynccontextmanager
@@ -616,6 +615,22 @@ class TestProgressiveImporterMetadataTags:
         assert gallery_id == 4242
         upsert_tags.assert_awaited_once_with(session, 4242, ["parody:genshin impact", "character:ganyu"])
 
+    async def test_progressive_finalize_does_not_enqueue_a_tag_job(self):
+        """AI tagging is gone; finalize must not queue work for a missing handler."""
+        from unittest.mock import AsyncMock, patch
+
+        import core.queue
+
+        with patch.object(core.queue, "enqueue", new_callable=AsyncMock) as enqueue:
+            from worker import progressive as progressive_module
+
+            source = progressive_module.__file__
+            with open(source, encoding="utf-8") as handle:
+                body = handle.read()
+
+        assert "tag_job" not in body, "progressive.py still enqueues the removed tag_job"
+        assert enqueue.await_count == 0
+
 
 class TestProgressiveImporterTrashedGuard:
     """Re-downloading / re-importing a trashed gallery must not mutate or
@@ -873,12 +888,8 @@ class TestProgressiveImporterFinalize:
 
         fake_factory = _make_session_factory_cm(db_session_factory)
 
-        mock_settings = MagicMock()
-        mock_settings.tag_model_enabled = False
-
         with (
             patch("worker.progressive.AsyncSessionLocal", fake_factory),
-            patch("core.config.settings", mock_settings),
         ):
             result = await importer.finalize(dest_dir, partial=False)
 
@@ -915,12 +926,8 @@ class TestProgressiveImporterFinalize:
 
         fake_factory = _make_session_factory_cm(db_session_factory)
 
-        mock_settings = MagicMock()
-        mock_settings.tag_model_enabled = False
-
         with (
             patch("worker.progressive.AsyncSessionLocal", fake_factory),
-            patch("core.config.settings", mock_settings),
         ):
             result = await importer.finalize(dest_dir, partial=True)
 
@@ -967,7 +974,6 @@ class TestProgressiveImporterFinalize:
 
         with (
             patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
-            patch("core.config.settings", MagicMock(tag_model_enabled=False)),
         ):
             await importer.finalize(dest_dir, partial=False)
 
@@ -999,7 +1005,6 @@ class TestProgressiveImporterFinalize:
 
         with (
             patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
-            patch("core.config.settings", MagicMock(tag_model_enabled=False)),
         ):
             await importer.finalize(dest_dir)
 
@@ -1026,7 +1031,6 @@ class TestProgressiveImporterFinalize:
 
         with (
             patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
-            patch("core.config.settings", MagicMock(tag_model_enabled=False)),
         ):
             await importer.finalize(dest_dir)
 
@@ -1754,14 +1758,11 @@ class TestProgressiveFinalizeSidecar:
         importer.source_id = "sidecar_fin"
 
         fake_factory = _make_session_factory_cm(db_session_factory)
-        mock_settings = MagicMock()
-        mock_settings.tag_model_enabled = False
         sidecar_spy = AsyncMock(return_value=True)
 
         with (
             patch("worker.progressive.AsyncSessionLocal", fake_factory),
             patch("worker.progressive.write_gallery_sidecar", sidecar_spy),
-            patch("core.config.settings", mock_settings),
         ):
             result = await importer.finalize(dest_dir, partial=False)
 

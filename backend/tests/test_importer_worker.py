@@ -373,7 +373,6 @@ class TestImportJob:
             patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
             patch("worker.importer.upsert_tag_translations", AsyncMock()),
             patch("shutil.rmtree"),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
         ):
             ctx = _make_ctx()
             result = await import_job(ctx, path=str(gallery_dir), user_id=1)
@@ -422,7 +421,6 @@ class TestImportJob:
             patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
             patch("worker.importer.upsert_tag_translations", AsyncMock()),
             patch("shutil.rmtree"),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             ctx = _make_ctx()
@@ -444,57 +442,6 @@ class TestImportJob:
             "cover_thumbnail_job",
             "thumbnail_job",
         ]
-
-    async def test_tag_job_enqueued_when_tag_model_enabled(self, tmp_path):
-        """When tag_model_enabled=True, tag_job must be enqueued after import."""
-        from worker.importer import import_job
-
-        gallery_dir = _create_test_gallery(
-            tmp_path,
-            metadata={"category": "ehentai", "title": "T", "gid": 42},
-        )
-
-        mock_session = _make_mock_session()
-        mock_blob = MagicMock()
-        mock_blob.sha256 = "ff" * 32
-
-        _site_cfg = MagicMock(
-            source_id="ehentai",
-            source_id_fields=("gid",),
-            category="gallery",
-        )
-
-        with (
-            patch(
-                "worker.importer.AsyncSessionLocal",
-                return_value=_mock_session_ctx(mock_session),
-            ),
-            patch("worker.importer.store_blob", AsyncMock(return_value=mock_blob)),
-            patch("worker.importer.create_library_symlink", AsyncMock()),
-            patch("worker.helpers._sha256", return_value="bb" * 32),
-            patch("worker.importer._validate_image_magic", return_value=True),
-            patch("worker.importer._normalize_tags", side_effect=lambda t, s: t),
-            patch(
-                "plugins.builtin.gallery_dl._sites.get_site_config",
-                return_value=_site_cfg,
-            ),
-            patch("plugins.registry.plugin_registry.get_parser", return_value=None),
-            patch(
-                "plugins.builtin.gallery_dl._metadata._extract_artist",
-                return_value=None,
-            ),
-            patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
-            patch("worker.importer.upsert_tag_translations", AsyncMock()),
-            patch("shutil.rmtree"),
-            # tag_model_enabled = True
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=True)),
-            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
-        ):
-            ctx = _make_ctx()
-            await import_job(ctx, path=str(gallery_dir))
-
-        enqueued_calls = [c.args[0] for c in mock_enqueue.call_args_list]
-        assert "tag_job" in enqueued_calls
 
     async def test_files_with_invalid_magic_bytes_are_skipped(self, tmp_path):
         """Files failing magic-byte validation must be skipped (counted but not imported)."""
@@ -544,7 +491,6 @@ class TestImportJob:
             patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
             patch("worker.importer.upsert_tag_translations", AsyncMock()),
             patch("shutil.rmtree"),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
         ):
             ctx = _make_ctx()
             result = await import_job(ctx, path=str(gallery_dir))
@@ -598,7 +544,6 @@ class TestImportJob:
             patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
             patch("worker.importer.upsert_tag_translations", AsyncMock()),
             patch("shutil.rmtree"),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
         ):
             ctx = _make_ctx()
             result = await import_job(ctx, path=str(gallery_dir))
@@ -660,7 +605,6 @@ class TestImportJob:
             patch("worker.importer.store_blob", AsyncMock(return_value=MagicMock())),
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
         ):
             result = await import_job(_make_ctx(), path=str(gallery_dir))
 
@@ -762,7 +706,6 @@ class TestLocalImportJob:
             patch("worker.importer.hash_file_with_identity", side_effect=_hash_stub(test_sha)),
             patch("worker.importer.thumb_dir", return_value=td),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -789,7 +732,6 @@ class TestLocalImportJob:
             patch("worker.importer.hash_file_with_identity", side_effect=_hash_stub(test_sha)),
             patch("worker.importer.thumb_dir", return_value=td),
             patch("worker.importer._validate_image_magic", return_value=True),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -886,7 +828,6 @@ class TestLocalImportSymlinkGuard:
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("worker.importer.store_blob", AsyncMock(return_value=MagicMock())),
             patch("worker.importer.create_library_symlink", symlink_spy),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
@@ -992,7 +933,6 @@ class TestImportJobDuplicateBasenames:
             patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
             patch("worker.importer.upsert_tag_translations", AsyncMock()),
             patch("shutil.rmtree"),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
         ):
             result = await import_job(_make_ctx(), path=str(gallery_dir), user_id=1)
 
@@ -1061,7 +1001,6 @@ class TestImportJobSidecar:
             patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
             patch("worker.importer.upsert_tag_translations", AsyncMock()),
             patch("shutil.rmtree"),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
         ):
             result = await import_job(_make_ctx(), path=str(gallery_dir), user_id=1)
 
@@ -1113,7 +1052,6 @@ class TestLocalImportSidecar:
             patch("worker.importer.store_blob", AsyncMock(return_value=MagicMock())),
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer.write_gallery_sidecar", sidecar_spy),
-            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):

@@ -907,8 +907,6 @@ class ProgressiveImporter:
             "[progressive] finalized: gallery_id=%d pages=%d%s", self.gallery_id, self._page_counter, skip_summary
         )
 
-        from core.config import settings
-
         await core.queue.enqueue(
             "cover_thumbnail_job",
             gallery_id=self.gallery_id,
@@ -921,9 +919,6 @@ class ProgressiveImporter:
             _timeout=3600,
             _job_id=f"thumbnail:{self.gallery_id}",
         )
-
-        if settings.tag_model_enabled:
-            await core.queue.enqueue("tag_job", gallery_id=self.gallery_id)
 
         return self.gallery_id
 

@@ -1,9 +1,9 @@
 """Shared tag helper utilities for routers, services, and worker jobs."""
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from db.models import GalleryTag, Image, ImageTag, Tag, TagTranslation
+from db.models import GalleryTag, Tag, TagTranslation
 
 
 def parse_tag_strings(tags: list[str]) -> list[tuple[str, str]]:
@@ -94,46 +94,6 @@ async def rebuild_gallery_tags_array(session, gallery_id: int) -> list[str]:
     )
 
     return tags_array
-
-
-async def clear_ai_tags(session, gallery_id: int) -> int:
-    """Remove all AI-derived tags for a gallery (AIT-006).
-
-    Deletes image_tags rows (written exclusively by the AI tag job), strips
-    their tag strings from each image's tags_array, and deletes gallery_tags
-    rows with source='ai'. 'manual' and 'metadata' gallery tags and non-AI
-    tags_array entries are preserved.
-
-    Does not commit and does not rebuild galleries.tags_array — callers do
-    both (tag_job re-aggregates first; the clear-ai endpoint rebuilds directly).
-
-    Returns the number of gallery-level AI tag rows removed.
-    """
-    image_subq = select(Image.id).where(Image.gallery_id == gallery_id)
-
-    stale_rows = (
-        await session.execute(
-            select(ImageTag.image_id, Tag.namespace, Tag.name)
-            .join(Tag, Tag.id == ImageTag.tag_id)
-            .where(ImageTag.image_id.in_(image_subq))
-        )
-    ).all()
-    stale_by_image: dict[int, set[str]] = {}
-    for row in stale_rows:
-        stale_by_image.setdefault(row.image_id, set()).add(f"{row.namespace}:{row.name}")
-
-    if stale_by_image:
-        images = (await session.execute(select(Image).where(Image.id.in_(stale_by_image.keys())))).scalars().all()
-        for img in images:
-            stale = stale_by_image[img.id]
-            img.tags_array = [t for t in (img.tags_array or []) if t not in stale]
-
-    await session.execute(delete(ImageTag).where(ImageTag.image_id.in_(image_subq)))
-
-    result = await session.execute(
-        delete(GalleryTag).where(GalleryTag.gallery_id == gallery_id, GalleryTag.source == "ai")
-    )
-    return result.rowcount
 
 
 async def upsert_tag_translations(session, translations: list[dict]) -> None:

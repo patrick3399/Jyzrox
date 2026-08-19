@@ -13,7 +13,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
 import core.queue
-from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, Image, ImportConflict
@@ -401,8 +400,6 @@ async def import_job(
         _timeout=3600,
         _job_id=f"thumbnail:{gallery_id}",
     )
-    if settings.tag_model_enabled:
-        await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
     from core.events import EventType, emit_safe
 
@@ -825,10 +822,6 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             _timeout=3600,
             _job_id=f"thumbnail:{gallery_id}",
         )
-
-    # Trigger AI tagging if enabled
-    if settings.tag_model_enabled:
-        await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
     from core.events import EventType, emit_safe
 

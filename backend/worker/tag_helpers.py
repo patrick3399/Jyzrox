@@ -8,7 +8,6 @@ instead.
 """
 
 from services.tag_helpers import (  # noqa: F401
-    clear_ai_tags,
     parse_tag_strings,
     rebuild_gallery_tags_array,
     rebuild_tag_counts,
@@ -16,7 +15,6 @@ from services.tag_helpers import (  # noqa: F401
 )
 
 __all__ = [
-    "clear_ai_tags",
     "parse_tag_strings",
     "rebuild_gallery_tags_array",
     "rebuild_tag_counts",

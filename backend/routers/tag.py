@@ -6,7 +6,7 @@ import re
 from collections import deque
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from opencc import OpenCC
 from pydantic import BaseModel
 from sqlalchemy import case as sql_case
@@ -15,13 +15,11 @@ from sqlalchemy import literal as sql_literal
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import core.queue
-from core.auth import gallery_access_filter, has_gallery_write_access, require_auth, require_role
+from core.auth import has_gallery_write_access, require_auth, require_role
 from core.database import async_session, get_db
 from core.redis_client import get_redis
 from core.utils import escape_like
-from db.models import BlockedTag, Gallery, GalleryTag, Image, ImageTag, Tag, TagAlias, TagImplication, TagTranslation
-from services.settings_store import get_toggle
+from db.models import BlockedTag, Gallery, GalleryTag, ImageTag, Tag, TagAlias, TagImplication, TagTranslation
 
 _s2twp = OpenCC("s2twp")
 _t2s = OpenCC("t2s")
@@ -819,89 +817,6 @@ async def manual_tag_gallery(
         return {"status": "ok", "affected": removed}
 
 
-# ── AI Re-tag ─────────────────────────────────────────────────────────
-
-
-@router.post("/retag/{gallery_id}")
-async def retag_gallery(
-    gallery_id: int,
-    request: Request,
-    _: dict = Depends(_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """Enqueue AI tagging job for all images in a gallery."""
-    from core.config import settings as app_settings
-
-    if not await get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled):
-        raise HTTPException(status_code=400, detail="AI tagging is not enabled")
-
-    # Verify gallery exists
-    gallery = await db.get(Gallery, gallery_id)
-    if not gallery:
-        raise HTTPException(status_code=404, detail="Gallery not found")
-    await core.queue.enqueue("tag_job", gallery_id=gallery_id)
-    return {"status": "enqueued", "gallery_id": gallery_id}
-
-
-@router.post("/clear-ai/{gallery_id}")
-async def clear_gallery_ai_tags(
-    gallery_id: int,
-    auth: dict = Depends(_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """Remove all AI-derived tags from a gallery, keeping manual/metadata tags (AIT-006)."""
-    from services.tag_helpers import clear_ai_tags, rebuild_gallery_tags_array
-
-    gallery = await db.get(Gallery, gallery_id)
-    if not gallery:
-        raise HTTPException(status_code=404, detail="Gallery not found")
-
-    removed = await clear_ai_tags(db, gallery_id)
-    await rebuild_gallery_tags_array(db, gallery_id)
-    await db.commit()
-
-    from core.events import EventType, emit_safe
-
-    await emit_safe(
-        EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id
-    )
-    return {"status": "ok", "removed": removed}
-
-
-@router.post("/retag-all")
-async def retag_all_galleries(
-    request: Request,
-    _: dict = Depends(_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """Enqueue AI tagging jobs for ALL galleries (batch re-tag).
-
-    Uses chunked queries and Redis pipeline to avoid loading all IDs
-    into memory and doing 100K individual roundtrips.
-    """
-    from core.config import settings as app_settings
-
-    if not await get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled):
-        raise HTTPException(status_code=400, detail="AI tagging is not enabled")
-    enqueued = 0
-    CHUNK = 1000
-    offset = 0
-
-    while True:
-        chunk = (await db.execute(select(Gallery.id).order_by(Gallery.id).offset(offset).limit(CHUNK))).scalars().all()
-
-        if not chunk:
-            break
-
-        for gid in chunk:
-            await core.queue.enqueue("tag_job", gallery_id=gid)
-            enqueued += 1
-
-        offset += CHUNK
-
-    return {"status": "enqueued", "total": enqueued}
-
-
 # ── EhTagTranslation Import ──────────────────────────────────────────
 
 
@@ -1103,78 +1018,6 @@ async def list_tag_health_ignored(_: dict = Depends(_admin)):
     """List currently ignored tag-health keys (for the UI's ignored/restore view)."""
     keys = await _get_tag_health_ignored_keys()
     return {"keys": sorted(keys)}
-
-
-@router.get("/anomalies")
-async def get_tag_anomalies(
-    min_difference: float = Query(default=0.6, ge=0, le=1),
-    limit: int = Query(default=100, ge=1, le=500),
-    auth: dict = Depends(_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """Compare image-level AI confidence with gallery metadata tag confidence."""
-    metadata_rows = (
-        await db.execute(
-            select(Gallery.id, Gallery.title, Tag.id, Tag.namespace, Tag.name, GalleryTag.confidence)
-            .join(GalleryTag, GalleryTag.gallery_id == Gallery.id)
-            .join(Tag, Tag.id == GalleryTag.tag_id)
-            .where(GalleryTag.source == "metadata", gallery_access_filter(auth))
-        )
-    ).all()
-    ai_rows = (
-        await db.execute(
-            select(
-                Gallery.id,
-                Gallery.title,
-                Tag.id,
-                Tag.namespace,
-                Tag.name,
-                func.max(ImageTag.confidence),
-            )
-            .join(Image, Image.gallery_id == Gallery.id)
-            .join(ImageTag, ImageTag.image_id == Image.id)
-            .join(Tag, Tag.id == ImageTag.tag_id)
-            .where(gallery_access_filter(auth))
-            .group_by(Gallery.id, Gallery.title, Tag.id, Tag.namespace, Tag.name)
-        )
-    ).all()
-    combined: dict[tuple[int, int], dict] = {}
-    for gallery_id, title, tag_id, namespace, name, confidence in metadata_rows:
-        combined[(gallery_id, tag_id)] = {
-            "gallery_id": gallery_id,
-            "gallery_title": title,
-            "tag_id": tag_id,
-            "namespace": namespace,
-            "name": name,
-            "metadata_confidence": float(confidence or 0),
-            "ai_confidence": 0.0,
-        }
-    for gallery_id, title, tag_id, namespace, name, confidence in ai_rows:
-        row = combined.setdefault(
-            (gallery_id, tag_id),
-            {
-                "gallery_id": gallery_id,
-                "gallery_title": title,
-                "tag_id": tag_id,
-                "namespace": namespace,
-                "name": name,
-                "metadata_confidence": 0.0,
-                "ai_confidence": 0.0,
-            },
-        )
-        row["ai_confidence"] = float(confidence or 0)
-    anomalies = []
-    for row in combined.values():
-        difference = abs(row["ai_confidence"] - row["metadata_confidence"])
-        if difference < min_difference:
-            continue
-        row["difference"] = round(difference, 4)
-        row["suggestion"] = (
-            "review_ai_only" if row["ai_confidence"] > row["metadata_confidence"] else "review_metadata_only"
-        )
-        anomalies.append(row)
-    anomalies.sort(key=lambda item: (-item["difference"], item["gallery_id"], item["tag_id"]))
-    return {"anomalies": anomalies[:limit], "total": len(anomalies), "cached": False}
 
 
 # ── Tag deletion ─────────────────────────────────────────────────────

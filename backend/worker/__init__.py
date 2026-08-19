@@ -71,7 +71,6 @@ from worker.subscription_group import (
     check_subscription_group,
     subscription_scheduler,
 )
-from worker.tagging import tag_job
 from worker.thumbhash_backfill import thumbhash_backfill_job
 from worker.thumbnail import cover_thumbnail_job, thumbnail_job
 from worker.trash import trash_gc_job
@@ -1068,7 +1067,6 @@ def build_workers() -> tuple:
             move_library_path_job,
             reconcile_library_path_job,
             rescan_library_path_job,
-            tag_job,
             reconciliation_job,
             scheduled_scan_job,
             toggle_watcher_job,
@@ -1150,7 +1148,6 @@ __all__ = [
     "cover_thumbnail_job",
     "thumbnail_job",
     "reconciliation_job",
-    "tag_job",
     "check_followed_artists",
     "check_single_subscription",
     "check_subscription_group",

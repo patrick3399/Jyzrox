@@ -650,8 +650,8 @@ class TestImportJob:
 
         assert result["status"] == "done"
 
-    async def test_tag_job_enqueued_when_model_enabled(self, tmp_path):
-        """When tag_model_enabled is True, tag_job should also be enqueued."""
+    async def test_import_job_does_not_enqueue_a_tag_job(self, tmp_path):
+        """AI tagging is gone; a successful import must not queue work for a missing handler."""
         from worker.importer import import_job
 
         gallery_dir = tmp_path / "tag_gallery"
@@ -697,17 +697,15 @@ class TestImportJob:
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
-            patch("worker.importer.settings") as mock_settings,
             patch("shutil.rmtree"),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
-            mock_settings.tag_model_enabled = True
             result = await import_job(ctx, str(gallery_dir))
 
         assert result["status"] == "done"
         enqueue_calls = [c.args[0] for c in mock_enqueue.call_args_list]
         assert "thumbnail_job" in enqueue_calls
-        assert "tag_job" in enqueue_calls
+        assert "tag_job" not in enqueue_calls
 
     async def test_user_id_stored_in_gallery(self, tmp_path):
         """user_id parameter should be forwarded to gallery_values."""
@@ -972,9 +970,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer.settings") as mock_settings,
-        ):
-            mock_settings.tag_model_enabled = False
+):
             result = await local_import_job(ctx, str(src), "copy", gallery_id=1)
 
         assert result["status"] == "done"
@@ -1031,9 +1027,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer.settings") as mock_settings,
-        ):
-            mock_settings.tag_model_enabled = False
+):
             result = await local_import_job(ctx, str(src), "link", gallery_id=1)
 
         assert result["status"] == "done"
@@ -1090,9 +1084,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer.settings") as mock_settings,
-        ):
-            mock_settings.tag_model_enabled = False
+):
             result = await local_import_job(ctx, str(src), "copy", gallery_id=1)
 
         assert result["status"] == "done"
@@ -1152,10 +1144,8 @@ class TestLocalImportJob:
             patch("worker.importer.thumb_dir", return_value=missing_thumb_dir),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer.settings") as mock_settings,
-            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
-            mock_settings.tag_model_enabled = False
             result = await local_import_job(ctx, str(src), "link", gallery_id=1)
 
         assert result["status"] == "done"
@@ -1220,9 +1210,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer.settings") as mock_settings,
-        ):
-            mock_settings.tag_model_enabled = False
+):
             result = await local_import_job(ctx, str(src), "copy", gallery_id=10)
 
         assert result["status"] == "done"
@@ -1418,9 +1406,7 @@ class TestBatchImportJob:
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer.settings") as mock_settings,
-        ):
-            mock_settings.tag_model_enabled = False
+):
             result = await batch_import_job(
                 ctx,
                 root_dir=str(tmp_path),
