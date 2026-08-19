@@ -130,10 +130,12 @@ def _orphan_row(id, source, source_id, import_mode="link", deleted_at=None):
 
 class TestOrphanGalleryIdsSanitization:
     """Regression tests for edge case #46: Phase 2 compares the raw
-    Gallery.source_id against sanitized on-disk directory keys, so a link
-    gallery whose source_id contains '/' (e.g. local imports 'artist/month/title')
-    is wrongly flagged as a filesystem orphan and DELETED even though its
-    sanitized library directory exists on disk.
+    Gallery.source_id against sanitized on-disk directory keys, so a gallery
+    whose source_id contains '/' (e.g. local imports 'artist/month/title')
+    is wrongly flagged as a filesystem orphan even though its sanitized library
+    directory exists on disk. When this was written Phase 2 deleted such
+    galleries; it now rebuilds their directories instead, so the cost of the
+    same mistake is a redundant rebuild rather than data loss.
     """
 
     def test_link_gallery_with_slash_source_id_present_on_disk_is_not_orphan(self):
@@ -157,16 +159,40 @@ class TestOrphanGalleryIdsSanitization:
 
         assert result == [8], "a link gallery with no matching disk dir is a real orphan"
 
-    def test_non_link_and_trashed_galleries_are_never_orphaned(self):
+    def test_trashed_gallery_absent_from_disk_is_never_orphaned(self):
         from worker.reconciliation import _orphan_gallery_ids
 
         fs_keys: set = set()
-        download_row = _orphan_row(id=1, source="ehentai", source_id="123", import_mode="download")
         trashed_row = _orphan_row(id=2, source="local", source_id="a/b", deleted_at=datetime.now(UTC))
 
-        result = _orphan_gallery_ids([download_row, trashed_row], fs_keys)
+        result = _orphan_gallery_ids([trashed_row], fs_keys)
 
-        assert result == []
+        assert result == [], "a trashed gallery must not be resurrected by the repair pass"
+
+
+class TestOrphanGalleryIdsRepairScope:
+    """Phase 2 repairs missing library dirs instead of deleting DB rows, so its
+    input must not be restricted to link-mode galleries.
+
+    The ``import_mode == 'link'`` filter dates from when Phase 2 *deleted*
+    orphans, where restricting to link mode kept it from destroying the source
+    of truth. Phase 2 now rebuilds from the DB, and the surviving filter
+    excludes exactly the galleries that most need rebuilding: CAS-backed
+    downloads, whose ``import_mode`` is NULL and whose pixels only reachable
+    path is the library tree.
+    """
+
+    def test_cas_download_gallery_absent_from_disk_is_selected_for_repair(self):
+        from worker.reconciliation import _orphan_gallery_ids
+
+        # A downloaded gallery carries no import_mode; its dir is the only
+        # filesystem representation its blobs have.
+        fs_keys = {("weibo", "other_gallery")}
+        row = _orphan_row(id=97807, source="weibo", source_id="3802725779", import_mode=None)
+
+        result = _orphan_gallery_ids([row], fs_keys)
+
+        assert result == [97807], "a CAS gallery with no library dir must be queued for repair"
 
 
 class TestReconciliationJob:
@@ -458,6 +484,95 @@ class TestReconciliationJob:
             external_path="/mnt/source/page.jpg",
         )
         sidecar_spy.assert_awaited_once()
+
+    async def test_cas_gallery_missing_library_dir_is_rebuilt_when_import_mode_is_not_link(self, tmp_path):
+        """A downloaded gallery whose whole library dir is gone must be rebuilt.
+
+        Regression: weibo gallery 97807 (8,309 CAS images, download_status
+        complete) had no directory under /data/library/weibo/ and no weekly
+        reconciliation ever restored it, because Phase 2's candidate list was
+        filtered to ``import_mode == "link"``.
+        """
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        present_dir = lib_base / "src_a" / "present"
+        present_dir.mkdir(parents=True)
+        (present_dir / "keep.jpg").write_bytes(b"image")
+        (present_dir / "info.json").write_text("{}", encoding="utf-8")
+
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+        mock_settings.data_cas_path = str(tmp_path / "cas")
+
+        present_gallery = MagicMock(id=1, source="src_a", source_id="present", import_mode="copy", deleted_at=None)
+        # The gallery under repair: a CAS download, so import_mode is NULL.
+        missing_gallery = MagicMock(id=97807, source="weibo", source_id="3802725779", import_mode=None)
+        missing_gallery.deleted_at = None
+        missing_gallery.category = None
+        missing_gallery.language = None
+        missing_gallery.uploader = None
+        missing_gallery.artist_id = None
+        missing_gallery.pages = 1
+        missing_gallery.source_url = None
+        missing_gallery.tags_array = []
+        missing_gallery.posted_at = None
+        missing_gallery.title = "weibo user"
+        missing_gallery.title_jpn = None
+        missing_gallery.source_pages = None
+        # While Phase 2 skips this gallery the side-effect list shifts by two and
+        # these payloads reach the Phase 3 blob GC. An int ref count keeps that
+        # path inert so the test fails on its assertion rather than on a
+        # MagicMock comparison.
+        missing_gallery.actual_refs = 1
+
+        blob = MagicMock()
+        image_row = MagicMock(
+            gallery_id=97807,
+            filename="5294120438596487_01.jpg",
+            external_path=None,
+            Blob=blob,
+        )
+        image_row.actual_refs = 1
+
+        execute_returns = [
+            _make_result_with_rows([present_gallery]),  # Phase 1 gallery lookup
+            _make_result_with_rows([]),  # Phase 1 image lookup
+            _make_result_with_rows(  # Phase 2 orphan candidate scan
+                [
+                    _orphan_row(1, "src_a", "present", "copy"),
+                    _orphan_row(97807, "weibo", "3802725779", import_mode=None),
+                ]
+            ),
+            _make_result_with_rows([missing_gallery]),  # Phase 2 full galleries
+            _make_result_with_rows([image_row]),  # Phase 2 images/blob metadata
+            _make_result_with_rows([]),  # Phase 3 blob GC
+            _make_empty_result(),  # padding: never run out of side effects
+            _make_empty_result(),
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        symlink_spy = AsyncMock()
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with (
+            patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.reconciliation._cron_record", new_callable=AsyncMock),
+            patch("worker.reconciliation.settings", mock_settings),
+            patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
+            patch("worker.reconciliation.create_library_symlink", symlink_spy),
+            patch("worker.reconciliation.write_gallery_sidecar", sidecar_spy),
+        ):
+            result = await reconciliation_job(_make_ctx())
+
+        symlink_spy.assert_awaited_once_with(
+            "weibo",
+            "3802725779",
+            "5294120438596487_01.jpg",
+            blob,
+            external_path=None,
+        )
+        assert result["repaired_links"] == 1
+        assert result["removed_galleries"] == 0
 
     async def test_orphan_blobs_deleted_from_cas_and_db(self, tmp_path):
         """Blobs with ref_count<=0 and actual_refs==0 should have CAS files deleted."""

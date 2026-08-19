@@ -67,22 +67,29 @@ async def _galleries_by_fs_key(session, chunk_keys: list[tuple[str, str]]) -> di
 
 
 def _orphan_gallery_ids(db_rows, fs_keys: set[tuple[str, str]]) -> list[int]:
-    """Return ids of link-mode galleries whose library directory is missing on disk.
+    """Return ids of live galleries whose library directory is missing on disk.
+
+    Phase 2 rebuilds these directories from the DB and deletes nothing, which is
+    why import mode is not filtered here. A CAS-backed download carries no
+    ``import_mode`` and the library tree is the only filesystem representation
+    its blobs have, so it is precisely the case that needs rebuilding — weibo
+    gallery 97807 (8,309 images) sat unrepaired through every weekly run because
+    an ``import_mode == "link"`` filter excluded it. That filter dated from when
+    Phase 2 deleted orphans rather than repairing them; the deletion guard it
+    was providing now lives at the only site that still deletes galleries
+    (Phase 1, and only for directories that exist but are empty).
 
     On-disk directory names are produced by ``safe_source_id()`` (e.g. '/' -> '__'),
     so the DB ``source_id`` MUST be sanitized the same way before comparing against
-    ``fs_keys``. Comparing the raw ``source_id`` wrongly flags link galleries whose
-    id contains '/' (e.g. local imports 'artist/month/title') as filesystem orphans
-    and deletes them (edge case #46). ``safe_source_id`` is lossy, so any collision
-    only ever produces a false negative (a gallery is preserved), never a wrongful
-    delete — the safe direction.
+    ``fs_keys``. Comparing the raw ``source_id`` wrongly flags galleries whose id
+    contains '/' (e.g. local imports 'artist/month/title') as filesystem orphans
+    (edge case #46). ``safe_source_id`` is lossy, so a collision only ever
+    produces a false negative (no rebuild), never a wrongful one.
     """
     return [
         row.id
         for row in db_rows
-        if (row.source, safe_source_id(row.source_id)) not in fs_keys
-        and row.import_mode == "link"
-        and row.deleted_at is None
+        if (row.source, safe_source_id(row.source_id)) not in fs_keys and row.deleted_at is None
     ]
 
 
