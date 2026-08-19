@@ -74,10 +74,6 @@ jobs:
             context: ./nginx
             image: patrick339/jyzrox-nginx
             pass_version: false
-          - name: tagger
-            context: ./tagger
-            image: patrick339/jyzrox-tagger
-            pass_version: false
     steps:
       - uses: actions/checkout@v5
 
@@ -122,8 +118,7 @@ jobs:
           for image in \
             patrick339/jyzrox-backend \
             patrick339/jyzrox-pwa \
-            patrick339/jyzrox-nginx \
-            patrick339/jyzrox-tagger; do
+            patrick339/jyzrox-nginx; do
             docker buildx imagetools inspect "${image}:${STAGED_TAG}" >/dev/null
           done
 
@@ -135,8 +130,7 @@ jobs:
           for image in \
             patrick339/jyzrox-backend \
             patrick339/jyzrox-pwa \
-            patrick339/jyzrox-nginx \
-            patrick339/jyzrox-tagger; do
+            patrick339/jyzrox-nginx; do
             docker buildx imagetools create \
               -t "${image}:${VERSION}" \
               "${image}:${STAGED_TAG}"
@@ -149,8 +143,7 @@ jobs:
           for image in \
             patrick339/jyzrox-backend \
             patrick339/jyzrox-pwa \
-            patrick339/jyzrox-nginx \
-            patrick339/jyzrox-tagger; do
+            patrick339/jyzrox-nginx; do
             docker buildx imagetools inspect "${image}:${VERSION}" >/dev/null
           done
 
@@ -199,8 +192,7 @@ jobs:
           for image in \
             patrick339/jyzrox-backend \
             patrick339/jyzrox-pwa \
-            patrick339/jyzrox-nginx \
-            patrick339/jyzrox-tagger; do
+            patrick339/jyzrox-nginx; do
             docker buildx imagetools create \
               -t "${image}:latest" \
               "${image}:${VERSION}"

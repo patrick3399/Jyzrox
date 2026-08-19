@@ -226,69 +226,6 @@ services:
           memory: 256M
     logging: *default-logging
 
-  tagger:
-    build: ./tagger
-    environment:
-      - TZ=${TZ:-Asia/Taipei}
-      - TAG_MODEL_NAME=${TAG_MODEL_NAME:-SmilingWolf/wd-swinv2-tagger-v3}
-      - ONNX_PROVIDERS=${ONNX_PROVIDERS:-CPUExecutionProvider}
-    volumes:
-      - app_data:/data:ro
-      - tagger_models:/app/models
-    networks:
-      - backend
-      - frontend
-    security_opt: ["no-new-privileges:true"]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8100/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 3G
-        reservations:
-          memory: 1G
-    profiles:
-      - tagging
-    logging: *default-logging
-
-  captioner:
-    build: ./captioner
-    environment:
-      - TZ=${TZ:-Asia/Taipei}
-      - CAPTION_ENGINE=${CAPTION_ENGINE:-florence2}
-      - CAPTION_MODEL_NAME=${CAPTION_MODEL_NAME:-microsoft/Florence-2-base}
-      - CAPTION_DEVICE=${CAPTION_DEVICE:-cpu}
-    volumes:
-      - app_data:/data:ro
-      - captioner_models:/app/models
-    networks:
-      - backend
-      - frontend
-    security_opt: ["no-new-privileges:true"]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8200/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 120s
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 8G
-        reservations:
-          memory: 2G
-    profiles:
-      - captioning
-    logging: *default-logging
-
   # One-shot schema bootstrap: creates the schema on a fresh DB and applies
   # pending migrations on an existing one, then exits. api/worker wait for it to
   # complete (see x-backend-depends). Owns schema setup instead of the fragile
@@ -385,8 +322,6 @@ volumes:
       type: none
       o: bind
       device: ${JYZROX_DATA_ROOT}/redis
-  tagger_models:
-  captioner_models:
   gallery_dl_venv:
     driver: local
     driver_opts:
