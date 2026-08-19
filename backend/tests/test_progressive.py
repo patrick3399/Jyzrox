@@ -523,6 +523,100 @@ class TestProgressiveImporterPreExistingCancel:
 # ---------------------------------------------------------------------------
 
 
+class TestProgressiveImporterMetadataTags:
+    """HR-008: the progressive path wrote galleries.tags_array without the
+    gallery_tags rows that array is derived from.
+
+    ``rebuild_gallery_tags_array()`` overwrites tags_array with whatever
+    gallery_tags holds, unconditionally and with no empty guard, and nine call
+    sites reach it (manual tag add/remove, alias and implication application,
+    bulk tag edits). So the first tag edit on a progressively imported gallery
+    replaced its real source metadata with a near-empty array. Measured
+    2026-08-19: 89 galleries (64 ehentai, 25 pixiv) held 1,368 tags backed by no
+    gallery_tags rows at all.
+
+    The upsert itself is PostgreSQL-only (``ON CONFLICT`` on a constraint the
+    ORM never declared, plus ``cardinality()``), so it cannot run against the
+    SQLite test database — which is exactly why this path had no coverage. The
+    junction write is asserted at the call boundary instead.
+    """
+
+    async def _run_ensure(self, invoke, data, extra_patches=()):
+        """Drive one creation path with a mock session, returning the spy."""
+        from contextlib import ExitStack
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        upsert_result = MagicMock()
+        upsert_result.scalar_one.return_value = 4242
+        session.execute = AsyncMock(return_value=upsert_result)
+
+        upsert_tags = AsyncMock()
+        with ExitStack() as stack:
+            stack.enter_context(patch("worker.progressive.AsyncSessionLocal", return_value=session))
+            stack.enter_context(
+                patch.object(ProgressiveImporter, "_detect_trashed_conflict", AsyncMock(return_value=None))
+            )
+            stack.enter_context(patch.object(ProgressiveImporter, "_load_gallery_state", AsyncMock()))
+            stack.enter_context(patch("worker.progressive.upsert_metadata_gallery_tags", upsert_tags))
+            for ctx in extra_patches:
+                stack.enter_context(ctx)
+            gallery_id = await invoke(importer, data)
+
+        return gallery_id, session, upsert_tags
+
+    async def test_ensure_gallery_from_import_data_writes_gallery_tags_for_metadata_tags(self):
+        """Creating from plugin metadata must write the junction rows too."""
+        from plugins.models import GalleryImportData
+
+        data = GalleryImportData(
+            source="pixiv",
+            source_id="hr008_import_data",
+            title="Metadata Tags",
+            tags=["artist:someone", "female:sole female"],
+        )
+
+        gallery_id, session, upsert_tags = await self._run_ensure(
+            lambda imp, d: imp.ensure_gallery_from_import_data(d), data
+        )
+
+        assert gallery_id == 4242
+        upsert_tags.assert_awaited_once_with(session, 4242, ["artist:someone", "female:sole female"])
+
+    async def test_ensure_gallery_writes_gallery_tags_for_metadata_tags(self):
+        """The gallery-dl metadata path must write them as well."""
+        from plugins.models import GalleryImportData
+
+        data = GalleryImportData(
+            source="ehentai",
+            source_id="hr008_ensure_gallery",
+            title="Tags Survive Rebuild",
+            tags=["parody:genshin impact", "character:ganyu"],
+        )
+
+        from pathlib import Path as _Path
+        from unittest.mock import patch
+
+        # ensure_gallery() parses a raw gallery-dl metadata dict; the parser is
+        # not what is under test here.
+        parser = patch(
+            "plugins.builtin.gallery_dl._metadata.parse_gallery_dl_import",
+            return_value=data,
+        )
+        gallery_id, session, upsert_tags = await self._run_ensure(
+            lambda imp, d: imp.ensure_gallery({}, _Path("/tmp/unused")), data, extra_patches=(parser,)
+        )
+
+        assert gallery_id == 4242
+        upsert_tags.assert_awaited_once_with(session, 4242, ["parody:genshin impact", "character:ganyu"])
+
+
 class TestProgressiveImporterTrashedGuard:
     """Re-downloading / re-importing a trashed gallery must not mutate or
     resurrect it (audit #8; same invariant as rescan #58 / BE-T16)."""

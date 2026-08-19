@@ -16,7 +16,7 @@ import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
-from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, ImportConflict, Tag
+from db.models import Blob, ExcludedBlob, Gallery, Image, ImportConflict
 from services.cas import (
     create_library_symlink,
     increment_ref_count,
@@ -26,7 +26,11 @@ from services.cas import (
     thumbnails_complete_at,
 )
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
-from services.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
+from services.tag_helpers import (
+    rebuild_gallery_tags_array,
+    upsert_metadata_gallery_tags,
+    upsert_tag_translations,
+)
 from worker.constants import (
     _MEDIA_EXTS,
     _VIDEO_EXTS,
@@ -333,7 +337,7 @@ async def import_job(
             gallery.download_status = terminal_status
 
         # Upsert tags + gallery_tags
-        await _upsert_tags(session, gallery_id, tags)
+        await upsert_metadata_gallery_tags(session, gallery_id, tags)
 
         await reorder_social_gallery_images(session, gallery_id, source)
 
@@ -489,42 +493,6 @@ def _build_gallery(
         "tags_array": tags,
         "artist_id": artist_id,
     }
-
-
-async def _upsert_tags(session, gallery_id: int, tags: list[str]) -> None:
-    if not tags:
-        return
-
-    # Step 1: deduplicate so we don't send duplicate rows to the DB
-    seen: set[tuple[str, str]] = set()
-    tag_values: list[dict] = []
-    for tag_str in tags:
-        if ":" in tag_str:
-            ns, name = tag_str.split(":", 1)
-        else:
-            ns, name = "general", tag_str
-        key = (ns, name)
-        if key not in seen:
-            seen.add(key)
-            tag_values.append({"namespace": ns, "name": name, "count": 1})
-
-    # Step 2: batch upsert all tags, retrieve their IDs in a single round-trip
-    tag_stmt = (
-        pg_insert(Tag)
-        .values(tag_values)
-        .on_conflict_do_update(
-            index_elements=["namespace", "name"],
-            set_={"count": Tag.count + 1},
-        )
-        .returning(Tag.id)
-    )
-    tag_ids = (await session.execute(tag_stmt)).scalars().all()
-
-    # Step 3: batch insert gallery_tag junction rows in a single round-trip
-    gt_values = [{"gallery_id": gallery_id, "tag_id": tid, "confidence": 1.0, "source": "metadata"} for tid in tag_ids]
-    if gt_values:
-        gt_stmt = pg_insert(GalleryTag).values(gt_values).on_conflict_do_nothing()
-        await session.execute(gt_stmt)
 
 
 async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: int) -> dict:

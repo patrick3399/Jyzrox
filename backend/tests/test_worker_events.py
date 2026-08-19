@@ -674,7 +674,7 @@ class TestImporterJobEmitsEvent:
                 patch("worker.importer.create_library_symlink", AsyncMock()),
                 patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
                 patch("worker.importer.upsert_tag_translations", AsyncMock()),
-                patch("worker.importer._upsert_tags", AsyncMock()),
+                patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
                 patch("plugins.registry.plugin_registry") as mock_registry,
                 patch("core.events.emit_safe", mock_emit),
                 patch.dict("os.environ", {}),
@@ -733,7 +733,7 @@ class TestImporterJobEmitsEvent:
                 patch("worker.importer.create_library_symlink", AsyncMock()),
                 patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
                 patch("worker.importer.upsert_tag_translations", AsyncMock()),
-                patch("worker.importer._upsert_tags", AsyncMock()),
+                patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
                 patch("plugins.registry.plugin_registry") as mock_registry,
                 patch("core.events.emit_safe", AsyncMock(side_effect=RuntimeError("bus error"))),
             ):

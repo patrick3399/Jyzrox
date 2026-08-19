@@ -35,10 +35,10 @@ from worker.importer import (
     _build_gallery,
     _extract_tags,
     _normalize_tags,
-    _upsert_tags,
     batch_import_job,
     import_job,
     local_import_job,
+    upsert_metadata_gallery_tags,
 )
 from worker.liveness import (
     clear_run_marker,
@@ -1182,7 +1182,7 @@ __all__ = [
     "_extract_tags",
     "_normalize_tags",
     "_build_gallery",
-    "_upsert_tags",
+    "upsert_metadata_gallery_tags",
     "_sha256",
     "compute_job_key",
     "enqueue_download_job",

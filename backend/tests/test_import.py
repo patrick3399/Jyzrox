@@ -565,7 +565,7 @@ class TestImportJob:
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer._upsert_tags", AsyncMock()),
+            patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
             patch("shutil.rmtree"),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -643,7 +643,7 @@ class TestImportJob:
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer._upsert_tags", AsyncMock()),
+            patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
             patch("shutil.rmtree"),
         ):
             result = await import_job(ctx, str(gallery_dir), source_url=test_url)
@@ -696,7 +696,7 @@ class TestImportJob:
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer._upsert_tags", AsyncMock()),
+            patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
             patch("worker.importer.settings") as mock_settings,
             patch("shutil.rmtree"),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
@@ -755,7 +755,7 @@ class TestImportJob:
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer._upsert_tags", AsyncMock()),
+            patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
             patch("shutil.rmtree"),
         ):
             result = await import_job(ctx, str(gallery_dir), user_id=5)
@@ -814,7 +814,7 @@ class TestImportJob:
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
             patch("plugins.registry.plugin_registry.get_parser", return_value=None),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-            patch("worker.importer._upsert_tags", AsyncMock()),
+            patch("worker.importer.upsert_metadata_gallery_tags", AsyncMock()),
             patch("shutil.rmtree"),
         ):
             result = await import_job(ctx, str(gallery_dir))

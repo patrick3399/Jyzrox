@@ -24,6 +24,50 @@ def parse_tag_strings(tags: list[str]) -> list[tuple[str, str]]:
     return result
 
 
+async def upsert_metadata_gallery_tags(session, gallery_id: int, tags: list[str]) -> None:
+    """Write source-metadata tags as gallery_tags rows for one gallery.
+
+    ``galleries.tags_array`` is a denormalised view of these rows —
+    :func:`rebuild_gallery_tags_array` regenerates it from them and will happily
+    write an empty array when they are missing. Any writer that sets tags_array
+    must therefore write the junction rows in the same transaction, or the next
+    rebuild silently discards the metadata (HR-008).
+
+    Does not commit; callers own the transaction.
+    """
+    if not tags:
+        return
+
+    # Deduplicate first so a single statement never carries conflicting rows.
+    seen: set[tuple[str, str]] = set()
+    tag_values: list[dict] = []
+    for tag_str in tags:
+        if ":" in tag_str:
+            ns, name = tag_str.split(":", 1)
+        else:
+            ns, name = "general", tag_str
+        key = (ns, name)
+        if key not in seen:
+            seen.add(key)
+            tag_values.append({"namespace": ns, "name": name, "count": 1})
+
+    tag_stmt = (
+        pg_insert(Tag)
+        .values(tag_values)
+        .on_conflict_do_update(
+            index_elements=["namespace", "name"],
+            set_={"count": Tag.count + 1},
+        )
+        .returning(Tag.id)
+    )
+    tag_ids = (await session.execute(tag_stmt)).scalars().all()
+
+    gt_values = [{"gallery_id": gallery_id, "tag_id": tid, "confidence": 1.0, "source": "metadata"} for tid in tag_ids]
+    if gt_values:
+        gt_stmt = pg_insert(GalleryTag).values(gt_values).on_conflict_do_nothing()
+        await session.execute(gt_stmt)
+
+
 async def rebuild_gallery_tags_array(session, gallery_id: int) -> list[str]:
     """
     Rebuild galleries.tags_array from gallery_tags join tags (single source of truth).

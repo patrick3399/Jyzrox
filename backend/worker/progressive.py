@@ -25,6 +25,7 @@ from services.cas import (
     thumb_dir,
 )
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
+from services.tag_helpers import upsert_metadata_gallery_tags
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
@@ -417,6 +418,12 @@ class ProgressiveImporter:
             )
             self.gallery_id = (await session.execute(stmt)).scalar_one()
 
+            # tags_array above is a denormalised view of gallery_tags, and
+            # rebuild_gallery_tags_array() regenerates it from those rows —
+            # writing only the array leaves the next rebuild free to overwrite
+            # it with nothing (HR-008).
+            await upsert_metadata_gallery_tags(session, self.gallery_id, import_data.tags)
+
             # Link gallery_id to the DownloadJob
             if self.db_job_id:
                 from db.models import DownloadJob
@@ -544,6 +551,12 @@ class ProgressiveImporter:
                 .returning(Gallery.id)
             )
             self.gallery_id = (await session.execute(stmt)).scalar_one()
+
+            # tags_array above is a denormalised view of gallery_tags, and
+            # rebuild_gallery_tags_array() regenerates it from those rows —
+            # writing only the array leaves the next rebuild free to overwrite
+            # it with nothing (HR-008).
+            await upsert_metadata_gallery_tags(session, self.gallery_id, data.tags)
 
             if self.db_job_id:
                 from db.models import DownloadJob
