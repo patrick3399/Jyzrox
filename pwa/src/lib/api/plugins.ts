@@ -17,28 +17,3 @@ export const processing = {
       body: JSON.stringify(data),
     }),
 }
-
-export const training = {
-  listLoras: () =>
-    apiFetch<{
-      loras: Array<{
-        id: number
-        dataset_id: number | null
-        name: string
-        file_size: number
-        sha256: string
-        trigger_words: string[]
-        training_params: Record<string, unknown>
-        created_at: string
-      }>
-    }>('/api/training/loras'),
-  uploadLora: (form: FormData) =>
-    apiFetch<{ id: number; name: string }>('/api/training/loras', { method: 'POST', body: form }),
-  deleteLora: (id: number) =>
-    apiFetch<{ status: string }>(`/api/training/loras/${id}`, { method: 'DELETE' }),
-  importComfy: (form: FormData) =>
-    apiFetch<{ status: string; gallery_id: number; image_id: number }>('/api/training/comfyui/import', {
-      method: 'POST',
-      body: form,
-    }),
-}

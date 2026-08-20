@@ -28,7 +28,6 @@ import {
   ListTodo,
   FolderHeart,
   Database,
-  BrainCircuit,
   ChartNoAxesColumnIncreasing,
 } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
@@ -144,16 +143,6 @@ export const PAGE_REGISTRY: PageDef[] = [
     labelKey: 'nav.datasets',
     descKey: 'dashboard.quickLinks.datasetsDesc',
     icon: Database,
-    nav: false,
-    dashboard: true,
-    sidebar: true,
-    minRole: 'member',
-  },
-  {
-    href: '/training',
-    labelKey: 'nav.training',
-    descKey: 'dashboard.quickLinks.trainingDesc',
-    icon: BrainCircuit,
     nav: false,
     dashboard: true,
     sidebar: true,

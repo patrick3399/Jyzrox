@@ -19,7 +19,7 @@ import { tokens } from './tokens'
 import { exportApi } from './export'
 import { import_ } from './import'
 import { history, savedSearches } from './history'
-import { plugins, processing, training } from './plugins'
+import { plugins, processing } from './plugins'
 import { galleryManagement } from './galleryManagement'
 import { pixiv } from './pixiv'
 import { artists } from './artists'
@@ -51,7 +51,6 @@ export const api = {
   savedSearches,
   plugins,
   processing,
-  training,
   galleryManagement,
   pixiv,
   artists,

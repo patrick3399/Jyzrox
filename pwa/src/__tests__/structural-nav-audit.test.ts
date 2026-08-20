@@ -160,3 +160,10 @@ describe('structural-nav-audit — browser-native back gesture', () => {
     expect(hook).toContain('!enabled || !isStandaloneApp()')
   })
 })
+
+describe('structural-nav-audit — AI subsystem removal', () => {
+  it('does not register a training page', async () => {
+    const { PAGE_REGISTRY } = await import('@/lib/pageRegistry')
+    expect(PAGE_REGISTRY.find((page) => page.href === '/training')).toBeUndefined()
+  })
+})
