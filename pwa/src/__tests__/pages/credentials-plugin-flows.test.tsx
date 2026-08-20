@@ -78,7 +78,6 @@ const fanboxPlugin: PluginInfo = {
   credential_schema: [],
   credential_flows: [fanboxFlow],
   has_browse: false,
-  has_process: false,
   browse_schema: null,
   credential_configured: false,
   enabled: true,

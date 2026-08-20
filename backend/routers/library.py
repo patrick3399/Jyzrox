@@ -532,9 +532,9 @@ def _i_browse(img: Image) -> dict:
 
 
 async def _apply_image_filters(
-    stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None, favorited=None
+    stmt, *, source, gallery_id, auth, db, category=None, favorited=None
 ):
-    """Apply common image browser filters (tags, source, category, blocked tags, gallery access)."""
+    """Apply common image browser filters (source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
     stmt = stmt.where(Image.visibility == "active")
 
@@ -552,18 +552,13 @@ async def _apply_image_filters(
             stmt = stmt.where(or_(Gallery.category.is_(None), Gallery.category == ""))
         else:
             stmt = stmt.where(Gallery.category == category)
-    if tags:
-        stmt = stmt.where(Image.tags_array.contains(cast(tags, ARRAY(Text))))
-    if exclude_tags:
-        stmt = stmt.where(not_(Image.tags_array.overlap(cast(exclude_tags, ARRAY(Text)))))
-
     # Blocked tags exclusion
     blocked_rows = (
         await db.execute(select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == auth["user_id"]))
     ).all()
     if blocked_rows:
         blocked_patterns = [f"{ns}:{name}" for ns, name in blocked_rows]
-        stmt = stmt.where(not_(Image.tags_array.overlap(cast(blocked_patterns, ARRAY(Text)))))
+        stmt = stmt.where(not_(Gallery.tags_array.overlap(cast(blocked_patterns, ARRAY(Text)))))
 
     if favorited:
         stmt = stmt.where(
@@ -580,8 +575,6 @@ async def _apply_image_filters(
 
 @router.get("/images/timeline_percentiles")
 async def image_timeline_percentiles(
-    tags: list[str] = Query(default=[]),
-    exclude_tags: list[str] = Query(default=[]),
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
     gallery_id: int | None = None,
@@ -600,8 +593,6 @@ async def image_timeline_percentiles(
     base = select(Image.added_at).join(Gallery, Image.gallery_id == Gallery.id)
     base = await _apply_image_filters(
         base,
-        tags=tags,
-        exclude_tags=exclude_tags,
         source=source,
         gallery_id=gallery_id,
         auth=auth,
@@ -627,8 +618,6 @@ async def image_timeline_percentiles(
 
 @router.get("/images/time_range")
 async def image_time_range(
-    tags: list[str] = Query(default=[]),
-    exclude_tags: list[str] = Query(default=[]),
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
     gallery_id: int | None = None,
@@ -640,8 +629,6 @@ async def image_time_range(
     stmt = select(func.min(Image.added_at), func.max(Image.added_at)).join(Gallery, Image.gallery_id == Gallery.id)
     stmt = await _apply_image_filters(
         stmt,
-        tags=tags,
-        exclude_tags=exclude_tags,
         source=source,
         gallery_id=gallery_id,
         auth=auth,
@@ -658,8 +645,6 @@ async def image_time_range(
 
 @router.get("/images")
 async def browse_images(
-    tags: list[str] = Query(default=[]),
-    exclude_tags: list[str] = Query(default=[]),
     cursor: str | None = None,
     jump_at: str | None = None,
     limit: int = Query(default=40, le=100),
@@ -682,8 +667,6 @@ async def browse_images(
     )
     stmt = await _apply_image_filters(
         stmt,
-        tags=tags,
-        exclude_tags=exclude_tags,
         source=source,
         gallery_id=gallery_id,
         auth=auth,

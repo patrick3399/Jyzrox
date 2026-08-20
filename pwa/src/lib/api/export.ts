@@ -7,12 +7,8 @@ export const exportApi = {
   datasetUrl: (
     datasetId: number,
     options: {
-      preset: 'kohya' | 'ai_toolkit'
       trigger_word?: string
-      repeats: number
       validation_percent: number
-      resolution?: number
-      precompute_buckets: boolean
       include_metadata: boolean
     },
   ): string => `/api/export/dataset/${datasetId}${qs(options as Record<string, unknown>)}`,

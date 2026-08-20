@@ -254,7 +254,6 @@ class Image(Base):
     filename: Mapped[str | None] = mapped_column(Text)
     blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
     external_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     visibility: Mapped[str] = mapped_column(Text, default="active", server_default="active", nullable=False)
@@ -272,7 +271,6 @@ class Image(Base):
 
     gallery: Mapped[Gallery] = relationship(back_populates="images")
     blob: Mapped[Blob] = relationship()
-    image_tags: Mapped[list[ImageTag]] = relationship(back_populates="image", cascade="all, delete-orphan")
 
 
 class Tag(Base):
@@ -315,17 +313,6 @@ class GalleryTag(Base):
     source: Mapped[str] = mapped_column(Text, default="metadata")
 
     gallery: Mapped[Gallery] = relationship(back_populates="gallery_tags")
-    tag: Mapped[Tag] = relationship()
-
-
-class ImageTag(Base):
-    __tablename__ = "image_tags"
-
-    image_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
-    tag_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id"), primary_key=True)
-    confidence: Mapped[float | None] = mapped_column(Float)
-
-    image: Mapped[Image] = relationship(back_populates="image_tags")
     tag: Mapped[Tag] = relationship()
 
 
@@ -623,38 +610,6 @@ class DatasetImage(Base):
 
     dataset: Mapped[Dataset] = relationship(back_populates="dataset_images")
     image: Mapped[Image] = relationship()
-
-
-class LoraModel(Base):
-    __tablename__ = "lora_models"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    dataset_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True
-    )
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    file_path: Mapped[str] = mapped_column(Text, nullable=False)
-    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    sha256: Mapped[str] = mapped_column(Text, nullable=False)
-    trigger_words: Mapped[list[str]] = mapped_column(
-        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=list, server_default=text("'[]'::jsonb")
-    )
-    training_params: Mapped[dict] = mapped_column(
-        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-class GeneratedImageMetadata(Base):
-    __tablename__ = "generated_image_metadata"
-
-    image_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True
-    )
-    prompt_json: Mapped[dict | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
-    workflow_json: Mapped[dict | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
-    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class GalleryPermission(Base):

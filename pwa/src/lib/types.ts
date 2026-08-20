@@ -361,7 +361,6 @@ export interface SystemHealth {
 export interface SystemInfo {
   version: string
   eh_max_concurrency: number
-  tag_model_enabled: boolean
   versions: {
     jyzrox: string | null
     python: string | null
@@ -369,7 +368,6 @@ export interface SystemInfo {
     gallery_dl: string | null
     postgresql: string | null
     redis: string | null
-    onnxruntime: string | null
   }
 }
 
@@ -575,7 +573,6 @@ export interface Dataset {
   id: number
   name: string
   description: string | null
-  tag_threshold: number
   selection_spec: DatasetSelectionSpec
   member_count: number
   gallery_count: number
@@ -669,22 +666,11 @@ export interface PluginInfo {
   credential_schema: FieldDef[]
   credential_flows: CredentialFlow[]
   has_browse: boolean
-  has_process: boolean
   browse_schema: BrowseSchema | null
   credential_configured: boolean
   enabled: boolean
 }
 
-export interface PluginServiceHealth {
-  online: boolean
-  service: string
-  version: string | null
-  gpu_name: string | null
-  vram_total_mb: number | null
-  vram_free_mb: number | null
-  models: string[]
-  error: string | null
-}
 
 // ── Pixiv Types ──────────────────────────────────────────────────────
 

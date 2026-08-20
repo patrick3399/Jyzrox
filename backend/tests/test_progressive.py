@@ -1328,7 +1328,6 @@ class TestProgressiveImporterImportFile:
         from worker.progressive import ProgressiveImporter
 
         monkeypatch.setattr(progressive_mod, "pg_insert", sqlite_insert)
-        monkeypatch.setattr(progressive_mod.Image.__table__.c.tags_array, "default", None)
 
         gallery_id = await _insert_gallery(db_session, source="pixiv", source_id="123", pages=1)
         old_sha = "aa" + "0" * 62
@@ -1393,7 +1392,6 @@ class TestProgressiveImporterImportFile:
         from worker.progressive import ProgressiveImporter
 
         monkeypatch.setattr(progressive_mod, "pg_insert", sqlite_insert)
-        monkeypatch.setattr(progressive_mod.Image.__table__.c.tags_array, "default", None)
 
         gallery_id = await _insert_gallery(db_session, source="pixiv", source_id="456", pages=0)
         old_sha = "cc" + "0" * 62
@@ -1702,7 +1700,6 @@ class TestProgressiveImporterSymlinkGuard:
         from worker.progressive import ProgressiveImporter
 
         monkeypatch.setattr(progressive_mod, "pg_insert", sqlite_insert)
-        monkeypatch.setattr(progressive_mod.Image.__table__.c.tags_array, "default", None)
 
         gallery_id = await _insert_gallery(db_session, source_id="symlink_ok")
 

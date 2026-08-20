@@ -18,7 +18,6 @@ const VERSION_LABELS: Record<string, string> = {
   nextjs: 'Next.js',
   postgresql: 'PostgreSQL',
   redis: 'Redis',
-  onnxruntime: 'ONNX Runtime',
 }
 
 function versionLabel(key: string): string {
@@ -189,7 +188,6 @@ export default function SystemSettingsPage() {
                       gallery_dl: systemInfo.versions.gallery_dl,
                       postgresql: systemInfo.versions.postgresql,
                       redis: systemInfo.versions.redis,
-                      onnxruntime: systemInfo.versions.onnxruntime,
                     })
                       .filter(([, v]) => v !== null)
                       .map(([key, value]) => (
@@ -215,21 +213,10 @@ export default function SystemSettingsPage() {
                       label: t('settings.ehMaxConcurrency'),
                       value: String(systemInfo.eh_max_concurrency),
                     },
-                    {
-                      label: t('settings.aiTagging'),
-                      value: systemInfo.tag_model_enabled
-                        ? t('settings.enabled')
-                        : t('settings.disabled'),
-                      valueClass: systemInfo.tag_model_enabled
-                        ? 'text-green-400'
-                        : 'text-vault-text-muted',
-                    },
-                  ].map(({ label, value, valueClass }) => (
+                  ].map(({ label, value }) => (
                     <div key={label} className="flex justify-between items-center px-3 py-2">
                       <span className="text-sm text-vault-text-muted">{label}</span>
-                      <span
-                        className={`text-sm font-medium ${valueClass ?? 'text-vault-text-secondary'}`}
-                      >
+                      <span className="text-sm font-medium text-vault-text-secondary">
                         {value}
                       </span>
                     </div>

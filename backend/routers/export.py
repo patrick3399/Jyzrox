@@ -310,8 +310,6 @@ async def export_kohya(
 
             # Combine gallery tags and specific image tags
             all_tags = set(gallery_tags)
-            if img.tags_array:
-                all_tags.update(img.tags_array)
 
             base, _ = os.path.splitext(arcname)
             tag_string = ", ".join(_caption_tags(all_tags, excluded, underscores_to_spaces))

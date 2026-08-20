@@ -167,9 +167,6 @@ async def test_merge_copies_references_trashes_sources_and_old_route_is_404(clie
         text("INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) VALUES (102, 301, 0.8, 'metadata')")
     )
     await db_session.execute(
-        text("INSERT INTO image_tags (image_id, tag_id, confidence) VALUES (203, 301, 0.7)")
-    )
-    await db_session.execute(
         text("INSERT INTO collections (id, user_id, name) VALUES (401, 1, 'Merged collection')")
     )
     await db_session.execute(

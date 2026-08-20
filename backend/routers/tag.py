@@ -19,7 +19,7 @@ from core.auth import has_gallery_write_access, require_auth, require_role
 from core.database import async_session, get_db
 from core.redis_client import get_redis
 from core.utils import escape_like
-from db.models import BlockedTag, Gallery, GalleryTag, ImageTag, Tag, TagAlias, TagImplication, TagTranslation
+from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
 
 _s2twp = OpenCC("s2twp")
 _t2s = OpenCC("t2s")
@@ -1033,7 +1033,7 @@ async def delete_tag(tag_id: int, auth: dict = Depends(_admin)):
     """
     Delete a single tag (Tag Health "delete" action).
 
-    Rejected with 409 if still referenced by gallery_tags or image_tags —
+    Rejected with 409 if still referenced by gallery_tags —
     Health-tab deletions target count==0 orphan tags, not in-use ones.
     On success, also removes tag_aliases pointing at it and any
     tag_implications it participates in.
@@ -1046,10 +1046,7 @@ async def delete_tag(tag_id: int, auth: dict = Depends(_admin)):
         gt_count = (
             await session.execute(select(func.count()).select_from(GalleryTag).where(GalleryTag.tag_id == tag_id))
         ).scalar()
-        it_count = (
-            await session.execute(select(func.count()).select_from(ImageTag).where(ImageTag.tag_id == tag_id))
-        ).scalar()
-        if gt_count or it_count:
+        if gt_count:
             raise HTTPException(status_code=409, detail="Tag is still in use")
 
         await session.execute(delete(TagAlias).where(TagAlias.canonical_id == tag_id))

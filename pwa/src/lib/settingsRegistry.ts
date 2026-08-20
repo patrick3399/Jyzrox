@@ -13,7 +13,7 @@ import {
   Gauge,
   Wrench,
   ScrollText,
-  Bot,
+  Tags,
   CalendarClock,
 } from 'lucide-react'
 import { hasRole } from '@/lib/pageRegistry'
@@ -136,10 +136,10 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
     group: 'admin',
   },
   {
-    slug: 'ai-tagging',
-    labelKey: 'settingsCategory.aiTagging',
-    descKey: 'settingsCategory.aiTaggingDesc',
-    icon: Bot,
+    slug: 'tag-database',
+    labelKey: 'settingsCategory.tagDatabase',
+    descKey: 'settingsCategory.tagDatabaseDesc',
+    icon: Tags,
     minRole: 'admin',
     group: 'admin',
   },

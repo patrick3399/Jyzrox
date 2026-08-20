@@ -11,7 +11,6 @@ Scale targets:
   galleries:    10,000
   images:       ~1,000,000 (50-200 per gallery)
   gallery_tags: ~100,000 (5-15 per gallery, deduplicated)
-  image_tags:   ~2,000,000 (1-3 per image)
   favorites:    ~1,000
   ratings:      ~2,000
 """
@@ -34,7 +33,6 @@ TAG_COUNT = 10_000
 BLOB_COUNT = 200_000
 IMAGES_PER_GALLERY_MIN = 50
 IMAGES_PER_GALLERY_MAX = 200
-IMAGE_TAGS_PER_IMAGE = 3  # average; actual 1-3
 GALLERY_TAGS_PER_GALLERY_MIN = 5
 GALLERY_TAGS_PER_GALLERY_MAX = 15
 FAVORITE_COUNT = 1_000
@@ -338,42 +336,6 @@ async def _phase_gallery_tags(
     return len(records)
 
 
-async def _phase_image_tags(conn: asyncpg.Connection) -> int:
-    """Assign 1-3 tags per image via COPY in batches."""
-    tag_ids: list[int] = [row["id"] for row in await conn.fetch("SELECT id FROM tags ORDER BY id")]
-    image_ids: list[int] = [row["id"] for row in await conn.fetch("SELECT id FROM images ORDER BY id")]
-
-    batch: list[tuple] = []
-    total = 0
-    batch_size = 200_000
-
-    for image_id in image_ids:
-        n_tags = random.randint(1, 3)
-        picked_ids = random.sample(tag_ids, k=min(n_tags, len(tag_ids)))
-        for tag_id in picked_ids:
-            confidence = round(random.uniform(0.3, 1.0), 4)
-            batch.append((image_id, tag_id, confidence))
-
-        if len(batch) >= batch_size:
-            await conn.copy_records_to_table(
-                "image_tags",
-                records=batch,
-                columns=["image_id", "tag_id", "confidence"],
-            )
-            total += len(batch)
-            batch.clear()
-
-    if batch:
-        await conn.copy_records_to_table(
-            "image_tags",
-            records=batch,
-            columns=["image_id", "tag_id", "confidence"],
-        )
-        total += len(batch)
-
-    return total
-
-
 async def _phase_user_data(conn: asyncpg.Connection, gallery_rows: list[tuple]) -> int:
     """Seed user_favorites and user_ratings for user_id=1."""
     gallery_ids = [g[0] for g in gallery_rows]
@@ -433,7 +395,6 @@ async def seed_all(dsn: str) -> dict[str, int]:
 
         await _timed("images", _phase_images(conn, gallery_rows, blob_shas))
         await _timed("gallery_tags", _phase_gallery_tags(conn, gallery_rows))
-        await _timed("image_tags", _phase_image_tags(conn))
         await _timed("user_data", _phase_user_data(conn, gallery_rows))
 
     finally:

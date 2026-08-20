@@ -93,14 +93,6 @@ async def _insert_image(db_session, gallery_id, page_num=1, filename="001.jpg"):
     return result.scalar()
 
 
-async def _insert_image_tag(db_session, image_id, tag_id):
-    await db_session.execute(
-        text("INSERT OR IGNORE INTO image_tags (image_id, tag_id, confidence) VALUES (:iid, :tid, 0.9)"),
-        {"iid": image_id, "tid": tag_id},
-    )
-    await db_session.commit()
-
-
 def _mock_redis_with_ignored(ignored_keys=None):
     """Return an AsyncMock redis client whose smembers() returns the given
     byte-encoded ignore keys (simulating real redis decode_responses=False)."""
@@ -473,16 +465,6 @@ class TestDeleteTag:
         # Confirm it was NOT deleted
         check = (await db_session.execute(text("SELECT id FROM tags WHERE id = :id"), {"id": tid})).scalar()
         assert check == tid
-
-    async def test_delete_tag_in_use_by_image_tags_returns_409(self, client, db_session):
-        """A tag still referenced by image_tags (but not gallery_tags) must be rejected with 409."""
-        gid = await _insert_gallery(db_session, source_id="del_tag_it")
-        tid = await _insert_tag(db_session, "general", "in_use_image_tag", count=1)
-        img_id = await _insert_image(db_session, gid)
-        await _insert_image_tag(db_session, img_id, tid)
-
-        resp = await client.delete(f"/api/tags/{tid}")
-        assert resp.status_code == 409
 
     async def test_delete_tag_success_removes_aliases_and_implications(self, client, db_session):
         """Deleting an unused tag must cascade-clean tag_aliases (canonical_id) and

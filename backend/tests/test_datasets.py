@@ -1,6 +1,6 @@
 """Regression tests for persistent AI training datasets."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 

@@ -83,14 +83,6 @@ export const tags = {
   removeBlocked: (id: number) =>
     apiFetch<{ status: string }>(`/api/tags/blocked/${id}`, { method: 'DELETE' }),
 
-  retag: (galleryId: number) =>
-    apiFetch<{ status: string; gallery_id: number }>(`/api/tags/retag/${galleryId}`, {
-      method: 'POST',
-    }),
-
-  retagAll: () =>
-    apiFetch<{ status: string; total: number }>('/api/tags/retag-all', { method: 'POST' }),
-
   importEhtag: () =>
     apiFetch<{ status: string; count: number }>('/api/tags/import-ehtag', { method: 'POST' }),
 
@@ -133,22 +125,6 @@ export const tags = {
     }),
 
   healthIgnored: () => apiFetch<{ keys: string[] }>('/api/tags/health/ignored'),
-
-  anomalies: (minDifference = 0.6) =>
-    apiFetch<{
-      anomalies: Array<{
-        gallery_id: number
-        gallery_title: string | null
-        tag_id: number
-        namespace: string
-        name: string
-        ai_confidence: number
-        metadata_confidence: number
-        difference: number
-        suggestion: 'review_ai_only' | 'review_metadata_only'
-      }>
-      total: number
-    }>(`/api/tags/anomalies${qs({ min_difference: minDifference })}`),
 
   deleteTag: (tagId: number) =>
     apiFetch<{ status: string }>(`/api/tags/${tagId}`, { method: 'DELETE' }),

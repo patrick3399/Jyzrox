@@ -20,7 +20,7 @@ export const datasets = {
 
   update: (
     id: number,
-    patch: { name?: string; description?: string | null; tag_threshold?: number },
+    patch: { name?: string; description?: string | null },
   ) =>
     apiFetch<{ status: string }>(`/api/datasets/${id}`, {
       method: 'PATCH',
@@ -72,9 +72,4 @@ export const datasets = {
       body: JSON.stringify(data),
     }),
 
-  generateCaptions: (id: number, engine: 'florence2' | 'joycaption') =>
-    apiFetch<{ status: string; job_id: string; engine: string }>(
-      `/api/datasets/${id}/captions/generate`,
-      { method: 'POST', body: JSON.stringify({ engine }) },
-    ),
 }

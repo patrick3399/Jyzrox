@@ -23,7 +23,6 @@ from db.models import (
     GallerySourceItem,
     GalleryTag,
     Image,
-    ImageTag,
     ReadProgress,
     UserFavorite,
     UserImageFavorite,
@@ -219,9 +218,6 @@ async def _copy_images(
     exact_count = 0
     similar_count = 0
 
-    existing_image_tags: dict[int, set[int]] = defaultdict(set)
-    for row in (await db.execute(select(ImageTag).where(ImageTag.image_id.in_([image.id for image in target_images] or [-1])))).scalars():
-        existing_image_tags[row.image_id].add(row.tag_id)
     existing_favorites = {
         (row.user_id, row.image_id)
         for row in (
@@ -251,11 +247,6 @@ async def _copy_images(
             .all()
         )
         source_ids = [image.id for image in source_images]
-        tags_by_image: dict[int, list[ImageTag]] = defaultdict(list)
-        for tag in (
-            await db.execute(select(ImageTag).where(ImageTag.image_id.in_(source_ids or [-1])))
-        ).scalars():
-            tags_by_image[tag.image_id].append(tag)
         favorites_by_image: dict[int, list[UserImageFavorite]] = defaultdict(list)
         for favorite in (
             await db.execute(select(UserImageFavorite).where(UserImageFavorite.image_id.in_(source_ids or [-1])))
@@ -308,7 +299,6 @@ async def _copy_images(
                     filename=source_image.filename,
                     blob_sha256=source_image.blob_sha256,
                     external_path=source_image.external_path,
-                    tags_array=list(source_image.tags_array or []),
                     added_at=source_image.added_at,
                     visibility=source_image.visibility,
                     source_item_id=mapped_source_item_key,
@@ -331,10 +321,6 @@ async def _copy_images(
                 exact_count += 1
 
             image_map[source_image.id] = target_image.id
-            for tag in tags_by_image[source_image.id]:
-                if tag.tag_id not in existing_image_tags[target_image.id]:
-                    db.add(ImageTag(image_id=target_image.id, tag_id=tag.tag_id, confidence=tag.confidence))
-                    existing_image_tags[target_image.id].add(tag.tag_id)
             for favorite in favorites_by_image[source_image.id]:
                 key = (favorite.user_id, target_image.id)
                 if key not in existing_favorites:

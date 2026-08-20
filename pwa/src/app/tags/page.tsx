@@ -11,72 +11,10 @@ import { useProfile } from '@/hooks/useProfile'
 import TagHealthPanel from '@/components/TagHealthPanel'
 import TagTranslationsPanel from '@/components/TagTranslationsPanel'
 
-function TagAnomaliesPanel() {
-  const [difference, setDifference] = useState(0.6)
-  const { data, isLoading } = useSWR(['tag-anomalies', difference], () =>
-    api.tags.anomalies(difference),
-  )
-  if (isLoading) return <p className="text-sm text-vault-text-muted">{t('common.loading')}</p>
-  return (
-    <section className="space-y-4">
-      <div className="flex items-center gap-3">
-        <label className="text-sm text-vault-text-muted">{t('tags.anomalies.minDifference')}</label>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.05"
-          value={difference}
-          onChange={(event) => setDifference(Number(event.target.value))}
-        />
-        <span className="font-mono text-sm">{difference.toFixed(2)}</span>
-      </div>
-      <div className="overflow-x-auto rounded-xl border border-vault-border">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-vault-card text-vault-text-muted">
-            <tr>
-              <th className="p-3">{t('tags.anomalies.gallery')}</th>
-              <th className="p-3">{t('tags.anomalies.tag')}</th>
-              <th className="p-3">{t('tags.anomalies.ai')}</th>
-              <th className="p-3">{t('tags.anomalies.metadata')}</th>
-              <th className="p-3">{t('tags.anomalies.suggestion')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data?.anomalies ?? []).map((item) => (
-              <tr
-                key={`${item.gallery_id}:${item.tag_id}`}
-                className="border-t border-vault-border"
-              >
-                <td className="p-3">
-                  #{item.gallery_id} {item.gallery_title}
-                </td>
-                <td className="p-3 font-mono">
-                  {item.namespace}:{item.name}
-                </td>
-                <td className="p-3">{item.ai_confidence.toFixed(2)}</td>
-                <td className="p-3">{item.metadata_confidence.toFixed(2)}</td>
-                <td className="p-3">
-                  {item.suggestion === 'review_ai_only'
-                    ? t('tags.anomalies.reviewAiOnly')
-                    : t('tags.anomalies.reviewMissingAi')}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!data?.anomalies.length && (
-        <p className="text-sm text-vault-text-muted">{t('tags.anomalies.empty')}</p>
-      )}
-    </section>
-  )
-}
-
 export default function TagsPage() {
   const { data: profile } = useProfile()
   const isAdmin = profile?.role === 'admin'
-  const [tab, setTab] = useState<'browse' | 'translations' | 'health' | 'anomalies'>('browse')
+  const [tab, setTab] = useState<'browse' | 'translations' | 'health'>('browse')
   const [search, setSearch] = useState('')
   const [nsFilter, setNsFilter] = useState('')
   const [page, setPage] = useState(0)
@@ -258,21 +196,12 @@ export default function TagsPage() {
             >
               {t('tags.tabHealth')}
             </button>
-            <button
-              type="button"
-              onClick={() => setTab('anomalies')}
-              className={`px-4 py-2 text-sm transition-colors ${tab === 'anomalies' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-            >
-              {t('tags.anomalies.tab')}
-            </button>
           </>
         )}
       </div>
 
       {isAdmin && tab === 'health' ? (
         <TagHealthPanel />
-      ) : isAdmin && tab === 'anomalies' ? (
-        <TagAnomaliesPanel />
       ) : tab === 'translations' ? (
         <TagTranslationsPanel isAdmin={isAdmin} />
       ) : (

@@ -11,12 +11,8 @@ import { t } from '@/lib/i18n'
 export default function ExportPage() {
   const { data, isLoading } = useSWR('export-datasets', () => api.datasets.list())
   const [datasetId, setDatasetId] = useState<number | null>(null)
-  const [preset, setPreset] = useState<'kohya' | 'ai_toolkit'>('kohya')
   const [triggerWord, setTriggerWord] = useState('')
-  const [repeats, setRepeats] = useState(10)
   const [validationPercent, setValidationPercent] = useState(10)
-  const [resolution, setResolution] = useState('1024')
-  const [precomputeBuckets, setPrecomputeBuckets] = useState(true)
   const [includeMetadata, setIncludeMetadata] = useState(true)
   const [exporting, setExporting] = useState(false)
 
@@ -33,12 +29,8 @@ export default function ExportPage() {
     if (!datasetId) return
     setExporting(true)
     const url = api.export.datasetUrl(datasetId, {
-      preset,
       trigger_word: triggerWord,
-      repeats,
       validation_percent: validationPercent,
-      resolution: resolution ? Number(resolution) : undefined,
-      precompute_buckets: precomputeBuckets,
       include_metadata: includeMetadata,
     })
     const anchor = document.createElement('a')
@@ -98,17 +90,6 @@ export default function ExportPage() {
           <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-5">
             <h2 className="font-semibold text-vault-text">{t('export.options')}</h2>
             <label className="block text-sm text-vault-text-secondary">
-              {t('export.preset')}
-              <select
-                value={preset}
-                onChange={(event) => setPreset(event.target.value as 'kohya' | 'ai_toolkit')}
-                className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
-              >
-                <option value="kohya">kohya_ss</option>
-                <option value="ai_toolkit">ai-toolkit (FLUX LoRA)</option>
-              </select>
-            </label>
-            <label className="block text-sm text-vault-text-secondary">
               {t('export.triggerWord')}
               <input
                 value={triggerWord}
@@ -118,52 +99,16 @@ export default function ExportPage() {
                 placeholder={selected?.name ?? ''}
               />
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-sm text-vault-text-secondary">
-                {t('export.repeats')}
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={repeats}
-                  onChange={(event) => setRepeats(Number(event.target.value))}
-                  className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
-                />
-              </label>
-              <label className="text-sm text-vault-text-secondary">
-                {t('export.validationPercent')}
-                <input
-                  type="number"
-                  min={0}
-                  max={50}
-                  value={validationPercent}
-                  onChange={(event) => setValidationPercent(Number(event.target.value))}
-                  className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
-                />
-              </label>
-            </div>
-            <label className="block text-sm text-vault-text-secondary">
-              {t('export.resolution')}
-              <select
-                value={resolution}
-                onChange={(event) => setResolution(event.target.value)}
-                className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
-              >
-                <option value="">{t('export.originalResolution')}</option>
-                {[512, 768, 1024, 1536, 2048].map((value) => (
-                  <option key={value} value={value}>
-                    {value}px
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-vault-text-secondary">
+            <label className="text-sm text-vault-text-secondary">
+              {t('export.validationPercent')}
               <input
-                type="checkbox"
-                checked={precomputeBuckets}
-                onChange={(event) => setPrecomputeBuckets(event.target.checked)}
+                type="number"
+                min={0}
+                max={50}
+                value={validationPercent}
+                onChange={(event) => setValidationPercent(Number(event.target.value))}
+                className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
               />
-              {t('export.precomputeBuckets')}
             </label>
             <label className="flex items-center gap-2 text-sm text-vault-text-secondary">
               <input

@@ -121,22 +121,6 @@ export const settings = {
       trash_retention_days: number
     }>('/api/settings/features'),
 
-  getSwarmUi: () => apiFetch<{ url: string }>('/api/settings/swarmui'),
-
-  setSwarmUi: (url: string) =>
-    apiFetch<{ url: string }>('/api/settings/swarmui', {
-      method: 'PATCH',
-      body: JSON.stringify({ url }),
-    }),
-
-  getCaptioner: () => apiFetch<{ url: string }>('/api/settings/captioner'),
-
-  setCaptioner: (url: string) =>
-    apiFetch<{ url: string }>('/api/settings/captioner', {
-      method: 'PATCH',
-      body: JSON.stringify({ url }),
-    }),
-
   setFeature: (feature: string, enabled: boolean) =>
     apiFetch<{ feature: string; enabled: boolean }>(`/api/settings/features/${feature}`, {
       method: 'PATCH',

@@ -42,23 +42,15 @@ function ImageBrowserInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const tagsParam = searchParams.get('tags')
-  const excludeParam = searchParams.get('exclude_tags')
 
   const sourceParam = searchParams.get('source') ?? ''
   const categoryParam = searchParams.get('category') ?? ''
   const favoritedParam = searchParams.get('favorited')
 
-  const tags = useMemo(() => (tagsParam ? tagsParam.split(',').filter(Boolean) : []), [tagsParam])
-  const excludeTags = useMemo(
-    () => (excludeParam ? excludeParam.split(',').filter(Boolean) : []),
-    [excludeParam],
-  )
 
   const [sourceFilter, setSourceFilter] = useState(sourceParam)
   const [categoryFilter, setCategoryFilter] = useState(categoryParam)
   const [favoritedFilter, setFavoritedFilter] = useState(favoritedParam !== 'false')
-  const [tagInput, setTagInput] = useState('')
   const [jumpAt, setJumpAt] = useState<string | undefined>(undefined)
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
@@ -122,17 +114,15 @@ function ImageBrowserInner() {
   // Reset jumpAt when filters change
   useEffect(() => {
     setJumpAt(undefined)
-  }, [sourceFilter, categoryFilter, tags, excludeTags, favoritedFilter])
+  }, [sourceFilter, categoryFilter, favoritedFilter])
 
   const filterParams = useMemo(
     () => ({
-      tags: tags.length > 0 ? tags : undefined,
-      exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
       source: sourceFilter || undefined,
       category: categoryFilter || undefined,
       favorited: favoritedFilter || undefined,
     }),
-    [tags, excludeTags, sourceFilter, categoryFilter, favoritedFilter],
+    [sourceFilter, categoryFilter, favoritedFilter],
   )
 
   const { minAt, maxAt } = useTimeRange(filterParams)
@@ -159,30 +149,6 @@ function ImageBrowserInner() {
     if (img.width && img.height && img.height > 0) return img.width / img.height
     return 0.7 // default portrait ratio
   }, [])
-
-  const handleAddTag = useCallback(() => {
-    const tag = tagInput.trim()
-    if (!tag || tags.includes(tag)) return
-    const newTags = [...tags, tag]
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('tags', newTags.join(','))
-    router.replace(`/images?${params.toString()}`)
-    setTagInput('')
-  }, [tagInput, tags, searchParams, router])
-
-  const handleRemoveTag = useCallback(
-    (tag: string) => {
-      const newTags = tags.filter((tg) => tg !== tag)
-      const params = new URLSearchParams(searchParams.toString())
-      if (newTags.length > 0) {
-        params.set('tags', newTags.join(','))
-      } else {
-        params.delete('tags')
-      }
-      router.replace(`/images?${params.toString()}`)
-    },
-    [tags, searchParams, router],
-  )
 
   const handleImageClick = useCallback(
     (img: BrowseImage) => {
@@ -470,38 +436,6 @@ function ImageBrowserInner() {
             />
             {favoritedFilter ? t('images.favoritesOnly') : t('common.all')}
           </button>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddTag()
-              }}
-              placeholder={t('images.filterByTags')}
-              className="bg-vault-input border border-vault-border rounded px-3 py-1.5 text-sm text-vault-text placeholder:text-vault-text-secondary focus:outline-none focus:border-vault-accent"
-            />
-            <button
-              onClick={handleAddTag}
-              className="bg-vault-accent text-white rounded px-3 py-1.5 text-sm hover:bg-vault-accent/90 transition-colors"
-            >
-              {t('common.add')}
-            </button>
-          </div>
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-1 bg-vault-accent/10 text-vault-accent rounded-full px-3 py-1 text-xs"
-            >
-              {tag}
-              <button
-                onClick={() => handleRemoveTag(tag)}
-                className="hover:text-red-400 transition-colors ml-1"
-              >
-                ×
-              </button>
-            </span>
-          ))}
         </div>
 
         {/* Grid */}

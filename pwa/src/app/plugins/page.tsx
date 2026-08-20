@@ -1,19 +1,17 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Puzzle, Check, X, Download, Sparkles, Cpu } from 'lucide-react'
+import { Puzzle, Check, X, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import type { PluginInfo } from '@/lib/types'
-import type { PluginServiceHealth } from '@/lib/types'
 
 export default function PluginsPage() {
   useLocale()
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [health, setHealth] = useState<Record<string, PluginServiceHealth>>({})
 
   useEffect(() => {
     api.plugins
@@ -21,13 +19,6 @@ export default function PluginsPage() {
       .then((res) => setPlugins(res.plugins))
       .catch(() => toast.error(t('plugins.loadFailed')))
       .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    api.plugins
-      .health()
-      .then((result) => setHealth(result.services))
-      .catch(() => {})
   }, [])
 
   return (
@@ -91,40 +82,8 @@ export default function PluginsPage() {
                     {t('plugins.fallback')}
                   </span>
                 )}
-                {plugin.has_process && (
-                  <span className="flex items-center gap-1 text-vault-accent">
-                    <Sparkles size={12} />
-                    {t('plugins.hasProcess')}
-                  </span>
-                )}
               </div>
 
-              {plugin.has_process && health[plugin.source_id] && (
-                <div className="mt-3 rounded-lg border border-vault-border bg-vault-input p-3 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full ${health[plugin.source_id].online ? 'bg-green-400' : 'bg-red-400'}`}
-                    />
-                    <span className="font-medium text-vault-text">
-                      {health[plugin.source_id].online
-                        ? t('plugins.serviceOnline')
-                        : t('plugins.serviceOffline')}
-                    </span>
-                  </div>
-                  {health[plugin.source_id].gpu_name && (
-                    <p className="mt-2 flex items-center gap-1 text-vault-text-muted">
-                      <Cpu size={12} />
-                      {health[plugin.source_id].gpu_name}
-                      {health[plugin.source_id].vram_total_mb
-                        ? ` · ${health[plugin.source_id].vram_total_mb} MB VRAM`
-                        : ''}
-                    </p>
-                  )}
-                  {!health[plugin.source_id].online && health[plugin.source_id].error && (
-                    <p className="mt-2 break-words text-red-400">{health[plugin.source_id].error}</p>
-                  )}
-                </div>
-              )}
 
               {/* Credential status */}
               {plugin.credential_schema.length > 0 && (

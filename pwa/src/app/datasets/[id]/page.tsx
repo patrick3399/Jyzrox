@@ -10,7 +10,6 @@ import {
   Plus,
   RotateCcw,
   SlidersHorizontal,
-  Sparkles,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -65,7 +64,6 @@ function DatasetDetailInner() {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [tagThreshold, setTagThreshold] = useState('0.35')
   const [showAdd, setShowAdd] = useState(false)
   const [galleryIds, setGalleryIds] = useState('')
   const [collectionIds, setCollectionIds] = useState('')
@@ -73,7 +71,6 @@ function DatasetDetailInner() {
   const [tagQuery, setTagQuery] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [showCaptions, setShowCaptions] = useState(false)
-  const [captionEngine, setCaptionEngine] = useState<'florence2' | 'joycaption'>('florence2')
   const [triggerWord, setTriggerWord] = useState('')
   const [captionSearch, setCaptionSearch] = useState('')
   const [captionReplacement, setCaptionReplacement] = useState('')
@@ -87,7 +84,6 @@ function DatasetDetailInner() {
   const startEditing = () => {
     setName(data?.name ?? '')
     setDescription(data?.description ?? '')
-    setTagThreshold(String(data?.tag_threshold ?? 0.35))
     setEditing(true)
   }
 
@@ -100,7 +96,6 @@ function DatasetDetailInner() {
         data: {
           name: name.trim(),
           description: description.trim() || null,
-          tag_threshold: Math.max(0, Math.min(1, Number(tagThreshold))),
         },
       })
       await mutate()
@@ -199,18 +194,6 @@ function DatasetDetailInner() {
     }
   }
 
-  const handleGenerateCaptions = async () => {
-    setBusy(true)
-    try {
-      await api.datasets.generateCaptions(id, captionEngine)
-      toast.success(t('datasets.captionsQueued'))
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('common.error'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const handleCaptionBatch = async (
     operation: 'prepend_trigger' | 'search_replace',
   ) => {
@@ -256,18 +239,6 @@ function DatasetDetailInner() {
                 rows={2}
                 placeholder={t('datasets.descriptionPlaceholder')}
               />
-              <label className="block text-sm text-vault-text-secondary">
-                {t('datasets.tagThreshold')}
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={tagThreshold}
-                  onChange={(event) => setTagThreshold(event.target.value)}
-                  className="ml-2 w-24 rounded border border-vault-border bg-vault-input px-2 py-1 text-vault-text"
-                />
-              </label>
               <div className="flex gap-2">
                 <button
                   onClick={saveMetadata}
@@ -385,27 +356,6 @@ function DatasetDetailInner() {
           <div>
             <h2 className="font-semibold text-vault-text">{t('datasets.captionReview')}</h2>
             <p className="mt-1 text-sm text-vault-text-secondary">{t('datasets.captionReviewHint')}</p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-            <select
-              value={captionEngine}
-              onChange={(event) =>
-                setCaptionEngine(event.target.value as 'florence2' | 'joycaption')
-              }
-              className="rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
-            >
-              <option value="florence2">Florence-2</option>
-              <option value="joycaption">JoyCaption</option>
-            </select>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleGenerateCaptions}
-              className="flex items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              <Sparkles size={16} />
-              {t('datasets.generateCaptions')}
-            </button>
           </div>
           <div className="grid gap-2 md:grid-cols-[1fr_auto]">
             <input

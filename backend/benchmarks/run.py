@@ -19,7 +19,6 @@ from pathlib import Path
 import asyncpg
 from sqlalchemy import Text, cast, desc, select, text
 from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # ---------------------------------------------------------------------------
@@ -36,7 +35,6 @@ from db.models import (  # noqa: E402
     Gallery,
     GalleryTag,
     Image,
-    ImageTag,
     Tag,
     UserFavorite,
     UserRating,
@@ -127,7 +125,6 @@ async def setup_bench_db() -> str:
             CREATE INDEX IF NOT EXISTS idx_galleries_owner_added_at_id ON galleries (created_by_user_id, added_at DESC, id DESC) WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_tags_count ON tags (count DESC);
             CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
-            CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
             CREATE INDEX IF NOT EXISTS idx_galleries_source ON galleries (source, source_id);
             CREATE INDEX IF NOT EXISTS idx_galleries_visibility ON galleries (visibility);
             CREATE INDEX IF NOT EXISTS idx_galleries_created_by ON galleries (created_by_user_id) WHERE created_by_user_id IS NOT NULL;
@@ -468,39 +465,6 @@ async def bench_dedup_load_blobs(session: AsyncSession) -> BenchResult:
     return await _run_bench("dedup_load_blobs", "Worker Pressure", session, stmt)
 
 
-async def bench_tag_upsert_batch(session: AsyncSession) -> BenchResult:
-    """
-    Worker pressure: INSERT image_tags for 100 images x 3 tags each.
-    Uses INSERT ... ON CONFLICT DO NOTHING to simulate tagger output.
-    """
-    r = BenchResult(name="tag_upsert_batch", flow="Worker Pressure")
-
-    # Fetch stable image and tag IDs for the upsert input.
-    image_id_rows = (await session.execute(select(Image.id).order_by(Image.id).limit(100))).all()
-    tag_id_rows = (await session.execute(select(Tag.id).order_by(Tag.id).limit(3))).all()
-
-    image_ids = [row[0] for row in image_id_rows]
-    tag_ids = [row[0] for row in tag_id_rows]
-
-    upsert_stmt = (
-        pg_insert(ImageTag)
-        .values(
-            [{"image_id": img_id, "tag_id": tag_id, "confidence": 0.9} for img_id in image_ids for tag_id in tag_ids]
-        )
-        .on_conflict_do_nothing()
-    )
-
-    r.explain_plan = None  # INSERT EXPLAIN plans are not meaningful here
-
-    for _ in range(_BENCH_ITERATIONS):
-        t0 = time.perf_counter()
-        await session.execute(upsert_stmt)
-        await session.rollback()  # Roll back so data stays stable across iterations
-        r.times_ms.append((time.perf_counter() - t0) * 1000)
-
-    return r
-
-
 # ---------------------------------------------------------------------------
 # Summary table printer
 # ---------------------------------------------------------------------------
@@ -522,7 +486,6 @@ _ALL_BENCHMARKS = [
     bench_explorer_galleries_by_source,
     bench_explorer_gallery_images,
     bench_dedup_load_blobs,
-    bench_tag_upsert_batch,
 ]
 
 

@@ -93,7 +93,6 @@ CREATE TABLE IF NOT EXISTS images (
     filename        TEXT,
     blob_sha256     TEXT NOT NULL REFERENCES blobs(sha256),
     external_path   TEXT,
-    tags_array      TEXT[] DEFAULT '{}',
     caption         TEXT,
     visibility      TEXT NOT NULL DEFAULT 'active',
     source_item_id  TEXT,
@@ -137,13 +136,6 @@ CREATE TABLE IF NOT EXISTS gallery_tags (
     confidence      REAL DEFAULT 1.0,
     source          TEXT DEFAULT 'metadata',
     PRIMARY KEY (gallery_id, tag_id)
-);
-
-CREATE TABLE IF NOT EXISTS image_tags (
-    image_id        BIGINT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-    tag_id          BIGINT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-    confidence      REAL,
-    PRIMARY KEY (image_id, tag_id)
 );
 
 CREATE SEQUENCE IF NOT EXISTS download_admission_ticket_seq;
@@ -242,7 +234,6 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE INDEX IF NOT EXISTS idx_galleries_tags_gin ON galleries USING GIN (tags_array);
-CREATE INDEX IF NOT EXISTS idx_images_tags_gin    ON images    USING GIN (tags_array);
 CREATE INDEX IF NOT EXISTS idx_galleries_title_trgm ON galleries USING GIN (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_galleries_title_jpn_trgm ON galleries USING GIN (title_jpn gin_trgm_ops);
 
@@ -267,7 +258,6 @@ CREATE INDEX IF NOT EXISTS idx_tags_count ON tags (count DESC);
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags (name);
 
 CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
-CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_user_id ON download_jobs (user_id);
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS admission_key TEXT;
@@ -517,7 +507,6 @@ CREATE TABLE IF NOT EXISTS datasets (
     user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     description     TEXT,
-    tag_threshold   REAL NOT NULL DEFAULT 0.35,
     selection_spec  JSONB NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -536,27 +525,6 @@ CREATE TABLE IF NOT EXISTS dataset_images (
     CONSTRAINT ck_dataset_image_state CHECK (state IN ('included', 'excluded'))
 );
 CREATE INDEX IF NOT EXISTS ix_dataset_images_image_id ON dataset_images (image_id);
-
-CREATE TABLE IF NOT EXISTS lora_models (
-    id              BIGSERIAL PRIMARY KEY,
-    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    dataset_id      BIGINT REFERENCES datasets(id) ON DELETE SET NULL,
-    name            TEXT NOT NULL,
-    file_path       TEXT NOT NULL,
-    file_size       BIGINT NOT NULL,
-    sha256          TEXT NOT NULL,
-    trigger_words   JSONB NOT NULL DEFAULT '[]',
-    training_params JSONB NOT NULL DEFAULT '{}',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS ix_lora_models_user_created ON lora_models (user_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS generated_image_metadata (
-    image_id      BIGINT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
-    prompt_json   JSONB,
-    workflow_json JSONB,
-    imported_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
 CREATE TABLE IF NOT EXISTS gallery_permissions (
     gallery_id BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,

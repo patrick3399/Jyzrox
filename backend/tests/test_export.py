@@ -43,7 +43,6 @@ async def _insert_image(
     page_num: int = 1,
     filename: str = "001.jpg",
     file_path: str | None = None,
-    tags_array: str = "[]",
 ):
     """Insert a blob + image record.
 
@@ -72,15 +71,14 @@ async def _insert_image(
     )
     await db_session.execute(
         text(
-            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, tags_array) "
-            "VALUES (:gid, :pn, :fn, :sha, :tags)"
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
+            "VALUES (:gid, :pn, :fn, :sha)"
         ),
         {
             "gid": gallery_id,
             "pn": page_num,
             "fn": filename,
             "sha": sha,
-            "tags": tags_array,
         },
     )
     await db_session.commit()
@@ -144,7 +142,6 @@ class TestExportKohya:
                 page_num=1,
                 filename="page_001.jpg",
                 file_path=tmp_path,
-                tags_array='["artist:bob"]',
             )
 
             with patch("routers.export.async_session", db_session_factory):
@@ -233,7 +230,7 @@ class TestExportCaptionFormat:
     """Caption .txt files must strip namespaces, filter non-trainable
     namespaces, and be deterministically sorted — AIT-001."""
 
-    async def _export_caption(self, client, db_session, db_session_factory, gallery_tags, image_tags, query=""):
+    async def _export_caption(self, client, db_session, db_session_factory, gallery_tags, query=""):
         """Insert a one-image gallery and return the caption .txt content."""
         gid = await _insert_gallery(db_session, title=f"Caption {gallery_tags}", tags_array=gallery_tags)
 
@@ -248,7 +245,6 @@ class TestExportCaptionFormat:
                 page_num=1,
                 filename="page_001.jpg",
                 file_path=tmp_path,
-                tags_array=image_tags,
             )
             with patch("routers.export.async_session", db_session_factory):
                 resp = await client.get(f"/api/export/kohya/{gid}{query}")
@@ -272,8 +268,7 @@ class TestExportCaptionFormat:
             client,
             db_session,
             db_session_factory,
-            gallery_tags='["general:zebra", "character:alice"]',
-            image_tags='["artist:bob"]',
+            gallery_tags='["general:zebra", "character:alice", "artist:bob"]',
         )
         assert caption == "alice, bob, zebra"
 
@@ -287,7 +282,6 @@ class TestExportCaptionFormat:
             db_session,
             db_session_factory,
             gallery_tags='["rating:questionable", "language:japanese", "metadata:translated", "general:1girl"]',
-            image_tags="[]",
         )
         assert caption == "1girl"
 
@@ -298,7 +292,6 @@ class TestExportCaptionFormat:
             db_session,
             db_session_factory,
             gallery_tags='["rating:safe", "general:1girl"]',
-            image_tags="[]",
             query="?exclude_namespaces=",
         )
         assert caption == "1girl, safe"
@@ -310,7 +303,6 @@ class TestExportCaptionFormat:
             db_session,
             db_session_factory,
             gallery_tags='["general:long_hair"]',
-            image_tags="[]",
             query="?underscores_to_spaces=true",
         )
         assert caption == "long hair"
@@ -323,7 +315,6 @@ class TestExportCaptionFormat:
             db_session,
             db_session_factory,
             gallery_tags='["1girl", "general:1girl"]',
-            image_tags="[]",
         )
         assert caption == "1girl"
 

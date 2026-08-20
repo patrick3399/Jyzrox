@@ -489,7 +489,6 @@ _SQLITE_SCHEMA = [
         filename TEXT,
         blob_sha256 TEXT REFERENCES blobs(sha256),
         external_path TEXT,
-        tags_array TEXT DEFAULT '[]',
         caption TEXT,
         added_at TIMESTAMP,
         visibility TEXT DEFAULT 'active',
@@ -620,12 +619,6 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS image_tags (
-        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-        confidence REAL,
-        PRIMARY KEY (image_id, tag_id)
-    )
     """,
     """
     CREATE TABLE IF NOT EXISTS credentials (
@@ -769,7 +762,6 @@ _SQLITE_SCHEMA = [
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         description TEXT,
-        tag_threshold REAL NOT NULL DEFAULT 0.35,
         selection_spec TEXT NOT NULL DEFAULT '{}',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -789,26 +781,8 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS lora_models (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        dataset_id INTEGER REFERENCES datasets(id) ON DELETE SET NULL,
-        name TEXT NOT NULL,
-        file_path TEXT NOT NULL,
-        file_size INTEGER NOT NULL,
-        sha256 TEXT NOT NULL,
-        trigger_words TEXT NOT NULL DEFAULT '[]',
-        training_params TEXT NOT NULL DEFAULT '{}',
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
     """,
     """
-    CREATE TABLE IF NOT EXISTS generated_image_metadata (
-        image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
-        prompt_json TEXT,
-        workflow_json TEXT,
-        imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
     """,
     """
     CREATE TABLE IF NOT EXISTS gallery_permissions (
