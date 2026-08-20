@@ -36,7 +36,6 @@ from routers import (
     library,
     novels,
     opds,
-    process,
     queue_admin,
     rss,
     scheduled_tasks,
@@ -199,7 +198,6 @@ app.include_router(export.router, prefix="/api/export")
 app.include_router(external.router, prefix="/api/external/v1")
 app.include_router(history.router, prefix="/api/history")
 app.include_router(plugins_router.router, prefix="/api/plugins")
-app.include_router(process.router, prefix="/api/process")
 app.include_router(artists.router, prefix="/api/artists")
 app.include_router(collections.router, prefix="/api/collections")
 app.include_router(datasets.router, prefix="/api/datasets")

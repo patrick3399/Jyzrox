@@ -101,20 +101,3 @@ async def test_plugins_list_each_plugin_has_required_fields(client, db_session, 
     assert plugin["source_id"] == "test_source"
     assert plugin["name"] == "Test Plugin"
     assert plugin["enabled"] is True
-
-
-async def test_plugins_health_returns_processor_service_health(client, db_session):
-    await _insert_user(db_session)
-    meta = _make_plugin_meta("processor", "Processor")
-    processor = MagicMock()
-    processor.health = AsyncMock(
-        return_value=MagicMock(model_dump=MagicMock(return_value={"online": True, "service": "Processor"}))
-    )
-
-    with patch("routers.plugins.plugin_registry") as mock_registry:
-        mock_registry.list_plugins.return_value = [meta]
-        mock_registry.get_processor.return_value = processor
-        response = await client.get("/api/plugins/health")
-
-    assert response.status_code == 200
-    assert response.json()["services"]["processor"]["online"] is True

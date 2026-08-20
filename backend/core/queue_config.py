@@ -53,7 +53,6 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 # ─────────────────────────────────────────────────────────────────────────────
 # thumbnail_job               render            15       full-book thumbnails
 # thumbhash_backfill_job      render            10       batch maintenance
-# process_job                 render            15       remote image processing
 # ─────────────────────────────────────────────────────────────────────────────
 
 JOB_QUEUE_ROUTING: dict[str, str] = {
@@ -63,7 +62,6 @@ JOB_QUEUE_ROUTING: dict[str, str] = {
     # render — CPU-bound, lowest priority
     "thumbnail_job": QUEUE_RENDER,
     "thumbhash_backfill_job": QUEUE_RENDER,
-    "process_job": QUEUE_RENDER,
     "caption_job": QUEUE_RENDER,
     # ingest — import pipeline, must precede render
     "local_import_job": QUEUE_INGEST,

@@ -11,12 +11,9 @@ from plugins.base import (
     HasMeta,
     Parseable,
     Previewable,
-    Processable,
     Refreshable,
     SourcePlugin,
     Subscribable,
-    Taggable,
-    TaggerPlugin,
 )
 from plugins.models import PluginMeta, SiteInfo
 
@@ -28,7 +25,6 @@ class PluginRegistry:
         # Legacy ABC dicts (preserved for backward compatibility)
         self._sources: dict[str, SourcePlugin] = {}
         self._browsers: dict[str, BrowsePlugin] = {}
-        self._taggers: dict[str, TaggerPlugin] = {}
         self._fallback: SourcePlugin | None = None
 
         # Protocol capability tracking — maps source_id → specific plugin object
@@ -37,8 +33,6 @@ class PluginRegistry:
         self._browsable: dict[str, Any] = {}
         self._parseable: dict[str, Any] = {}
         self._credential_providers: dict[str, Any] = {}
-        self._taggable: dict[str, Any] = {}
-        self._processable: dict[str, Any] = {}
         self._previewable: dict[str, Any] = {}
         self._refreshable: dict[str, Any] = {}
         self._subscribable: dict[str, Any] = {}
@@ -99,9 +93,6 @@ class PluginRegistry:
         if isinstance(plugin, BrowsePlugin):
             self._claim(self._browsers, sid, plugin, "BrowsePlugin")
             logger.info("Registered browse plugin: %s", sid)
-        if isinstance(plugin, TaggerPlugin):
-            self._claim(self._taggers, sid, plugin, "TaggerPlugin")
-            logger.info("Registered tagger plugin: %s", sid)
 
         # Protocol capability probing — each maps sid → the specific plugin object
         if isinstance(plugin, HasMeta):
@@ -126,10 +117,6 @@ class PluginRegistry:
             self._claim(self._parseable, sid, plugin, "Parseable")
         if isinstance(plugin, CredentialProvider):
             self._claim(self._credential_providers, sid, plugin, "CredentialProvider")
-        if isinstance(plugin, Taggable):
-            self._claim(self._taggable, sid, plugin, "Taggable")
-        if isinstance(plugin, Processable):
-            self._claim(self._processable, sid, plugin, "Processable")
         if isinstance(plugin, Previewable):
             self._claim(self._previewable, sid, plugin, "Previewable")
         if isinstance(plugin, Refreshable):
@@ -152,9 +139,6 @@ class PluginRegistry:
 
     def get_browser(self, source_id: str) -> BrowsePlugin | None:
         return self._browsers.get(source_id)
-
-    def get_tagger(self, source_id: str) -> TaggerPlugin | None:
-        return self._taggers.get(source_id)
 
     def list_plugins(self) -> list[PluginMeta]:
         """Return metadata for every registered plugin (deduplicated by source_id)."""
@@ -286,9 +270,6 @@ class PluginRegistry:
 
     def get_downloader(self, source_id: str) -> Any:
         return self._downloadable.get(source_id)
-
-    def get_processor(self, source_id: str) -> Any:
-        return self._processable.get(source_id)
 
     def get_previewer(self, source_id: str) -> Any:
         return self._previewable.get(source_id)

@@ -12,7 +12,6 @@ async def init_plugins() -> None:
     from plugins.builtin.gallery_dl.source import GalleryDlPlugin
     from plugins.builtin.pixiv._browse import PixivBrowsePlugin
     from plugins.builtin.pixiv.source import PixivSourcePlugin
-    from plugins.builtin.swarmui.plugin import SwarmUiPlugin
 
     # Bundled custom extractors must reach the in-process gallery_dl.extractor
     # before any URL detection runs — module-sources only covers the download
@@ -29,4 +28,3 @@ async def init_plugins() -> None:
     # Pixiv native downloader — takes precedence over gallery-dl for pixiv.net URLs
     plugin_registry.register(PixivSourcePlugin())
     plugin_registry.register(PixivBrowsePlugin())
-    plugin_registry.register(SwarmUiPlugin())

@@ -121,14 +121,14 @@ async def test_event_bus_emit_stores_in_recent_list():
 
     with patch("core.redis_client.get_redis", return_value=mock_redis):
         bus = EventBus()
-        ev = Event(event_type=EventType.GALLERY_TAGGED)
+        ev = Event(event_type=EventType.GALLERY_DELETED)
         await bus.emit(ev)
 
     mock_pipe.lpush.assert_called_once()
     lpush_args = mock_pipe.lpush.call_args.args
     assert lpush_args[0] == EventBus.RECENT_KEY
     payload = json.loads(lpush_args[1])
-    assert payload["event_type"] == "gallery.tagged"
+    assert payload["event_type"] == "gallery.deleted"
     # ltrim is amortized — not called on every emit, only every 50th
     assert mock_pipe.ltrim.call_count == 0
 

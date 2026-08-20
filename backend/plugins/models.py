@@ -162,29 +162,3 @@ class BrowseSchema(BaseModel):
     supports_favorites: bool = False
     supports_popular: bool = False
     supports_toplist: bool = False
-
-
-class TagResult(BaseModel):
-    image_path: str
-    tags: list[str]
-    confidence: list[float] = []
-
-
-class ProcessResult(BaseModel):
-    status: Literal["done", "failed"]
-    output_path: str | None = None
-    width: int | None = None
-    height: int | None = None
-    metadata: dict = {}
-    error: str | None = None
-
-
-class ServiceHealth(BaseModel):
-    online: bool
-    service: str
-    version: str | None = None
-    gpu_name: str | None = None
-    vram_total_mb: int | None = None
-    vram_free_mb: int | None = None
-    models: list[str] = []
-    error: str | None = None

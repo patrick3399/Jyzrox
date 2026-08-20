@@ -17,11 +17,8 @@ from plugins.models import (
     GalleryMetadata,
     PluginMeta,
     PreviewData,
-    ProcessResult,
     RemoteMetadataResult,
     SearchResult,
-    ServiceHealth,
-    TagResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -85,22 +82,6 @@ class CredentialProvider(Protocol):
     def credential_flows(self) -> list[CredentialFlow]: ...
 
     async def verify_credential(self, credentials: dict) -> CredentialStatus: ...
-
-
-@runtime_checkable
-class Taggable(Protocol):
-    meta: PluginMeta
-
-    async def tag_images(self, image_paths: list[Path]) -> list[TagResult]: ...
-
-
-@runtime_checkable
-class Processable(Protocol):
-    meta: PluginMeta
-
-    async def process(self, input_path: Path, output_dir: Path, options: dict) -> ProcessResult: ...
-
-    async def health(self) -> ServiceHealth: ...
 
 
 @runtime_checkable
@@ -216,18 +197,4 @@ class BrowsePlugin(ABC):
         credentials: dict | None = None,
     ) -> tuple[bytes, str]:
         """Fetch image bytes and content-type for proxying."""
-        ...
-
-
-class TaggerPlugin(ABC):
-    """Plugin that tags images using AI/ML models.
-
-    # DEPRECATED — use Protocol interfaces above
-    """
-
-    meta: PluginMeta
-
-    @abstractmethod
-    async def tag_images(self, image_paths: list[Path]) -> list[TagResult]:
-        """Tag a list of images, returning one TagResult per image."""
         ...
