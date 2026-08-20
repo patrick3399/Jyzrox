@@ -1,117 +1,123 @@
-"""Regression tests for trainer-ready dataset exports."""
+"""Dataset export: stored bytes plus caption files, never a decode.
 
-import io
-import json
+HR-007: the previous builder opened every source image at full resolution to
+scale it, and a second time to probe bucket dimensions, on the process-wide
+default executor with no admission bound. Four concurrent 178 MP decodes
+measured 2578 MB anon against a 3 GB api limit. The export no longer decodes
+at all, so the test asserts that directly.
+"""
+
 import zipfile
-from pathlib import Path
-from unittest.mock import patch
 
-from PIL import Image as PILImage
-from sqlalchemy import text
+import PIL.Image as PILImage
+import pytest
+
+from services.dataset_export import (
+    DatasetExportImage,
+    DatasetExportOptions,
+    build_dataset_archive,
+    safe_component,
+)
 
 
-async def _seed_dataset(db_session, image_path: Path) -> int:
-    await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (1, 'exporter', 'x', 'admin')"
-        )
+def _record(tmp_path, image_id=1, name="page.jpg", tags=("artist:someone",), caption=None):
+    path = tmp_path / name
+    path.write_bytes(b"not a real jpeg, and it never gets decoded")
+    return DatasetExportImage(
+        image_id=image_id,
+        page_num=image_id,
+        filename=name,
+        sha256=f"{image_id:064x}",
+        path=path,
+        extension=".jpg",
+        gallery_source="ehentai",
+        gallery_source_id="123",
+        gallery_source_url="https://e-hentai.org/g/123/abc",
+        image_source_url=None,
+        tags=tags,
+        caption=caption,
     )
-    await db_session.execute(
-        text(
-            "INSERT INTO galleries "
-            "(id, source, source_id, title, pages, visibility, created_by_user_id, source_url, tags_array) "
-            "VALUES (7100, 'local', 'trainer', 'Trainer', 1, 'private', 1, "
-            "'https://example.test/gallery', '[\"character:alice\", \"style:anime\"]')"
-        )
+
+
+def _options(**overrides):
+    base = {
+        "dataset_name": "Test Dataset",
+        "trigger_word": "",
+        "validation_percent": 0,
+        "include_metadata": True,
+    }
+    base.update(overrides)
+    return DatasetExportOptions(**base)
+
+
+def test_dataset_export_never_opens_a_source_image(tmp_path, monkeypatch):
+    """The archive must be built without decoding anything (HR-007)."""
+
+    def _fail_open(*args, **kwargs):
+        raise AssertionError("dataset export opened an image")
+
+    monkeypatch.setattr(PILImage, "open", _fail_open)
+
+    archive_path = build_dataset_archive([_record(tmp_path)], _options())
+
+    with zipfile.ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+    assert any(name.endswith(".jpg") for name in names)
+
+
+def test_dataset_export_writes_stored_bytes_unchanged(tmp_path):
+    """Bytes go in as they are; trainers do their own resizing."""
+    record = _record(tmp_path)
+    original = record.path.read_bytes()
+
+    archive_path = build_dataset_archive([record], _options())
+
+    with zipfile.ZipFile(archive_path) as archive:
+        image_name = next(n for n in archive.namelist() if n.endswith(".jpg"))
+        assert archive.read(image_name) == original
+        assert archive.getinfo(image_name).compress_type == zipfile.ZIP_STORED
+
+
+def test_dataset_export_caption_uses_trigger_word_then_tags(tmp_path):
+    archive_path = build_dataset_archive(
+        [_record(tmp_path, tags=("artist:someone", "female:gloves"))],
+        _options(trigger_word="alice_token"),
     )
-    await db_session.execute(
-        text(
-            "INSERT INTO blobs "
-            "(sha256, file_size, extension, storage, external_path, ref_count, width, height) "
-            "VALUES ('dataset-export-sha', :size, '.png', 'external', :path, 1, 32, 48)"
-        ),
-        {"size": image_path.stat().st_size, "path": str(image_path)},
-    )
-    await db_session.execute(
-        text(
-            "INSERT INTO images "
-            "(id, gallery_id, page_num, filename, blob_sha256, visibility, source_item_url, tags_array, caption) "
-            "VALUES (7100, 7100, 1, '../unsafe.png', 'dataset-export-sha', 'active', "
-            "'https://example.test/image', '[\"quality:high\"]', 'A person beneath flowering trees.')"
-        )
-    )
-    await db_session.execute(
-        text("INSERT INTO datasets (id, user_id, name, selection_spec) VALUES (7100, 1, 'Alice Set', '{}')")
-    )
-    await db_session.execute(
-        text(
-            "INSERT INTO dataset_images (dataset_id, image_id, state, source) "
-            "VALUES (7100, 7100, 'included', 'manual')"
-        )
-    )
-    await db_session.commit()
-    return 7100
+
+    with zipfile.ZipFile(archive_path) as archive:
+        caption_name = next(n for n in archive.namelist() if n.endswith(".txt"))
+        assert archive.read(caption_name).decode() == "alice_token, gloves, someone"
 
 
-async def test_kohya_dataset_export_contains_config_split_captions_and_metadata(
-    client, db_session, db_session_factory, tmp_path
-):
-    image_path = tmp_path / "source.png"
-    PILImage.new("RGB", (32, 48), "purple").save(image_path)
-    dataset_id = await _seed_dataset(db_session, image_path)
+def test_dataset_export_splits_validation_deterministically_by_sha(tmp_path):
+    records = [_record(tmp_path, image_id=i, name=f"page{i}.jpg") for i in range(1, 21)]
 
-    with patch("routers.export.async_session", db_session_factory):
-        response = await client.get(
-            f"/api/export/dataset/{dataset_id}",
-            params={
-                "preset": "kohya",
-                "trigger_word": "alice_token",
-                "repeats": 3,
-                "resolution": 512,
-                "precompute_buckets": "true",
-            },
-        )
+    first = build_dataset_archive(records, _options(validation_percent=50))
+    second = build_dataset_archive(records, _options(validation_percent=50))
 
-    assert response.status_code == 200, response.text
-    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        names = archive.namelist()
-        image_name = next(name for name in names if name.endswith(".png"))
-        caption_name = str(Path(image_name).with_suffix(".txt"))
-        metadata_name = next(name for name in names if name.startswith("metadata/"))
-        manifest = json.loads(archive.read("manifest.json"))
+    def _validation_names(path):
+        with zipfile.ZipFile(path) as archive:
+            return {n for n in archive.namelist() if n.startswith("images/validation/")}
 
-        assert image_name.startswith("train/3_alice_token/buckets/64x64/")
-        assert "../" not in image_name
-        assert archive.read(caption_name).decode() == "alice_token, A person beneath flowering trees."
-        assert 'image_dir = "train/3_alice_token"' in archive.read("dataset.toml").decode()
-        assert json.loads(archive.read(metadata_name))["source_url"] == "https://example.test/image"
-        assert manifest["images"][0]["original_tags"] == [
-            "character:alice",
-            "quality:high",
-            "style:anime",
-        ]
+    assert _validation_names(first) == _validation_names(second)
 
 
-async def test_ai_toolkit_dataset_export_contains_yaml(client, db_session, db_session_factory, tmp_path):
-    image_path = tmp_path / "source.png"
-    PILImage.new("RGB", (32, 48), "green").save(image_path)
-    dataset_id = await _seed_dataset(db_session, image_path)
+def test_dataset_export_excludes_unavailable_files_in_the_manifest(tmp_path):
+    record = _record(tmp_path)
+    record.path.unlink()
 
-    with patch("routers.export.async_session", db_session_factory):
-        response = await client.get(
-            f"/api/export/dataset/{dataset_id}", params={"preset": "ai_toolkit", "repeats": 4}
-        )
+    archive_path = build_dataset_archive([record], _options())
 
-    assert response.status_code == 200
-    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        assert "config.yaml" in archive.namelist()
-        assert any(name.startswith("images/train/") and name.endswith(".png") for name in archive.namelist())
-        config = archive.read("config.yaml").decode()
-        assert "folder_path: images/train" in config
-        assert "num_repeats: 4" in config
+    with zipfile.ZipFile(archive_path) as archive:
+        manifest = archive.read("manifest.json").decode()
+    assert '"status": "excluded"' in manifest
+    assert '"reason": "unavailable"' in manifest
 
 
-async def test_dataset_export_requires_auth(unauthed_client):
-    response = await unauthed_client.get("/api/export/dataset/7100")
-    assert response.status_code == 401
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("Alice / Bob", "Alice_Bob"), ("   ", "concept"), ("..hidden", "hidden")],
+)
+def test_safe_component_collapses_runs_of_unsafe_characters(value, expected):
+    """The pattern ends in + so a run becomes one underscore, not one per char."""
+    assert safe_component(value) == expected

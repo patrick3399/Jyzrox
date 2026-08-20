@@ -419,7 +419,6 @@ class TestFeatureToggles:
         assert "rate_limit_enabled" in data
         assert "opds_enabled" in data
         assert "external_api_enabled" in data
-        assert "ai_tagging_enabled" in data
         assert "retry_enabled" in data
         assert "novel_enabled" in data
         assert data["novel_enabled"] is False  # feature ships disabled by default
@@ -636,62 +635,6 @@ class TestFeatureTogglesNumeric:
                 json={"value": 999},
             )
         assert resp.status_code == 400
-
-    async def test_patch_tag_general_threshold_sets_runtime_value(self, client, mock_redis):
-        """AIT-005: tag_general_threshold must be runtime-adjustable via PATCH."""
-        mock_redis.set = AsyncMock(return_value=True)
-        with patch("routers.settings.get_redis", return_value=mock_redis):
-            resp = await client.patch(
-                "/api/settings/features/tag_general_threshold",
-                json={"value": 0.5},
-            )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["feature"] == "tag_general_threshold"
-        assert data["value"] == 0.5
-        mock_redis.set.assert_awaited_with("setting:tag_general_threshold", "0.5")
-
-    async def test_patch_tag_character_threshold_sets_runtime_value(self, client, mock_redis):
-        """AIT-005: tag_character_threshold must be runtime-adjustable via PATCH."""
-        mock_redis.set = AsyncMock(return_value=True)
-        with patch("routers.settings.get_redis", return_value=mock_redis):
-            resp = await client.patch(
-                "/api/settings/features/tag_character_threshold",
-                json={"value": 0.9},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["value"] == 0.9
-
-    async def test_patch_tag_threshold_out_of_range_returns_400(self, client, mock_redis):
-        """Tag thresholds outside (0, 1] must be rejected."""
-        mock_redis.set = AsyncMock(return_value=True)
-        with patch("routers.settings.get_redis", return_value=mock_redis):
-            for bad in (0, -0.1, 1.5):
-                resp = await client.patch(
-                    "/api/settings/features/tag_general_threshold",
-                    json={"value": bad},
-                )
-                assert resp.status_code == 400, f"value {bad} must be rejected"
-
-    async def test_get_features_includes_tag_thresholds(self, client, mock_redis):
-        """AIT-005: GET features must expose the runtime tag thresholds."""
-        mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.settings.get_redis", return_value=mock_redis):
-            resp = await client.get("/api/settings/features")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "tag_general_threshold" in data
-        assert "tag_character_threshold" in data
-
-
-# ---------------------------------------------------------------------------
-# Site Credential Endpoint Tests
-# ---------------------------------------------------------------------------
-
-
-class TestSiteCredentialEndpoint:
-    """POST /api/settings/credentials/site — generic credential injection."""
-
     async def test_set_site_credential_cookies_browser_format(self, client):
         """POST /credentials/site with browser cookie format."""
         with patch("routers.settings.set_credential", new_callable=AsyncMock) as mock_set:
@@ -1578,37 +1521,3 @@ class TestPatchRecoveryStrategy:
                 json={"running": "mark_failed"},
             )
         assert resp.status_code == 403
-
-
-class TestSwarmUiSettings:
-    async def test_get_and_patch_swarmui_url(self, client, db_session, mock_redis):
-        await _insert_user(db_session)
-        mock_redis.get = AsyncMock(return_value=None)
-        mock_redis.set = AsyncMock(return_value=True)
-
-        get_response = await client.get("/api/settings/swarmui")
-        patch_response = await client.patch("/api/settings/swarmui", json={"url": "http://swarmui.example.com:7801/"})
-
-        assert get_response.status_code == 200
-        # Unset means unset — the endpoint must not hand back a fallback host.
-        assert get_response.json()["url"] == ""
-        assert patch_response.status_code == 200
-        assert patch_response.json() == {"url": "http://swarmui.example.com:7801"}
-        mock_redis.set.assert_awaited_with("setting:swarmui_url", "http://swarmui.example.com:7801")
-
-    async def test_patch_swarmui_rejects_credentials(self, client, db_session):
-        await _insert_user(db_session)
-        response = await client.patch("/api/settings/swarmui", json={"url": "http://user:secret@swarm.local:7801"})
-        assert response.status_code == 422
-
-    async def test_get_and_patch_captioner_url(self, client, db_session, mock_redis):
-        await _insert_user(db_session)
-        mock_redis.get = AsyncMock(return_value=None)
-        mock_redis.set = AsyncMock(return_value=True)
-
-        get_response = await client.get("/api/settings/captioner")
-        patch_response = await client.patch("/api/settings/captioner", json={"url": "http://captioner:8200/"})
-
-        assert get_response.status_code == 200
-        assert patch_response.json() == {"url": "http://captioner:8200"}
-        mock_redis.set.assert_awaited_with("setting:captioner_url", "http://captioner:8200")

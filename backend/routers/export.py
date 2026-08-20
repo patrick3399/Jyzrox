@@ -16,7 +16,7 @@ from starlette.background import BackgroundTask
 
 from core.auth import gallery_access_filter, require_role
 from core.database import async_session
-from db.models import Blob, Dataset, DatasetImage, Gallery, GalleryTag, Image, ImageTag, Tag
+from db.models import Blob, Dataset, DatasetImage, Gallery, Image
 from services.cas import resolve_blob_path
 from services.dataset_export import DatasetExportImage, DatasetExportOptions, build_dataset_archive, safe_component
 
@@ -141,16 +141,12 @@ _member = require_role("member")
 @router.get("/dataset/{dataset_id}")
 async def export_dataset(
     dataset_id: int,
-    preset: str = Query(default="kohya", pattern="^(kohya|ai_toolkit)$"),
     trigger_word: str = Query(default="", max_length=200),
-    repeats: int = Query(default=10, ge=1, le=100),
     validation_percent: int = Query(default=0, ge=0, le=50),
-    resolution: int | None = Query(default=None, ge=256, le=4096),
-    precompute_buckets: bool = False,
     include_metadata: bool = True,
     auth: dict = Depends(_member),
 ):
-    """Export a user-owned dataset for kohya_ss or ai-toolkit."""
+    """Export a user-owned dataset as stored bytes plus caption files."""
     async with async_session() as session:
         dataset = (
             await session.execute(select(Dataset).where(Dataset.id == dataset_id, Dataset.user_id == auth["user_id"]))
@@ -172,80 +168,35 @@ async def export_dataset(
                 .order_by(Image.id)
             )
         ).all()
-        image_ids = [image.id for image, _, _ in rows]
-        gallery_ids = list({gallery.id for _, gallery, _ in rows})
-        confidence_rows = (
-            (
-                await session.execute(
-                    select(ImageTag.image_id, Tag.namespace, Tag.name, ImageTag.confidence)
-                    .join(Tag, Tag.id == ImageTag.tag_id)
-                    .where(ImageTag.image_id.in_(image_ids))
-                )
-            ).all()
-            if image_ids
-            else []
-        )
-        gallery_confidence_rows = (
-            (
-                await session.execute(
-                    select(GalleryTag.gallery_id, Tag.namespace, Tag.name, GalleryTag.confidence)
-                    .join(Tag, Tag.id == GalleryTag.tag_id)
-                    .where(GalleryTag.gallery_id.in_(gallery_ids))
-                )
-            ).all()
-            if gallery_ids
-            else []
-        )
 
     if not rows:
         raise HTTPException(status_code=404, detail="Dataset has no included images")
-    confidence: dict[int, dict[str, float | None]] = {}
-    for image_id, namespace, name, value in confidence_rows:
-        confidence.setdefault(image_id, {})[f"{namespace}:{name}"] = value
-    gallery_confidence: dict[int, dict[str, float | None]] = {}
-    for gallery_id, namespace, name, value in gallery_confidence_rows:
-        gallery_confidence.setdefault(gallery_id, {})[f"{namespace}:{name}"] = value
-    records = []
-    for image, gallery, blob in rows:
-        tag_confidence = {**gallery_confidence.get(gallery.id, {}), **confidence.get(image.id, {})}
-        original_tags = set(gallery.tags_array or []) | set(image.tags_array or [])
-        filtered_tags = tuple(
-            sorted(
-                tag
-                for tag in original_tags
-                if tag_confidence.get(tag) is None or tag_confidence[tag] >= dataset.tag_threshold
-            )
+
+    records = [
+        DatasetExportImage(
+            image_id=image.id,
+            page_num=image.page_num,
+            filename=image.filename or f"image_{image.id}{blob.extension}",
+            sha256=blob.sha256,
+            path=resolve_blob_path(blob, image.external_path),
+            extension=blob.extension,
+            gallery_source=gallery.source,
+            gallery_source_id=gallery.source_id,
+            gallery_source_url=gallery.source_url,
+            image_source_url=image.source_item_url,
+            tags=tuple(sorted(gallery.tags_array or [])),
+            caption=image.caption,
         )
-        records.append(
-            DatasetExportImage(
-                image_id=image.id,
-                page_num=image.page_num,
-                filename=image.filename or f"image_{image.id}{blob.extension}",
-                sha256=blob.sha256,
-                path=resolve_blob_path(blob, image.external_path),
-                extension=blob.extension,
-                gallery_source=gallery.source,
-                gallery_source_id=gallery.source_id,
-                gallery_source_url=gallery.source_url,
-                image_source_url=image.source_item_url,
-                tags=filtered_tags,
-                original_tags=tuple(sorted(original_tags)),
-                caption=image.caption,
-                tag_confidence=tag_confidence,
-            )
-        )
+        for image, gallery, blob in rows
+    ]
     options = DatasetExportOptions(
-        preset=preset,
         dataset_name=dataset.name,
         trigger_word=trigger_word,
-        repeats=repeats,
         validation_percent=validation_percent,
-        resolution=resolution,
-        precompute_buckets=precompute_buckets,
         include_metadata=include_metadata,
     )
     archive_path = await asyncio.to_thread(build_dataset_archive, records, options)
-    filename = f"dataset_{dataset_id}_{safe_component(dataset.name)}_{preset}.zip"
+    filename = f"dataset_{dataset_id}_{safe_component(dataset.name)}.zip"
     return FileResponse(
         archive_path,
         media_type="application/zip",

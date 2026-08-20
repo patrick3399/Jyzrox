@@ -129,18 +129,6 @@ class TestSettingsDefaults:
         """eh_max_concurrency defaults to 2 to respect EH rate limits."""
         s = self._make_settings()
         assert s.eh_max_concurrency == 2
-
-    def test_settings_default_tag_model_enabled(self):
-        """tag_model_enabled defaults to False; opt-in only."""
-        s = self._make_settings()
-        assert s.tag_model_enabled is False
-
-    def test_settings_default_swarmui_url_is_empty_not_a_lan_host(self):
-        """swarmui_url ships empty: a baked-in host would make a fresh deploy
-        call out to whatever sits at that address on the operator's own LAN."""
-        s = self._make_settings()
-        assert s.swarmui_url == ""
-
     def test_settings_default_library_base_path(self):
         """library_base_path defaults to /mnt for host-mounted external media."""
         s = self._make_settings()

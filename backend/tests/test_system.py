@@ -63,7 +63,6 @@ async def test_system_info_returns_version_fields(client, db_session_factory, mo
     mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
     with (
         patch("routers.system.AsyncSessionLocal", db_session_factory),
-        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=None),
     ):
         resp = await client.get("/api/system/info")
 
@@ -81,13 +80,12 @@ async def test_system_info_versions_field_has_expected_keys(client, db_session_f
     mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
     with (
         patch("routers.system.AsyncSessionLocal", db_session_factory),
-        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=None),
     ):
         resp = await client.get("/api/system/info")
 
     assert resp.status_code == 200
     data = resp.json()
-    expected_keys = {"jyzrox", "python", "fastapi", "gallery_dl", "postgresql", "redis", "onnxruntime"}
+    expected_keys = {"jyzrox", "python", "fastapi", "gallery_dl", "postgresql", "redis"}
     assert expected_keys == set(data["versions"].keys())
 
 
@@ -244,7 +242,6 @@ async def test_system_info_includes_dynamic_gallery_dl_version(client):
         patch("worker.gallery_dl_venv.get_current_version", new_callable=AsyncMock, return_value="1.28.0"),
         patch("routers.system._get_postgresql_version", new_callable=AsyncMock, return_value="16.1"),
         patch("routers.system._get_redis_version", new_callable=AsyncMock, return_value="7.2.0"),
-        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=None),
     ):
         resp = await client.get("/api/system/info")
 
@@ -260,7 +257,6 @@ async def test_system_info_gallery_dl_version_none_when_unavailable(client):
         patch("worker.gallery_dl_venv.get_current_version", new_callable=AsyncMock, return_value=None),
         patch("routers.system._get_postgresql_version", new_callable=AsyncMock, return_value="16.1"),
         patch("routers.system._get_redis_version", new_callable=AsyncMock, return_value="7.2.0"),
-        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=None),
     ):
         resp = await client.get("/api/system/info")
 
@@ -482,111 +478,6 @@ async def test_system_health_records_unknown_when_df_raises(client, db_session_f
     assert services["inodes"] == "unknown"
 
 
-# -- _get_tagger_info (lines 150-160) / system_info with tagger ---------------
-
-
-async def test_system_info_with_tagger_online_includes_onnxruntime_version(client, db_session_factory, mock_redis):
-    """system_info populates onnxruntime version when tagger is online (lines 150-160, 183)."""
-    mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
-
-    tagger_payload = {
-        "status": "ok",
-        "onnxruntime_version": "1.17.0",
-        "model": "wd-v1-4-vit-tagger-v2",
-    }
-
-    with (
-        patch("routers.system.AsyncSessionLocal", db_session_factory),
-        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=tagger_payload),
-    ):
-        resp = await client.get("/api/system/info")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["versions"]["onnxruntime"] == "1.17.0"
-    assert data["tagger"] == tagger_payload
-
-
-async def test_system_info_with_tagger_offline_has_none_onnxruntime(client, db_session_factory, mock_redis):
-    """system_info sets onnxruntime to None when tagger is offline (line 183)."""
-    mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
-
-    with (
-        patch("routers.system.AsyncSessionLocal", db_session_factory),
-        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=None),
-    ):
-        resp = await client.get("/api/system/info")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["versions"]["onnxruntime"] is None
-    assert data["tagger"] is None
-
-
-async def test_get_tagger_info_returns_none_when_http_fails():
-    """_get_tagger_info returns None when httpx raises a connection error (lines 158-160)."""
-    import httpx
-
-    from routers.system import _get_tagger_info
-
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
-
-        result = await _get_tagger_info()
-
-    assert result is None
-
-
-async def test_get_tagger_info_returns_none_when_status_not_200():
-    """_get_tagger_info returns None when tagger responds with non-200 status."""
-
-    from routers.system import _get_tagger_info
-
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_resp = MagicMock()
-        mock_resp.status_code = 503
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
-
-        result = await _get_tagger_info()
-
-    assert result is None
-
-
-async def test_get_tagger_info_returns_json_on_200():
-    """_get_tagger_info returns parsed JSON body when tagger responds 200 (lines 156-157)."""
-
-    from routers.system import _get_tagger_info
-
-    expected = {"status": "ok", "onnxruntime_version": "1.16.3"}
-
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json = MagicMock(return_value=expected)
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
-
-        result = await _get_tagger_info()
-
-    assert result == expected
-
-
-# ---------------------------------------------------------------------------
-# Tests — storage
-# ---------------------------------------------------------------------------
 
 
 async def test_system_storage_returns_mounts_deduplicated_by_device(client):

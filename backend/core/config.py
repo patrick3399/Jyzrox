@@ -53,28 +53,17 @@ class Settings(BaseSettings):
     eh_download_max_retries: int = 3  # nl retries per image
 
     # AI Tagging
-    tag_model_enabled: bool = False
-    tag_model_name: str = "SmilingWolf/wd-swinv2-tagger-v3"
-    tag_general_threshold: float = 0.35
-    tag_character_threshold: float = 0.85
-    tagger_url: str = "http://tagger:8100"
-    tagger_timeout: int = 30
 
     # Remote image processing
-    swarmui_enabled: bool = False
-    swarmui_url: str = ""  # No default host — admin sets it via SWARMUI_URL or the settings UI
-    swarmui_timeout: int = 600
-    captioner_enabled: bool = False
-    captioner_url: str = "http://captioner:8200"
-    captioner_timeout: int = 300
-    captioner_engine: str = "florence2"
 
     # Storage paths (inside container)
     data_gallery_path: str = "/data/gallery"
     data_thumbs_path: str = "/data/thumbs"
-    data_training_path: str = "/data/training"
     data_avatars_path: str = "/data/avatars"
     data_cas_path: str = "/data/cas"
+    # Not an AI path despite the name: routers/import_router.py stores
+    # browser-extension web clips under /data/training/web-clips/.
+    data_training_path: str = "/data/training"
     data_library_path: str = "/data/library"
     data_backups_path: str = "/data/backups"
     novel_repo_path: str = "/data/novel"

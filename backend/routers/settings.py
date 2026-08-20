@@ -11,7 +11,7 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 from sqlalchemy import delete, select, text
 
 from core.auth import require_auth, require_role
@@ -28,11 +28,9 @@ from services.settings_store import (
 from services.settings_store import (
     get_int_setting as _get_int_setting,
 )
-from services.settings_store import get_string_setting as _get_string_setting
 from services.settings_store import (
     get_toggle as _get_toggle,
 )
-from services.settings_store import set_string_setting as _set_string_setting
 from services.settings_store import (
     set_toggle as _set_toggle,
 )
@@ -99,32 +97,6 @@ class SiteCredentialRequest(BaseModel):
 
 class SaucenaoApiKeyRequest(BaseModel):
     api_key: str
-
-
-class SwarmUiSettingsPatch(BaseModel):
-    url: str
-
-    @field_validator("url")
-    @classmethod
-    def validate_url(cls, value: str) -> str:
-        value = value.strip().rstrip("/")
-        parsed = urllib.parse.urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("url must be an absolute HTTP or HTTPS URL")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("url must not contain credentials, a query, or a fragment")
-        if len(value) > 500:
-            raise ValueError("url is too long")
-        return value
-
-
-class CaptionerSettingsPatch(BaseModel):
-    url: str
-
-    @field_validator("url")
-    @classmethod
-    def validate_url(cls, value: str) -> str:
-        return SwarmUiSettingsPatch.validate_url(value)
 
 
 # ── Credentials ──────────────────────────────────────────────────────
@@ -601,15 +573,6 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "opds_enabled": await _get_toggle("setting:opds_enabled", app_settings.opds_enabled),
         "external_api_enabled": await _get_toggle("setting:external_api_enabled", app_settings.external_api_enabled),
         "novel_enabled": await _get_toggle("setting:novel_enabled", app_settings.novel_enabled),
-        "ai_tagging_enabled": await _get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled),
-        "swarmui_enabled": await _get_toggle("setting:swarmui_enabled", app_settings.swarmui_enabled),
-        "captioner_enabled": await _get_toggle("setting:captioner_enabled", app_settings.captioner_enabled),
-        "tag_general_threshold": await _get_float_setting(
-            "setting:tag_general_threshold", app_settings.tag_general_threshold
-        ),
-        "tag_character_threshold": await _get_float_setting(
-            "setting:tag_character_threshold", app_settings.tag_character_threshold
-        ),
         "tag_translation_enabled": await _get_toggle("setting:tag_translation_enabled", True),
         "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
         "download_pixiv_enabled": await _get_toggle(
@@ -647,11 +610,6 @@ async def patch_feature_toggle(
         "opds_enabled": "setting:opds_enabled",
         "external_api_enabled": "setting:external_api_enabled",
         "novel_enabled": "setting:novel_enabled",
-        "ai_tagging_enabled": "setting:ai_tagging_enabled",
-        "swarmui_enabled": "setting:swarmui_enabled",
-        "captioner_enabled": "setting:captioner_enabled",
-        "tag_general_threshold": "setting:tag_general_threshold",
-        "tag_character_threshold": "setting:tag_character_threshold",
         "tag_translation_enabled": "setting:tag_translation_enabled",
         "download_eh_enabled": "setting:download_eh_enabled",
         "download_pixiv_enabled": "setting:download_pixiv_enabled",
@@ -701,15 +659,6 @@ async def patch_feature_toggle(
             raise HTTPException(status_code=400, detail="value required for dedup_opencv_threshold")
         await get_redis().set("setting:dedup_opencv_threshold", str(req.value))
         return {"feature": feature, "value": req.value}
-
-    if feature in ("tag_general_threshold", "tag_character_threshold"):
-        if req.value is None:
-            raise HTTPException(status_code=400, detail=f"value required for {feature}")
-        val = float(req.value)
-        if not (0.0 < val <= 1.0):
-            raise HTTPException(status_code=400, detail=f"{feature} must be in (0, 1]")
-        await get_redis().set(redis_key, str(val))
-        return {"feature": feature, "value": val}
 
     if feature == "retry_max_retries":
         if req.value is None:
@@ -775,28 +724,6 @@ async def patch_feature_toggle(
 
     await _set_toggle(redis_key, req.enabled)
     return {"feature": feature, "enabled": req.enabled}
-
-
-@router.get("/swarmui")
-async def get_swarmui_settings(_: dict = Depends(_admin)):
-    """Return the configured SwarmUI service URL."""
-    return {"url": await _get_string_setting("setting:swarmui_url", app_settings.swarmui_url)}
-
-
-@router.patch("/swarmui")
-async def patch_swarmui_settings(req: SwarmUiSettingsPatch, _: dict = Depends(_admin)):
-    """Update the SwarmUI service URL used by API and workers."""
-    return {"url": await _set_string_setting("setting:swarmui_url", req.url)}
-
-
-@router.get("/captioner")
-async def get_captioner_settings(_: dict = Depends(_admin)):
-    return {"url": await _get_string_setting("setting:captioner_url", app_settings.captioner_url)}
-
-
-@router.patch("/captioner")
-async def patch_captioner_settings(req: CaptionerSettingsPatch, _: dict = Depends(_admin)):
-    return {"url": await _set_string_setting("setting:captioner_url", req.url)}
 
 
 # ── EH Site Preference ───────────────────────────────────────────────

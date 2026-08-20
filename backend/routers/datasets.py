@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import core.queue
 from core.auth import gallery_access_filter, require_role
 from core.database import get_db
 from core.events import EventType, emit_safe
@@ -23,7 +22,6 @@ from db.models import (
     Image,
     Tag,
 )
-from services.caption_engine import caption_engine_registry
 from services.cas import thumb_srcset, thumb_url
 
 router = APIRouter(tags=["datasets"])
@@ -61,7 +59,6 @@ class DatasetCreate(DatasetSelection):
 class DatasetPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
-    tag_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @field_validator("name")
     @classmethod
@@ -97,10 +94,6 @@ class CaptionBatchRequest(BaseModel):
     trigger_word: str | None = Field(default=None, max_length=200)
     search: str | None = Field(default=None, max_length=1000)
     replacement: str = Field(default="", max_length=1000)
-
-
-class CaptionGenerateRequest(BaseModel):
-    engine: Literal["florence2", "joycaption"] = "florence2"
 
 
 def _unique_ids(values: list[int]) -> list[int]:
@@ -381,7 +374,6 @@ def _serialize_dataset(dataset: Dataset, member_count: int, gallery_count: int, 
         "id": dataset.id,
         "name": dataset.name,
         "description": dataset.description,
-        "tag_threshold": dataset.tag_threshold,
         "selection_spec": dataset.selection_spec or {},
         "member_count": member_count,
         "gallery_count": gallery_count,
@@ -618,8 +610,6 @@ async def update_dataset(
         dataset.name = body.name.strip()
     if "description" in body.model_fields_set:
         dataset.description = body.description
-    if body.tag_threshold is not None:
-        dataset.tag_threshold = body.tag_threshold
     dataset.updated_at = datetime.now(UTC)
     await db.commit()
     await emit_safe(
@@ -708,26 +698,6 @@ async def batch_update_captions(
                 changed += 1
     await db.commit()
     return {"status": "ok", "changed": changed}
-
-
-@router.post("/{dataset_id}/captions/generate", status_code=202)
-async def generate_dataset_captions(
-    dataset_id: int,
-    body: CaptionGenerateRequest,
-    auth: dict = Depends(_member),
-    db: AsyncSession = Depends(get_db),
-):
-    await _owned_dataset(db, dataset_id, auth["user_id"])
-    if caption_engine_registry.get(body.engine) is None:
-        raise HTTPException(status_code=400, detail="Unknown caption engine")
-    job = await core.queue.enqueue(
-        "caption_job",
-        dataset_id=dataset_id,
-        engine_id=body.engine,
-        actor_user_id=auth["user_id"],
-        _timeout=7200,
-    )
-    return {"status": "queued", "job_id": job.key, "engine": body.engine}
 
 
 @router.post("/{dataset_id}/filters/preview")

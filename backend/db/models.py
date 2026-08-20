@@ -599,7 +599,6 @@ class Dataset(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    tag_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.35, server_default="0.35")
     selection_spec: Mapped[dict] = mapped_column(
         JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )

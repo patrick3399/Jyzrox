@@ -121,36 +121,20 @@ async def system_health():
     return {"status": "ok", "services": results}
 
 
-async def _get_tagger_info() -> dict | None:
-    """Fetch tagger service health info, or None if offline."""
-    try:
-        import httpx
-
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{settings.tagger_url}/health", timeout=5)
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        pass
-    return None
-
-
 @router.get("/info")
 async def system_info(_: dict = Depends(require_auth)):
     """Return non-sensitive runtime configuration including component versions."""
     from worker.gallery_dl_venv import get_current_version
 
-    pg_ver, redis_ver, tagger_info, gdl_version = await asyncio.gather(
+    pg_ver, redis_ver, gdl_version = await asyncio.gather(
         _get_postgresql_version(),
         _get_redis_version(),
-        _get_tagger_info(),
         get_current_version(),
     )
     jyzrox_ver = _STATIC_VERSIONS["jyzrox"]
     return {
         "version": jyzrox_ver,
         "eh_max_concurrency": settings.eh_max_concurrency,
-        "tag_model_enabled": settings.tag_model_enabled,
         "versions": {
             "jyzrox": jyzrox_ver,
             "python": _STATIC_VERSIONS["python"],
@@ -158,9 +142,7 @@ async def system_info(_: dict = Depends(require_auth)):
             "gallery_dl": gdl_version,
             "postgresql": pg_ver,
             "redis": redis_ver,
-            "onnxruntime": tagger_info.get("onnxruntime_version") if tagger_info else None,
         },
-        "tagger": tagger_info,
     }
 
 

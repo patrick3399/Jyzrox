@@ -62,7 +62,6 @@ JOB_QUEUE_ROUTING: dict[str, str] = {
     # render — CPU-bound, lowest priority
     "thumbnail_job": QUEUE_RENDER,
     "thumbhash_backfill_job": QUEUE_RENDER,
-    "caption_job": QUEUE_RENDER,
     # ingest — import pipeline, must precede render
     "local_import_job": QUEUE_INGEST,
     "cover_thumbnail_job": QUEUE_INGEST,

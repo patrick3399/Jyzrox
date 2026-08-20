@@ -398,7 +398,7 @@ async def test_dataset_is_private_to_owner(db_session, make_client):
     assert response.status_code == 404
 
 
-async def test_dataset_caption_review_batch_threshold_and_generation(db_session, make_client):
+async def test_dataset_caption_review_and_batch_rewrite(db_session, make_client):
     await _user(db_session, 1)
     _, images = await _gallery_with_images(
         db_session,
@@ -406,17 +406,13 @@ async def test_dataset_caption_review_batch_threshold_and_generation(db_session,
         source_id="caption-review",
         active=2,
     )
-    queued = MagicMock(key="caption-job")
 
     async with make_client(user_id=1) as ac:
-        enqueue = ac._transport.app.state.enqueue
-        enqueue.return_value = queued
         with patch("routers.datasets.emit_safe", new_callable=AsyncMock):
             created = await ac.post(
                 "/api/datasets/", json={"name": "Captions", "image_ids": [image.id for image in images]}
             )
             dataset_id = created.json()["id"]
-            threshold = await ac.patch(f"/api/datasets/{dataset_id}", json={"tag_threshold": 0.7})
             edited = await ac.patch(
                 f"/api/datasets/{dataset_id}/images/{images[0].id}/caption",
                 json={"caption": "a person in a forest"},
@@ -429,26 +425,11 @@ async def test_dataset_caption_review_batch_threshold_and_generation(db_session,
                 f"/api/datasets/{dataset_id}/captions/batch",
                 json={"operation": "search_replace", "search": "forest", "replacement": "garden"},
             )
-            generated = await ac.post(
-                f"/api/datasets/{dataset_id}/captions/generate", json={"engine": "florence2"}
-            )
             detail = await ac.get(f"/api/datasets/{dataset_id}")
-
-    assert threshold.status_code == 200
     assert edited.json()["caption"] == "a person in a forest"
     assert prepended.json()["changed"] == 2
     assert replaced.json()["changed"] == 1
-    assert generated.status_code == 202
-    assert generated.json()["job_id"] == "caption-job"
-    assert detail.json()["tag_threshold"] == 0.7
     assert detail.json()["images"][0]["caption"] == "alice_token, a person in a garden"
-    enqueue.assert_awaited_once_with(
-        "caption_job",
-        dataset_id=dataset_id,
-        engine_id="florence2",
-        actor_user_id=1,
-        _timeout=7200,
-    )
 
 
 async def test_list_and_update_dataset_metadata(db_session, make_client):

@@ -19,7 +19,6 @@ from core.scheduled_task_catalog import CATALOG
 from core.watcher import LibraryWatcher
 from services.memory_diag import read_container_oom_kills
 from worker.backup import database_backup_job
-from worker.captioning import caption_job
 from worker.dedup_scan import dedup_scan_job
 from worker.dedup_tier1 import dedup_tier1_job
 from worker.dedup_tier2 import dedup_tier2_job
@@ -1115,7 +1114,6 @@ def build_workers() -> tuple:
         functions=[
             thumbnail_job,
             thumbhash_backfill_job,
-            caption_job,
         ],
         concurrency=concurrency[QUEUE_RENDER],
         startup=_render_startup,
