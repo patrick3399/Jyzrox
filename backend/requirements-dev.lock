@@ -46,7 +46,7 @@ croniter==6.2.2
     # via
     #   -r requirements.txt
     #   saq
-cryptography==47.0.0
+cryptography==50.0.0
     # via -r requirements.txt
 fastapi==0.136.1
     # via -r requirements.txt
@@ -96,7 +96,7 @@ packaging==26.0
     #   build
     #   pytest
     #   wheel
-pillow==12.2.0
+pillow==12.3.0
     # via
     #   -r requirements.txt
     #   imagehash

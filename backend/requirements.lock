@@ -38,7 +38,7 @@ croniter==6.2.2
     # via
     #   -r requirements.txt
     #   saq
-cryptography==47.0.0
+cryptography==50.0.0
     # via -r requirements.txt
 fastapi==0.136.1
     # via -r requirements.txt
@@ -79,7 +79,7 @@ opencc-python-reimplemented==0.1.7
     # via -r requirements.txt
 opencv-python-headless==4.13.0.92
     # via -r requirements.txt
-pillow==12.2.0
+pillow==12.3.0
     # via
     #   -r requirements.txt
     #   imagehash
