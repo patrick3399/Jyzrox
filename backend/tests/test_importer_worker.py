@@ -1060,3 +1060,25 @@ class TestLocalImportSidecar:
         assert result["status"] == "done"
         sidecar_spy.assert_awaited_once()
         assert sidecar_spy.call_args.args[:2] == ("local", "sidecar_test")
+
+
+class TestBatchImportCategory:
+    async def test_existing_gallery_keeps_its_category_on_reimport(self):
+        """batch_import_job updates title on conflict but must not touch category."""
+        import inspect
+
+        from worker.importer import batch_import_job
+
+        src = inspect.getsource(batch_import_job)
+        conflict_branch = src.split("if existing is not None:", 1)[1]
+        assert "existing.title = title" in conflict_branch
+        assert "existing.category" not in conflict_branch
+
+    async def test_insert_branch_binds_category_parameter(self):
+        import inspect
+
+        from worker.importer import batch_import_job
+
+        src = inspect.getsource(batch_import_job)
+        assert '"category": category,' in src
+        assert "category, created_by_user_id" in src

@@ -1913,3 +1913,151 @@ class TestImportConflictOptions:
         )
         assert response.status_code == 200
         assert response.json()["mode"] == "auto_merge"
+
+
+class TestBatchScanCategory:
+    async def test_scan_returns_category_group_for_four_segment_pattern(self, client, tmp_path, monkeypatch):
+        """{category} must reach the preview payload so the UI can show it."""
+        import routers.import_router as ir
+
+        gallery = tmp_path / "Cosplay" / "abfluss" / "g1"
+        gallery.mkdir(parents=True)
+        (gallery / "001.jpg").write_bytes(b"x")
+
+        async def _fake_paths():
+            return [str(tmp_path)]
+
+        monkeypatch.setattr(ir, "get_all_library_paths", _fake_paths)
+
+        resp = await client.post(
+            "/api/import/batch/scan",
+            json={"root_dir": str(tmp_path), "pattern": "{category}/{artist}/{title}"},
+        )
+        assert resp.status_code == 200
+        matches = resp.json()["matches"]
+        assert len(matches) == 1
+        assert matches[0]["category"] == "Cosplay"
+        assert matches[0]["artist"] == "abfluss"
+        assert matches[0]["title"] == "g1"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/import/batch/start — BatchGalleryItem type-checks `category` and
+# normalize_category() runs on it before the batch_import_job payload is built
+# ---------------------------------------------------------------------------
+
+
+class TestBatchStartCategoryTypeChecking:
+    """`BatchStartRequest.galleries` is `list[BatchGalleryItem]`, so a
+    malformed `category` must fail Pydantic validation (422) instead of
+    reaching the worker as 500 or being silently accepted. A well-typed but
+    unusable `category` (too long) must still be normalized to None before
+    it is handed to `batch_import_job`, mirroring the discovery-side
+    normalize_category() contract.
+    """
+
+    @staticmethod
+    def _entry_category(entry):
+        """`req.galleries` may reach the mocked enqueue call as either plain
+        dicts or BatchGalleryItem instances depending on how the router
+        builds the job payload — assert on the value, not the container."""
+        return entry["category"] if isinstance(entry, dict) else entry.category
+
+    async def test_category_as_dict_returns_422_not_500(self, client):
+        resp = await client.post(
+            "/api/import/batch/start",
+            json={
+                "root_dir": "/mnt/test_lib/root",
+                "mode": "copy",
+                "galleries": [{"path": "/mnt/test_lib/root/g1", "title": "G1", "category": {"a": 1}}],
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_category_as_int_returns_422_not_500(self, client):
+        resp = await client.post(
+            "/api/import/batch/start",
+            json={
+                "root_dir": "/mnt/test_lib/root",
+                "mode": "copy",
+                "galleries": [{"path": "/mnt/test_lib/root/g1", "title": "G1", "category": 5000}],
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_category_over_max_length_string_passes_pydantic_but_is_stored_as_none(
+        self, client, mock_redis
+    ):
+        """A 5000-char string is a valid `str`, so Pydantic accepts it — but
+        normalize_category() must still reject it before it reaches the job
+        payload (mirrors core.local_category_plan.normalize_category's
+        64-char limit)."""
+        from main import app
+
+        galleries = [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1", "category": "x" * 5000}]
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("os.sep", "/"),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+        ):
+            resp = await client.post(
+                "/api/import/batch/start",
+                json={"root_dir": "/mnt/test_lib/root", "mode": "copy", "galleries": galleries},
+            )
+
+        assert resp.status_code == 200
+        enqueue_call = app.state.enqueue.call_args
+        entry = enqueue_call.kwargs["galleries"][0]
+        assert self._entry_category(entry) is None
+
+    async def test_category_with_surrounding_whitespace_is_trimmed_before_enqueue(self, client, mock_redis):
+        from main import app
+
+        galleries = [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1", "category": "  Cosplay  "}]
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("os.sep", "/"),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+        ):
+            resp = await client.post(
+                "/api/import/batch/start",
+                json={"root_dir": "/mnt/test_lib/root", "mode": "copy", "galleries": galleries},
+            )
+
+        assert resp.status_code == 200
+        enqueue_call = app.state.enqueue.call_args
+        entry = enqueue_call.kwargs["galleries"][0]
+        assert self._entry_category(entry) == "Cosplay"
+
+    async def test_existing_frontend_four_key_payload_shape_is_still_accepted(self, client, mock_redis):
+        """Regression guard: pwa/src/app/import/page.tsx sends exactly
+        {path, artist, category, title} per gallery. Narrowing `galleries`
+        to `list[BatchGalleryItem]` must not break this existing caller."""
+        galleries = [{"path": "/mnt/test_lib/root/g1", "artist": "abfluss", "category": "Cosplay", "title": "G1"}]
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("os.sep", "/"),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+        ):
+            resp = await client.post(
+                "/api/import/batch/start",
+                json={"root_dir": "/mnt/test_lib/root", "mode": "copy", "galleries": galleries},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1

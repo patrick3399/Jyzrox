@@ -19,6 +19,7 @@ from core.auth import require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session, get_db
 from core.events import EventType, emit_safe
+from core.local_category_plan import normalize_category
 from core.local_patterns import (
     DEFAULT_IMPORT_MODE,
     DEFAULT_LIBRARY_PATTERN,
@@ -48,10 +49,17 @@ class BatchScanRequest(BaseModel):
     pattern: str = "{title}"
 
 
+class BatchGalleryItem(BaseModel):
+    path: str
+    title: str
+    artist: str | None = None
+    category: str | None = None
+
+
 class BatchStartRequest(BaseModel):
     root_dir: str
     mode: str = "copy"  # "copy" | "link"
-    galleries: list[dict]  # [{path, artist, title}, ...]
+    galleries: list[BatchGalleryItem]  # [{path, artist, category, title}, ...]
 
 
 class ConflictModeRequest(BaseModel):
@@ -206,12 +214,14 @@ async def batch_scan(
         if m:
             groups = m.groupdict()
             artist = groups.get("artist") or None
+            category = groups.get("category") or None
             title = groups.get("title") or Path(abs_path).name
             matches.append(
                 {
                     "rel_path": rel_path_normalized,
                     "abs_path": abs_path,
                     "artist": artist,
+                    "category": category,
                     "title": title,
                     "file_count": len(media_files),
                 }
@@ -273,11 +283,18 @@ async def batch_start(
             )
             await session.execute(stmt)
             await session.commit()
+
+    # SAQ serializes job kwargs to JSON, so BatchGalleryItem instances cannot
+    # be passed directly — model_dump() them into plain dicts. category is
+    # normalized here (not left to the worker alone) so a folder-name-derived
+    # or user-supplied value that Pydantic accepts as a `str` but is otherwise
+    # unusable (too long, etc.) never reaches the job payload.
+    galleries_payload = [{**g.model_dump(), "category": normalize_category(g.category)} for g in req.galleries]
     await core.queue.enqueue(
         "batch_import_job",
         root_dir=real_root,
         mode=req.mode,
-        galleries=req.galleries,
+        galleries=galleries_payload,
         batch_id=batch_id,
         user_id=auth["user_id"],
     )

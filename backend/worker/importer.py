@@ -14,6 +14,7 @@ from sqlalchemy.sql import select
 
 import core.queue
 from core.database import AsyncSessionLocal
+from core.local_category_plan import normalize_category
 from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, Image, ImportConflict
 from services.cas import (
@@ -855,6 +856,7 @@ async def batch_import_job(
     for entry in galleries:
         abs_path = entry["path"]
         artist = entry.get("artist")
+        category = normalize_category(entry.get("category"))
         title = entry.get("title", Path(abs_path).name)
 
         # Use relative path as source_id to avoid collisions
@@ -884,6 +886,7 @@ async def batch_import_job(
                                 "mode": mode,
                                 "title": title,
                                 "artist": artist,
+                                "category": category,
                             },
                         )
                     )
@@ -897,8 +900,10 @@ async def batch_import_job(
                     result = await session.execute(
                         text(
                             "INSERT INTO galleries "
-                            "(source, source_id, title, import_mode, library_path, source_path, artist_id, uploader, created_by_user_id)"
-                            " VALUES (:source, :source_id, :title, :mode, :library_path, :source_path, :artist_id, :uploader, :user_id) "
+                            "(source, source_id, title, import_mode, library_path, source_path, artist_id, uploader, "
+                            "category, created_by_user_id)"
+                            " VALUES (:source, :source_id, :title, :mode, :library_path, :source_path, :artist_id, "
+                            ":uploader, :category, :user_id) "
                             "RETURNING id"
                         ),
                         {
@@ -910,6 +915,7 @@ async def batch_import_job(
                             "source_path": os.path.realpath(abs_path) if mode == "link" else None,
                             "artist_id": f"local:{artist}" if artist else None,
                             "uploader": artist,
+                            "category": category,
                             "user_id": user_id,
                         },
                     )
