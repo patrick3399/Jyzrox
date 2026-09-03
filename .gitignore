@@ -71,3 +71,7 @@ screenshots/
 # Original icon sources (moved to pwa/public/)
 /icon.png
 /icon_clean.png
+
+# Site-specific operator input for the one-off category migration.
+scripts/category-map*.tsv
+scripts/recategorize-map*.tsv
