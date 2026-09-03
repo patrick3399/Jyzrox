@@ -418,6 +418,7 @@ type BatchMatch = {
   rel_path: string
   abs_path: string
   artist: string | null
+  category: string | null
   title: string
   file_count: number
   selected: boolean
@@ -439,7 +440,12 @@ function ZoneB() {
   const { trigger: startBatch } = useBatchStart()
   const { data: progress } = useBatchProgress(batchId)
 
-  const presets = ['{title}', '{artist}/{title}', '{_}/{artist}/{title}']
+  const presets = [
+    '{title}',
+    '{artist}/{title}',
+    '{_}/{artist}/{title}',
+    '{category}/{artist}/{_}/{title}',
+  ]
 
   const updateMatch = (idx: number, field: string, value: string | boolean | null) => {
     setMatches((prev) => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)))
@@ -464,7 +470,12 @@ function ZoneB() {
       const result = await startBatch({
         rootDir: selectedDir!,
         mode: 'copy',
-        galleries: selected.map((m) => ({ path: m.abs_path, artist: m.artist, title: m.title })),
+        galleries: selected.map((m) => ({
+          path: m.abs_path,
+          artist: m.artist,
+          category: m.category,
+          title: m.title,
+        })),
       })
       setBatchId(result.batch_id)
       setPhase('importing')
@@ -639,7 +650,7 @@ function ZoneB() {
             ) : (
               <div className="border border-vault-border rounded-lg overflow-hidden">
                 {/* Table header */}
-                <div className="grid grid-cols-[auto_1fr_1fr_auto] gap-2 px-3 py-2 bg-vault-input border-b border-vault-border text-xs text-vault-text-muted font-medium">
+                <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-3 py-2 bg-vault-input border-b border-vault-border text-xs text-vault-text-muted font-medium">
                   <input
                     type="checkbox"
                     checked={allSelected}
@@ -649,6 +660,7 @@ function ZoneB() {
                     className="accent-vault-accent"
                   />
                   <span>{t('import.batch.artist')}</span>
+                  <span>{t('import.batch.category')}</span>
                   <span>{t('import.gallery.title')}</span>
                   <span className="text-right">{t('import.batch.fileCount')}</span>
                 </div>
@@ -657,7 +669,7 @@ function ZoneB() {
                   {matches.map((m, idx) => (
                     <div
                       key={m.abs_path}
-                      className={`grid grid-cols-[auto_1fr_1fr_auto] gap-2 px-3 py-2 items-center text-sm hover:bg-vault-card-hover transition-colors ${
+                      className={`grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-3 py-2 items-center text-sm hover:bg-vault-card-hover transition-colors ${
                         !m.selected ? 'opacity-50' : ''
                       }`}
                     >
@@ -671,6 +683,13 @@ function ZoneB() {
                         type="text"
                         value={m.artist ?? ''}
                         onChange={(e) => updateMatch(idx, 'artist', e.target.value || null)}
+                        className={editInputClass}
+                        placeholder="—"
+                      />
+                      <input
+                        type="text"
+                        value={m.category ?? ''}
+                        onChange={(e) => updateMatch(idx, 'category', e.target.value || null)}
                         className={editInputClass}
                         placeholder="—"
                       />

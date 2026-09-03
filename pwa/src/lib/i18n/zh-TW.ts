@@ -1115,6 +1115,7 @@ const zhTW: Record<string, string> = {
 
   // ── Import (batch) ──
   'import.batch.artist': '藝術家',
+  'import.batch.category': '類別',
   'import.batch.done': '完成：{completed} 個已匯入，{failed} 個失敗',
   'import.batch.fileCount': '檔案',
   'import.batch.importAll': '全部匯入（{count}）',
@@ -1126,7 +1127,7 @@ const zhTW: Record<string, string> = {
   'import.batch.modeLinkDesc': '檔案保留在原位',
   'import.batch.noMatches': '沒有目錄符合此模式',
   'import.batch.pattern': '路徑模式',
-  'import.batch.patternHelp': '{artist}、{title}、{_}（略過）',
+  'import.batch.patternHelp': '{artist}、{category}、{title}、{_}（略過）',
   'import.batch.presets': '預設',
   'import.batch.progress': '{completed}/{total} 個圖庫',
   'import.batch.scan': '掃描',
