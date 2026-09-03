@@ -955,9 +955,6 @@ async def image_proxy(
       4. Fetch image page HTML → extract image URL
       5. Fetch image bytes → cache → return
     """
-    if not _is_private(get_client_ip(request)):
-        await check_rate_limit(f"img_proxy:eh:{auth['user_id']}", max_requests=120, window=60)
-
     # 1. Cache hit
     cached_bytes = await cache.get_proxied_image(gid, page)
     if cached_bytes:
@@ -968,6 +965,13 @@ async def image_proxy(
             media_type=detect_media_type(cached_bytes),
             headers={"Cache-Control": "private, max-age=86400"},  # 24h
         )
+
+    # Rate-limit the outbound EH fetch, not the request. The budget exists to keep
+    # us from hammering EH, so only a cache miss — the one branch that actually
+    # leaves our network — spends it. Charging cache hits burned the whole budget
+    # on ordinary fast page-flipping through already-fetched pages.
+    if not _is_private(get_client_ip(request)):
+        await check_rate_limit(f"img_proxy:eh:{auth['user_id']}", max_requests=600, window=60)
 
     # 2. Resolve image page token — imagelist cache first, then on-demand fetch
     token_map = await cache.get_imagelist_cache(gid) or {}
@@ -1175,7 +1179,7 @@ async def thumb_proxy(
     # actually leaves our network — spends it. Charging cache hits made a 50-tile
     # browse page burn the whole 120/min budget in under three pages of scrolling.
     if not _is_private(get_client_ip(request)):
-        await check_rate_limit(f"img_proxy:eh_thumb:{auth['user_id']}", max_requests=120, window=60)
+        await check_rate_limit(f"img_proxy:eh_thumb:{auth['user_id']}", max_requests=600, window=60)
 
     cred_json = await get_credential("ehentai")
     cookies = json.loads(cred_json) if cred_json else {}

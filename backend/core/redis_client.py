@@ -102,7 +102,11 @@ class EhSemaphore:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.acquire_timeout
 
-        val = await r.get("rate_limit:config:ehentai:concurrency")
+        # Deliberately a distinct Redis key from `rate_limit:config:ehentai:concurrency`
+        # (that one belongs to DownloadSemaphore, see `get_limit()` below). Sharing a
+        # key coupled the interactive reader's throughput to background download job
+        # concurrency, which is wrong — they are different bottlenecks.
+        val = await r.get("rate_limit:config:ehentai:browse_concurrency")
         if val is not None:
             try:
                 max_count = int(val)

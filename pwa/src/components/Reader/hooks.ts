@@ -130,9 +130,26 @@ export function useReaderState(
 // Core feature: prefetch control with parallel slots + per-image timeout
 
 /** Max concurrent in-flight prefetch requests in proxy mode */
-const PROXY_PREFETCH_CONCURRENCY = 2
+const PROXY_PREFETCH_CONCURRENCY = 4
 /** Timeout (ms) per image in proxy mode before giving up and moving on */
-const PROXY_PREFETCH_TIMEOUT_MS = 2000
+const PROXY_PREFETCH_TIMEOUT_MS = 10000
+/**
+ * How many pages ahead of the current page a page-turn cleanup keeps alive.
+ * Page turns abort only requests outside [currentPage, currentPage + this],
+ * so a fast flip can keep building a buffer instead of restarting the chain
+ * every turn. The upper bound is what stops this from regressing FE-T16's
+ * memory incident on a long fast flip.
+ */
+const PREFETCH_KEEP_AHEAD = 10
+
+/** Bookkeeping for one in-flight/active prefetch <img> element. */
+interface ActiveImage {
+  el: HTMLImageElement
+  /** Proxy-mode per-image timeout; null in local mode (no timeout there). */
+  timeoutId: ReturnType<typeof setTimeout> | null
+  /** Whether this request incremented inflightCountRef (proxy mode only). */
+  counted: boolean
+}
 
 export function useSequentialPrefetch(
   images: ReaderImage[],
@@ -147,8 +164,10 @@ export function useSequentialPrefetch(
   // restarts the chain issues a second request for a page whose first request
   // has not settled yet — for a large file that means downloading it twice.
   const inflightPagesRef = useRef<Set<number>>(new Set())
-  // Track active Image elements for cleanup on unmount / page change
-  const activeImagesRef = useRef<Set<HTMLImageElement>>(new Set())
+  // Active Image elements keyed by page, for cleanup on unmount / page change.
+  // Keyed by page (rather than a bare Set) so a page-turn cleanup can abort
+  // only the pages that fell outside the keep-ahead window.
+  const activeImagesRef = useRef<Map<number, ActiveImage>>(new Map())
   const unmountedRef = useRef(false)
 
   // Reader rebuilds its `images` array on every render, so reading it through a
@@ -175,27 +194,60 @@ export function useSequentialPrefetch(
   // Epoch: incremented on every currentPage change.
   // Each in-flight callback captures its epoch; if it doesn't match the
   // current epoch by the time it fires, it was started for a stale page
-  // position and must not continue the chain.
+  // position and must not keep marching forward from that stale position —
+  // see currentPageRef below for where it re-enters instead.
   const epochRef = useRef(0)
 
-  // Cleanup helper: detach handlers and stop loading
-  const cleanupImage = useCallback((el: HTMLImageElement) => {
-    el.onload = null
-    el.onerror = null
-    el.src = ''
-    activeImagesRef.current.delete(el)
+  // Latest currentPage, readable from within prefetchPage's closures (which
+  // are recreated far less often than currentPage changes). Declared here —
+  // before prefetchPage — so it's initialised by the time those closures
+  // capture it. A settling request whose epoch has gone stale uses this to
+  // re-enter the chain at the current frontier instead of abandoning it;
+  // otherwise the chain goes idle between page turns (see hop-forward loop
+  // in prefetchPage, which skips anything already prefetched/in-flight, so
+  // re-entering here never re-requests a page that's already covered).
+  const currentPageRef = useRef(currentPage)
+  useEffect(() => {
+    currentPageRef.current = currentPage
+  }, [currentPage])
+
+  // Cleanup helper: detach handlers, stop loading, clear any pending timeout,
+  // and drop the page's bookkeeping entry.
+  const cleanupImage = useCallback((pageNum: number) => {
+    const entry = activeImagesRef.current.get(pageNum)
+    if (!entry) return
+    if (entry.timeoutId !== null) clearTimeout(entry.timeoutId)
+    entry.el.onload = null
+    entry.el.onerror = null
+    entry.el.src = ''
+    activeImagesRef.current.delete(pageNum)
   }, [])
 
-  // Cleanup all active images (used on unmount and epoch change)
+  // Cleanup all active images (used on unmount only — page turns use the
+  // windowed cleanup below so useful in-flight prefetches survive).
   const cleanupAllImages = useCallback(() => {
-    activeImagesRef.current.forEach((el) => {
-      el.onload = null
-      el.onerror = null
-      el.src = ''
-    })
+    Array.from(activeImagesRef.current.keys()).forEach((pageNum) => cleanupImage(pageNum))
     activeImagesRef.current.clear()
     inflightPagesRef.current.clear()
-  }, [])
+  }, [cleanupImage])
+
+  // Abort only the in-flight/active prefetches whose page falls outside
+  // [minPage, maxPage], decrementing the inflight counter for the ones that
+  // contributed to it. Pages inside the window are left running so a page
+  // turn doesn't throw away a buffer that's already being built.
+  const cleanupImagesOutsideWindow = useCallback(
+    (minPage: number, maxPage: number) => {
+      activeImagesRef.current.forEach((entry, pageNum) => {
+        if (pageNum >= minPage && pageNum <= maxPage) return
+        cleanupImage(pageNum)
+        inflightPagesRef.current.delete(pageNum)
+        if (entry.counted) {
+          inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
+        }
+      })
+    },
+    [cleanupImage],
+  )
 
   // Cleanup on unmount
   useEffect(() => {
@@ -247,32 +299,57 @@ export function useSequentialPrefetch(
         const capturedEpoch = epochRef.current
 
         const el = new window.Image()
-        activeImagesRef.current.add(el)
+        const entry: ActiveImage = { el, timeoutId: null, counted: true }
+        activeImagesRef.current.set(pageNum, entry)
 
-        // Timeout: if image hasn't loaded within threshold, skip and continue chain
+        // Timeout: if image hasn't loaded within threshold, skip and continue chain.
+        // The count is decremented unconditionally — it was incremented
+        // unconditionally above, and a stale epoch only means "don't keep
+        // marching forward from the stale page position", not "this slot was
+        // never actually used" or "stop prefetching altogether" (see the
+        // re-entry logic below).
         const timeoutId = setTimeout(() => {
-          cleanupImage(el)
+          cleanupImage(pageNum)
           inflightPagesRef.current.delete(pageNum)
-          if (unmountedRef.current || capturedEpoch !== epochRef.current) return
           inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
-          // Skip this page (don't add to prefetched) and try next
-          prefetchPageRef.current(pageNum + 1)
+          if (unmountedRef.current) return
+          // Skip this page (don't add to prefetched) and try next. If the
+          // epoch is still current, continue from this page in sequence; if
+          // a page turn moved on since this request started, don't keep
+          // marching forward from the abandoned position — re-enter the
+          // chain at the current frontier instead so prefetching doesn't go
+          // idle until the next page turn.
+          const nextPage = capturedEpoch === epochRef.current ? pageNum + 1 : currentPageRef.current + 1
+          prefetchPageRef.current(nextPage)
         }, PROXY_PREFETCH_TIMEOUT_MS)
+        entry.timeoutId = timeoutId
 
         el.onload = el.onerror = () => {
           clearTimeout(timeoutId)
-          cleanupImage(el)
+          cleanupImage(pageNum)
           inflightPagesRef.current.delete(pageNum)
+          inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
 
-          // If unmounted or the user has moved to a different page since this
-          // request was started, abandon the chain.
-          if (unmountedRef.current || capturedEpoch !== epochRef.current) return
+          if (unmountedRef.current) return
 
+          // Record the page as prefetched even if a page turn moved the epoch
+          // on since this request started — the bytes are in the browser
+          // cache either way, so dropping the bookkeeping would only cause a
+          // pointless re-request later.
           prefetchedRef.current = new Set([...prefetchedRef.current, pageNum])
           setPrefetched(new Set(prefetchedRef.current))
-          inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
-          // Chain: immediately try the next page in sequence
-          prefetchPageRef.current(pageNum + 1)
+
+          // If the epoch is still current, continue this chain from the next
+          // page in sequence. If a page turn moved the epoch on since this
+          // request started, don't keep marching forward from a page
+          // position the user has left — re-enter the chain at the current
+          // frontier instead. prefetchPage's hop-forward loop skips anything
+          // already prefetched/in-flight, so this lands on the first
+          // genuinely useful page rather than re-requesting anything, and
+          // keeps the buffer advancing between page turns instead of going
+          // idle once every in-flight request from the old epoch settles.
+          const nextPage = capturedEpoch === epochRef.current ? pageNum + 1 : currentPageRef.current + 1
+          prefetchPageRef.current(nextPage)
         }
         el.src = img.url
       } else {
@@ -280,9 +357,9 @@ export function useSequentialPrefetch(
         if (!img.url) return // skip un-downloaded images
         inflightPagesRef.current.add(pageNum)
         const el = new window.Image()
-        activeImagesRef.current.add(el)
+        activeImagesRef.current.set(pageNum, { el, timeoutId: null, counted: false })
         el.onload = el.onerror = () => {
-          cleanupImage(el)
+          cleanupImage(pageNum)
           inflightPagesRef.current.delete(pageNum)
           if (unmountedRef.current) return
 
@@ -323,26 +400,29 @@ export function useSequentialPrefetch(
 
   useEffect(() => {
     // Advance epoch so any stale in-flight callback from the previous page
-    // will detect a mismatch and abort its chain.
+    // will, once it settles, re-enter its chain at the current frontier
+    // (currentPageRef.current + 1) instead of continuing to march forward
+    // from the page position the user has left. Bookkeeping — recording the
+    // page as prefetched and decrementing the inflight count — always
+    // happens regardless of epoch; see the onload/onerror/timeout handlers.
     epochRef.current += 1
-    // Reset inflight count so the new chain can start immediately even if the
-    // old requests haven't fired their callbacks yet.
-    inflightCountRef.current = 0
-    // Clean up any in-flight Image objects from the previous page
-    cleanupAllImages()
+
+    // Abort only the prefetches that fell outside the keep-ahead window.
+    // Do NOT reset inflightCountRef here: it is now decremented accurately as
+    // each request settles or is aborted below, so PROXY_PREFETCH_CONCURRENCY
+    // stays a real cap instead of being reset on every page turn — which is
+    // what let fast flipping cancel a buffer that was still being built.
+    cleanupImagesOutsideWindow(currentPage, currentPage + PREFETCH_KEEP_AHEAD)
 
     startPrefetchWindow(currentPage)
-  }, [currentPage, startPrefetchWindow, cleanupAllImages])
+  }, [currentPage, startPrefetchWindow, cleanupImagesOutsideWindow])
 
   // Pages that only became prefetchable later (appended by infinite scroll, or
   // finished downloading and gained a URL) still need a request. Top the window
   // up without tearing down the requests already running for this page — that
   // teardown-and-restart is what turned one page turn into repeated downloads
-  // of the same file.
-  const currentPageRef = useRef(currentPage)
-  useEffect(() => {
-    currentPageRef.current = currentPage
-  }, [currentPage])
+  // of the same file. (currentPageRef itself is declared above, before
+  // prefetchPage, so its stale-epoch re-entry logic can read it too.)
   useEffect(() => {
     startPrefetchWindow(currentPageRef.current)
   }, [prefetchableKey, startPrefetchWindow])

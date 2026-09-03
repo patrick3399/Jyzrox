@@ -3,7 +3,10 @@
  *
  * Tests the prefetch hook used by the Reader component.
  * The hook has two modes:
- *   - Proxy mode: PROXY_PREFETCH_CONCURRENCY (2) concurrent slots with chaining
+ *   - Proxy mode: PROXY_PREFETCH_CONCURRENCY (4) concurrent slots with chaining.
+ *     Page turns keep in-flight prefetches inside a window ahead of the current
+ *     page ([currentPage, currentPage + PREFETCH_KEEP_AHEAD]) instead of aborting
+ *     everything, so fast flipping can build a buffer.
  *   - Local mode: fire up to 3 concurrent requests per page change
  */
 
@@ -84,22 +87,24 @@ describe('useSequentialPrefetch', () => {
   // ── Proxy mode ───────────────────────────────────────────────────
 
   describe('proxy mode', () => {
-    it('should create 2 in-flight Image requests on initial render (concurrency=2)', () => {
+    it('should create 4 in-flight Image requests on initial render (concurrency=4)', () => {
       const images = makeImages(5)
 
       renderHook(() => useSequentialPrefetch(images, 1, true))
 
-      expect(instances).toHaveLength(2)
+      expect(instances).toHaveLength(4)
       expect(instances[0].src).toBe('http://proxy/page/2')
       expect(instances[1].src).toBe('http://proxy/page/3')
+      expect(instances[2].src).toBe('http://proxy/page/4')
+      expect(instances[3].src).toBe('http://proxy/page/5')
     })
 
-    it('should NOT start more than 2 requests while both are in flight', () => {
+    it('should NOT start more than 4 requests while all four are in flight', () => {
       const images = makeImages(10)
 
       renderHook(() => useSequentialPrefetch(images, 1, true))
 
-      expect(instances).toHaveLength(2)
+      expect(instances).toHaveLength(4)
     })
 
     it('should eventually prefetch all remaining pages after completing initial ones', async () => {
@@ -137,24 +142,38 @@ describe('useSequentialPrefetch', () => {
       expect(instances.length).toBeGreaterThan(2)
     })
 
-    it('should restart chain from new currentPage+1 when currentPage changes', async () => {
-      const images = makeImages(10)
+    it('should abort out-of-window prefetches and start a new window when currentPage jumps far ahead', async () => {
+      // Page turns no longer restart the chain by aborting everything — they keep
+      // in-flight prefetches inside [currentPage, currentPage + PREFETCH_KEEP_AHEAD]
+      // (= 10) and only abort requests that fall outside it. A jump from page 1 to
+      // page 20 puts every pre-turn request (pages 2-5) outside the new window
+      // ([20, 30]), so — unlike a small in-window turn — all of them get aborted
+      // and a fresh window is started from the new position.
+      const images = makeImages(30)
       let currentPage = 1
 
       const { rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
 
-      expect(instances).toHaveLength(2)
+      expect(instances).toHaveLength(4)
+      const preTurnInstances = [...instances]
 
-      // User jumps to page 6
-      currentPage = 6
+      // User jumps to page 20 — far outside the old keep-ahead window.
+      currentPage = 20
       await act(async () => {
         rerender()
       })
 
-      // Should have requests for pages 7 and 8
+      // Every pre-turn request must have been aborted (src reset).
+      preTurnInstances.forEach((inst) => {
+        expect(inst.src).toBe('')
+      })
+
+      // A new window of 4 requests must have been started from page 21.
       const srcs = activeSrcs(instances)
-      expect(srcs).toContain('http://proxy/page/7')
-      expect(srcs).toContain('http://proxy/page/8')
+      expect(srcs).toContain('http://proxy/page/21')
+      expect(srcs).toContain('http://proxy/page/22')
+      expect(srcs).toContain('http://proxy/page/23')
+      expect(srcs).toContain('http://proxy/page/24')
     })
 
     it('should not create a duplicate request for a page already in prefetchedRef', async () => {
@@ -315,7 +334,7 @@ describe('useSequentialPrefetch', () => {
 
       renderHook(() => useSequentialPrefetch(images, 1, true))
 
-      // Concurrency is 2: with page 2 skipped, both slots must land on real images.
+      // Concurrency is 4: with page 2 skipped, the available slots must land on real images.
       const srcs = activeSrcs(instances)
       expect(srcs).not.toContain('http://proxy/page/2.mp4')
       expect(srcs).toContain('http://proxy/page/3')
@@ -366,6 +385,126 @@ describe('useSequentialPrefetch', () => {
       })
 
       expect(activeSrcs(instances)).toContain('http://proxy/page/2')
+    })
+  })
+
+  // ── Windowed page-turn cleanup ─────────────────────────────────────
+  // Regression: page turns used to blanket-abort every in-flight prefetch via
+  // cleanupAllImages(), throwing away a buffer that was still being built. The
+  // fix aborts only requests outside [currentPage, currentPage +
+  // PREFETCH_KEEP_AHEAD] (=10); requests inside the window survive the turn.
+  // The abort half is still required — without it, a long fast flip would keep
+  // growing the window forever and regress FE-T16's memory incident.
+
+  describe('windowed page-turn cleanup', () => {
+    it('should abort a prefetch outside the keep-ahead window on page turn but not one inside it', async () => {
+      const images = makeImages(20)
+      let currentPage = 1
+
+      const { result, rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+
+      // Concurrency 4: initial in-flight requests are for pages 2, 3, 4, 5.
+      expect(instances).toHaveLength(4)
+      const page2Image = instances[0]
+      const page3Image = instances[1]
+
+      // Turn to page 3: keep window becomes [3, 13]. Page 2 falls outside it;
+      // page 3 stays inside it.
+      currentPage = 3
+      await act(async () => {
+        rerender()
+      })
+
+      // Outside the window: aborted — handlers detached and src reset.
+      expect(page2Image.src).toBe('')
+      // Inside the window: left running, untouched.
+      expect(page3Image.src).toBe('http://proxy/page/3')
+
+      // The kept-alive prefetch must still settle normally afterwards.
+      await act(async () => {
+        page3Image.triggerLoad()
+      })
+      expect(result.current.has(3)).toBe(true)
+    })
+  })
+
+  // ── Epoch bookkeeping survival ──────────────────────────────────────
+  // Regression: the onload/onerror handler used to bail out entirely
+  // (`if (... || capturedEpoch !== epochRef.current) return`) before recording
+  // the page as prefetched whenever a page turn had bumped the epoch since the
+  // request started. That dropped legitimately-downloaded bytes from
+  // `prefetched` bookkeeping and could cause a pointless later re-request.
+
+  describe('epoch bookkeeping survival', () => {
+    it('should record a prefetch in the returned set even when it settles after a page turn', async () => {
+      const images = makeImages(20)
+      let currentPage = 1
+
+      const { result, rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+
+      // Page 2's request started under the old epoch, before any page turn.
+      const page2Image = instances[0]
+
+      // Turn to page 2: keep window [2, 12] keeps page 2 alive (not aborted),
+      // but the epoch has still been bumped.
+      currentPage = 2
+      await act(async () => {
+        rerender()
+      })
+      expect(page2Image.src).toBe('http://proxy/page/2') // not aborted
+
+      // The pre-turn request for page 2 finally settles, after the epoch bump.
+      await act(async () => {
+        page2Image.triggerLoad()
+      })
+
+      expect(result.current.has(2)).toBe(true)
+    })
+  })
+
+  // ── No stall after a page turn ───────────────────────────────────────
+  // Regression: if every concurrency slot is occupied by requests that started
+  // before a page turn and none of them fall outside the keep-ahead window (so
+  // none get aborted), no new prefetchPage call can start immediately — they
+  // all hit the `inflightCountRef.current >= PROXY_PREFETCH_CONCURRENCY` guard.
+  // The chain must not go idle forever in this state: once those pre-turn
+  // requests settle, the slot they free up must be used to start a new request
+  // that re-enters the chain at (currentPage + 1) and hops forward past
+  // whatever is still in flight. This requires BOTH accurate inflightCountRef
+  // decrementing AND epoch-independent chain continuation — a partial port of
+  // the windowed-cleanup fix that keeps the old early-return-on-epoch-mismatch
+  // reproduces the stall this test pins.
+
+  describe('no stall after a page turn', () => {
+    it('should issue a new prefetch once pre-turn in-flight requests settle even though all slots were full at the turn', async () => {
+      const images = makeImages(10)
+      let currentPage = 1
+
+      const { rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+
+      // Concurrency 4: pages 2, 3, 4, 5 occupy every slot.
+      expect(instances).toHaveLength(4)
+      const page2Image = instances[0]
+
+      // Small turn to page 2: keep window [2, 12] keeps pages 2-5 all alive, so
+      // nothing is aborted and every concurrency slot stays occupied.
+      currentPage = 2
+      await act(async () => {
+        rerender()
+      })
+      // No slot was freed by the turn itself, so no new request could start yet.
+      expect(instances).toHaveLength(4)
+
+      // One of the pre-turn requests (page 2) finally settles.
+      await act(async () => {
+        page2Image.triggerLoad()
+      })
+
+      // The freed slot must be used: the chain re-enters at currentPage+1 (=3)
+      // and hops forward past pages 3, 4, 5 (still in flight) to land on the
+      // first genuinely available page, 6.
+      expect(instances).toHaveLength(5)
+      expect(instances[4].src).toBe('http://proxy/page/6')
     })
   })
 })

@@ -1373,6 +1373,49 @@ class TestEhImageProxy:
         assert resp.status_code == 504
         assert resp.json()["detail"] == "EH image request timed out"
 
+    async def test_image_proxy_cache_hit_does_not_consume_rate_budget(self, client, mock_redis):
+        """A Redis cache hit serves bytes without any outbound EH fetch, so it must not
+        spend the per-user EH quota.
+
+        Mirrors the thumb-proxy fix in TestEhThumbProxy: the budget exists to bound
+        outbound traffic to EH, so charging it against cache hits let ordinary fast
+        page-flipping through already-fetched pages exhaust the whole budget.
+        """
+        fake_jpeg = b"\xff\xd8\xff" + b"\x00" * 10
+
+        with (
+            # LAN clients bypass the limiter outright; the bug only bites public ones.
+            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
+            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=fake_jpeg),
+        ):
+            resp = await client.get("/api/eh/image-proxy/12345/1")
+
+        assert resp.status_code == 200
+        assert resp.content == fake_jpeg
+        rate_limit.assert_not_called()
+
+    async def test_image_proxy_cache_miss_still_consumes_rate_budget(self, client, mock_redis):
+        """A cache miss reaches beyond our own cache toward EH, so the per-user limit
+        must still apply, keyed per-endpoint under `img_proxy:eh:` (not `eh_thumb:`,
+        the sibling thumb-proxy endpoint's key)."""
+        with (
+            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
+            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+        ):
+            resp = await client.get("/api/eh/image-proxy/12345/1")
+
+        # No imagelist cache and no gallery cache to fall back on → 404, but the
+        # rate check happens before that resolution step, so it is still charged.
+        assert resp.status_code == 404
+        rate_limit.assert_awaited_once()
+        key = rate_limit.await_args.args[0]
+        assert key.startswith("img_proxy:eh:")
+
 
 # ---------------------------------------------------------------------------
 # TestEhErrorParsing

@@ -22,7 +22,13 @@ http {
     gzip_vary on;
 
     # Rate limits
-    limit_req_zone $binary_remote_addr zone=eh_proxy:10m rate=5r/s;
+    # eh_proxy runs before require_auth, so it is the only gate against an
+    # unauthenticated flood reaching API workers -- keep the zone even though
+    # its per-key granularity is coarse. No real_ip_header is configured, so
+    # $binary_remote_addr resolves to the outer reverse proxy's address, not
+    # the end client's; this is a shared bucket across all external clients,
+    # not a per-user limit.
+    limit_req_zone $binary_remote_addr zone=eh_proxy:10m rate=30r/s;
     limit_req_zone $binary_remote_addr zone=pixiv_proxy:10m rate=20r/s;
     limit_req_zone $binary_remote_addr zone=auth_zone:10m rate=5r/m;
     limit_req_zone $binary_remote_addr zone=api_zone:10m rate=30r/s;
@@ -196,7 +202,7 @@ http {
 
         # ── E-H image proxy: rate limited ─────────────────────────
         location /api/eh/image-proxy/ {
-            limit_req zone=eh_proxy burst=10 nodelay;
+            limit_req zone=eh_proxy burst=60 nodelay;
             proxy_pass http://api;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;

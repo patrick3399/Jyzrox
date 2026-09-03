@@ -399,15 +399,20 @@ class TestEhSemaphore:
                     async with sem.acquire():
                         pass
 
-    async def test_concurrency_limit_read_from_redis(self):
-        """acquire() reads concurrency limit from rate_limit:config:ehentai:concurrency."""
+    async def test_concurrency_limit_read_from_browse_concurrency_redis_key(self):
+        """acquire() reads its concurrency limit from
+        rate_limit:config:ehentai:browse_concurrency (the reader/interactive key),
+        not rate_limit:config:ehentai:concurrency (DownloadSemaphore's key — see
+        TestDownloadSemaphoreAcquire below and test_acquire_reads_browse_concurrency_
+        key_and_ignores_download_concurrency_key for the coupling this guards
+        against)."""
         from core.redis_client import EhSemaphore
 
         sem = EhSemaphore()
         mock_redis = AsyncMock()
 
         def _get(key):
-            if key == "rate_limit:config:ehentai:concurrency":
+            if key == "rate_limit:config:ehentai:browse_concurrency":
                 return b"5"
             return None
 
@@ -422,6 +427,45 @@ class TestEhSemaphore:
                 async with sem.acquire():
                     pass  # acquired with custom limit of 5
 
+        mock_redis.decr.assert_called_once()
+
+    async def test_acquire_reads_browse_concurrency_key_and_ignores_download_concurrency_key(self):
+        """EhSemaphore must key off ehentai:browse_concurrency and must NOT also read
+        (or be limited by) ehentai:concurrency — DownloadSemaphore's key.
+
+        Sharing that key previously coupled the interactive reader's throughput to
+        background download job concurrency, which is the wrong bottleneck: a slot
+        count that satisfies the (higher) browse_concurrency limit but would exceed
+        the (lower) download concurrency value must still acquire successfully, and
+        the download key must never even be read.
+        """
+        from core.redis_client import EhSemaphore
+
+        sem = EhSemaphore()
+        mock_redis = AsyncMock()
+
+        def _get(key):
+            if key == "rate_limit:config:ehentai:browse_concurrency":
+                return b"5"
+            if key == "rate_limit:config:ehentai:concurrency":
+                # DownloadSemaphore's key. If EhSemaphore ever reads this by mistake
+                # (or takes the min of both), a count of 3 would exceed this limit
+                # of 1 and the acquire below would time out instead of succeeding.
+                return b"1"
+            return None
+
+        mock_redis.get = AsyncMock(side_effect=_get)
+        mock_redis.incr = AsyncMock(return_value=3)  # > download key (1), <= browse key (5)
+        mock_redis.decr = AsyncMock(return_value=2)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.redis_client.settings") as mock_settings:
+                mock_settings.eh_max_concurrency = 2
+                mock_settings.eh_acquire_timeout = 5
+                async with sem.acquire():
+                    pass  # must acquire: count=3 is within browse_concurrency=5
+
+        mock_redis.get.assert_awaited_once_with("rate_limit:config:ehentai:browse_concurrency")
         mock_redis.decr.assert_called_once()
 
     async def test_default_concurrency_fallback_when_no_redis_key(self):

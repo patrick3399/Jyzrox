@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     download_job_timeout: int = 86400
 
     # E-Hentai limits
-    eh_max_concurrency: int = 2
+    eh_max_concurrency: int = 8
     eh_request_timeout: int = 30
     eh_acquire_timeout: int = 60
     eh_use_ex: bool = False  # Use ExHentai instead of E-Hentai (EH_USE_EX env var)
