@@ -154,6 +154,99 @@ class TestLibraryDiscoveryTrashedGuard:
         assert "WHERE galleries.deleted_at IS NULL" in statement
 
 
+class TestLibraryDiscoveryCategory:
+    """{category} is derived from the path on insert only (first-import-only)."""
+
+    @staticmethod
+    def _run(tmp_path, pattern, rel_parts):
+        from worker.scan import _LibrarySpec
+
+        current = tmp_path.joinpath(*rel_parts)
+        current.mkdir(parents=True)
+        session = AsyncMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = 1
+        session.execute.return_value = result
+        return session, current, _LibrarySpec(path=str(tmp_path), pattern=pattern, import_mode="link")
+
+    async def test_category_group_is_bound_as_insert_parameter(self, tmp_path):
+        from worker.scan import _discover_single_library_dir
+
+        session, current, spec = self._run(tmp_path, "{category}/{artist}/{title}", ["Cosplay", "abfluss", "g1"])
+        await _discover_single_library_dir(session, spec, current)
+
+        params = session.execute.await_args.args[1]
+        assert params["category"] == "Cosplay"
+        assert params["artist_id"] == "local:abfluss"
+
+    async def test_category_is_not_in_the_on_conflict_update_list(self, tmp_path):
+        """Re-discovery must never overwrite a category the user edited."""
+        from worker.scan import _discover_single_library_dir
+
+        session, current, spec = self._run(tmp_path, "{category}/{artist}/{title}", ["Cosplay", "abfluss", "g1"])
+        await _discover_single_library_dir(session, spec, current)
+
+        statement = str(session.execute.await_args.args[0])
+        update_clause = statement.split("DO UPDATE SET", 1)[1]
+        assert "category" not in update_clause
+        # the fields that DO follow the path must still be updated
+        assert "title = EXCLUDED.title" in update_clause
+        assert "artist_id = EXCLUDED.artist_id" in update_clause
+
+    async def test_pattern_without_category_binds_none(self, tmp_path):
+        from worker.scan import _discover_single_library_dir
+
+        session, current, spec = self._run(tmp_path, "{artist}/{title}", ["abfluss", "g1"])
+        await _discover_single_library_dir(session, spec, current)
+
+        assert session.execute.await_args.args[1]["category"] is None
+
+    async def test_trashed_guard_survives_the_category_column(self, tmp_path):
+        """The HR-014 guard must remain on the DO UPDATE branch."""
+        from worker.scan import _discover_single_library_dir
+
+        session, current, spec = self._run(tmp_path, "{category}/{artist}/{title}", ["Cosplay", "abfluss", "g1"])
+        await _discover_single_library_dir(session, spec, current)
+
+        assert "WHERE galleries.deleted_at IS NULL" in str(session.execute.await_args.args[0])
+
+    async def test_category_folder_name_with_surrounding_whitespace_is_trimmed(self, tmp_path):
+        """Discovery must run the matched {category} group through
+        normalize_category, which trims whitespace, before binding it."""
+        from worker.scan import _discover_single_library_dir
+
+        session, current, spec = self._run(tmp_path, "{category}/{artist}/{title}", ["  Cosplay  ", "abfluss", "g1"])
+        await _discover_single_library_dir(session, spec, current)
+
+        assert session.execute.await_args.args[1]["category"] == "Cosplay"
+
+    async def test_category_folder_name_over_64_chars_binds_none_and_still_imports(self, tmp_path):
+        """A too-long folder name must not abort discovery: normalize_category
+        degrades it to None instead, and the gallery is still enqueued for
+        import — a bad category folder name must not block ingest."""
+        from worker.scan import _discover_single_library_dir, _ImportRequest
+
+        long_category = "x" * 65
+        session, current, spec = self._run(tmp_path, "{category}/{artist}/{title}", [long_category, "abfluss", "g1"])
+        result = await _discover_single_library_dir(session, spec, current)
+
+        assert session.execute.await_args.args[1]["category"] is None
+        assert isinstance(result, _ImportRequest)
+
+    async def test_category_still_excluded_from_do_update_set_after_normalization(self, tmp_path):
+        """Reinforces test_category_is_not_in_the_on_conflict_update_list: the
+        switch to normalize_category must not accidentally reintroduce
+        `category` into the DO UPDATE SET clause."""
+        from worker.scan import _discover_single_library_dir
+
+        session, current, spec = self._run(tmp_path, "{category}/{artist}/{title}", ["Cosplay", "abfluss", "g1"])
+        await _discover_single_library_dir(session, spec, current)
+
+        statement = str(session.execute.await_args.args[0])
+        update_clause = statement.split("DO UPDATE SET", 1)[1]
+        assert "category" not in update_clause
+
+
 class TestRescanLibraryJob:
     """Tests for rescan_library_job(ctx)."""
 

@@ -12,6 +12,7 @@ from sqlalchemy.sql import select
 import core.queue
 from core.config import get_all_library_paths, get_monitored_library_paths, settings
 from core.database import AsyncSessionLocal
+from core.local_category_plan import normalize_category
 from core.local_patterns import (
     DEFAULT_IMPORT_MODE,
     DEFAULT_LIBRARY_PATTERN,
@@ -258,6 +259,14 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
     rel_path, groups = matched
     title = groups.get("title") or current.name
     artist = groups.get("artist")
+    raw_category = groups.get("category")
+    category = normalize_category(raw_category)
+    if raw_category and category is None:
+        logger.warning(
+            "[discover] %s: unusable category folder name %r, importing without category",
+            rel_path,
+            raw_category,
+        )
     source_path = os.path.realpath(current)
 
     # NOTE: the `WHERE galleries.deleted_at IS NULL` guard on the DO UPDATE
@@ -266,10 +275,17 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
     # condition fails, no row is updated, and RETURNING yields nothing —
     # callers must treat a None result as "skip enqueue" (already the case
     # at all call sites).
+    #
+    # NOTE: `category` is deliberately absent from DO UPDATE SET. A path-derived
+    # category is a first-import default, not a source of truth: re-discovery
+    # must not clobber a value edited in the Workbench. Moving a gallery between
+    # category folders therefore does not re-derive it (accepted trade-off).
     stmt = text(
         "INSERT INTO galleries "
-        "(source, source_id, title, artist_id, uploader, library_path, source_path, import_mode, download_status) "
-        "VALUES ('local', :source_id, :title, :artist_id, :uploader, :library_path, :source_path, :import_mode, 'importing') "
+        "(source, source_id, title, artist_id, uploader, category, library_path, source_path, import_mode, "
+        "download_status) "
+        "VALUES ('local', :source_id, :title, :artist_id, :uploader, :category, :library_path, :source_path, "
+        ":import_mode, 'importing') "
         "ON CONFLICT (source, source_id) DO UPDATE SET "
         "title = EXCLUDED.title, "
         "artist_id = EXCLUDED.artist_id, "
@@ -287,6 +303,7 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
             "title": title,
             "artist_id": f"local:{artist}" if artist else None,
             "uploader": artist,
+            "category": category,
             "library_path": spec.path,
             "source_path": source_path,
             "import_mode": spec.import_mode,
