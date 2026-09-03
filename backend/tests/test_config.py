@@ -126,9 +126,27 @@ class TestSettingsDefaults:
         assert s.pixiv_client_id == "MOBrBDS8blbauoSck0ZfDbtuzpyT"
 
     def test_settings_default_eh_max_concurrency(self):
-        """eh_max_concurrency defaults to 2 to respect EH rate limits."""
+        """eh_max_concurrency defaults to 8 for the interactive browse path.
+
+        Raised from 2 in 8329d4f. EH's real limit is a view count over a long
+        window (509 Bandwidth Exceeded), not concurrency throttling, so a cap of
+        2 did not reduce how many images we fetch - it only made the reader slow
+        (18.6% 504s on image-proxy). That commit also gave EhSemaphore its own
+        ehentai:browse_concurrency key, so this knob no longer constrains
+        background downloads; those stay on eh_download_concurrency.
+        """
         s = self._make_settings()
-        assert s.eh_max_concurrency == 2
+        assert s.eh_max_concurrency == 8
+
+    def test_settings_default_eh_download_concurrency(self):
+        """eh_download_concurrency stays 3, independent of eh_max_concurrency.
+
+        Browse and download budgets were decoupled in 8329d4f; widening the
+        interactive path must not widen the background one.
+        """
+        s = self._make_settings()
+        assert s.eh_download_concurrency == 3
+
     def test_settings_default_library_base_path(self):
         """library_base_path defaults to /mnt for host-mounted external media."""
         s = self._make_settings()
