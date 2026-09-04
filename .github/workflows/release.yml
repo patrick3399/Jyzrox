@@ -165,6 +165,9 @@ jobs:
             git push origin "${TAG}"
           fi
 
+      # orhun/git-cliff-action must stay listed in the repo's Actions
+      # allowed-actions patterns (Settings > Actions > selected-actions),
+      # or every run on main fails as a startup_failure with 0 jobs.
       - name: Generate release notes (git-cliff)
         uses: orhun/git-cliff-action@v4
         with:
