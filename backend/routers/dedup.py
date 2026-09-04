@@ -99,13 +99,9 @@ async def get_dedup_stats(_: dict = Depends(_admin)):
         "needs_t2": counts.get("needs_context", 0) + counts.get("needs_t2", 0),
         "needs_t3": counts.get("needs_t3", 0),
         "same_gallery_only": counts.get("same_gallery_only", 0),
-        "pending_review": counts.get("needs_review", 0)
-        + counts.get("quality_conflict", 0)
-        + counts.get("variant", 0),
+        "pending_review": counts.get("needs_review", 0) + counts.get("quality_conflict", 0) + counts.get("variant", 0),
         "whitelisted": counts.get("whitelisted", 0) + decisions.get("whitelisted", 0),
-        "resolved": counts.get("resolved", 0)
-        + decisions.get("dismissed", 0)
-        + decisions.get("merged", 0),
+        "resolved": counts.get("resolved", 0) + decisions.get("dismissed", 0) + decisions.get("merged", 0),
     }
 
 

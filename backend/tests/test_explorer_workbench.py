@@ -22,10 +22,7 @@ from services.workbench_metadata import apply_source_scalar_metadata
 
 async def _seed_user_and_galleries(db_session) -> None:
     await db_session.execute(
-        text(
-            "INSERT INTO users (id, username, password_hash, role) "
-            "VALUES (1, 'admin', 'unused', 'admin')"
-        )
+        text("INSERT INTO users (id, username, password_hash, role) VALUES (1, 'admin', 'unused', 'admin')")
     )
     await db_session.execute(
         text(
@@ -166,19 +163,14 @@ async def test_merge_copies_references_trashes_sources_and_old_route_is_404(clie
     await db_session.execute(
         text("INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) VALUES (102, 301, 0.8, 'metadata')")
     )
-    await db_session.execute(
-        text("INSERT INTO collections (id, user_id, name) VALUES (401, 1, 'Merged collection')")
-    )
+    await db_session.execute(text("INSERT INTO collections (id, user_id, name) VALUES (401, 1, 'Merged collection')"))
     await db_session.execute(
         text("INSERT INTO collection_galleries (collection_id, gallery_id, position) VALUES (401, 102, 0)")
     )
     await db_session.execute(text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, 102)"))
     await db_session.execute(text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, 102, 8)"))
     await db_session.execute(
-        text(
-            "INSERT INTO read_progress (user_id, gallery_id, last_page, last_image_id) "
-            "VALUES (1, 102, 2, 203)"
-        )
+        text("INSERT INTO read_progress (user_id, gallery_id, last_page, last_image_id) VALUES (1, 102, 2, 203)")
     )
     await db_session.commit()
 
@@ -375,14 +367,16 @@ async def test_bulk_actions_manage_personal_state_collections_and_manual_tags(cl
     assert tags.json()["affected"] == 2
 
     favorites = (
-        await db_session.execute(select(UserFavorite).where(UserFavorite.gallery_id.in_([101, 102])))
-    ).scalars().all()
+        (await db_session.execute(select(UserFavorite).where(UserFavorite.gallery_id.in_([101, 102])))).scalars().all()
+    )
     memberships = (
-        await db_session.execute(select(CollectionGallery).where(CollectionGallery.collection_id == 901))
-    ).scalars().all()
+        (await db_session.execute(select(CollectionGallery).where(CollectionGallery.collection_id == 901)))
+        .scalars()
+        .all()
+    )
     manual_tags = (
-        await db_session.execute(select(GalleryTag).where(GalleryTag.gallery_id.in_([101, 102])))
-    ).scalars().all()
+        (await db_session.execute(select(GalleryTag).where(GalleryTag.gallery_id.in_([101, 102])))).scalars().all()
+    )
     assert len(favorites) == 2
     assert len(memberships) == 2
     assert len(manual_tags) == 2

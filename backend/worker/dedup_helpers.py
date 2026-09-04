@@ -148,11 +148,7 @@ async def _pair_context_scopes(session, pairs) -> dict[int, str]:
     if not shas:
         return {}
     rows = (
-        await session.execute(
-            select(Image.blob_sha256, Image.gallery_id)
-            .where(Image.blob_sha256.in_(shas))
-            .distinct()
-        )
+        await session.execute(select(Image.blob_sha256, Image.gallery_id).where(Image.blob_sha256.in_(shas)).distinct())
     ).all()
     galleries: dict[str, set[int]] = {sha: set() for sha in shas}
     for sha, gallery_id in rows:

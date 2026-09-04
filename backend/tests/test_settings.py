@@ -495,8 +495,8 @@ class TestFeatureToggles:
         assert data["value"] == 8
         assert data["removed_candidates"] == 1
         remaining = (
-            await db_session.execute(text("SELECT decision FROM blob_relationships ORDER BY sha_a"))
-        ).scalars().all()
+            (await db_session.execute(text("SELECT decision FROM blob_relationships ORDER BY sha_a"))).scalars().all()
+        )
         assert remaining == ["whitelisted"]
 
     async def test_patch_feature_phash_threshold_rejects_fractional_or_out_of_range(self, client, mock_redis):
@@ -635,6 +635,7 @@ class TestFeatureTogglesNumeric:
                 json={"value": 999},
             )
         assert resp.status_code == 400
+
     async def test_set_site_credential_cookies_browser_format(self, client):
         """POST /credentials/site with browser cookie format."""
         with patch("routers.settings.set_credential", new_callable=AsyncMock) as mock_set:

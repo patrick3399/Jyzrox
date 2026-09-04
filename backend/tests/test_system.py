@@ -478,8 +478,6 @@ async def test_system_health_records_unknown_when_df_raises(client, db_session_f
     assert services["inodes"] == "unknown"
 
 
-
-
 async def test_system_storage_returns_mounts_deduplicated_by_device(client):
     """GET /api/system/storage deduplicates paths on the same filesystem device."""
     fake_stat = MagicMock()

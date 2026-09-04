@@ -27,9 +27,7 @@ def test_bk_tree_matches_brute_force_hamming_radius():
     for query in blobs[::17]:
         for threshold in (0, 5, 10):
             expected = {
-                blob.sha256
-                for blob in blobs
-                if _hamming_distance(query.phash_int, blob.phash_int) <= threshold
+                blob.sha256 for blob in blobs if _hamming_distance(query.phash_int, blob.phash_int) <= threshold
             }
             actual = {blob.sha256 for blob, _distance in index.query(query.phash_int, threshold)}
             assert actual == expected

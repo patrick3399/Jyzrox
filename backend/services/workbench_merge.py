@@ -115,10 +115,7 @@ async def preview_gallery_merge(
             added += 1
 
     conflicts = {
-        field_name: [
-            {"gallery_id": gallery.id, "value": getattr(gallery, field_name)}
-            for gallery in ordered
-        ]
+        field_name: [{"gallery_id": gallery.id, "value": getattr(gallery, field_name)} for gallery in ordered]
         for field_name in MERGE_SCALAR_FIELDS
         if len({repr(getattr(gallery, field_name)) for gallery in ordered}) > 1
     }
@@ -141,9 +138,7 @@ async def _copy_source_items(
     sources: Sequence[Gallery],
 ) -> dict[int, tuple[int, str]]:
     existing = (
-        (await db.execute(select(GallerySourceItem).where(GallerySourceItem.gallery_id == target_id)))
-        .scalars()
-        .all()
+        (await db.execute(select(GallerySourceItem).where(GallerySourceItem.gallery_id == target_id))).scalars().all()
     )
     used_ids = {item.source_item_id for item in existing}
     row_map: dict[int, tuple[int, str]] = {}
@@ -205,9 +200,7 @@ async def _copy_images(
     target_blobs = {
         blob.sha256: blob
         for blob in (
-            (await db.execute(select(Blob).where(Blob.sha256.in_(list(target_by_sha) or [""]))))
-            .scalars()
-            .all()
+            (await db.execute(select(Blob).where(Blob.sha256.in_(list(target_by_sha) or [""])))).scalars().all()
         )
     }
     next_page = max((image.page_num for image in target_images), default=0) + 1
@@ -221,7 +214,11 @@ async def _copy_images(
     existing_favorites = {
         (row.user_id, row.image_id)
         for row in (
-            await db.execute(select(UserImageFavorite).where(UserImageFavorite.image_id.in_([image.id for image in target_images] or [-1])))
+            await db.execute(
+                select(UserImageFavorite).where(
+                    UserImageFavorite.image_id.in_([image.id for image in target_images] or [-1])
+                )
+            )
         ).scalars()
     }
     relationship_pairs = {
@@ -238,11 +235,7 @@ async def _copy_images(
 
     for source in sources:
         source_images = (
-            (
-                await db.execute(
-                    select(Image).where(Image.gallery_id == source.id).order_by(Image.page_num, Image.id)
-                )
-            )
+            (await db.execute(select(Image).where(Image.gallery_id == source.id).order_by(Image.page_num, Image.id)))
             .scalars()
             .all()
         )
@@ -255,7 +248,9 @@ async def _copy_images(
         source_blobs = {
             blob.sha256: blob
             for blob in (
-                await db.execute(select(Blob).where(Blob.sha256.in_([image.blob_sha256 for image in source_images] or [""])))
+                await db.execute(
+                    select(Blob).where(Blob.sha256.in_([image.blob_sha256 for image in source_images] or [""]))
+                )
             ).scalars()
         }
 
@@ -366,23 +361,13 @@ async def _merge_gallery_relations(db: AsyncSession, target: Gallery, sources: S
             if tag_precedence.get(row.source, 0) > tag_precedence.get(existing.source, 0):
                 existing.source = row.source
 
-    target.tags_array = list(
-        dict.fromkeys(
-            tag
-            for gallery in [target, *sources]
-            for tag in (gallery.tags_array or [])
-        )
-    )
+    target.tags_array = list(dict.fromkeys(tag for gallery in [target, *sources] for tag in (gallery.tags_array or [])))
 
     memberships = (
-        (await db.execute(select(CollectionGallery).where(CollectionGallery.gallery_id.in_(all_ids))))
-        .scalars()
-        .all()
+        (await db.execute(select(CollectionGallery).where(CollectionGallery.gallery_id.in_(all_ids)))).scalars().all()
     )
     collection_covers = (
-        (await db.execute(select(Collection).where(Collection.cover_gallery_id.in_(source_ids))))
-        .scalars()
-        .all()
+        (await db.execute(select(Collection).where(Collection.cover_gallery_id.in_(source_ids)))).scalars().all()
     )
     for collection in collection_covers:
         collection.cover_gallery_id = target.id
@@ -400,7 +385,11 @@ async def _merge_gallery_relations(db: AsyncSession, target: Gallery, sources: S
                 )
             ).scalar_one()
         max_positions[row.collection_id] += 1
-        db.add(CollectionGallery(collection_id=row.collection_id, gallery_id=target.id, position=max_positions[row.collection_id]))
+        db.add(
+            CollectionGallery(
+                collection_id=row.collection_id, gallery_id=target.id, position=max_positions[row.collection_id]
+            )
+        )
         target_collections.add(row.collection_id)
 
     for model in (UserFavorite, UserReadingList):
@@ -456,9 +445,7 @@ async def _merge_read_progress(
         mapped_image_id = image_map.get(row.last_image_id) if row.last_image_id is not None else None
         mapped_page = row.last_page
         if mapped_image_id is not None:
-            mapped_page = (
-                await db.execute(select(Image.page_num).where(Image.id == mapped_image_id))
-            ).scalar_one()
+            mapped_page = (await db.execute(select(Image.page_num).where(Image.id == mapped_image_id))).scalar_one()
         db.add(
             ReadProgress(
                 user_id=row.user_id,

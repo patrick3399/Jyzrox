@@ -1,6 +1,5 @@
 """Regression tests for shared thumbnail lifecycle safety."""
 
-
 from sqlalchemy import text
 
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
