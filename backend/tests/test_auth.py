@@ -408,14 +408,10 @@ class TestUiPreferences:
 
     async def test_patch_merges_and_null_removes_fields(self, client, db_session):
         await _create_user(db_session)
-        first = await client.patch(
-            "/api/auth/ui-preferences", json={"theme": "dark", "gallery_grid_columns": 5}
-        )
+        first = await client.patch("/api/auth/ui-preferences", json={"theme": "dark", "gallery_grid_columns": 5})
         assert first.status_code == 200
 
-        second = await client.patch(
-            "/api/auth/ui-preferences", json={"theme": None, "font_scale": 1.1}
-        )
+        second = await client.patch("/api/auth/ui-preferences", json={"theme": None, "font_scale": 1.1})
         assert second.status_code == 200
         assert second.json()["preferences"] == {"gallery_grid_columns": 5, "font_scale": 1.1}
 

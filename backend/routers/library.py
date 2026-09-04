@@ -531,9 +531,7 @@ def _i_browse(img: Image) -> dict:
 # ── Image browser ─────────────────────────────────────────────────────
 
 
-async def _apply_image_filters(
-    stmt, *, source, gallery_id, auth, db, category=None, favorited=None
-):
+async def _apply_image_filters(stmt, *, source, gallery_id, auth, db, category=None, favorited=None):
     """Apply common image browser filters (source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
     stmt = stmt.where(Image.visibility == "active")

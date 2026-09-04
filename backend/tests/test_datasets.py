@@ -367,12 +367,8 @@ async def test_dataset_phash_filter_keeps_first_and_restores_when_disabled(db_se
                 "/api/datasets/", json={"name": "pHash", "image_ids": [image.id for image in images]}
             )
             dataset_id = created.json()["id"]
-            preview = await ac.post(
-                f"/api/datasets/{dataset_id}/filters/preview", json={"phash_distance": 1}
-            )
-            applied = await ac.post(
-                f"/api/datasets/{dataset_id}/filters/apply", json={"phash_distance": 1}
-            )
+            preview = await ac.post(f"/api/datasets/{dataset_id}/filters/preview", json={"phash_distance": 1})
+            applied = await ac.post(f"/api/datasets/{dataset_id}/filters/apply", json={"phash_distance": 1})
             excluded = await ac.get(f"/api/datasets/{dataset_id}?state=excluded")
             relaxed = await ac.post(f"/api/datasets/{dataset_id}/filters/apply", json={})
 

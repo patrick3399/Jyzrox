@@ -66,9 +66,7 @@ async def normalize_explorer_query(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid saved search id")
     saved = (
-        await db.execute(
-            select(SavedSearch).where(SavedSearch.id == saved_id, SavedSearch.user_id == auth["user_id"])
-        )
+        await db.execute(select(SavedSearch).where(SavedSearch.id == saved_id, SavedSearch.user_id == auth["user_id"]))
     ).scalar_one_or_none()
     if saved is None:
         raise HTTPException(status_code=404, detail="Saved search not found")
@@ -86,9 +84,7 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
     if spec.node_kind == "trash":
         filters = [Gallery.deleted_at.is_not(None)]
         if auth["role"] != "admin":
-            filters.append(
-                or_(Gallery.created_by_user_id == auth["user_id"], Gallery.created_by_user_id.is_(None))
-            )
+            filters.append(or_(Gallery.created_by_user_id == auth["user_id"], Gallery.created_by_user_id.is_(None)))
     else:
         filters = [gallery_access_filter(auth)]
 
@@ -109,9 +105,7 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
             filters.append(~exists(select(Image.id).where(Image.gallery_id == Gallery.id)))
         elif spec.node_id == "duplicates":
             related_hashes = select(BlobRelationship.sha_a).union(select(BlobRelationship.sha_b))
-            filters.append(
-                Gallery.id.in_(select(Image.gallery_id).where(Image.blob_sha256.in_(related_hashes)))
-            )
+            filters.append(Gallery.id.in_(select(Image.gallery_id).where(Image.blob_sha256.in_(related_hashes))))
         else:
             raise HTTPException(status_code=400, detail="Unknown smart view")
     elif spec.node_kind not in {"all", "trash", "source", "collection", "artist"}:
@@ -127,7 +121,11 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
             filters.append(Gallery.artist_id == _value(token))
         elif token.startswith("category:"):
             value = _value(token)
-            filters.append(or_(Gallery.category.is_(None), Gallery.category == "") if value == "__uncategorized__" else Gallery.category == value)
+            filters.append(
+                or_(Gallery.category.is_(None), Gallery.category == "")
+                if value == "__uncategorized__"
+                else Gallery.category == value
+            )
         elif token.startswith("language:"):
             filters.append(Gallery.language == _value(token))
         elif token.startswith("rating:"):
@@ -141,9 +139,7 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
             )
         elif token.startswith("rl:") and _value(token).lower() == "true":
             filters.append(
-                Gallery.id.in_(
-                    select(UserReadingList.gallery_id).where(UserReadingList.user_id == auth["user_id"])
-                )
+                Gallery.id.in_(select(UserReadingList.gallery_id).where(UserReadingList.user_id == auth["user_id"]))
             )
         elif token.startswith("collection:"):
             try:

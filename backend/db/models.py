@@ -371,9 +371,7 @@ class ReadEvent(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    gallery_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False
-    )
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
     image_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )

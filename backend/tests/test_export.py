@@ -70,10 +70,7 @@ async def _insert_image(
         {"sha": sha, "fs": file_size, "ext": ext, "storage": storage, "ep": file_path},
     )
     await db_session.execute(
-        text(
-            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
-            "VALUES (:gid, :pn, :fn, :sha)"
-        ),
+        text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, :pn, :fn, :sha)"),
         {
             "gid": gallery_id,
             "pn": page_num,

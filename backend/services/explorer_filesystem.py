@@ -31,7 +31,7 @@ def resolve_library_relative(root: Path, relative_path: str, *, require_director
         raise HTTPException(status_code=400, detail="Invalid library-relative path")
     try:
         candidate = (root / Path(*raw.parts)).resolve(strict=True)
-    except (FileNotFoundError, OSError):
+    except FileNotFoundError, OSError:
         raise HTTPException(status_code=404, detail="Library entry not found")
     if not candidate.is_relative_to(root):
         raise HTTPException(status_code=403, detail="Library path escapes the configured root")
@@ -64,7 +64,7 @@ async def read_folder_stats(redis: Any, library_id: int, relative_path: str) -> 
         raw = raw.decode("utf-8")
     try:
         return json.loads(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

@@ -148,9 +148,7 @@ async def test_media_authz_imgproxy_cas_source_allowed_without_gallery_lookup():
 
 async def test_media_authz_direct_cas_uses_authenticated_capability_semantics():
     """CAS/thumb paths are session-gated by nginx, not Gallery-ACL checked here."""
-    allowed = await authorize_media_uri(
-        {"user_id": 2, "role": "member"}, "/media/cas/pr/iv/privatecas.jpg"
-    )
+    allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, "/media/cas/pr/iv/privatecas.jpg")
     assert allowed is True
 
 

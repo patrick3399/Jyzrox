@@ -14,7 +14,6 @@ Notes on SQLite compatibility:
   GET/DELETE all use standard SQLAlchemy SELECT/DELETE and work fine.
 """
 
-
 import pytest
 from sqlalchemy import text
 

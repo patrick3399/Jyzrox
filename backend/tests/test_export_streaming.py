@@ -178,7 +178,9 @@ class TestEndpointResponse:
 
         from tests.test_export import _insert_gallery, _insert_image
 
-        gid = await _insert_gallery(db_session, title="Streamed Gallery", tags_array='["character:alice", "artist:bob"]')
+        gid = await _insert_gallery(
+            db_session, title="Streamed Gallery", tags_array='["character:alice", "artist:bob"]'
+        )
         for page in (1, 2, 3):
             image = tmp_path / f"page_{page:03d}.jpg"
             image.write_bytes(b"\xff\xd8\xff\xe0" + os.urandom(4000 + page))

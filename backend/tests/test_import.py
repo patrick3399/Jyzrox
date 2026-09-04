@@ -970,7 +970,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-):
+        ):
             result = await local_import_job(ctx, str(src), "copy", gallery_id=1)
 
         assert result["status"] == "done"
@@ -1027,7 +1027,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", mock_symlink),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-):
+        ):
             result = await local_import_job(ctx, str(src), "link", gallery_id=1)
 
         assert result["status"] == "done"
@@ -1084,7 +1084,7 @@ class TestLocalImportJob:
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-):
+        ):
             result = await local_import_job(ctx, str(src), "copy", gallery_id=1)
 
         assert result["status"] == "done"
@@ -1144,7 +1144,7 @@ class TestLocalImportJob:
             patch("worker.importer.thumb_dir", return_value=missing_thumb_dir),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             result = await local_import_job(ctx, str(src), "link", gallery_id=1)
 
@@ -1210,7 +1210,7 @@ patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-):
+        ):
             result = await local_import_job(ctx, str(src), "copy", gallery_id=10)
 
         assert result["status"] == "done"
@@ -1406,7 +1406,7 @@ class TestBatchImportJob:
             patch("worker.importer.create_library_symlink", AsyncMock()),
             patch("worker.importer._validate_image_magic", return_value=True),
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-):
+        ):
             result = await batch_import_job(
                 ctx,
                 root_dir=str(tmp_path),
@@ -1985,9 +1985,7 @@ class TestBatchStartCategoryTypeChecking:
         )
         assert resp.status_code == 422
 
-    async def test_category_over_max_length_string_passes_pydantic_but_is_stored_as_none(
-        self, client, mock_redis
-    ):
+    async def test_category_over_max_length_string_passes_pydantic_but_is_stored_as_none(self, client, mock_redis):
         """A 5000-char string is a valid `str`, so Pydantic accepts it — but
         normalize_category() must still reject it before it reaches the job
         payload (mirrors core.local_category_plan.normalize_category's

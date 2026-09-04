@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 _POST_RE = re.compile(r"(?:https?://)?(?:(?:www\.)?fanbox\.cc/@[\w-]+/|[\w-]+\.fanbox\.cc/)posts/(\d+)", re.I)
 _CREATOR_RE = re.compile(r"(?:https?://)?(?:([\w-]+)\.fanbox\.cc|(?:www\.)?fanbox\.cc/@([\w-]+))/?$", re.I)
 
+
 def _cookies(credentials: dict | str | None) -> dict[str, str]:
     if isinstance(credentials, str):
         if not credentials.strip():
