@@ -66,6 +66,7 @@ jobs:
             context: ./backend
             image: patrick339/jyzrox-backend
             pass_version: true
+            build_contexts: dbinit=./db
           - name: pwa
             context: ./pwa
             image: patrick339/jyzrox-pwa
@@ -92,6 +93,7 @@ jobs:
           context: ${{ matrix.context }}
           push: true
           build-args: ${{ matrix.pass_version && format('APP_VERSION={0}', needs.version.outputs.version) || '' }}
+          build-contexts: ${{ matrix.build_contexts }}
           tags: ${{ matrix.image }}:ci-${{ github.run_id }}-${{ github.run_attempt }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
