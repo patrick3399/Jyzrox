@@ -28,14 +28,43 @@ the host):
         --mapping scripts/category-map.tsv --root /mnt/ssd-data/images
 
     # 3. container: rewrite the database and rebuild the library tree
+    #    Do NOT pass --entrypoint: entrypoint.sh ends in `exec gosu appuser
+    #    "$@"` and the Dockerfile has no USER, so overriding it runs as root
+    #    and leaves root-owned directories under /data that the worker (uid
+    #    1042) can no longer write to.
     docker compose run --rm --no-deps -v "$PWD/scripts:/opsscripts:ro" \\
-        --entrypoint python worker /opsscripts/migrate_local_category.py commit \\
+        worker python /opsscripts/migrate_local_category.py commit \\
         --mapping /opsscripts/category-map.tsv --root /mnt/ssd-data/images
 
     # 4. container: verify
     docker compose run --rm --no-deps -v "$PWD/scripts:/opsscripts:ro" \\
-        --entrypoint python worker /opsscripts/migrate_local_category.py verify \\
+        worker python /opsscripts/migrate_local_category.py verify \\
         --mapping /opsscripts/category-map.tsv --root /mnt/ssd-data/images
+
+    # 5. host: bring the writers back, then RELOAD NGINX, then unfreeze
+    #    Restarting api/worker gives them new container IPs. nginx resolves
+    #    its upstreams once at start/reload and caches them, so without the
+    #    reload every /api/* request returns 502 with "connect() failed
+    #    (111: Connection refused)" while every container still reports
+    #    healthy -- container healthchecks cannot see this.
+    docker compose start api worker
+    docker compose exec nginx nginx -s reload
+    curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:35689/api/settings/features  # expect 401, not 502
+    redis-cli -a "$REDIS_PASSWORD" set cron:library_scan:enabled 1
+
+    # 6. regenerate the info.json sidecars, whose source_id and category are
+    #    now stale. Reconciliation only writes *missing* sidecars, which is
+    #    why the library rebuild deletes them rather than rewriting them.
+    #    Run the "Reconciliation" scheduled task from the admin UI, or:
+    docker compose run --rm --no-deps worker python - <<'PY'
+    import asyncio, core.queue
+
+    async def main():
+        await core.queue.init_queues()
+        await core.queue.enqueue("reconciliation_job", force=True, _timeout=3600)
+
+    asyncio.run(main())
+    PY
 
 ``move-source`` is reversible with ``--reverse``. ``commit`` runs in a single
 transaction and its library-tree rebuild is idempotent, so a failed run is
