@@ -17,19 +17,41 @@ ENV_FILE="$PROJECT_DIR/.env"
 if [ -f "$ENV_FILE" ]; then
   DB_USER="$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]')"
   DB_NAME="$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]')"
+  REDIS_PASSWORD="$(grep -E '^REDIS_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]')" || true
 fi
 DB_USER="${DB_USER:-vault}"
 DB_NAME="${DB_NAME:-vault}"
 
 mkdir -p "$BACKUP_DIR"
 
-# Redis backup
-echo "[backup] Triggering Redis BGSAVE..."
-docker compose exec -T redis redis-cli BGSAVE 2>/dev/null || true
-sleep 2
-# Copy Redis dump alongside the DB backup
+# Redis backup.
+# Automatic RDB save points are disabled (see the redis service command), so this
+# BGSAVE is the only thing that refreshes /data/dump.rdb. If it fails, dump.rdb is
+# stale by an unbounded amount -- skip the copy rather than archive a stale file.
+REDIS_CLI=(docker compose exec -T redis redis-cli --no-auth-warning)
+[ -n "${REDIS_PASSWORD:-}" ] && REDIS_CLI+=(-a "$REDIS_PASSWORD") || true
 REDIS_DUMP="${BACKUP_DIR}/redis_${TIMESTAMP}.rdb"
-docker compose cp redis:/data/dump.rdb "$REDIS_DUMP" 2>/dev/null || echo "[backup] Warning: Redis dump copy failed"
+
+echo "[backup] Triggering Redis BGSAVE..."
+BGSAVE_OUT="$("${REDIS_CLI[@]}" BGSAVE 2>&1 || true)"
+if [[ "$BGSAVE_OUT" == *"Background saving started"* \
+   || "$BGSAVE_OUT" == *"Background saving scheduled"* ]]; then
+  # dump.rdb is only safe to copy once the forked child has finished writing it.
+  for _ in $(seq 1 120); do
+    IN_PROGRESS="$("${REDIS_CLI[@]}" INFO persistence 2>/dev/null \
+      | tr -d '\r' | awk -F: '/^rdb_bgsave_in_progress:/{print $2}' || true)"
+    if [ "$IN_PROGRESS" = "0" ]; then break; fi
+    sleep 1
+  done
+  if [ "${IN_PROGRESS:-1}" != "0" ]; then
+    echo "[backup] Warning: Redis BGSAVE did not finish in 120s, skipping dump copy"
+  else
+    docker compose cp redis:/data/dump.rdb "$REDIS_DUMP" \
+      || echo "[backup] Warning: Redis dump copy failed"
+  fi
+else
+  echo "[backup] Warning: Redis BGSAVE failed ($BGSAVE_OUT), skipping stale dump.rdb copy"
+fi
 
 # Determine output filename and encryption mode
 if [ -n "${BACKUP_ENCRYPT_KEY:-}" ]; then

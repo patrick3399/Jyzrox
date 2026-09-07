@@ -282,7 +282,11 @@ services:
 
   redis:
     image: redis:8-alpine
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    # --save "" disables automatic RDB snapshots. Recovery loads the AOF, never
+    # dump.rdb, so the default save points (300s/100 changes) were rewriting the
+    # whole dataset to disk every ~5 minutes for nothing. scripts/backup.sh still
+    # issues an explicit BGSAVE for its portable point-in-time copy.
+    command: redis-server --appendonly yes --save "" --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     volumes:
       - redis_data:/data
     healthcheck:
