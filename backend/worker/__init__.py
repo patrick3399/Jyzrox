@@ -122,35 +122,32 @@ def _watcher_job_kwargs(job_name: str, args: tuple) -> dict:
 
 async def _log_level_subscriber(ctx: dict) -> None:
     """Subscribe to log_level:changed pub/sub and apply new level when source==worker."""
-    from core.log_handler import LOG_LEVEL_CHANNEL
-    from core.redis_client import get_pubsub
+    import core.log_handler as log_handler
+    from core.redis_client import pubsub_listen_forever
 
-    pubsub = get_pubsub()
-    try:
-        await pubsub.subscribe(LOG_LEVEL_CHANNEL)
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                try:
-                    data = message["data"]
-                    if isinstance(data, bytes):
-                        data = data.decode()
-                    payload = json.loads(data)
-                    if payload.get("source") == "worker":
-                        level = payload.get("level", "INFO").upper()
-                        logging.getLogger().setLevel(level)
-                        logger.info("[log_level_subscriber] Level changed to %s", level)
-                except Exception as exc:
-                    logger.warning("[log_level_subscriber] Failed to process message: %s", exc)
-    except asyncio.CancelledError:
-        pass
-    except Exception as exc:
-        logger.warning("[log_level_subscriber] Subscriber exited with error: %s", exc)
-    finally:
-        try:
-            await pubsub.unsubscribe(LOG_LEVEL_CHANNEL)
-            await pubsub.aclose()
-        except Exception:
-            pass
+    async def _apply(data) -> None:
+        if isinstance(data, bytes):
+            data = data.decode()
+        payload = json.loads(data)
+        if payload.get("source") == "worker":
+            level = payload.get("level", "INFO").upper()
+            logging.getLogger().setLevel(level)
+            logger.info("[log_level_subscriber] Level changed to %s", level)
+
+    async def _resync() -> None:
+        """Re-read the persisted level after every (re)subscribe.
+
+        Unlike the site_config cache there is no TTL here, so a change published
+        while the connection was down would otherwise never be applied.
+        """
+        await log_handler.apply_log_level_from_redis("worker")
+
+    await pubsub_listen_forever(
+        log_handler.LOG_LEVEL_CHANNEL,
+        _apply,
+        on_subscribe=_resync,
+        name="log_level_subscriber",
+    )
 
 
 async def _ensure_archive_table_schema() -> None:
