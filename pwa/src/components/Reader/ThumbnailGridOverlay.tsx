@@ -1,7 +1,8 @@
 'use client'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { t } from '@/lib/i18n'
+import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { getColumnCount, type ColumnConfig } from '@/components/VirtualGrid'
 import { ThumbnailCell, type SpriteNaturalSizes } from './ThumbnailCell'
 import type { ReaderImage, ReadingDirection } from './types'
@@ -58,7 +59,18 @@ export function ThumbnailGridOverlay({
     [images, readingDirection],
   )
 
-  useEffect(() => {
+  // useLayoutEffect (not useEffect) is required here: it runs synchronously
+  // after DOM mutation but before the browser paints, so the very first
+  // painted frame already has a real containerWidth. With a plain useEffect,
+  // React commits and the browser can paint one frame using the initial
+  // containerWidth=0 first — with colCount defaulting to 3, that computes a
+  // *negative* cellWidth/cellHeight (see cellWidth below), which browsers
+  // treat as invalid and fall back to content-driven auto height, collapsing
+  // every row on top of the others near the top of the scroll area. On fast
+  // desktop hardware that single bad frame is imperceptible; on slower mobile
+  // hardware it was visible and, if the ResizeObserver's first callback was
+  // delayed further, could persist.
+  useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const width = el.getBoundingClientRect().width
@@ -86,7 +98,8 @@ export function ThumbnailGridOverlay({
     return result
   }, [displayImages, colCount])
 
-  const cellWidth = colCount > 0 ? (containerWidth - GAP * (colCount - 1)) / colCount : 0
+  const cellWidth =
+    colCount > 0 ? Math.max(0, (containerWidth - GAP * (colCount - 1)) / colCount) : 0
   const cellHeight = cellWidth * CELL_ASPECT
   const rowHeight = cellHeight + GAP
 
@@ -150,47 +163,53 @@ export function ThumbnailGridOverlay({
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pb-4">
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const rowItems = rows[virtualRow.index]
-            if (!rowItems) return null
-            return (
-              <div
-                key={virtualRow.key}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  transform: `translateY(${virtualRow.start}px)`,
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
-                  gap: GAP,
-                }}
-              >
-                {rowItems.map((img) => {
-                  const previewRaw = previews?.[String(img.pageNum)]
-                  return (
-                    <div key={img.pageNum} style={{ height: cellHeight }}>
-                      <ThumbnailCell
-                        image={img}
-                        isActive={img.pageNum === currentPage}
-                        previewRaw={previewRaw}
-                        spriteNaturalSizes={spriteNaturalSizes}
-                        frameWidth={Math.round(cellWidth)}
-                        frameHeight={Math.round(cellHeight)}
-                        onSelect={(page) => {
-                          onSelect(page)
-                          onClose()
-                        }}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })}
-        </div>
+        {!(cellWidth > 0) ? (
+          <div className="flex justify-center py-8">
+            <LoadingSpinner />
+          </div>
+        ) : (
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const rowItems = rows[virtualRow.index]
+              if (!rowItems) return null
+              return (
+                <div
+                  key={virtualRow.key}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
+                    gap: GAP,
+                  }}
+                >
+                  {rowItems.map((img) => {
+                    const previewRaw = previews?.[String(img.pageNum)]
+                    return (
+                      <div key={img.pageNum} style={{ height: cellHeight }}>
+                        <ThumbnailCell
+                          image={img}
+                          isActive={img.pageNum === currentPage}
+                          previewRaw={previewRaw}
+                          spriteNaturalSizes={spriteNaturalSizes}
+                          frameWidth={Math.round(cellWidth)}
+                          frameHeight={Math.round(cellHeight)}
+                          onSelect={(page) => {
+                            onSelect(page)
+                            onClose()
+                          }}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeAll } from 'vitest'
+import { describe, expect, it, vi, beforeAll, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ThumbnailGridOverlay } from '@/components/Reader/ThumbnailGridOverlay'
 import type { ReaderImage } from '@/components/Reader/types'
@@ -152,5 +152,64 @@ describe('ThumbnailGridOverlay', () => {
     )
     fireEvent.click(screen.getByLabelText('reader.closeGrid'))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  describe('when the container width never resolves above zero', () => {
+    // Regression: on a device where the scroll container's measured width
+    // stayed at 0 (the state's own initial value), colCount defaulted to 3
+    // and cellWidth computed to (0 - GAP*2)/3 — a *negative* number. Browsers
+    // treat a negative CSS height as invalid and fall back to content-driven
+    // auto sizing, which collapsed every virtual row on top of the others
+    // near the top of the screen ("everything piled up in the top quarter").
+    // The fix gates rendering on `cellWidth > 0`; this proves the pathological
+    // width can never reach a rendered cell.
+    let originalGetBoundingClientRect: typeof HTMLElement.prototype.getBoundingClientRect
+
+    beforeAll(() => {
+      originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect
+    })
+
+    afterEach(() => {
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect
+      vi.unstubAllGlobals()
+      vi.stubGlobal('ResizeObserver', AutoFireResizeObserver)
+    })
+
+    it('shows a loading state instead of a negative-height thumbnail grid', () => {
+      // Neither measurement path ever reports a usable width: the component's
+      // own getBoundingClientRect read stays 0, and this ResizeObserver never
+      // fires to correct it — simulating a device where measurement is stuck,
+      // not just transiently delayed.
+      class NeverFiresResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+      vi.stubGlobal('ResizeObserver', NeverFiresResizeObserver)
+      HTMLElement.prototype.getBoundingClientRect = () =>
+        ({
+          width: 0,
+          height: 800,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 800,
+          x: 0,
+          y: 0,
+          toJSON() {},
+        }) as DOMRect
+
+      render(
+        <ThumbnailGridOverlay
+          images={makeImages(20)}
+          currentPage={1}
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      )
+
+      expect(screen.queryByTitle('Page 1')).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toBeInTheDocument()
+    })
   })
 })
