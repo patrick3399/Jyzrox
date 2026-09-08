@@ -23,6 +23,12 @@ const CELL_ASPECT = 80 / 60
 const GAP = 8
 const OVERSCAN_ROWS = 2
 const COLUMNS: ColumnConfig = { base: 3, sm: 4, md: 6, lg: 8, xl: 10 }
+// px-4 on the measured scroll container (see scrollRef below): getBoundingClientRect()
+// returns the border-box, which already includes this padding, so it must be
+// subtracted before dividing the remainder into columns — otherwise cellWidth is
+// computed against space the grid never actually has, skewing every cell's aspect
+// ratio away from the intended 3:4.
+const HORIZONTAL_PADDING = 16 * 2
 
 export function ThumbnailGridOverlay({
   images,
@@ -33,8 +39,23 @@ export function ThumbnailGridOverlay({
   onClose,
 }: ThumbnailGridOverlayProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const [colCount, setColCount] = useState(COLUMNS.base)
-  const [containerWidth, setContainerWidth] = useState(0)
+  // Seeded from window.innerWidth (same pattern as VirtualGrid.tsx), not 0.
+  // @tanstack/react-virtual's own internal useIsomorphicLayoutEffect measures
+  // and caches per-row offsets on the *first* render regardless of what this
+  // component's JSX renders — a `containerWidth` of 0 on that first pass
+  // computes a near-zero rowHeight, which gets cached permanently and never
+  // updates even once later renders compute the real, correct rowHeight
+  // (the cache only invalidates on an explicit DOM (re)measurement or a
+  // count change, not because `estimateSize`'s return value changed). That
+  // stale cache is what rendered multiple distinct rows on top of each other
+  // near the top of the screen. Starting from a real width sidesteps the bad
+  // first estimate entirely instead of trying to hide it after the fact.
+  const [colCount, setColCount] = useState<number>(() =>
+    typeof window === 'undefined' ? COLUMNS.base : getColumnCount(window.innerWidth, COLUMNS),
+  )
+  const [containerWidth, setContainerWidth] = useState<number>(() =>
+    typeof window === 'undefined' ? 0 : window.innerWidth,
+  )
   const [hasMeasured, setHasMeasured] = useState(false)
 
   // Sprite natural-size cache, independent of ThumbnailStrip's own copy.
@@ -59,29 +80,34 @@ export function ThumbnailGridOverlay({
     [images, readingDirection],
   )
 
-  // useLayoutEffect (not useEffect) is required here: it runs synchronously
-  // after DOM mutation but before the browser paints, so the very first
-  // painted frame already has a real containerWidth. With a plain useEffect,
-  // React commits and the browser can paint one frame using the initial
-  // containerWidth=0 first — with colCount defaulting to 3, that computes a
-  // *negative* cellWidth/cellHeight (see cellWidth below), which browsers
-  // treat as invalid and fall back to content-driven auto height, collapsing
-  // every row on top of the others near the top of the scroll area. On fast
-  // desktop hardware that single bad frame is imperceptible; on slower mobile
-  // hardware it was visible and, if the ResizeObserver's first callback was
-  // delayed further, could persist.
+  // Refines the window.innerWidth estimate above to the scroll container's
+  // *actual* content width (window.innerWidth doesn't know about this
+  // overlay's own padding or any scrollbar), and keeps it in sync on resize.
+  // useLayoutEffect (not useEffect) so this happens before paint — with a
+  // plain useEffect the browser can paint one frame at the estimated width
+  // first, which is a visible flash rather than a functional bug now that
+  // the estimate is a real width instead of 0.
+  //
+  // Only apply a measurement that is actually usable (> 0). A width reading
+  // of 0 is never more correct than the window.innerWidth estimate already
+  // in state — it means this particular measurement path failed, not that
+  // the container is genuinely zero-width — so it must not overwrite a good
+  // estimate with a broken one.
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const width = el.getBoundingClientRect().width
-    setContainerWidth(width)
-    setColCount(getColumnCount(width, COLUMNS))
+    if (width > 0) {
+      setContainerWidth(width)
+      setColCount(getColumnCount(width, COLUMNS))
+    }
     setHasMeasured(true)
 
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (!entry) return
       const w = entry.contentRect.width
+      if (w <= 0) return
       setContainerWidth(w)
       setColCount(getColumnCount(w, COLUMNS))
     })
@@ -99,7 +125,9 @@ export function ThumbnailGridOverlay({
   }, [displayImages, colCount])
 
   const cellWidth =
-    colCount > 0 ? Math.max(0, (containerWidth - GAP * (colCount - 1)) / colCount) : 0
+    colCount > 0
+      ? Math.max(0, (containerWidth - HORIZONTAL_PADDING - GAP * (colCount - 1)) / colCount)
+      : 0
   const cellHeight = cellWidth * CELL_ASPECT
   const rowHeight = cellHeight + GAP
 
@@ -150,7 +178,10 @@ export function ThumbnailGridOverlay({
         ) : null,
       )}
 
-      <div className="flex items-center justify-between px-4 py-2 shrink-0">
+      <div
+        className="flex items-center justify-between px-4 py-2 shrink-0"
+        style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top))' }}
+      >
         <span className="text-sm text-white/70">{t('reader.gridOverview')}</span>
         <button
           onClick={onClose}
@@ -162,7 +193,11 @@ export function ThumbnailGridOverlay({
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pb-4">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-4"
+        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+      >
         {!(cellWidth > 0) ? (
           <div className="flex justify-center py-8">
             <LoadingSpinner />

@@ -154,38 +154,34 @@ describe('ThumbnailGridOverlay', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  describe('when the container width never resolves above zero', () => {
-    // Regression: on a device where the scroll container's measured width
-    // stayed at 0 (the state's own initial value), colCount defaulted to 3
-    // and cellWidth computed to (0 - GAP*2)/3 — a *negative* number. Browsers
-    // treat a negative CSS height as invalid and fall back to content-driven
-    // auto sizing, which collapsed every virtual row on top of the others
-    // near the top of the screen ("everything piled up in the top quarter").
-    // The fix gates rendering on `cellWidth > 0`; this proves the pathological
-    // width can never reach a rendered cell.
+  describe('when neither measurement path ever reports a usable width', () => {
+    // Belt-and-suspenders: even if window.innerWidth itself were 0 *and*
+    // getBoundingClientRect/ResizeObserver never correct it, cellWidth must
+    // never go negative and content must never render at a broken size —
+    // the safe fallback is a loading state instead.
     let originalGetBoundingClientRect: typeof HTMLElement.prototype.getBoundingClientRect
+    let originalInnerWidth: number
 
     beforeAll(() => {
       originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect
+      originalInnerWidth = window.innerWidth
     })
 
     afterEach(() => {
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
       vi.unstubAllGlobals()
       vi.stubGlobal('ResizeObserver', AutoFireResizeObserver)
     })
 
     it('shows a loading state instead of a negative-height thumbnail grid', () => {
-      // Neither measurement path ever reports a usable width: the component's
-      // own getBoundingClientRect read stays 0, and this ResizeObserver never
-      // fires to correct it — simulating a device where measurement is stuck,
-      // not just transiently delayed.
       class NeverFiresResizeObserver {
         observe() {}
         unobserve() {}
         disconnect() {}
       }
       vi.stubGlobal('ResizeObserver', NeverFiresResizeObserver)
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 0 })
       HTMLElement.prototype.getBoundingClientRect = () =>
         ({
           width: 0,
@@ -210,6 +206,77 @@ describe('ThumbnailGridOverlay', () => {
 
       expect(screen.queryByTitle('Page 1')).not.toBeInTheDocument()
       expect(screen.getByRole('status')).toBeInTheDocument()
+    })
+  })
+
+  describe('before the precise DOM measurement resolves', () => {
+    // Regression: @tanstack/react-virtual's own internal layout effect
+    // measures and caches per-row positions on the *first* render, before
+    // this component's own useLayoutEffect (which reads the real
+    // scrollRef.getBoundingClientRect()) ever runs — and that cache does not
+    // get recomputed later just because a subsequent render passes a
+    // different `estimateSize`. Gating the container width's initial state on
+    // `hasMeasured`/getBoundingClientRect (as a prior version of this
+    // component did, starting from 0) fed the virtualizer a near-zero
+    // estimate on that first pass, permanently caching several rows on top of
+    // each other near the top of the scroll area — reproduced live as pages
+    // 25/28/31/34 (three apart, i.e. one per column) all rendering in the same
+    // spot. Seeding the initial state from window.innerWidth instead means
+    // the very first render already uses a real width, so that first
+    // internal measurement is correct from the start.
+    let originalGetBoundingClientRect: typeof HTMLElement.prototype.getBoundingClientRect
+    let originalInnerWidth: number
+
+    beforeAll(() => {
+      originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect
+      originalInnerWidth = window.innerWidth
+    })
+
+    afterEach(() => {
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
+      vi.unstubAllGlobals()
+      vi.stubGlobal('ResizeObserver', AutoFireResizeObserver)
+    })
+
+    it('renders real thumbnails on first paint using the window.innerWidth estimate', () => {
+      // getBoundingClientRect/ResizeObserver never resolve to anything useful
+      // here (simulating imprecise/delayed DOM measurement) — only
+      // window.innerWidth carries a real value, exactly like the very first
+      // render in a real browser before any effect has run.
+      class NeverFiresResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+      vi.stubGlobal('ResizeObserver', NeverFiresResizeObserver)
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+      HTMLElement.prototype.getBoundingClientRect = () =>
+        ({
+          width: 0,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          x: 0,
+          y: 0,
+          toJSON() {},
+        }) as DOMRect
+
+      render(
+        <ThumbnailGridOverlay
+          images={makeImages(20)}
+          currentPage={1}
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      )
+
+      // Real thumbnails render immediately — not stuck on the loading state —
+      // because the initial estimate was never a broken width to begin with.
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      expect(screen.getByTitle('Page 1')).toBeInTheDocument()
     })
   })
 })
