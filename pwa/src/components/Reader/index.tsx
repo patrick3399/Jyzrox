@@ -1604,7 +1604,11 @@ export default function Reader({
     swipeRight,
     handleSwipeUp,
     50,
-    () => isZoomedRef.current,
+    // Scrolling inside the grid overview bubbles touch events up to this
+    // listener on containerRef; without this guard a downward scroll
+    // (finger swiping up) inside the grid was misread as swipe-up-to-back
+    // and exited the Reader instead of just scrolling the grid.
+    () => isZoomedRef.current || state.isGridOpen,
   )
 
   useKeyboardNav(
