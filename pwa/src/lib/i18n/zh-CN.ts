@@ -896,6 +896,8 @@ const zhCN: Record<string, string> = {
   // ── Reader ──
   'reader.jumpToPage': '跳至页面',
   'reader.goBack': '返回',
+  'reader.gridOverview': '缩略图总览',
+  'reader.closeGrid': '关闭缩略图总览',
   'reader.viewModeSingleShort': '单页',
   'reader.viewModeWebtoonShort': '条漫',
   'reader.viewModeDoubleShort': '双页',

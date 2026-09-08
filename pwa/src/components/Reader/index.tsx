@@ -24,6 +24,7 @@ import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
 import { ThumbnailCell } from './ThumbnailCell'
+import { ThumbnailGridOverlay } from './ThumbnailGridOverlay'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -904,6 +905,7 @@ interface ReaderOverlayProps {
   onAutoAdvanceIntervalChange: (s: number) => void
   onShowHelp: () => void
   onPageSelect: (page: number) => void
+  onOpenGrid: () => void
 }
 
 function ReaderOverlay({
@@ -922,6 +924,7 @@ function ReaderOverlay({
   onAutoAdvanceIntervalChange,
   onShowHelp,
   onPageSelect,
+  onOpenGrid,
 }: ReaderOverlayProps) {
   const VIEW_MODES: { mode: ViewMode; icon: string; label: string }[] = [
     { mode: 'single', icon: '▣', label: t('reader.viewModeSingleShort') },
@@ -1061,6 +1064,14 @@ function ReaderOverlay({
             <span>{currentDir.icon}</span>
           </button>
         )}
+        <button
+          onClick={onOpenGrid}
+          className={cycleBtnClass}
+          title={t('reader.gridOverview')}
+          aria-label={t('reader.gridOverview')}
+        >
+          <span>▦</span>
+        </button>
 
         <div className="flex-1" />
 
@@ -1412,6 +1423,8 @@ export default function Reader({
     toggleOverlay,
     setScaleMode,
     setReadingDirection,
+    showGrid,
+    hideGrid,
   } = useReaderState(initialPage, totalPages, source, sourceId)
 
   // Reader settings (status bar, auto advance)
@@ -1595,10 +1608,18 @@ export default function Reader({
   )
 
   useKeyboardNav(
-    rawNextPage,
-    rawPrevPage,
-    handleToggleOverlay,
-    handleBack,
+    () => {
+      if (!state.isGridOpen) rawNextPage()
+    },
+    () => {
+      if (!state.isGridOpen) rawPrevPage()
+    },
+    () => {
+      if (!state.isGridOpen) handleToggleOverlay()
+    },
+    () => {
+      if (!state.isGridOpen) handleBack()
+    },
     state.readingDirection,
     state.viewMode,
   )
@@ -1630,16 +1651,18 @@ export default function Reader({
     return () => el.removeEventListener('wheel', handler)
   }, [rawNextPage, rawPrevPage, state.viewMode])
 
-  // Escape key to go back
+  // Escape key to go back — no-ops while the grid overview is open, which
+  // has its own Escape handler to close itself instead.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (state.isGridOpen) return
         router.back()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [router])
+  }, [router, state.isGridOpen])
 
   // Help overlay
   const [showHelp, setShowHelp] = useState(false)
@@ -1884,6 +1907,7 @@ export default function Reader({
           onAutoAdvanceIntervalChange={handleAutoAdvanceInterval}
           onShowHelp={handleShowHelp}
           onPageSelect={setPageWithPrefetch}
+          onOpenGrid={showGrid}
         />
       </div>
 
@@ -2004,6 +2028,18 @@ export default function Reader({
           readingDirection={state.readingDirection}
           viewMode={state.viewMode}
           onDismiss={handleDismissHelp}
+        />
+      )}
+
+      {/* Full-screen thumbnail grid overview */}
+      {state.isGridOpen && (
+        <ThumbnailGridOverlay
+          images={images}
+          currentPage={state.currentPage}
+          previews={previews}
+          readingDirection={state.readingDirection}
+          onSelect={setPageWithPrefetch}
+          onClose={hideGrid}
         />
       )}
 

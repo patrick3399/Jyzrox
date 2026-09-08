@@ -904,6 +904,8 @@ const zhTW: Record<string, string> = {
   'reader.helpSwipeUp': '上滑返回',
   'reader.jumpToPage': '跳至頁面',
   'reader.goBack': '返回',
+  'reader.gridOverview': '縮圖總覽',
+  'reader.closeGrid': '關閉縮圖總覽',
   'reader.viewModeSingleShort': '單頁',
   'reader.viewModeWebtoonShort': '條漫',
   'reader.viewModeDoubleShort': '雙頁',

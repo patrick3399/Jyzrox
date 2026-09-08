@@ -813,6 +813,8 @@ const ja: Record<string, string> = {
   // ── Reader ──
   'reader.jumpToPage': 'ページへジャンプ',
   'reader.goBack': '戻る',
+  'reader.gridOverview': 'グリッド一覧',
+  'reader.closeGrid': 'グリッド一覧を閉じる',
   'reader.viewModeSingleShort': 'シングル',
   'reader.viewModeWebtoonShort': 'ウェブトゥーン',
   'reader.viewModeDoubleShort': '見開き',

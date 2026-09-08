@@ -1063,6 +1063,8 @@ const ko: Record<string, string> = {
   // ── Reader ──
   'reader.jumpToPage': '페이지로 이동',
   'reader.goBack': '뒤로 가기',
+  'reader.gridOverview': '그리드 개요',
+  'reader.closeGrid': '그리드 개요 닫기',
   'reader.viewModeSingleShort': '싱글',
   'reader.viewModeWebtoonShort': '웹툰',
   'reader.viewModeDoubleShort': '더블',

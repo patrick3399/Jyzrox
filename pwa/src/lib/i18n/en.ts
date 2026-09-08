@@ -694,6 +694,8 @@ const en: Record<string, string> = {
   // ── Reader ──
   'reader.jumpToPage': 'Jump to page',
   'reader.goBack': 'Go back',
+  'reader.gridOverview': 'Grid overview',
+  'reader.closeGrid': 'Close grid overview',
   'reader.viewModeSingleShort': 'Single',
   'reader.viewModeWebtoonShort': 'Webtoon',
   'reader.viewModeDoubleShort': 'Double',
