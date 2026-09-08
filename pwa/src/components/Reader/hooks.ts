@@ -63,6 +63,10 @@ function readerReducer(state: ReaderState, action: ReaderAction): ReaderState {
       return { ...state, scaleMode: action.mode }
     case 'SET_READING_DIRECTION':
       return { ...state, readingDirection: action.direction }
+    case 'SHOW_GRID':
+      return { ...state, isGridOpen: true }
+    case 'HIDE_GRID':
+      return { ...state, isGridOpen: false }
     default:
       return state
   }
@@ -83,6 +87,7 @@ export function useReaderState(
     showOverlay: false,
     scaleMode: settings.defaultScaleMode,
     readingDirection: savedDirection ?? settings.defaultReadingDirection,
+    isGridOpen: false,
   } as ReaderState)
 
   const setPage = useCallback(
@@ -100,6 +105,10 @@ export function useReaderState(
   const setViewMode = useCallback((mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', mode }), [])
 
   const toggleOverlay = useCallback(() => dispatch({ type: 'TOGGLE_OVERLAY' }), [])
+
+  const showGrid = useCallback(() => dispatch({ type: 'SHOW_GRID' }), [])
+
+  const hideGrid = useCallback(() => dispatch({ type: 'HIDE_GRID' }), [])
 
   const setScaleMode = useCallback(
     (mode: ScaleMode) => dispatch({ type: 'SET_SCALE_MODE', mode }),
@@ -123,6 +132,8 @@ export function useReaderState(
     toggleOverlay,
     setScaleMode,
     setReadingDirection,
+    showGrid,
+    hideGrid,
   }
 }
 

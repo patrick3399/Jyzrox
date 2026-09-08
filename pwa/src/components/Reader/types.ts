@@ -22,6 +22,7 @@ export interface ReaderState {
   showOverlay: boolean // show top/bottom controls
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
+  isGridOpen: boolean // full-screen thumbnail grid overview
 }
 
 export type ReaderAction =
@@ -32,6 +33,8 @@ export type ReaderAction =
   | { type: 'HIDE_OVERLAY' }
   | { type: 'SET_SCALE_MODE'; mode: ScaleMode }
   | { type: 'SET_READING_DIRECTION'; direction: ReadingDirection }
+  | { type: 'SHOW_GRID' }
+  | { type: 'HIDE_GRID' }
 
 // localStorage-persisted reader settings (from settings page)
 export interface ReaderSettings {
