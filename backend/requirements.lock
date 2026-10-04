@@ -83,6 +83,8 @@ pillow==12.3.0
     # via
     #   -r requirements.txt
     #   imagehash
+pillow-heif==1.8.0
+    # via -r requirements.txt
 pixivpy3==3.7.5
     # via -r requirements.txt
 psutil==7.2.2
