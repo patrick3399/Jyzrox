@@ -40,7 +40,12 @@ export const logs = {
 
 export const galleryDl = {
   getVersion: () =>
-    apiFetch<{ current: string | null; latest: string | null }>('/api/admin/gallery-dl/version'),
+    apiFetch<{
+      current: string | null
+      latest: string | null
+      image: string | null
+      image_newer: boolean
+    }>('/api/admin/gallery-dl/version'),
   upgrade: (version?: string) =>
     apiFetch<{ job_id: string }>('/api/admin/gallery-dl/upgrade', {
       method: 'POST',

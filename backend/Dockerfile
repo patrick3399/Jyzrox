@@ -7,8 +7,13 @@ RUN pip install --no-cache-dir --upgrade pip
 WORKDIR /install
 
 COPY requirements.lock .
+# GDL_VERSION pins the gallery-dl baked into the image (empty = latest at build
+# time). Passing a new value also busts this layer's cache; without it a cached
+# build keeps the old gallery-dl.
+ARG GDL_VERSION=
 RUN pip install --no-cache-dir --prefix=/install/pkgs -r requirements.lock && \
-    pip install --no-cache-dir --prefix=/install/pkgs gallery-dl "psycopg[binary]"
+    pip download --no-cache-dir --dest /install/gdl-wheels "gallery-dl${GDL_VERSION:+==$GDL_VERSION}" "psycopg[binary]" && \
+    pip install --no-cache-dir --prefix=/install/pkgs --no-index --find-links /install/gdl-wheels gallery-dl "psycopg[binary]"
 
 # Download swagger-ui-dist static assets for self-hosted docs
 RUN python -c "\
@@ -42,6 +47,8 @@ RUN groupadd -g 1042 appgroup && \
 
 # Copy installed Python packages from builder
 COPY --from=builder /install/pkgs /usr/local
+# Wheels of the same gallery-dl, so the worker can rebuild the venv offline.
+COPY --from=builder /install/gdl-wheels /opt/gdl-wheels
 
 WORKDIR /app
 

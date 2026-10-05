@@ -22,9 +22,9 @@ import {
 import VideoPlayer from './VideoPlayer'
 import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
-import { AppImage } from '@/components/AppImage'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
-import { getSpriteThumbnailStyle } from './thumbnailSprite'
+import { ThumbnailCell } from './ThumbnailCell'
+import { ThumbnailGridOverlay } from './ThumbnailGridOverlay'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -905,6 +905,7 @@ interface ReaderOverlayProps {
   onAutoAdvanceIntervalChange: (s: number) => void
   onShowHelp: () => void
   onPageSelect: (page: number) => void
+  onOpenGrid: () => void
 }
 
 function ReaderOverlay({
@@ -923,6 +924,7 @@ function ReaderOverlay({
   onAutoAdvanceIntervalChange,
   onShowHelp,
   onPageSelect,
+  onOpenGrid,
 }: ReaderOverlayProps) {
   const VIEW_MODES: { mode: ViewMode; icon: string; label: string }[] = [
     { mode: 'single', icon: '▣', label: t('reader.viewModeSingleShort') },
@@ -1062,6 +1064,14 @@ function ReaderOverlay({
             <span>{currentDir.icon}</span>
           </button>
         )}
+        <button
+          onClick={onOpenGrid}
+          className={cycleBtnClass}
+          title={t('reader.gridOverview')}
+          aria-label={t('reader.gridOverview')}
+        >
+          <span>▦</span>
+        </button>
 
         <div className="flex-1" />
 
@@ -1140,7 +1150,7 @@ function ThumbnailStrip({
   isVisible: _isVisible,
   readingDirection,
 }: ThumbnailStripProps) {
-  const activeRef = useRef<HTMLButtonElement | null>(null)
+  const activeRef = useRef<HTMLDivElement | null>(null)
   const stripRef = useRef<HTMLDivElement | null>(null)
   const userScrollingRef = useRef(false)
   // Cache natural sprite dimensions per URL for pixel-perfect background-size.
@@ -1333,78 +1343,26 @@ function ThumbnailStrip({
             const actualIndex = visibleRange.start + i
             const isActive = img.pageNum === currentPage
             const previewRaw = previews?.[String(img.pageNum)]
-
-            let thumbSrc: string | null = null
-            let spriteStyle: React.CSSProperties | null = null
             const thumbW = 60
             const thumbH = 80
 
-            if (previewRaw) {
-              if (previewRaw.includes('|')) {
-                const parts = previewRaw.split('|')
-                const spriteUrl = parts[0]
-                const ox = Number(parts[1])
-                const cellW = Number(parts[2]) || 200
-                const cellH = Number(parts[3]) || 300
-                const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
-                const naturalSize = spriteNaturalSizes[proxyUrl]
-                if (naturalSize) {
-                  const geometry = getSpriteThumbnailStyle({
-                    offsetX: ox,
-                    cellWidth: cellW,
-                    cellHeight: cellH,
-                    spriteWidth: naturalSize.w,
-                    spriteHeight: naturalSize.h,
-                    frameWidth: thumbW,
-                    frameHeight: thumbH,
-                  })
-                  if (geometry) {
-                    spriteStyle = {
-                      backgroundImage: `url(${proxyUrl})`,
-                      backgroundPosition: geometry.backgroundPosition,
-                      backgroundSize: geometry.backgroundSize,
-                      backgroundRepeat: 'no-repeat',
-                      width: '100%',
-                      height: '100%',
-                    }
-                  }
-                }
-              } else {
-                thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
-              }
-            } else if (img.isLocal) {
-              thumbSrc = img.thumbUrl || img.url
-            }
-
             return (
-              <button
+              <div
                 key={img.pageNum}
-                ref={isActive ? activeRef : null}
-                onClick={() => onPageSelect(img.pageNum)}
-                className={`absolute shrink-0 overflow-hidden rounded ${
-                  isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
-                }`}
+                ref={isActive ? activeRef : undefined}
+                className="absolute shrink-0"
                 style={{ left: actualIndex * THUMB_TOTAL_W, width: thumbW, height: thumbH, top: 0 }}
-                title={`Page ${img.pageNum}`}
               >
-                {spriteStyle ? (
-                  <div style={spriteStyle} />
-                ) : thumbSrc ? (
-                  <AppImage
-                    src={thumbSrc}
-                    alt={`Thumb ${img.pageNum}`}
-                    className="h-full w-full object-cover"
-                    sizes="60px"
-                  />
-                ) : (
-                  <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
-                    <span className="text-[11px] text-gray-500">{img.pageNum}</span>
-                  </div>
-                )}
-                <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[10px] text-white leading-tight py-px">
-                  {img.pageNum}
-                </span>
-              </button>
+                <ThumbnailCell
+                  image={img}
+                  isActive={isActive}
+                  previewRaw={previewRaw}
+                  spriteNaturalSizes={spriteNaturalSizes}
+                  frameWidth={thumbW}
+                  frameHeight={thumbH}
+                  onSelect={onPageSelect}
+                />
+              </div>
             )
           })}
         </div>
@@ -1465,6 +1423,8 @@ export default function Reader({
     toggleOverlay,
     setScaleMode,
     setReadingDirection,
+    showGrid,
+    hideGrid,
   } = useReaderState(initialPage, totalPages, source, sourceId)
 
   // Reader settings (status bar, auto advance)
@@ -1644,14 +1604,26 @@ export default function Reader({
     swipeRight,
     handleSwipeUp,
     50,
-    () => isZoomedRef.current,
+    // Scrolling inside the grid overview bubbles touch events up to this
+    // listener on containerRef; without this guard a downward scroll
+    // (finger swiping up) inside the grid was misread as swipe-up-to-back
+    // and exited the Reader instead of just scrolling the grid.
+    () => isZoomedRef.current || state.isGridOpen,
   )
 
   useKeyboardNav(
-    rawNextPage,
-    rawPrevPage,
-    handleToggleOverlay,
-    handleBack,
+    () => {
+      if (!state.isGridOpen) rawNextPage()
+    },
+    () => {
+      if (!state.isGridOpen) rawPrevPage()
+    },
+    () => {
+      if (!state.isGridOpen) handleToggleOverlay()
+    },
+    () => {
+      if (!state.isGridOpen) handleBack()
+    },
     state.readingDirection,
     state.viewMode,
   )
@@ -1683,16 +1655,18 @@ export default function Reader({
     return () => el.removeEventListener('wheel', handler)
   }, [rawNextPage, rawPrevPage, state.viewMode])
 
-  // Escape key to go back
+  // Escape key to go back — no-ops while the grid overview is open, which
+  // has its own Escape handler to close itself instead.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (state.isGridOpen) return
         router.back()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [router])
+  }, [router, state.isGridOpen])
 
   // Help overlay
   const [showHelp, setShowHelp] = useState(false)
@@ -1937,6 +1911,7 @@ export default function Reader({
           onAutoAdvanceIntervalChange={handleAutoAdvanceInterval}
           onShowHelp={handleShowHelp}
           onPageSelect={setPageWithPrefetch}
+          onOpenGrid={showGrid}
         />
       </div>
 
@@ -2057,6 +2032,18 @@ export default function Reader({
           readingDirection={state.readingDirection}
           viewMode={state.viewMode}
           onDismiss={handleDismissHelp}
+        />
+      )}
+
+      {/* Full-screen thumbnail grid overview */}
+      {state.isGridOpen && (
+        <ThumbnailGridOverlay
+          images={images}
+          currentPage={state.currentPage}
+          previews={previews}
+          readingDirection={state.readingDirection}
+          onSelect={setPageWithPrefetch}
+          onClose={hideGrid}
         />
       )}
 

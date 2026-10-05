@@ -462,6 +462,9 @@ const ja: Record<string, string> = {
     'gallery-dlダウンロードエンジンのバージョンを管理します。独立したvenvのアップグレードまたはロールバック。',
   'settings.galleryDlCurrent': '現在のバージョン',
   'settings.galleryDlLatest': 'PyPI最新版',
+  'settings.galleryDlImage': 'イメージ内バージョン（サイト検出）',
+  'settings.galleryDlImageNewer':
+    'イメージには gallery-dl {image} が含まれており、現在の venv（{current}）より新しいです。キュー待ち・一時停止・実行中のダウンロードがなくなると、venv は自動的に同期されます。',
   'settings.galleryDlNotInstalled': '未インストール',
   'settings.galleryDlUnknown': '不明',
   'settings.galleryDlUpToDate': '最新版です',
@@ -813,6 +816,8 @@ const ja: Record<string, string> = {
   // ── Reader ──
   'reader.jumpToPage': 'ページへジャンプ',
   'reader.goBack': '戻る',
+  'reader.gridOverview': 'グリッド一覧',
+  'reader.closeGrid': 'グリッド一覧を閉じる',
   'reader.viewModeSingleShort': 'シングル',
   'reader.viewModeWebtoonShort': 'ウェブトゥーン',
   'reader.viewModeDoubleShort': '見開き',

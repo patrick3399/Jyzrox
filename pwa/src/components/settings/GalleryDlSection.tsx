@@ -9,9 +9,12 @@ import type { GdlUpgradeEvent } from '@/lib/types'
 import { useWsGdlUpgrade } from '@/lib/ws'
 
 export function GalleryDlSection() {
-  const [version, setVersion] = useState<{ current: string | null; latest: string | null } | null>(
-    null,
-  )
+  const [version, setVersion] = useState<{
+    current: string | null
+    latest: string | null
+    image?: string | null
+    image_newer?: boolean
+  } | null>(null)
   const [operating, setOperating] = useState(false)
   const [lastResult, setLastResult] = useState<GdlUpgradeEvent | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -105,7 +108,22 @@ export function GalleryDlSection() {
             {version.latest ?? t('settings.galleryDlUnknown')}
           </span>
         </div>
+        {version.image && (
+          <div className="flex justify-between px-4 py-2.5">
+            <span className="text-sm text-vault-text-muted">{t('settings.galleryDlImage')}</span>
+            <span className="text-sm text-vault-text font-mono">{version.image}</span>
+          </div>
+        )}
       </div>
+
+      {version.image_newer && (
+        <p className="text-sm text-amber-400 mb-4">
+          {t('settings.galleryDlImageNewer', {
+            image: version.image ?? '',
+            current: version.current ?? '',
+          })}
+        </p>
+      )}
 
       {upToDate && <p className="text-sm text-green-400 mb-4">{t('settings.galleryDlUpToDate')}</p>}
 

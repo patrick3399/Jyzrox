@@ -39,6 +39,14 @@ try:
 except ImportError:
     pass
 
+try:
+    # .heic is an accepted import extension but Pillow has no HEIF decoder of its own.
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except ImportError:
+    pass
+
 _thumbnail_semaphore: asyncio.Semaphore | None = None
 _thumbnail_semaphore_size: int | None = None
 _thumbnail_executor: concurrent.futures.ThreadPoolExecutor | None = None

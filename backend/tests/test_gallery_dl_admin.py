@@ -159,3 +159,27 @@ async def test_rollback_gallery_dl_enqueue_returns_none_uses_unknown(client):
 
     assert resp.status_code == 200
     assert resp.json()["job_id"] == "unknown"
+
+
+async def test_get_gallery_dl_version_flags_image_newer_than_venv(client):
+    """Drift: image ships 1.32.15 while the venv runs 1.32.8 (numeric compare)."""
+    with (
+        patch("worker.gallery_dl_venv.get_current_version", new_callable=AsyncMock, return_value="1.32.8"),
+        patch("worker.gallery_dl_venv.get_latest_pypi_version", new_callable=AsyncMock, return_value="1.32.15"),
+        patch("worker.gallery_dl_venv.get_image_version", return_value="1.32.15"),
+    ):
+        data = (await client.get("/api/admin/gallery-dl/version")).json()
+
+    assert data["image"] == "1.32.15"
+    assert data["image_newer"] is True
+
+
+async def test_get_gallery_dl_version_no_drift_when_venv_ahead_or_equal(client):
+    for venv_ver in ("1.32.15", "1.40.0"):
+        with (
+            patch("worker.gallery_dl_venv.get_current_version", new_callable=AsyncMock, return_value=venv_ver),
+            patch("worker.gallery_dl_venv.get_latest_pypi_version", new_callable=AsyncMock, return_value=None),
+            patch("worker.gallery_dl_venv.get_image_version", return_value="1.32.15"),
+        ):
+            data = (await client.get("/api/admin/gallery-dl/version")).json()
+        assert data["image_newer"] is False

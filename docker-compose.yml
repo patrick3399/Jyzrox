@@ -93,6 +93,7 @@ services:
         dbinit: ./db
       args:
         APP_VERSION: ${APP_VERSION:-dev}
+        GDL_VERSION: ${GDL_VERSION:-}
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8'
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 30s
@@ -146,6 +147,7 @@ services:
         dbinit: ./db
       args:
         APP_VERSION: ${APP_VERSION:-dev}
+        GDL_VERSION: ${GDL_VERSION:-}
     command: python -m worker
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 55s
@@ -282,7 +284,11 @@ services:
 
   redis:
     image: redis:8-alpine
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    # --save "" disables automatic RDB snapshots. Recovery loads the AOF, never
+    # dump.rdb, so the default save points (300s/100 changes) were rewriting the
+    # whole dataset to disk every ~5 minutes for nothing. scripts/backup.sh still
+    # issues an explicit BGSAVE for its portable point-in-time copy.
+    command: redis-server --appendonly yes --save "" --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     volumes:
       - redis_data:/data
     healthcheck:

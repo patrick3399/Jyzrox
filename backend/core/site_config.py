@@ -257,12 +257,17 @@ class SiteConfigService:
 
     async def start_listener(self) -> None:
         """Start Redis Pub/Sub listener for cross-container cache invalidation."""
-        try:
-            pubsub = get_redis().pubsub()
-            await pubsub.subscribe(_INVALIDATION_CHANNEL)
-            self._listener_task = asyncio.create_task(self._listen(pubsub), name="site_config_listener")
-        except Exception:
-            logger.warning("[site_config] failed to start Pub/Sub listener — cache uses TTL only")
+        from core.redis_client import pubsub_listen_forever
+
+        self._listener_task = asyncio.create_task(
+            pubsub_listen_forever(
+                _INVALIDATION_CHANNEL,
+                self._evict,
+                on_subscribe=self._drop_cache,
+                name="site_config",
+            ),
+            name="site_config_listener",
+        )
 
     async def stop_listener(self) -> None:
         """Cancel the Pub/Sub listener task on shutdown."""
@@ -272,27 +277,24 @@ class SiteConfigService:
                 await self._listener_task
             except asyncio.CancelledError:
                 pass
-            self._listener_task = None
+        self._listener_task = None
 
-    async def _listen(self, pubsub) -> None:
-        """Listen for invalidation messages and evict cache entries."""
-        try:
-            async for msg in pubsub.listen():
-                if msg["type"] == "message":
-                    data = msg["data"]
-                    source_id = data.decode() if isinstance(data, bytes) else data
-                    self._cache.pop(source_id, None)
-                    self._batch_cache = None
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.warning("[site_config] Pub/Sub listener died — cache uses TTL only")
-        finally:
-            try:
-                await pubsub.unsubscribe(_INVALIDATION_CHANNEL)
-                await pubsub.aclose()
-            except Exception:
-                pass
+    async def _evict(self, data) -> None:
+        """Evict the cache entry named by an invalidation message."""
+        source_id = data.decode() if isinstance(data, bytes) else data
+        if not isinstance(source_id, str):
+            raise TypeError(f"invalidation payload is {type(source_id).__name__}, not str")
+        self._cache.pop(source_id, None)
+        self._batch_cache = None
+
+    async def _drop_cache(self) -> None:
+        """Discard the whole cache after every (re)subscribe.
+
+        Invalidations published while the connection was down are gone, so any
+        entry held across the gap may be stale.
+        """
+        self._cache.clear()
+        self._batch_cache = None
 
     # ── Internal ──────────────────────────────────────────────────────
 

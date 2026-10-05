@@ -637,6 +637,9 @@ const ko: Record<string, string> = {
     'gallery-dl 다운로드 엔진 버전을 관리합니다. 격리된 venv를 업그레이드하거나 롤백합니다.',
   'settings.galleryDlCurrent': '현재 버전',
   'settings.galleryDlLatest': 'PyPI 최신 버전',
+  'settings.galleryDlImage': '이미지 내 버전(사이트 감지)',
+  'settings.galleryDlImageNewer':
+    '이미지에 gallery-dl {image}이(가) 포함되어 있으며 현재 venv({current})보다 최신입니다. 대기·일시정지·실행 중인 다운로드가 없으면 venv가 자동으로 동기화됩니다.',
   'settings.galleryDlNotInstalled': '설치되지 않음',
   'settings.galleryDlUnknown': '알 수 없음',
   'settings.galleryDlUpToDate': '최신 버전',
@@ -1063,6 +1066,8 @@ const ko: Record<string, string> = {
   // ── Reader ──
   'reader.jumpToPage': '페이지로 이동',
   'reader.goBack': '뒤로 가기',
+  'reader.gridOverview': '그리드 개요',
+  'reader.closeGrid': '그리드 개요 닫기',
   'reader.viewModeSingleShort': '싱글',
   'reader.viewModeWebtoonShort': '웹툰',
   'reader.viewModeDoubleShort': '더블',
