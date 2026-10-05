@@ -10,7 +10,7 @@ annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
-anyio==4.13.0
+anyio==4.14.2
     # via
     #   httpx
     #   starlette
@@ -56,7 +56,7 @@ httptools==0.7.1
     # via uvicorn
 httpx==0.28.1
     # via -r requirements.txt
-idna==3.14
+idna==3.20
     # via
     #   anyio
     #   httpx
@@ -83,6 +83,7 @@ pillow==12.3.0
     # via
     #   -r requirements.txt
     #   imagehash
+    #   pillow-heif
 pillow-heif==1.8.0
     # via -r requirements.txt
 pixivpy3==3.7.5
@@ -97,7 +98,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.14.1
+pydantic-settings==2.14.2
     # via -r requirements.txt
 pyparsing==3.3.2
     # via cloudscraper
@@ -107,7 +108,7 @@ python-dotenv==1.2.2
     # via
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.28
+python-multipart==0.0.31
     # via -r requirements.txt
 pywavelets==1.9.0
     # via imagehash
@@ -117,7 +118,7 @@ redis[hiredis]==6.4.0
     # via
     #   -r requirements.txt
     #   saq
-requests==2.33.1
+requests==2.34.2
     # via
     #   cloudscraper
     #   pixivpy3
@@ -132,13 +133,13 @@ scipy==1.17.1
     # via imagehash
 six==1.17.0
     # via python-dateutil
-soupsieve==2.8.3
+soupsieve==2.10
     # via beautifulsoup4
 sqlalchemy[asyncio]==2.0.49
     # via
     #   -r requirements.txt
     #   alembic
-starlette==1.0.0
+starlette==1.7.0
     # via fastapi
 thumbhash==0.1.2
     # via -r requirements.txt
@@ -157,7 +158,7 @@ typing-inspection==0.4.2
     #   fastapi
     #   pydantic
     #   pydantic-settings
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   pixivpy3
     #   requests
