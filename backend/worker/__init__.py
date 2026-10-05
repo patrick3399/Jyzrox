@@ -26,7 +26,7 @@ from worker.dedup_tier3 import dedup_tier3_job
 from worker.download import download_job
 from worker.ehtag_sync import ehtag_sync_job
 from worker.explorer_stats import explorer_folder_stats_job
-from worker.gallery_dl_venv import ensure_venv
+from worker.gallery_dl_venv import ensure_venv, image_sync_loop
 from worker.gallery_dl_venv import rollback_job as gdl_rollback_job
 from worker.gallery_dl_venv import upgrade_job as gdl_upgrade_job
 from worker.helpers import _sha256, compute_job_key, enqueue_download_job, env_int
@@ -311,6 +311,9 @@ async def startup(ctx: dict) -> None:
         await ensure_venv()
     except Exception as exc:
         logger.error("gallery-dl venv initialization failed: %s", exc)
+    # If the image ships a newer gallery-dl than the venv, sync it once downloads
+    # are idle (guarded like an admin upgrade; never blocks startup).
+    ctx["_gdl_image_sync_task"] = asyncio.ensure_future(image_sync_loop())
     # Auto-upgrade archive tables created by gallery-dl without Jyzrox columns
     try:
         await _ensure_archive_table_schema()
@@ -585,6 +588,13 @@ async def startup(ctx: dict) -> None:
 async def shutdown(ctx: dict) -> None:
     logger.info("SAQ Worker shutting down")
     _watcher.stop()
+    gdl_sync_task = ctx.get("_gdl_image_sync_task")
+    if gdl_sync_task is not None and not gdl_sync_task.done():
+        gdl_sync_task.cancel()
+        try:
+            await gdl_sync_task
+        except asyncio.CancelledError:
+            pass
     # Cancel log level subscriber
     log_level_task = ctx.get("_log_level_task")
     if log_level_task is not None and not log_level_task.done():

@@ -106,3 +106,32 @@ describe('GalleryDlSection — upgrade failure indication', () => {
     expect(toast.success).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('GalleryDlSection — image drift indication', () => {
+  it('test_imageNewerThanVenv_showsImageVersionAndSyncNotice', async () => {
+    mockGetVersion.mockResolvedValueOnce({
+      current: '1.32.8',
+      latest: '1.32.15',
+      image: '1.32.15',
+      image_newer: true,
+    } as never)
+    render(<GalleryDlSection />)
+    await waitFor(() => expect(screen.getByText('1.32.8')).toBeInTheDocument())
+
+    expect(screen.getByText('settings.galleryDlImage')).toBeInTheDocument()
+    expect(screen.getByText('settings.galleryDlImageNewer 1.32.15 1.32.8')).toBeInTheDocument()
+  })
+
+  it('test_imageNotNewer_hidesSyncNotice', async () => {
+    mockGetVersion.mockResolvedValueOnce({
+      current: '1.40.0',
+      latest: '1.40.0',
+      image: '1.32.15',
+      image_newer: false,
+    } as never)
+    render(<GalleryDlSection />)
+    await waitFor(() => expect(screen.getByText('settings.galleryDlImage')).toBeInTheDocument())
+
+    expect(screen.queryByText(/settings\.galleryDlImageNewer/)).not.toBeInTheDocument()
+  })
+})

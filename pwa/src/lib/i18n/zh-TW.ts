@@ -586,6 +586,9 @@ const zhTW: Record<string, string> = {
   'settings.galleryDlDesc': '管理 gallery-dl 下載引擎的版本。升級或回退獨立虛擬環境。',
   'settings.galleryDlCurrent': '目前版本',
   'settings.galleryDlLatest': 'PyPI 最新版本',
+  'settings.galleryDlImage': '映像檔內版本（站點偵測）',
+  'settings.galleryDlImageNewer':
+    '映像檔內建 gallery-dl {image}，比目前 venv（{current}）新。待沒有排隊、暫停或執行中的下載時，venv 會自動同步。',
   'settings.galleryDlNotInstalled': '未安裝',
   'settings.galleryDlUnknown': '未知',
   'settings.galleryDlUpToDate': '已是最新版本',

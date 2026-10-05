@@ -324,6 +324,9 @@ const en: Record<string, string> = {
     'Manage the gallery-dl download engine version. Upgrade or rollback the isolated venv.',
   'settings.galleryDlCurrent': 'Current Version',
   'settings.galleryDlLatest': 'Latest on PyPI',
+  'settings.galleryDlImage': 'In image (site detection)',
+  'settings.galleryDlImageNewer':
+    'The image ships gallery-dl {image}, newer than the active venv ({current}). The venv syncs automatically once no downloads are queued, paused or running.',
   'settings.galleryDlNotInstalled': 'Not installed',
   'settings.galleryDlUnknown': 'Unknown',
   'settings.galleryDlUpToDate': 'Up to date',

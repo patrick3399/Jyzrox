@@ -20,6 +20,7 @@ import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
+from importlib import metadata
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -28,9 +29,23 @@ VENV_BASE = Path("/opt/gallery-dl")
 VENV_ACTIVE = VENV_BASE / "active"
 GDL_BIN = VENV_ACTIVE / "bin" / "gallery-dl"
 
-# Pinned baseline for the initial venv. Kept intentionally below the latest
-# PyPI release so the admin online-upgrade path always has a gap to exercise.
+# Fallback baseline for the initial venv, used only when the version baked into
+# the image cannot be determined. Normally a fresh venv installs the image's own
+# gallery-dl so both start out identical.
 INITIAL_GDL_VERSION = "1.32.1"
+
+# Wheels for the image's gallery-dl (+ psycopg), baked in by the Dockerfile.
+# Lets a venv be built from the image's exact version without touching PyPI.
+WHEELS_DIR = Path("/opt/gdl-wheels")
+
+# Records the image version the venv was last reconciled against, so an admin
+# rollback survives a restart: the venv is only auto-synced again when the
+# image ships a *different* gallery-dl.
+_SYNC_MARKER_NAME = ".synced_image_version"
+
+# How long the background sync waits before retrying after being rejected
+# (downloads active / lifecycle lock busy).
+IMAGE_SYNC_RETRY_INTERVAL = 300.0
 
 _VERSION_DIR_RE = re.compile(r"^v\d+$")
 
@@ -72,6 +87,59 @@ def invalidate_gdl_bin_cache() -> None:
     """Clear cached binary path. Called after upgrade/rollback."""
     global _gdl_bin_cache
     _gdl_bin_cache = None
+
+
+def get_image_version() -> str | None:
+    """Return the gallery-dl version baked into the image (in-process import).
+
+    The in-process copy is what extractor detection uses; downloads run the
+    venv's copy. Reading it via importlib metadata never executes anything.
+    """
+    try:
+        return metadata.version("gallery-dl")
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def _parse_version(version: str | None) -> tuple[int, ...] | None:
+    """Parse ``1.32.15`` into ``(1, 32, 15)``; None when it has no numeric part."""
+    if not version:
+        return None
+    parts = re.findall(r"\d+", version.split("-", 1)[0])
+    return tuple(int(p) for p in parts) if parts else None
+
+
+def is_version_newer(candidate: str | None, baseline: str | None) -> bool:
+    """True only when both parse and ``candidate`` is strictly newer."""
+    cand, base = _parse_version(candidate), _parse_version(baseline)
+    if cand is None or base is None:
+        return False
+    return cand > base
+
+
+def _offline_wheels_available() -> bool:
+    return WHEELS_DIR.is_dir() and any(WHEELS_DIR.glob("*.whl"))
+
+
+def _pip_install_cmd(py_bin: str, pkg: str, *, offline: bool) -> list[str]:
+    cmd = [py_bin, "-m", "pip", "install", "--upgrade"]
+    if offline:
+        cmd += ["--no-index", "--find-links", str(WHEELS_DIR)]
+    return [*cmd, pkg, "psycopg[binary]"]
+
+
+def _read_sync_marker() -> str | None:
+    try:
+        return (VENV_BASE / _SYNC_MARKER_NAME).read_text().strip() or None
+    except OSError:
+        return None
+
+
+def _write_sync_marker(version: str) -> None:
+    try:
+        (VENV_BASE / _SYNC_MARKER_NAME).write_text(version)
+    except OSError as exc:
+        logger.warning("[gallery-dl venv] Could not write image sync marker: %s", exc)
 
 
 async def _run(cmd: list[str], timeout: float = 300) -> tuple[int, str, str]:
@@ -251,12 +319,20 @@ async def ensure_venv() -> None:
         logger.error("[gallery-dl venv] venv creation failed: %s", stderr)
         raise RuntimeError(f"Failed to create venv: {stderr}")
 
-    # Install gallery-dl (pinned baseline). This is a freshly created venv, so
-    # its pip console script carries a correct self-referential shebang.
+    # Install the image's own gallery-dl so a fresh venv starts identical to the
+    # in-process copy (offline when the baked wheels are present). Fall back to
+    # the pinned baseline only if the image version is unknown. This is a freshly
+    # created venv, so its pip console script carries a correct shebang.
     pip_bin = str(v1 / "bin" / "pip")
-    logger.info("[gallery-dl venv] Installing gallery-dl==%s into %s", INITIAL_GDL_VERSION, v1)
+    image_version = get_image_version()
+    offline = image_version is not None and _offline_wheels_available()
+    target_version = image_version or INITIAL_GDL_VERSION
+    logger.info("[gallery-dl venv] Installing gallery-dl==%s into %s (offline=%s)", target_version, v1, offline)
+    install_cmd = [pip_bin, "install", "--upgrade"]
+    if offline:
+        install_cmd += ["--no-index", "--find-links", str(WHEELS_DIR)]
     rc, _, stderr = await _run(
-        [pip_bin, "install", "--upgrade", f"gallery-dl=={INITIAL_GDL_VERSION}", "psycopg[binary]"],
+        [*install_cmd, f"gallery-dl=={target_version}", "psycopg[binary]"],
         timeout=120,
     )
     if rc != 0:
@@ -271,6 +347,8 @@ async def ensure_venv() -> None:
 
     ver = await _get_version(str(v1 / "bin" / "gallery-dl"))
     logger.info("[gallery-dl venv] Initial venv ready: gallery-dl %s", ver)
+    if image_version is not None and ver == image_version:
+        _write_sync_marker(image_version)
     invalidate_gdl_bin_cache()
 
 
@@ -320,13 +398,18 @@ async def _cleanup_new_dir(new_dir: Path) -> None:
     await asyncio.to_thread(shutil.rmtree, new_dir, True)
 
 
-async def _fail(status: str, error: str, requested_version: str | None = None) -> dict:
+async def _fail(status: str, error: str, requested_version: str | None = None, *, quiet: bool = False) -> dict:
     """Emit a failure event and return the SAQ job result dict.
 
     Emitting on every failure/rejection (not just success) is what lets the
     admin UI surface the outcome instead of silently keeping the old version.
+    ``quiet`` suppresses only *rejections* for the background image sync, which
+    retries on a timer and would otherwise toast the admin every few minutes.
     """
     from core.events import EventType, emit_safe
+
+    if quiet and status == "rejected":
+        return {"status": status, "error": error}
 
     await emit_safe(
         EventType.SYSTEM_GDL_UPGRADE_FAILED,
@@ -339,7 +422,15 @@ async def _fail(status: str, error: str, requested_version: str | None = None) -
 
 
 async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: ARG001
-    """SAQ job: upgrade gallery-dl to a specific version (or latest).
+    """SAQ job: upgrade gallery-dl to a specific version (or latest)."""
+    return await _upgrade(version)
+
+
+async def _upgrade(version: str | None, *, offline: bool = False, quiet: bool = False) -> dict:
+    """Build a fresh venv and swap it in, guarded against active downloads.
+
+    ``offline`` installs from the image's baked wheels instead of PyPI;
+    ``quiet`` is the background image sync (see ``_fail``).
 
     Steps:
     1. Check no downloads are queued, paused, or running
@@ -355,7 +446,7 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
     # repeated under the exclusive lifecycle lock immediately before swap.
     active = await _check_active_downloads()
     if active > 0:
-        return await _fail("rejected", f"{active} download(s) queued, paused, or running", version)
+        return await _fail("rejected", f"{active} download(s) queued, paused, or running", version, quiet=quiet)
 
     old_version = await get_current_version()
 
@@ -373,24 +464,24 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
         rc, _, stderr = await _run(_venv_create_cmd(new_dir), timeout=30)
         if rc != 0:
             await _cleanup_new_dir(new_dir)
-            return await _fail("failed", f"venv creation failed: {stderr}", version)
+            return await _fail("failed", f"venv creation failed: {stderr}", version, quiet=quiet)
 
         # 3. pip install — invoke pip via the new venv's own python so the
         #    install always targets new_dir, independent of any shebang.
         py_bin = str(new_dir / "bin" / "python")
         pkg = f"gallery-dl=={version}" if version else "gallery-dl"
         logger.info("[gallery-dl venv] Installing %s", pkg)
-        rc, _, stderr = await _run([py_bin, "-m", "pip", "install", "--upgrade", pkg, "psycopg[binary]"], timeout=120)
+        rc, _, stderr = await _run(_pip_install_cmd(py_bin, pkg, offline=offline), timeout=120)
         if rc != 0:
             await _cleanup_new_dir(new_dir)
-            return await _fail("failed", f"pip install failed: {stderr}", version)
+            return await _fail("failed", f"pip install failed: {stderr}", version, quiet=quiet)
 
         # 4. Verify
         new_bin = str(new_dir / "bin" / "gallery-dl")
         new_version = await _get_version(new_bin)
         if not new_version:
             await _cleanup_new_dir(new_dir)
-            return await _fail("failed", "gallery-dl --version failed after install", version)
+            return await _fail("failed", "gallery-dl --version failed after install", version, quiet=quiet)
     except Exception:
         await _cleanup_new_dir(new_dir)
         raise
@@ -407,7 +498,7 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
             active = await _check_active_downloads()
             if active > 0:
                 await _cleanup_new_dir(new_dir)
-                return await _fail("rejected", f"{active} download(s) queued, paused, or running", version)
+                return await _fail("rejected", f"{active} download(s) queued, paused, or running", version, quiet=quiet)
 
             _swap_active_symlink(new_dir)
             logger.info("[gallery-dl venv] Upgraded: %s → %s", old_version, new_version)
@@ -416,7 +507,7 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
         # The installed venv is still valid; drop it and let the admin retry
         # rather than swapping while a gallery-dl process reads the old tree.
         await _cleanup_new_dir(new_dir)
-        return await _fail("rejected", str(exc), version)
+        return await _fail("rejected", str(exc), version, quiet=quiet)
 
     invalidate_gdl_bin_cache()
 
@@ -480,6 +571,67 @@ async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
         "old_version": old_version,
         "new_version": new_version,
     }
+
+
+async def sync_image_version() -> str:
+    """Bring the venv up to the image's gallery-dl when the image is newer.
+
+    Returns one of ``current`` (nothing to do), ``synced``, ``rejected``
+    (downloads active or lock busy — retry later), ``failed`` or
+    ``unavailable`` (image version or baked wheels missing).
+
+    Goes through ``_upgrade`` so it keeps every guard the admin upgrade has: the
+    active-download check, the exclusive lifecycle lock and the re-check right
+    before the swap. It never downgrades, and the marker keeps an admin rollback
+    from being undone on the next restart.
+    """
+    image_version = get_image_version()
+    if image_version is None or not _offline_wheels_available():
+        return "unavailable"
+    if _read_sync_marker() == image_version:
+        return "current"
+
+    current = await get_current_version()
+    if not is_version_newer(image_version, current):
+        # Venv already at or ahead of the image: record it so a later rollback
+        # to an older version is not "fixed" by a restart.
+        if _parse_version(current) is not None:
+            _write_sync_marker(image_version)
+            return "current"
+        return "unavailable"
+
+    logger.info("[gallery-dl venv] Image has gallery-dl %s, venv has %s; syncing", image_version, current)
+    result = await _upgrade(image_version, offline=True, quiet=True)
+    status = result["status"]
+    if status == "ok":
+        _write_sync_marker(image_version)
+        return "synced"
+    if status == "rejected":
+        logger.info("[gallery-dl venv] Image sync deferred: %s", result.get("error"))
+        return "rejected"
+    logger.warning("[gallery-dl venv] Image sync failed: %s", result.get("error"))
+    return "failed"
+
+
+async def image_sync_loop(interval: float | None = None) -> None:
+    """Background task: retry ``sync_image_version`` until it stops being rejected.
+
+    Waits out busy periods instead of forcing the swap, so the "no swap while a
+    download can start from the venv" invariant holds. Stops after any definitive
+    outcome; a failure is retried on the next worker start (no marker written).
+    """
+    wait = IMAGE_SYNC_RETRY_INTERVAL if interval is None else interval
+    while True:
+        try:
+            status = await sync_image_version()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[gallery-dl venv] Image sync crashed")
+            return
+        if status != "rejected":
+            return
+        await asyncio.sleep(wait)
 
 
 async def _cleanup_old_versions() -> None:

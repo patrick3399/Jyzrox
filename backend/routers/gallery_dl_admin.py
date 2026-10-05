@@ -21,11 +21,28 @@ class UpgradeRequest(BaseModel):
 
 @router.get("/version")
 async def get_gallery_dl_version(_: dict = Depends(_admin)):
-    """Return current and latest available gallery-dl versions."""
-    from worker.gallery_dl_venv import get_current_version, get_latest_pypi_version
+    """Return venv, image and latest gallery-dl versions.
+
+    ``image`` is the in-process copy used for extractor detection; downloads run
+    the venv (``current``). ``image_newer`` flags the case where the image ships a
+    newer gallery-dl than the venv (it is synced automatically once downloads are
+    idle, or by an admin upgrade).
+    """
+    from worker.gallery_dl_venv import (
+        get_current_version,
+        get_image_version,
+        get_latest_pypi_version,
+        is_version_newer,
+    )
 
     current, latest = await asyncio.gather(get_current_version(), get_latest_pypi_version())
-    return {"current": current, "latest": latest}
+    image = get_image_version()
+    return {
+        "current": current,
+        "latest": latest,
+        "image": image,
+        "image_newer": is_version_newer(image, current),
+    }
 
 
 @router.post("/upgrade")

@@ -548,3 +548,240 @@ while not release.exists() and time.monotonic() < deadline:
     # Nothing was swapped or deleted while a gallery-dl process held the lock.
     assert fake_active.resolve() == fake_base / "v2"
     assert (fake_base / "v2").exists()
+
+
+# ---------------------------------------------------------------------------
+# Image → venv sync (image ships a newer gallery-dl than the venv)
+# ---------------------------------------------------------------------------
+
+
+def _sync_env(tmp_path: Path, venv_version: str = "1.32.8", *, wheels: bool = True):
+    """Fake /opt/gallery-dl with an active venv, plus an optional wheels dir."""
+    base = tmp_path / "gallery-dl"
+    active = base / "active"
+    _make_fake_venv(base / "v1", venv_version)
+    active.symlink_to("v1")
+    wheels_dir = tmp_path / "wheels"
+    wheels_dir.mkdir()
+    if wheels:
+        (wheels_dir / "gallery_dl-1.32.15-py3-none-any.whl").write_text("")
+    return base, active, wheels_dir
+
+
+def _patch_sync(venv_mod, base, active, wheels_dir, image_version="1.32.15", **extra):
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(patch.object(venv_mod, "VENV_BASE", base))
+    stack.enter_context(patch.object(venv_mod, "VENV_ACTIVE", active))
+    stack.enter_context(patch.object(venv_mod, "WHEELS_DIR", wheels_dir))
+    stack.enter_context(patch.object(venv_mod, "get_image_version", return_value=image_version))
+    for name, value in extra.items():
+        stack.enter_context(patch.object(venv_mod, name, value))
+    return stack
+
+
+def test_is_version_newer_compares_numerically_not_lexically():
+    from worker.gallery_dl_venv import is_version_newer
+
+    assert is_version_newer("1.32.15", "1.32.8")  # lexical compare would say no
+    assert not is_version_newer("1.32.8", "1.32.15")
+    assert not is_version_newer("1.32.8", "1.32.8")
+    assert not is_version_newer(None, "1.32.8")
+    assert not is_version_newer("1.32.15", None)
+    assert not is_version_newer("garbage", "1.32.8")
+
+
+@pytest.mark.asyncio
+async def test_sync_upgrades_venv_offline_when_image_newer_and_writes_marker(tmp_path):
+    from worker import gallery_dl_venv as venv_mod
+
+    base, active, wheels = _sync_env(tmp_path)
+    installs: list[list[str]] = []
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.15")
+        elif "pip" in cmd:
+            installs.append(cmd)
+        elif "--version" in cmd:
+            return (0, "1.32.15\n", "")
+        return (0, "", "")
+
+    emit = AsyncMock()
+    with (
+        _patch_sync(venv_mod, base, active, wheels, _run=fake_run, _check_active_downloads=AsyncMock(return_value=0)),
+        patch("core.events.emit_safe", emit),
+    ):
+        status = await venv_mod.sync_image_version()
+
+    assert status == "synced"
+    assert active.resolve() == base / "v2"
+    assert (base / ".synced_image_version").read_text() == "1.32.15"
+    # Offline: never reaches PyPI, pinned to the image's exact version.
+    assert len(installs) == 1
+    assert "--no-index" in installs[0]
+    assert installs[0][installs[0].index("--find-links") + 1] == str(wheels)
+    assert "gallery-dl==1.32.15" in installs[0]
+
+
+@pytest.mark.asyncio
+async def test_sync_deferred_while_downloads_active_keeps_venv_and_stays_silent(tmp_path):
+    """Invariant: no venv swap while queued/paused/running downloads exist.
+
+    The sync is rejected (not forced), leaves no marker so it retries, and does
+    not toast the admin on every retry.
+    """
+    from worker import gallery_dl_venv as venv_mod
+
+    base, active, wheels = _sync_env(tmp_path)
+    emit = AsyncMock()
+    with (
+        _patch_sync(venv_mod, base, active, wheels, _check_active_downloads=AsyncMock(return_value=2)),
+        patch("core.events.emit_safe", emit),
+    ):
+        status = await venv_mod.sync_image_version()
+
+    assert status == "rejected"
+    assert active.resolve() == base / "v1"
+    assert not (base / "v2").exists()
+    assert not (base / ".synced_image_version").exists()
+    emit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_never_downgrades_and_records_marker_when_venv_ahead(tmp_path):
+    """Venv newer than the image (admin upgraded) must not be downgraded."""
+    from worker import gallery_dl_venv as venv_mod
+
+    base, active, wheels = _sync_env(tmp_path, venv_version="1.40.0")
+    upgrade = AsyncMock()
+    with _patch_sync(venv_mod, base, active, wheels, _upgrade=upgrade):
+        status = await venv_mod.sync_image_version()
+
+    assert status == "current"
+    upgrade.assert_not_awaited()
+    assert active.resolve() == base / "v1"
+    assert (base / ".synced_image_version").read_text() == "1.32.15"
+
+
+@pytest.mark.asyncio
+async def test_sync_does_not_undo_admin_rollback_after_restart(tmp_path):
+    """After a rollback to an older version, a restart with the same image must
+    not re-upgrade: the marker says this image version was already handled."""
+    from worker import gallery_dl_venv as venv_mod
+
+    base, active, wheels = _sync_env(tmp_path, venv_version="1.32.8")
+    (base / ".synced_image_version").write_text("1.32.15")
+    upgrade = AsyncMock()
+    with _patch_sync(venv_mod, base, active, wheels, _upgrade=upgrade):
+        status = await venv_mod.sync_image_version()
+
+    assert status == "current"
+    upgrade.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_resyncs_when_image_version_changes_after_marker(tmp_path):
+    from worker import gallery_dl_venv as venv_mod
+
+    base, active, wheels = _sync_env(tmp_path, venv_version="1.32.8")
+    (base / ".synced_image_version").write_text("1.32.10")  # older image, handled before
+    upgrade = AsyncMock(return_value={"status": "ok"})
+    with _patch_sync(venv_mod, base, active, wheels, _upgrade=upgrade):
+        status = await venv_mod.sync_image_version()
+
+    assert status == "synced"
+    upgrade.assert_awaited_once_with("1.32.15", offline=True, quiet=True)
+    assert (base / ".synced_image_version").read_text() == "1.32.15"
+
+
+@pytest.mark.asyncio
+async def test_sync_failure_keeps_old_venv_and_leaves_no_marker(tmp_path):
+    from worker import gallery_dl_venv as venv_mod
+
+    base, active, wheels = _sync_env(tmp_path)
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.15")
+            return (0, "", "")
+        if "pip" in cmd:
+            return (1, "", "no matching distribution")
+        return (0, "", "")
+
+    with (
+        _patch_sync(venv_mod, base, active, wheels, _run=fake_run, _check_active_downloads=AsyncMock(return_value=0)),
+        patch("core.events.emit_safe", AsyncMock()),
+    ):
+        status = await venv_mod.sync_image_version()
+
+    assert status == "failed"
+    assert active.resolve() == base / "v1"
+    assert not (base / "v2").exists()
+    assert not (base / ".synced_image_version").exists()
+
+
+@pytest.mark.asyncio
+async def test_sync_unavailable_without_baked_wheels_or_image_version(tmp_path):
+    from worker import gallery_dl_venv as venv_mod
+
+    base, active, wheels = _sync_env(tmp_path, wheels=False)
+    upgrade = AsyncMock()
+    with _patch_sync(venv_mod, base, active, wheels, _upgrade=upgrade):
+        assert await venv_mod.sync_image_version() == "unavailable"
+
+    base2, active2, wheels2 = _sync_env(tmp_path / "b")
+    with _patch_sync(venv_mod, base2, active2, wheels2, image_version=None, _upgrade=upgrade):
+        assert await venv_mod.sync_image_version() == "unavailable"
+    upgrade.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_image_sync_loop_retries_while_rejected_then_stops():
+    from worker import gallery_dl_venv as venv_mod
+
+    sync = AsyncMock(side_effect=["rejected", "rejected", "synced"])
+    with patch.object(venv_mod, "sync_image_version", sync):
+        await venv_mod.image_sync_loop(interval=0)
+
+    assert sync.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_image_sync_loop_does_not_retry_after_failure():
+    from worker import gallery_dl_venv as venv_mod
+
+    sync = AsyncMock(return_value="failed")
+    with patch.object(venv_mod, "sync_image_version", sync):
+        await venv_mod.image_sync_loop(interval=0)
+
+    sync.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_venv_fresh_install_uses_image_version_and_writes_marker(tmp_path):
+    """A fresh venv must match the image, not the stale hard-coded baseline."""
+    from worker import gallery_dl_venv as venv_mod
+
+    base = tmp_path / "gallery-dl"
+    active = base / "active"
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    (wheels / "gallery_dl-1.32.15-py3-none-any.whl").write_text("")
+    installs: list[list[str]] = []
+
+    async def fake_run(cmd, timeout=300):
+        if "install" in cmd:
+            installs.append(cmd)
+        if "--version" in cmd:
+            return (0, "1.32.15\n", "")
+        return (0, "", "")
+
+    with _patch_sync(venv_mod, base, active, wheels, _run=fake_run):
+        await venv_mod.ensure_venv()
+
+    assert "gallery-dl==1.32.15" in installs[0]
+    assert "gallery-dl==1.32.1" not in installs[0]
+    assert "--no-index" in installs[0]
+    assert (base / ".synced_image_version").read_text() == "1.32.15"

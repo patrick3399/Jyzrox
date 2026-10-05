@@ -93,6 +93,7 @@ services:
         dbinit: ./db
       args:
         APP_VERSION: ${APP_VERSION:-dev}
+        GDL_VERSION: ${GDL_VERSION:-}
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8'
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 30s
@@ -146,6 +147,7 @@ services:
         dbinit: ./db
       args:
         APP_VERSION: ${APP_VERSION:-dev}
+        GDL_VERSION: ${GDL_VERSION:-}
     command: python -m worker
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 55s

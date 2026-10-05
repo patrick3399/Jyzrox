@@ -430,6 +430,9 @@ const zhCN: Record<string, string> = {
   'settings.galleryDlDesc': '管理 gallery-dl 下载引擎版本。升级或回滚独立 venv。',
   'settings.galleryDlCurrent': '当前版本',
   'settings.galleryDlLatest': 'PyPI 最新版',
+  'settings.galleryDlImage': '镜像内版本（站点检测）',
+  'settings.galleryDlImageNewer':
+    '镜像内置 gallery-dl {image}，比当前 venv（{current}）新。待没有排队、暂停或运行中的下载时，venv 会自动同步。',
   'settings.galleryDlNotInstalled': '未安装',
   'settings.galleryDlUnknown': '未知',
   'settings.galleryDlUpToDate': '已是最新',
