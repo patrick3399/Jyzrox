@@ -20,7 +20,7 @@ Container /mnt/nas-share    ← Jyzrox reads from here
 Jyzrox UI → Settings → Library Path → /mnt/nas-share
 ```
 
-This mount is currently unused by the default deployment. Add it only to the services that need it (normally `api` and `worker`; add `nginx` for direct external-media serving, and `tagger` only when AI tagging reads those files).
+This mount is currently unused by the default deployment. Add it only to the services that need it (normally `api` and `worker`; add `nginx` for direct external-media serving).
 
 ---
 
@@ -171,7 +171,7 @@ services:
       - /mnt/nas-share:/mnt/nas:ro
 ```
 
-> Add the corresponding mount to `nginx` only when external media must be served directly, and to `tagger` only when AI tagging reads files from this NAS.
+> Add the corresponding mount to `nginx` only when external media must be served directly.
 
 Restart services:
 
