@@ -45,6 +45,7 @@ from worker.liveness import (
     record_memory_sample,
     start_run_marker,
 )
+from worker.log_redaction import install_log_redaction
 from worker.memory import after_process_hook
 from worker.novel_index import novel_index_job
 from worker.novel_sync import novel_sync_job
@@ -77,6 +78,7 @@ logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+install_log_redaction()
 logger = logging.getLogger("worker")
 
 
