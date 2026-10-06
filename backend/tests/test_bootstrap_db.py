@@ -122,6 +122,89 @@ class TestMigrationIdempotency:
         assert fk and any("pg_constraint" in s for s in fk), fk
 
 
+class TestConvergenceMigration0025:
+    """0025 repairs databases that init.sql and the migration chain built differently (BE-T15).
+
+    It runs against every existing database, most of which already have some or
+    all of the objects, so each statement must be a no-op where its object exists.
+    """
+
+    _FILENAME = "0025_converge_bootstrap_schema_drift.py"
+
+    def _statements(self) -> list[str]:
+        return [" ".join(statement.split()) for statement in _capture_upgrade_sql(self._FILENAME)]
+
+    def test_reapplies_every_migration_0008_statement(self):
+        # Databases bootstrapped from an init.sql that lacked 0008 are stamped past
+        # it, so alembic never runs 0008 for them; 0025 has to carry the same DDL.
+        statements = self._statements()
+        for expected in _capture_upgrade_sql("0008_pixiv_author_collections.py"):
+            assert " ".join(expected.split()) in statements, expected
+
+    def test_adds_the_objects_only_init_sql_declared_with_the_same_definition(self):
+        statements = self._statements()
+        init_sql = " ".join(_INIT_SQL_PATH.read_text(encoding="utf-8").split())
+        for index in (
+            "CREATE INDEX IF NOT EXISTS idx_read_progress_user ON read_progress (user_id, last_read_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_read_progress_gallery ON read_progress (gallery_id, last_read_at DESC)",
+        ):
+            assert index in statements
+            assert index in init_sql
+        role_check = "ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ('admin', 'member', 'viewer'));"
+        assert role_check in init_sql
+        assert any(role_check in statement for statement in statements)
+
+    def test_every_statement_is_guarded_so_a_complete_schema_is_left_untouched(self):
+        for statement in self._statements():
+            upper = statement.upper()
+            if upper.startswith("DO $$"):
+                # One anonymous block is a single command; its DDL runs only when
+                # the catalog says the object is missing or still divergent.
+                assert upper.endswith("END $$;"), statement
+                assert "PG_CONSTRAINT" in upper or "PG_ATTRIBUTE" in upper, statement
+                assert " IF EXISTS (" in upper or " IF NOT EXISTS (" in upper, statement
+            else:
+                # asyncpg prepares each op.execute(), which rejects multiple commands.
+                assert ";" not in statement, statement
+                assert upper.startswith(("CREATE TABLE IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS ")) or (
+                    upper.startswith("ALTER TABLE ") and " ADD COLUMN IF NOT EXISTS " in upper
+                ), statement
+            for unguardable in ("ADD CONSTRAINT", "RENAME CONSTRAINT", "SET NOT NULL", "UPDATE "):
+                if unguardable in upper:
+                    assert upper.startswith("DO $$"), statement
+
+    def test_renames_generated_constraint_names_only_when_the_migration_name_is_absent(self):
+        renames = [statement for statement in self._statements() if "RENAME CONSTRAINT" in statement]
+        renamed = {}
+        for statement in renames:
+            table, old, new = re.search(r"ALTER TABLE (\w+) RENAME CONSTRAINT (\w+) TO (\w+)", statement).groups()
+            renamed[new] = old
+            # Renaming onto an existing name raises, and the old name is absent on
+            # databases built by the migrations: both must be checked per table.
+            assert f"conrelid = '{table}'::regclass AND conname = '{old}'" in statement, statement
+            assert f"conrelid = '{table}'::regclass AND conname = '{new}'" in statement, statement
+            assert "IF EXISTS (" in statement and ") AND NOT EXISTS (" in statement, statement
+        assert renamed == {
+            "fk_images_replaced_by_image_id": "images_replaced_by_image_id_fkey",
+            "ck_workbench_operation_status": "workbench_operations_status_check",
+            "ck_gallery_metadata_field_origin": "gallery_metadata_field_states_origin_check",
+            "ck_gallery_metadata_change_origin": "gallery_metadata_changes_origin_check",
+            "fk_blob_relationship_decision_user": "blob_relationships_decision_by_user_id_fkey",
+        }
+
+    def test_backfills_null_options_before_setting_not_null_and_skips_when_already_not_null(self):
+        blocks = [statement for statement in self._statements() if "SET NOT NULL" in statement]
+        columns = set()
+        for statement in blocks:
+            table, column = re.search(r"ALTER TABLE (\w+) ALTER COLUMN (\w+) SET NOT NULL", statement).groups()
+            columns.add((table, column))
+            assert f"attrelid = '{table}'::regclass AND attname = '{column}' AND NOT attnotnull" in statement
+            backfill = f"UPDATE {table} SET {column} = '{{}}' WHERE {column} IS NULL;"
+            assert backfill in statement, statement
+            assert statement.index(backfill) < statement.index("SET NOT NULL"), statement
+        assert columns == {("download_jobs", "options"), ("subscriptions", "download_options")}
+
+
 class TestInitSqlValidity:
     """db/init.sql must be valid, re-runnable PostgreSQL (bootstrap applies it whole)."""
 
@@ -149,7 +232,8 @@ _CREATE_TABLE = re.compile(r"\bCREATE TABLE (?:IF NOT EXISTS )?(\w+) ?\(", re.IG
 _ALTER_TABLE = re.compile(r"\bALTER TABLE (?:IF EXISTS )?(\w+) ([^;]*)", re.IGNORECASE)
 _CREATE_INDEX = re.compile(r"\bCREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?(\w+) ON (\w+)", re.IGNORECASE)
 _ADD_COLUMN = re.compile(r"\bADD COLUMN (?:IF NOT EXISTS )?(\w+)", re.IGNORECASE)
-_NAMED_CONSTRAINT = re.compile(r"(?<!DROP )\bCONSTRAINT (\w+)", re.IGNORECASE)
+_NAMED_CONSTRAINT = re.compile(r"(?<!DROP )(?<!RENAME )\bCONSTRAINT (\w+)", re.IGNORECASE)
+_RENAME_CONSTRAINT = re.compile(r"\bRENAME CONSTRAINT (\w+) TO (\w+)", re.IGNORECASE)
 _DROP_TABLE = re.compile(r"\bDROP TABLE (?:IF EXISTS )?(\w+)", re.IGNORECASE)
 _DROP_INDEX = re.compile(r"\bDROP INDEX (?:IF EXISTS )?(\w+)", re.IGNORECASE)
 _DROP_FROM_TABLE = re.compile(r"\bDROP (?:COLUMN|CONSTRAINT) (?:IF EXISTS )?(\w+)", re.IGNORECASE)
@@ -192,6 +276,7 @@ def _objects_by_table(sql: str) -> dict[str, set[str]]:
         names = tables.setdefault(match[1], set())
         names.update(_ADD_COLUMN.findall(match[2]))
         names.update(_NAMED_CONSTRAINT.findall(match[2]))
+        names.update(new for _old, new in _RENAME_CONSTRAINT.findall(match[2]))
     for index, table in _CREATE_INDEX.findall(code):
         tables.setdefault(table, set()).add(index)
     return tables
@@ -210,6 +295,7 @@ def _objects_left_by_migrations() -> dict[str, set[str]]:
                 head.pop(table, None)
             for table, clauses in _ALTER_TABLE.findall(code):
                 head.get(table, set()).difference_update(_DROP_FROM_TABLE.findall(clauses))
+                head.get(table, set()).difference_update(old for old, _new in _RENAME_CONSTRAINT.findall(clauses))
             for index in _DROP_INDEX.findall(code):
                 for names in head.values():
                     names.discard(index)
