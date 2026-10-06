@@ -132,7 +132,16 @@ export function useLibraryBrowseSession({
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const refresh = session.refresh
 
+  const seenJobUpdateRef = useRef({ update: lastJobUpdate, ready: false })
+
   useEffect(() => {
+    const seen = seenJobUpdateRef.current
+    seenJobUpdateRef.current = { update: lastJobUpdate, ready: scopeReady }
+    // A job event is news only to a session that was already live when it
+    // arrived. One that predates the initial load or snapshot restore is
+    // covered by that load and by the revalidation probe; replaying it in the
+    // restore commit refreshes at a depth of one and truncates the snapshot.
+    if (!seen.ready || seen.update === lastJobUpdate) return
     if (
       !scopeReady ||
       !lastJobUpdate ||

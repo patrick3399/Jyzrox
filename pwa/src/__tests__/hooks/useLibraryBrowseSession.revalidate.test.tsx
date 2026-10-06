@@ -259,3 +259,89 @@ describe('useLibraryBrowseSession revalidation without a live job event', () => 
     expect(galleries).not.toHaveBeenCalled()
   })
 })
+
+describe('useLibraryBrowseSession job events that predate the session', () => {
+  const doneEvent = (jobId: string) => ({ job_id: jobId, status: 'done', progress: null })
+  const changedPages = async (_q: string, opts: { cursor?: string }) =>
+    opts.cursor ? secondPage([3, 2, 1]) : firstPage([5, 4], 5)
+
+  it('keeps the loaded depth of a restored snapshot when a stale done event is already present at mount', async () => {
+    const storage = new MemoryStorage()
+    await leaveTwoPageSnapshot(storage)
+    wsState.lastJobUpdate = doneEvent('finished-before-mount')
+    galleries.mockImplementation(changedPages)
+
+    const view = mount(storage)
+
+    await waitFor(() => expect(ids(view)).toEqual([5, 4, 3, 2, 1]))
+  })
+
+  it('does not collapse an unchanged restored snapshot to its first page for a stale done event', async () => {
+    const storage = new MemoryStorage()
+    await leaveTwoPageSnapshot(storage)
+    wsState.lastJobUpdate = doneEvent('finished-before-mount')
+    galleries.mockResolvedValue(firstPage([4, 3], 4))
+
+    const view = mount(storage)
+
+    await waitFor(() => expect(galleries).toHaveBeenCalledOnce())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(ids(view)).toEqual([4, 3, 2, 1])
+    expect(view.result.current.state).toMatchObject({ cursor: null, hasMore: false })
+  })
+
+  it('keeps the loaded depth when a done event arrives before the profile scope resolves', async () => {
+    const storage = new MemoryStorage()
+    await leaveTwoPageSnapshot(storage)
+    galleries.mockImplementation(changedPages)
+    const view = renderHook(
+      ({ enabled, userId }) =>
+        useLibraryBrowseSession({ query: '', enabled, userId, tabId: 'tab-a', storage }),
+      { initialProps: { enabled: false, userId: undefined as string | undefined } },
+    )
+
+    wsState.lastJobUpdate = doneEvent('finished-while-pending')
+    view.rerender({ enabled: false, userId: undefined })
+    view.rerender({ enabled: true, userId: 'member-42' })
+
+    await waitFor(() =>
+      expect(view.result.current.state.items.map((gallery) => gallery.id)).toEqual([5, 4, 3, 2, 1]),
+    )
+  })
+
+  it('keeps the loaded depth for a stale done event when the tab scope is claimed asynchronously', async () => {
+    const storage = new MemoryStorage()
+    const mountWithClaimedTab = () =>
+      renderHook(() =>
+        useLibraryBrowseSession({ query: '', enabled: true, userId: 'member-42', storage }),
+      )
+    galleries.mockResolvedValueOnce(firstPage([4, 3], 4)).mockResolvedValueOnce(secondPage([2, 1]))
+    const first = mountWithClaimedTab()
+    await waitFor(() => expect(ids(first)).toEqual([4, 3]))
+    await act(async () => first.result.current.loadMore())
+    first.unmount()
+    galleries.mockReset()
+    wsState.lastJobUpdate = doneEvent('finished-before-mount')
+    galleries.mockImplementation(changedPages)
+
+    const view = mountWithClaimedTab()
+
+    await waitFor(() => expect(ids(view)).toEqual([5, 4, 3, 2, 1]))
+  })
+
+  it('still refreshes the loaded depth for a done event that arrives after the snapshot is restored', async () => {
+    const storage = new MemoryStorage()
+    await leaveTwoPageSnapshot(storage)
+    galleries.mockResolvedValue(firstPage([4, 3], 4))
+    const view = mount(storage)
+    await waitFor(() => expect(galleries).toHaveBeenCalledOnce())
+    galleries.mockImplementation(changedPages)
+
+    wsState.lastJobUpdate = doneEvent('finished-after-mount')
+    view.rerender()
+
+    await waitFor(() => expect(ids(view)).toEqual([5, 4, 3, 2, 1]))
+  })
+})
