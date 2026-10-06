@@ -100,7 +100,9 @@ CREATE TABLE IF NOT EXISTS images (
     source_position INT,
     source_seen_at  TIMESTAMPTZ,
     hidden_at       TIMESTAMPTZ,
-    replaced_by_image_id BIGINT REFERENCES images(id) ON DELETE SET NULL,
+    replaced_by_image_id BIGINT,
+    CONSTRAINT fk_images_replaced_by_image_id
+        FOREIGN KEY (replaced_by_image_id) REFERENCES images(id) ON DELETE SET NULL,
     CONSTRAINT fk_images_blob_location
         FOREIGN KEY (blob_sha256, external_path)
         REFERENCES blob_locations(blob_sha256, external_path),
@@ -147,7 +149,7 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     source          TEXT,
     status          TEXT DEFAULT 'queued',
     progress        JSONB DEFAULT '{}',
-    options         JSONB DEFAULT '{}',
+    options         JSONB NOT NULL DEFAULT '{}',
     error           TEXT,
     created_at      TIMESTAMPTZ DEFAULT now(),
     finished_at     TIMESTAMPTZ,
@@ -165,31 +167,59 @@ CREATE TABLE IF NOT EXISTS read_progress (
     PRIMARY KEY (user_id, gallery_id)
 );
 
+-- ── Source works and stable read anchors ─────────────────────────────
+-- Mirrors migration 0008. Kept after galleries, images and read_progress so
+-- every foreign-key target already exists.
+CREATE TABLE IF NOT EXISTS gallery_source_items (
+    id              BIGSERIAL PRIMARY KEY,
+    gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    source_item_id  TEXT NOT NULL,
+    source_item_url TEXT,
+    title           TEXT,
+    published_at    TIMESTAMPTZ,
+    page_count      INTEGER NOT NULL DEFAULT 0,
+    source_position INTEGER,
+    source_seen_at  TIMESTAMPTZ,
+    status          TEXT NOT NULL DEFAULT 'active',
+    metadata_json   JSONB NOT NULL DEFAULT '{}',
+    CONSTRAINT uq_gallery_source_item UNIQUE (gallery_id, source_item_id),
+    CONSTRAINT ck_gallery_source_item_status CHECK (status IN ('active', 'source_missing'))
+);
+CREATE INDEX IF NOT EXISTS ix_gallery_source_items_gallery_order
+    ON gallery_source_items (gallery_id, source_position);
+ALTER TABLE images ADD COLUMN IF NOT EXISTS source_item_row_id BIGINT
+    REFERENCES gallery_source_items(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ix_images_source_item_row_id ON images (source_item_row_id);
+ALTER TABLE read_progress ADD COLUMN IF NOT EXISTS last_image_id BIGINT
+    REFERENCES images(id) ON DELETE SET NULL;
+
 CREATE TABLE IF NOT EXISTS workbench_operations (
     id              UUID PRIMARY KEY DEFAULT uuidv7(),
     user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL,
     kind            TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'queued'
-                    CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+    status          TEXT NOT NULL DEFAULT 'queued',
     selection_count INT NOT NULL DEFAULT 0,
     progress        JSONB NOT NULL DEFAULT '{}',
     params          JSONB NOT NULL DEFAULT '{}',
     error           TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at      TIMESTAMPTZ,
-    finished_at     TIMESTAMPTZ
+    finished_at     TIMESTAMPTZ,
+    CONSTRAINT ck_workbench_operation_status
+        CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled'))
 );
 
 CREATE TABLE IF NOT EXISTS gallery_metadata_field_states (
     gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     field_name      TEXT NOT NULL,
-    origin          TEXT NOT NULL DEFAULT 'source'
-                    CHECK (origin IN ('source', 'import', 'manual', 'merge')),
+    origin          TEXT NOT NULL DEFAULT 'source',
     locked          BOOLEAN NOT NULL DEFAULT false,
     source_value    JSONB,
     updated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (gallery_id, field_name)
+    PRIMARY KEY (gallery_id, field_name),
+    CONSTRAINT ck_gallery_metadata_field_origin
+        CHECK (origin IN ('source', 'import', 'manual', 'merge'))
 );
 
 CREATE TABLE IF NOT EXISTS gallery_metadata_changes (
@@ -198,10 +228,12 @@ CREATE TABLE IF NOT EXISTS gallery_metadata_changes (
     field_name      TEXT NOT NULL,
     old_value       JSONB,
     new_value       JSONB,
-    origin          TEXT NOT NULL CHECK (origin IN ('source', 'import', 'manual', 'merge')),
+    origin          TEXT NOT NULL,
     actor_user_id   BIGINT REFERENCES users(id) ON DELETE SET NULL,
     operation_id    UUID REFERENCES workbench_operations(id) ON DELETE SET NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_gallery_metadata_change_origin
+        CHECK (origin IN ('source', 'import', 'manual', 'merge'))
 );
 
 CREATE INDEX IF NOT EXISTS ix_workbench_operations_user_id
@@ -442,7 +474,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     avatar_url      TEXT,
     enabled         BOOLEAN DEFAULT TRUE,
     auto_download   BOOLEAN DEFAULT TRUE,
-    download_options JSONB DEFAULT '{}',
+    download_options JSONB NOT NULL DEFAULT '{}',
     cron_expr       TEXT DEFAULT '0 */2 * * *',
     last_checked_at TIMESTAMPTZ,
     last_success_at TIMESTAMPTZ,
@@ -457,8 +489,8 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_next_check ON subscriptions(next_ch
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source, source_id);
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS group_id INT REFERENCES subscription_groups(id) ON DELETE SET NULL;
-ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS download_options JSONB DEFAULT '{}';
-ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS options JSONB DEFAULT '{}';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS download_options JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_subscriptions_group ON subscriptions(group_id);
 
 -- Artist grouping
@@ -605,11 +637,13 @@ CREATE TABLE IF NOT EXISTS blob_relationships (
     context_revision_b BIGINT,
     decision        TEXT,
     decision_keep_sha TEXT,
-    decision_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    decision_by_user_id BIGINT,
     decided_at      TIMESTAMPTZ,
     tier            SMALLINT NOT NULL DEFAULT 1,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT fk_blob_relationship_decision_user
+        FOREIGN KEY (decision_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT uq_blob_pair UNIQUE (sha_a, sha_b),
     CONSTRAINT chk_canonical_order CHECK (sha_a < sha_b)
 );

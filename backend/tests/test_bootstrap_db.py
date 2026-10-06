@@ -8,14 +8,17 @@ correct, non-destructive action.
 """
 
 import importlib.util
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from db.models import Base
 from scripts import bootstrap_db
 
 _VERSIONS_DIR = Path(__file__).resolve().parent.parent / "migrations" / "versions"
+_INIT_SQL_PATH = Path(__file__).resolve().parent.parent.parent / "db" / "init.sql"
 
 
 def _load_migration(filename: str):
@@ -138,6 +141,123 @@ class TestInitSqlValidity:
         sql = self._init_sql()
         assert "chk_users_role" in sql
         assert "pg_constraint" in sql  # guarded via existence check
+
+
+_SQL_STRING_OR_COMMENT = re.compile(r"'(?:[^']|'')*'|--[^\n]*")
+_NESTED_PARENS = re.compile(r"\([^()]*\)")
+_CREATE_TABLE = re.compile(r"\bCREATE TABLE (?:IF NOT EXISTS )?(\w+) ?\(", re.IGNORECASE)
+_ALTER_TABLE = re.compile(r"\bALTER TABLE (?:IF EXISTS )?(\w+) ([^;]*)", re.IGNORECASE)
+_CREATE_INDEX = re.compile(r"\bCREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?(\w+) ON (\w+)", re.IGNORECASE)
+_ADD_COLUMN = re.compile(r"\bADD COLUMN (?:IF NOT EXISTS )?(\w+)", re.IGNORECASE)
+_NAMED_CONSTRAINT = re.compile(r"(?<!DROP )\bCONSTRAINT (\w+)", re.IGNORECASE)
+_DROP_TABLE = re.compile(r"\bDROP TABLE (?:IF EXISTS )?(\w+)", re.IGNORECASE)
+_DROP_INDEX = re.compile(r"\bDROP INDEX (?:IF EXISTS )?(\w+)", re.IGNORECASE)
+_DROP_FROM_TABLE = re.compile(r"\bDROP (?:COLUMN|CONSTRAINT) (?:IF EXISTS )?(\w+)", re.IGNORECASE)
+_TABLE_CONSTRAINT_KEYWORDS = frozenset({"CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "EXCLUDE", "LIKE"})
+
+
+def _sql_code(sql: str) -> str:
+    """Drop comments, blank string literals and collapse whitespace so regexes only see code."""
+    code = _SQL_STRING_OR_COMMENT.sub(lambda m: "''" if m[0].startswith("'") else "", sql)
+    return " ".join(code.split())
+
+
+def _parenthesized(code: str, start: int) -> str:
+    """Return the text between ``start`` and the parenthesis closing the one opened just before it."""
+    depth = 1
+    for end in range(start, len(code)):
+        depth += (code[end] == "(") - (code[end] == ")")
+        if depth == 0:
+            return code[start:end]
+    raise AssertionError("unbalanced parentheses in CREATE TABLE")
+
+
+def _objects_by_table(sql: str) -> dict[str, set[str]]:
+    """Map each table to the names of the columns, indexes and named constraints ``sql`` creates on it."""
+    code = _sql_code(sql)
+    tables: dict[str, set[str]] = {}
+    for match in _CREATE_TABLE.finditer(code):
+        body = _parenthesized(code, match.end())
+        names = tables.setdefault(match[1], set())
+        names.update(_NAMED_CONSTRAINT.findall(body))
+        # Collapse nested parentheses so only the commas separating definitions remain.
+        replaced = 1
+        while replaced:
+            body, replaced = _NESTED_PARENS.subn("", body)
+        for definition in filter(None, map(str.strip, body.split(","))):
+            first_word = definition.split()[0]
+            if first_word.upper() not in _TABLE_CONSTRAINT_KEYWORDS:
+                names.add(first_word)
+    for match in _ALTER_TABLE.finditer(code):
+        names = tables.setdefault(match[1], set())
+        names.update(_ADD_COLUMN.findall(match[2]))
+        names.update(_NAMED_CONSTRAINT.findall(match[2]))
+    for index, table in _CREATE_INDEX.findall(code):
+        tables.setdefault(table, set()).add(index)
+    return tables
+
+
+def _objects_left_by_migrations() -> dict[str, set[str]]:
+    """Replay every upgrade() and return what the migration chain leaves on each table at head."""
+    head: dict[str, set[str]] = {}
+    # Zero-padded filename prefixes mirror the revision chain, so sorting gives upgrade order.
+    for path in sorted(_VERSIONS_DIR.glob("[0-9]*.py")):
+        for statement in _capture_upgrade_sql(path.name):
+            code = _sql_code(statement)
+            for table, names in _objects_by_table(code).items():
+                head.setdefault(table, set()).update(names)
+            for table in _DROP_TABLE.findall(code):
+                head.pop(table, None)
+            for table, clauses in _ALTER_TABLE.findall(code):
+                head.get(table, set()).difference_update(_DROP_FROM_TABLE.findall(clauses))
+            for index in _DROP_INDEX.findall(code):
+                for names in head.values():
+                    names.discard(index)
+    return head
+
+
+class TestInitSqlMatchesHeadSchema:
+    """db/init.sql must equal the HEAD schema (BE-T15).
+
+    A fresh database is built from init.sql and stamped at head, so no migration
+    ever runs against it and the revision guard still reports success: whatever a
+    migration adds without mirroring it into init.sql is silently absent. Migration
+    0008 did exactly that, leaving fresh deployments without gallery_source_items,
+    images.source_item_row_id and read_progress.last_image_id.
+    """
+
+    def _init_sql_objects(self) -> dict[str, set[str]]:
+        return _objects_by_table(_INIT_SQL_PATH.read_text(encoding="utf-8"))
+
+    def test_init_sql_contains_every_orm_table_and_column(self):
+        init_sql = self._init_sql_objects()
+        missing = sorted(
+            f"{table.name}.{column.name}"
+            for table in Base.metadata.tables.values()
+            for column in table.columns
+            if column.name not in init_sql.get(table.name, ())
+        )
+        assert not missing, f"db/init.sql lacks columns the ORM loads: {missing}"
+
+    def test_init_sql_contains_every_column_index_and_constraint_created_by_migrations(self):
+        # The ORM does not declare most indexes and constraints, yet code depends on
+        # them by name (e.g. ON CONFLICT ON CONSTRAINT uq_gallery_source_item).
+        init_sql = self._init_sql_objects()
+        missing = sorted(
+            f"{table}.{name}"
+            for table, names in _objects_left_by_migrations().items()
+            for name in names - init_sql.get(table, set())
+        )
+        assert not missing, f"db/init.sql lacks objects that migrations create: {missing}"
+
+    def test_init_sql_declares_download_option_columns_not_null(self):
+        # Migration 0007 adds both columns as NOT NULL; a nullable copy in init.sql
+        # gives fresh databases a looser contract than upgraded ones.
+        code = _sql_code(_INIT_SQL_PATH.read_text(encoding="utf-8"))
+        declarations = re.findall(r"\b(?:download_)?options JSONB [^,;)]*", code)
+        assert declarations, "expected options / download_options column declarations"
+        nullable = [declaration for declaration in declarations if "NOT NULL" not in declaration]
+        assert not nullable, f"db/init.sql declares nullable option columns: {nullable}"
 
 
 @pytest.mark.asyncio
