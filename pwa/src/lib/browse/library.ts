@@ -57,6 +57,20 @@ export function libraryBrowseSearchQuery(identity: LibraryBrowseIdentity): strin
   })
 }
 
+/**
+ * Whether a freshly fetched first page differs from the buffered one.
+ *
+ * Only cursor-less responses carry a total, so a buffer loaded past its first
+ * page has none to compare and the page content alone decides.
+ */
+export function libraryFirstPageChanged(
+  current: { pages: SearchGalleryItem[][]; total: number | null },
+  probe: { items: SearchGalleryItem[]; total: number | null },
+): boolean {
+  if (current.total !== null && probe.total !== null && current.total !== probe.total) return true
+  return canonicalIdentityKey(current.pages[0] ?? []) !== canonicalIdentityKey(probe.items)
+}
+
 /** Remove the unscoped Library snapshot. The return value makes the migration idempotent. */
 export function invalidateLegacyLibraryScroll(storage: Storage): boolean {
   try {

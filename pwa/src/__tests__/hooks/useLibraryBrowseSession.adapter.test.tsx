@@ -12,6 +12,7 @@ vi.mock('@/lib/api', () => ({
 
 vi.mock('@/lib/ws', () => ({
   useWsJobs: () => wsState,
+  useWsConnection: () => ({ connected: true }),
 }))
 
 import { useLibraryBrowseSession } from '@/hooks/useLibraryBrowseSession'
