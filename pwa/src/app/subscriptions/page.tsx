@@ -848,7 +848,7 @@ export default function SubscriptionsPage() {
               onMoveToGroup={handleMoveToGroup}
               onRenameSub={handleRename}
               checkingId={checkingId}
-              defaultExpanded={groups.length === 0}
+              defaultExpanded={true}
             />
           )}
         </div>
