@@ -16,7 +16,8 @@ from sqlalchemy import select
 
 import core.queue
 from core.database import AsyncSessionLocal
-from db.models import Gallery
+from db.models import Gallery, Image
+from services.link_sync import enqueue_link_hash
 from worker.constants import logger
 
 
@@ -59,8 +60,35 @@ async def requeue_orphaned_imports(ctx: dict) -> dict:
     if pending:
         logger.warning("[import_recovery] requeued %d stranded local import(s)", len(pending))
 
+    # Second pass (ADR 0015): a gallery whose link_hash_job died with the worker
+    # is no longer `importing` (or never was), so the loop above cannot see it.
+    # Importing galleries are excluded because the replayed local import syncs
+    # them and queues the hash job itself.
+    async with AsyncSessionLocal() as session:
+        stranded_hash = (
+            (
+                await session.execute(
+                    select(Image.gallery_id)
+                    .join(Gallery, Gallery.id == Image.gallery_id)
+                    .where(
+                        Image.blob_sha256.is_(None),
+                        Image.external_path.is_not(None),
+                        Gallery.deleted_at.is_(None),
+                        Gallery.download_status != "importing",
+                    )
+                    .distinct()
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for gallery_id in stranded_hash:
+        await enqueue_link_hash(gallery_id)
+        logger.info("[import_recovery] requeued link hash pass gallery_id=%d", gallery_id)
+
     return {
         "status": "done",
         "requeued": len(pending),
         "gallery_ids": [gallery_id for gallery_id, _, _ in pending],
+        "link_hash_requeued": len(stranded_hash),
     }

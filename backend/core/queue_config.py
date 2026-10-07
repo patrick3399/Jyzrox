@@ -48,6 +48,7 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 # reconciliation_job          interactive        5       cron, weekly
 # ─────────────────────────────────────────────────────────────────────────────
 # local_import_job            ingest            40       creates images/pages
+# link_hash_job               ingest            38       hashes pending link pages
 # cover_thumbnail_job         ingest            35       single cover, fast
 # auto_discover_job           ingest            30       triggers local_import
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ JOB_QUEUE_ROUTING: dict[str, str] = {
     "thumbhash_backfill_job": QUEUE_RENDER,
     # ingest — import pipeline, must precede render
     "local_import_job": QUEUE_INGEST,
+    "link_hash_job": QUEUE_INGEST,
     "cover_thumbnail_job": QUEUE_INGEST,
     "auto_discover_job": QUEUE_INGEST,
     "explorer_folder_stats_job": QUEUE_INGEST,

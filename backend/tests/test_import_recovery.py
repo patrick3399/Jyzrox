@@ -151,7 +151,8 @@ class TestLocalImportTerminalStatus:
 
         Before this guard only SourceDirectoryChangedError / SourceFileChangedError
         were handled, so e.g. a LibraryDirCollisionError or an OSError while
-        hashing left the row on `importing` forever.
+        hashing left the row on `importing` forever. Link mode no longer hashes
+        in this job (ADR 0015), so the guard is exercised through copy mode.
         """
         from worker import importer
 
@@ -174,9 +175,49 @@ class TestLocalImportTerminalStatus:
             ),
         ):
             with pytest.raises(RuntimeError):
-                await importer.local_import_job({"redis": redis}, str(source_dir), "link", gallery_id)
+                await importer.local_import_job({"redis": redis}, str(source_dir), "copy", gallery_id)
 
         status = (
             await db_session.execute(text("SELECT download_status FROM galleries WHERE id = :i"), {"i": gallery_id})
         ).scalar_one()
         assert status == "failed", "an unhandled import failure must not stay on 'importing'"
+
+
+async def _seed_page(db_session, gallery_id: int, *, sha: str | None = None) -> None:
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path) "
+            "VALUES (:gid, 1, 'a.jpg', :sha, '/mnt/lib/a.jpg')"
+        ),
+        {"gid": gallery_id, "sha": sha},
+    )
+    await db_session.commit()
+
+
+class TestRequeueStrandedLinkHash:
+    async def test_gallery_with_pending_pages_gets_a_hash_job_after_restart(self, db_session):
+        """A link_hash_job killed with the worker leaves a non-importing gallery with pending pages."""
+        stranded = await _seed(db_session, source_id="omochi/pending", status="complete", pages=1)
+        await _seed_page(db_session, stranded)
+        done = await _seed(db_session, source_id="omochi/hashed", status="complete", pages=1)
+        await db_session.execute(
+            text(
+                "INSERT INTO blobs (sha256, file_size, media_type, extension, storage) VALUES ('h', 1, 'image', '.jpg', 'external')"
+            )
+        )
+        await _seed_page(db_session, done, sha="h")
+        trashed = await _seed(
+            db_session, source_id="omochi/pending-trashed", status="complete", deleted_at="2026-08-13 00:00:00+00"
+        )
+        await _seed_page(db_session, trashed)
+        importing = await _seed(db_session, source_id="omochi/pending-importing")
+        await _seed_page(db_session, importing)
+
+        result, enqueued = await _run(db_session)
+
+        hash_jobs = [kwargs for name, kwargs in enqueued if name == "link_hash_job"]
+        assert [kwargs["gallery_id"] for kwargs in hash_jobs] == [stranded]
+        assert hash_jobs[0]["_job_id"] == f"link-hash:{stranded}"
+        assert result["link_hash_requeued"] == 1
+        # The importing gallery goes through the import replay, which syncs and queues the hash itself.
+        assert [kwargs["gallery_id"] for name, kwargs in enqueued if name == "local_import_job"] == [importing]

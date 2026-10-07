@@ -42,6 +42,7 @@ HEAVY_JOB_FUNCTIONS = frozenset(
         "import_job",
         "batch_import_job",
         "local_import_job",
+        "link_hash_job",
         "thumbnail_job",
         "thumbhash_backfill_job",
         "rescan_library_job",

@@ -39,6 +39,7 @@ from worker.importer import (
     local_import_job,
     upsert_metadata_gallery_tags,
 )
+from worker.link_hash import link_hash_job
 from worker.liveness import (
     clear_run_marker,
     detect_unclean_exit,
@@ -1109,6 +1110,7 @@ def build_workers() -> tuple:
         queues[QUEUE_INGEST],
         functions=[
             local_import_job,
+            link_hash_job,
             cover_thumbnail_job,
             auto_discover_job,
             explorer_folder_stats_job,
@@ -1144,6 +1146,7 @@ __all__ = [
     "batch_import_job",
     "rescan_library_job",
     "rescan_gallery_job",
+    "link_hash_job",
     "rescan_by_path_job",
     "move_library_path_job",
     "reconcile_library_path_job",

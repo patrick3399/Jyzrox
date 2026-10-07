@@ -980,69 +980,6 @@ class TestLocalImportJob:
         call_kwargs = mock_store.call_args[1] if mock_store.call_args[1] else {}
         assert call_kwargs.get("storage") != "external"
 
-    async def test_link_mode_calls_store_blob_with_external_storage(self, tmp_path):
-        """Link mode should call store_blob with storage='external'."""
-        from worker.importer import local_import_job
-
-        src = tmp_path / "link_src"
-        src.mkdir()
-        img = src / "page1.jpg"
-        img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
-
-        mock_gallery = MagicMock()
-        mock_gallery.source = "local"
-        mock_gallery.source_id = "link_src"
-        mock_gallery.deleted_at = None
-
-        fixed_hash = "11223344" * 8
-        mock_blob = MagicMock()
-        mock_blob.sha256 = fixed_hash
-
-        mock_sess1 = _make_mock_session()
-        mock_sess1.get = AsyncMock(return_value=mock_gallery)
-
-        mock_sess2 = _make_mock_session()
-        excl_result = MagicMock()
-        excl_result.scalars.return_value.all.return_value = []
-        mock_sess2.execute = AsyncMock(return_value=excl_result)
-
-        mock_sess3 = _make_mock_session()
-        img_result = MagicMock()
-        img_result.scalar_one.return_value = None
-        mock_sess3.execute = AsyncMock(return_value=img_result)
-        mock_sess3.get = AsyncMock(return_value=mock_gallery)
-
-        sessions = iter([mock_sess1, mock_sess2, mock_sess3])
-
-        def _factory():
-            return next(sessions)
-
-        mock_store = AsyncMock(return_value=mock_blob)
-        mock_symlink = AsyncMock()
-        ctx = _make_ctx()
-
-        with (
-            patch("worker.importer.AsyncSessionLocal", side_effect=_factory),
-            patch("worker.importer.store_blob", mock_store),
-            patch("worker.importer.create_library_symlink", mock_symlink),
-            patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-        ):
-            result = await local_import_job(ctx, str(src), "link", gallery_id=1)
-
-        assert result["status"] == "done"
-        mock_store.assert_called_once()
-        call_kwargs = mock_store.call_args[1] if mock_store.call_args[1] else {}
-        assert call_kwargs.get("storage") == "external"
-        assert call_kwargs.get("external_path") == str(img)
-        image_insert = next(
-            call.args[0]
-            for call in mock_sess3.execute.await_args_list
-            if getattr(getattr(call.args[0], "table", None), "name", None) == "images"
-        )
-        assert image_insert.compile().params["external_path"] == str(img)
-        assert mock_symlink.await_args.kwargs["external_path"] == str(img)
-
     async def test_excluded_blob_skipped_in_local_import(self, tmp_path):
         """Files matching excluded_blobs sha256 should be skipped during local import."""
         from worker.importer import local_import_job
@@ -1146,7 +1083,7 @@ class TestLocalImportJob:
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
-            result = await local_import_job(ctx, str(src), "link", gallery_id=1)
+            result = await local_import_job(ctx, str(src), "copy", gallery_id=1)
 
         assert result["status"] == "done"
         assert result["processed"] == 0
