@@ -1,4 +1,4 @@
-"""Link gallery sync against a real folder and the test DB (ADR 0014)."""
+"""Link gallery sync against a real folder and the test DB (ADR 0015: register first, hash later)."""
 
 import hashlib
 import os
@@ -20,13 +20,13 @@ def _write(path: Path, payload: bytes, *, age_s: int = 60) -> None:
     os.utime(path, ns=(stamp, stamp))
 
 
-async def _gallery(db_session, source: Path, root: Path) -> int:
+async def _gallery(db_session, source: Path, root: Path, *, status: str = "complete") -> int:
     await db_session.execute(
         text(
             "INSERT INTO galleries (source, source_id, title, import_mode, source_path, library_path, "
-            "download_status) VALUES ('local', :sid, 'T', 'link', :path, :root, 'complete')"
+            "download_status) VALUES ('local', :sid, 'T', 'link', :path, :root, :status)"
         ),
-        {"sid": source.name, "path": str(source), "root": str(root)},
+        {"sid": source.name, "path": str(source), "root": str(root), "status": status},
     )
     await db_session.commit()
     return (
@@ -35,9 +35,10 @@ async def _gallery(db_session, source: Path, root: Path) -> int:
 
 
 async def _images(db_session, gallery_id: int) -> list[tuple]:
+    """(id, filename, external_path, blob_sha256, page_num, source_size) per page."""
     rows = await db_session.execute(
         text(
-            "SELECT id, filename, external_path, blob_sha256, page_num FROM images "
+            "SELECT id, filename, external_path, blob_sha256, page_num, source_size FROM images "
             "WHERE gallery_id=:gid ORDER BY page_num"
         ),
         {"gid": gallery_id},
@@ -45,18 +46,42 @@ async def _images(db_session, gallery_id: int) -> list[tuple]:
     return [tuple(row) for row in rows.all()]
 
 
+async def _attach_blob(db_session, image_id: int, sha: str, path: str, *, ref_count: int = 1) -> None:
+    """Give a pending page a blob + location, as a finished hash pass would."""
+    await db_session.execute(
+        text(
+            "INSERT INTO blobs (sha256, file_size, media_type, extension, storage, external_path, ref_count) "
+            "VALUES (:sha, 1, 'image', '.jpg', 'external', :path, :rc)"
+        ),
+        {"sha": sha, "path": path, "rc": ref_count},
+    )
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :path)"),
+        {"sha": sha, "path": path},
+    )
+    await db_session.execute(
+        text("UPDATE images SET blob_sha256=:sha WHERE id=:id"),
+        {"sha": sha, "id": image_id},
+    )
+    await db_session.commit()
+
+
 @contextmanager
 def _env(db_session_factory, library_root: Path):
     cas_settings = MagicMock()
     cas_settings.data_library_path = str(library_root)
+    hasher = MagicMock(side_effect=AssertionError("sync must not hash"))
     with (
         patch("services.link_sync.AsyncSessionLocal", db_session_factory),
         patch("services.cas.settings", cas_settings),
         patch("services.link_sync.emit_safe", new_callable=AsyncMock),
         patch("services.link_sync.write_gallery_sidecar", new_callable=AsyncMock),
         patch("services.link_sync.cleanup_unreferenced_thumbnails", new_callable=AsyncMock, return_value=set()),
+        # create=True: the hash pass (and its import) arrives with the background job.
+        patch("services.link_sync.hash_file_with_identity", hasher, create=True),
         patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
     ):
+        enqueue.hasher = hasher
         yield enqueue
 
 
@@ -68,6 +93,35 @@ def layout(tmp_path):
     return root, source, tmp_path / "library"
 
 
+async def test_sync_registers_new_files_as_pending_without_hashing(db_session, db_session_factory, mock_redis, layout):
+    from services.link_sync import sync_link_gallery
+
+    root, source, library = layout
+    _write(source / "001.jpg", b"one")
+    _write(source / "002.jpg", b"two")
+    gallery_id = await _gallery(db_session, source, root)
+
+    with _env(db_session_factory, library) as enqueue:
+        result = await sync_link_gallery(gallery_id, redis=mock_redis)
+
+    assert (result.status, result.added, result.pending, result.pages) == ("synced", 2, 2, 2)
+    rows = await _images(db_session, gallery_id)
+    assert [row[1] for row in rows] == ["001.jpg", "002.jpg"]
+    assert all(row[3] is None for row in rows), "pages must be pending (no blob)"
+    assert [row[5] for row in rows] == [(source / "001.jpg").stat().st_size, (source / "002.jpg").stat().st_size]
+    for name in ("001.jpg", "002.jpg"):
+        link = library / "local" / "g1" / name
+        assert link.is_symlink()
+        assert link.resolve() == (source / name).resolve()
+    assert (await db_session.execute(text("SELECT COUNT(*) FROM blobs"))).scalar_one() == 0
+    enqueue.hasher.assert_not_called()
+    enqueue.assert_awaited()
+    call = enqueue.await_args
+    assert call.args == ("link_hash_job",)
+    assert call.kwargs["gallery_id"] == gallery_id
+    assert call.kwargs["_job_id"] == f"link-hash:{gallery_id}"
+
+
 async def test_sync_unchanged_directory_mtime_skips_listing(db_session, db_session_factory, mock_redis, layout):
     from services import link_sync
 
@@ -75,37 +129,20 @@ async def test_sync_unchanged_directory_mtime_skips_listing(db_session, db_sessi
     _write(source / "001.jpg", b"one")
     gallery_id = await _gallery(db_session, source, root)
 
-    with _env(db_session_factory, library):
+    with _env(db_session_factory, library) as enqueue:
         first = await link_sync.sync_link_gallery(gallery_id, redis=mock_redis)
         with patch("services.link_sync.scan_media_files", wraps=link_sync.scan_media_files) as scan:
             second = await link_sync.sync_link_gallery(gallery_id, redis=mock_redis)
 
     assert (first.status, first.added, first.pages) == ("synced", 1, 1)
     assert second.status == "unchanged"
+    assert (second.pages, second.pending) == (1, 1)
     scan.assert_not_called()
+    # Pages are still pending, so the unchanged path keeps the hash job alive.
+    assert [call.args[0] for call in enqueue.await_args_list] == ["link_hash_job", "link_hash_job"]
 
 
-async def test_sync_adds_only_new_file_without_rehashing_existing(db_session, db_session_factory, mock_redis, layout):
-    from services import link_sync
-
-    root, source, library = layout
-    _write(source / "001.jpg", b"one")
-    gallery_id = await _gallery(db_session, source, root)
-
-    with _env(db_session_factory, library) as enqueue:
-        await link_sync.sync_link_gallery(gallery_id, redis=mock_redis)
-        _write(source / "002.jpg", b"two")
-        with patch("services.link_sync.hash_file_with_identity", wraps=link_sync.hash_file_with_identity) as hasher:
-            result = await link_sync.sync_link_gallery(gallery_id, redis=mock_redis)
-
-    assert (result.status, result.added, result.pages) == ("synced", 1, 2)
-    assert [call.args[0].name for call in hasher.call_args_list] == ["002.jpg"]
-    assert [row[1] for row in await _images(db_session, gallery_id)] == ["001.jpg", "002.jpg"]
-    assert (library / "local" / "g1" / "002.jpg").is_symlink()
-    assert "thumbnail_job" in [call.args[0] for call in enqueue.await_args_list]
-
-
-async def test_sync_renamed_file_keeps_image_id(db_session, db_session_factory, mock_redis, layout):
+async def test_sync_renamed_file_keeps_image_id_by_fingerprint(db_session, db_session_factory, mock_redis, layout):
     from services.link_sync import sync_link_gallery
 
     root, source, library = layout
@@ -116,7 +153,7 @@ async def test_sync_renamed_file_keeps_image_id(db_session, db_session_factory, 
         await sync_link_gallery(gallery_id, redis=mock_redis)
         before = await _images(db_session, gallery_id)
         (source / "001.jpg").rename(source / "cover.jpg")
-        result = await sync_link_gallery(gallery_id, redis=mock_redis)
+        result = await sync_link_gallery(gallery_id, redis=mock_redis, force=True)
 
     after = await _images(db_session, gallery_id)
     assert (result.renamed, result.added, result.removed) == (1, 0, 0)
@@ -127,27 +164,66 @@ async def test_sync_renamed_file_keeps_image_id(db_session, db_session_factory, 
     assert not (library / "local" / "g1" / "001.jpg").is_symlink()
 
 
-async def test_sync_overwritten_file_repoints_same_image_row(db_session, db_session_factory, mock_redis, layout):
+async def test_sync_renamed_hashed_file_keeps_its_blob(db_session, db_session_factory, mock_redis, layout):
+    from services.link_sync import sync_link_gallery
+
+    root, source, library = layout
+    _write(source / "001.jpg", b"one")
+    gallery_id = await _gallery(db_session, source, root)
+    sha = "b" * 64
+
+    with _env(db_session_factory, library):
+        await sync_link_gallery(gallery_id, redis=mock_redis)
+        image_id = (await _images(db_session, gallery_id))[0][0]
+        await _attach_blob(db_session, image_id, sha, str(source / "001.jpg"))
+        (source / "001.jpg").rename(source / "cover.jpg")
+        result = await sync_link_gallery(gallery_id, redis=mock_redis, force=True)
+
+    after = await _images(db_session, gallery_id)
+    assert result.renamed == 1
+    assert [(row[0], row[2], row[3]) for row in after] == [(image_id, str(source / "cover.jpg"), sha)]
+    locations = (
+        (
+            await db_session.execute(
+                text("SELECT external_path FROM blob_locations WHERE blob_sha256=:sha"), {"sha": sha}
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert str(source / "cover.jpg") in locations
+
+
+async def test_sync_changed_file_is_reset_to_pending_and_releases_its_blob(
+    db_session, db_session_factory, mock_redis, layout
+):
     from services.link_sync import sync_link_gallery
 
     root, source, library = layout
     _write(source / "001.jpg", b"original")
     gallery_id = await _gallery(db_session, source, root)
+    sha = "c" * 64
 
     with _env(db_session_factory, library):
         await sync_link_gallery(gallery_id, redis=mock_redis)
-        before = await _images(db_session, gallery_id)
+        before = (await _images(db_session, gallery_id))[0]
+        await _attach_blob(db_session, before[0], sha, str(source / "001.jpg"), ref_count=1)
         _write(source / "001.jpg", b"edited-and-longer", age_s=30)
         result = await sync_link_gallery(gallery_id, redis=mock_redis, force=True)
 
     after = await _images(db_session, gallery_id)
     assert result.replaced == 1
     assert len(after) == 1, "an in-place overwrite must not add a second page"
-    assert after[0][0] == before[0][0]
-    assert after[0][3] == hashlib.sha256(JPEG + b"edited-and-longer").hexdigest()
+    assert after[0][0] == before[0]
+    assert after[0][3] is None
+    assert after[0][5] == (source / "001.jpg").stat().st_size != before[5]
+    ref_count = (
+        await db_session.execute(text("SELECT ref_count FROM blobs WHERE sha256=:sha"), {"sha": sha})
+    ).scalar_one()
+    assert ref_count == 0
 
 
-async def test_sync_deleted_file_removes_row_symlink_and_reference(db_session, db_session_factory, mock_redis, layout):
+async def test_sync_deleted_file_removes_row_and_symlink(db_session, db_session_factory, mock_redis, layout):
     from services.link_sync import sync_link_gallery
 
     root, source, library = layout
@@ -163,13 +239,6 @@ async def test_sync_deleted_file_removes_row_symlink_and_reference(db_session, d
     assert (result.removed, result.pages) == (1, 1)
     assert [row[1] for row in await _images(db_session, gallery_id)] == ["001.jpg"]
     assert not (library / "local" / "g1" / "002.jpg").is_symlink()
-    ref_count = (
-        await db_session.execute(
-            text("SELECT ref_count FROM blobs WHERE sha256=:sha"),
-            {"sha": hashlib.sha256(JPEG + b"two").hexdigest()},
-        )
-    ).scalar_one()
-    assert ref_count == 0
 
 
 @pytest.mark.parametrize("unmount", ["absent", "empty"])
@@ -230,19 +299,17 @@ async def test_sync_file_still_being_written_is_left_for_the_next_sync(
     assert dir_mtime is None, "an unsettled file must force a full diff next time"
 
 
-async def test_sync_over_inline_limit_returns_deferred_without_changes(
-    db_session, db_session_factory, mock_redis, layout
-):
+async def test_sync_invalid_image_magic_is_not_registered(db_session, db_session_factory, mock_redis, layout):
     from services.link_sync import sync_link_gallery
 
     root, source, library = layout
-    _write(source / "001.jpg", b"one")
+    _write(source / "fake.png", b"jpeg-bytes-under-a-png-name")  # JPEG magic, .png extension
     gallery_id = await _gallery(db_session, source, root)
 
     with _env(db_session_factory, library):
-        result = await sync_link_gallery(gallery_id, redis=mock_redis, max_hash_files=0)
+        result = await sync_link_gallery(gallery_id, redis=mock_redis)
 
-    assert (result.status, result.pending) == ("deferred", 1)
+    assert (result.status, result.added) == ("synced", 0)
     assert await _images(db_session, gallery_id) == []
 
 
@@ -259,6 +326,23 @@ async def test_sync_held_lock_returns_busy(db_session, db_session_factory, mock_
 
     assert result.status == "busy"
     assert await _images(db_session, gallery_id) == []
+
+
+async def test_sync_importing_gallery_is_registered_immediately(db_session, db_session_factory, mock_redis, layout):
+    from services.link_sync import sync_link_gallery
+
+    root, source, library = layout
+    _write(source / "001.jpg", b"one")
+    gallery_id = await _gallery(db_session, source, root, status="importing")
+
+    with _env(db_session_factory, library):
+        result = await sync_link_gallery(gallery_id, redis=mock_redis)
+
+    assert (result.status, result.added) == ("synced", 1)
+    status = (
+        await db_session.execute(text("SELECT download_status FROM galleries WHERE id=:gid"), {"gid": gallery_id})
+    ).scalar_one()
+    assert status == "importing", "only the hash pass may finish a first import"
 
 
 async def test_sync_keeps_page_whose_file_lives_outside_the_source_dir(

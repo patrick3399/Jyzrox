@@ -1,6 +1,6 @@
-"""POST /api/library/galleries/{source}/{source_id}/sync (ADR 0014)."""
+"""POST /api/library/galleries/{source}/{source_id}/sync (ADR 0014, ADR 0015)."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from sqlalchemy import text
 
@@ -19,16 +19,15 @@ async def _insert(db_session, source_id: str, *, import_mode: str | None, source
     ).scalar_one()
 
 
-async def test_sync_link_gallery_runs_inline_with_bounded_work(client, db_session):
+async def test_sync_link_gallery_returns_service_result(client, db_session):
     from services.link_sync import LinkSyncResult
 
     gallery_id = await _insert(db_session, "linked", import_mode="link", source_path="/mnt/lib/linked")
-    sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=2, pages=5))
+    sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=2, pending=2, pages=5))
 
     with (
         patch("routers.library.sync_link_gallery", sync),
         patch("routers.library.get_redis", return_value=AsyncMock()),
-        patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
     ):
         response = await client.post("/api/library/galleries/local/linked/sync")
 
@@ -40,33 +39,30 @@ async def test_sync_link_gallery_runs_inline_with_bounded_work(client, db_sessio
         "removed": 0,
         "renamed": 0,
         "replaced": 0,
-        "pending": 0,
+        "pending": 2,
         "pages": 5,
     }
     assert sync.await_args.args == (gallery_id,)
-    assert sync.await_args.kwargs["max_hash_files"] == 40
-    assert sync.await_args.kwargs["max_hash_bytes"] == 512 * 1024 * 1024
-    enqueue.assert_not_awaited()
 
 
-async def test_sync_over_inline_limit_enqueues_rescan(client, db_session):
+async def test_sync_endpoint_never_passes_hash_limits(client, db_session):
+    """The sync is stat-only (ADR 0015): no inline hashing budget, no deferral, no endpoint-side enqueue."""
     from services.link_sync import LinkSyncResult
 
-    gallery_id = await _insert(db_session, "big", import_mode="link", source_path="/mnt/lib/big")
+    gallery_id = await _insert(db_session, "nolimits", import_mode="link", source_path="/mnt/lib/nolimits")
+    sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=300, pending=300, pages=303))
 
     with (
-        patch(
-            "routers.library.sync_link_gallery",
-            AsyncMock(return_value=LinkSyncResult(status="deferred", pending=300, pages=3)),
-        ),
+        patch("routers.library.sync_link_gallery", sync),
         patch("routers.library.get_redis", return_value=AsyncMock()),
         patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
     ):
-        response = await client.post("/api/library/galleries/local/big/sync")
+        response = await client.post("/api/library/galleries/local/nolimits/sync")
 
-    assert response.json()["status"] == "deferred"
     assert response.json()["pending"] == 300
-    enqueue.assert_awaited_once_with("rescan_gallery_job", gallery_id=gallery_id, _job_id=f"link-sync:{gallery_id}")
+    assert sync.await_args.args == (gallery_id,)
+    assert sync.await_args.kwargs == {"redis": ANY}
+    enqueue.assert_not_awaited()
 
 
 async def test_sync_non_link_gallery_does_no_filesystem_work(client, db_session):

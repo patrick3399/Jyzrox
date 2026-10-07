@@ -1,12 +1,17 @@
-"""Incremental filesystem → DB sync for link-mode galleries (ADR 0014).
+"""Stat-only filesystem → DB sync for link-mode galleries (ADR 0015).
 
 A link gallery's bytes stay in the user's folder, so the folder decides which
-pages exist. Reconciling the two is cheap:
+pages exist. Reconciling the two never reads file contents:
 
 1. one ``stat`` of the source directory — an unchanged mtime means nothing was
    added, removed or renamed, and the gallery opens straight from the DB;
 2. otherwise ``scandir`` + per-file ``stat`` against the size/mtime fingerprint
-   stored on each Image row, hashing only files that are new or changed.
+   stored on each Image row. New files become *pending* pages (no blob yet,
+   served through ``external_path``), vanished files are removed, a vanished
+   page and a new file with an identical fingerprint are a rename, and a page
+   whose fingerprint changed goes back to pending.
+
+Hashing and Blob creation happen afterwards in a background job.
 """
 
 from __future__ import annotations
@@ -25,22 +30,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import core.queue
 from core.database import AsyncSessionLocal
 from core.events import EventType, emit_safe
-from db.models import ExcludedBlob, Gallery, Image
-from services.cas import (
-    create_library_symlink,
-    decrement_ref_count,
-    increment_ref_count,
-    library_dir,
-    store_blob,
-)
+from db.models import BlobLocation, Gallery, Image
+from services.cas import create_library_symlink, decrement_ref_count, library_dir
 from services.image_magic import validate_image_magic
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from services.media_formats import MEDIA_EXTENSIONS, VIDEO_EXTENSIONS
-from services.source_identity import SourceFileChangedError, SourceFileIdentity, hash_file_with_identity
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 
 logger = logging.getLogger(__name__)
@@ -67,7 +66,7 @@ class KnownImage:
 
     image_id: int
     external_path: str
-    sha256: str
+    sha256: str | None
     size: int | None
     mtime_ns: int | None
 
@@ -152,9 +151,6 @@ def library_root_available(root: str | None) -> bool:
         return False
 
 
-# New pages are committed in chunks so they are readable while the rest is hashed.
-LINK_SYNC_CHUNK = 20
-
 _LOCK_TTL_SECONDS = 900
 _LOCK_RELEASE_LUA = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
 
@@ -167,7 +163,9 @@ class LinkSyncResult:
     added: int = 0
     removed: int = 0
     renamed: int = 0
+    # Pages reset to pending because their file changed.
     replaced: int = 0
+    # Pending pages (no blob yet) after the sync.
     pending: int = 0
     pages: int | None = None
 
@@ -183,19 +181,12 @@ def _lock_key(gallery_id: int) -> str:
     return f"link-sync:lock:{gallery_id}"
 
 
-async def sync_link_gallery(
-    gallery_id: int,
-    *,
-    redis,
-    force: bool = False,
-    max_hash_files: int | None = None,
-    max_hash_bytes: int | None = None,
-) -> LinkSyncResult:
+async def sync_link_gallery(gallery_id: int, *, redis, force: bool = False) -> LinkSyncResult:
     """Reconcile one link gallery with its source directory.
 
     ``force`` skips the directory-mtime shortcut (needed to notice a file
-    rewritten in place). ``max_hash_*`` bound the work a caller will do inline;
-    over the limit nothing is changed and the status is ``deferred``.
+    rewritten in place). Never hashes: when pending pages remain the hash job
+    is queued before returning.
     """
     token = uuid.uuid4().hex
     # One sync per gallery: two concurrent runs would both insert the same new
@@ -203,17 +194,38 @@ async def sync_link_gallery(
     if not await redis.set(_lock_key(gallery_id), token, nx=True, ex=_LOCK_TTL_SECONDS):
         return LinkSyncResult(status="busy")
     try:
-        return await _sync_locked(gallery_id, force=force, max_hash_files=max_hash_files, max_hash_bytes=max_hash_bytes)
+        return await _sync_locked(gallery_id, force=force)
     finally:
         await redis.eval(_LOCK_RELEASE_LUA, 1, _lock_key(gallery_id), token)
 
 
-async def _hash(file: FileStat) -> tuple[str, SourceFileIdentity] | None:
-    try:
-        return await asyncio.to_thread(hash_file_with_identity, Path(file.path))
-    except (OSError, SourceFileChangedError) as exc:
-        logger.warning("[link_sync] skipping %s: %s", file.path, exc)
-        return None
+def pair_renames(missing: list[KnownImage], new: list[FileStat]) -> list[tuple[KnownImage, FileStat]]:
+    """Match vanished pages to new files that have an identical size and mtime.
+
+    A rename keeps both. Only unambiguous matches count: exactly one vanished
+    page and exactly one new file may share a fingerprint.
+    """
+    gone: dict[tuple[int, int], list[KnownImage]] = defaultdict(list)
+    for image in missing:
+        if image.size is not None and image.mtime_ns is not None:
+            gone[(image.size, image.mtime_ns)].append(image)
+    arrived: dict[tuple[int, int], list[FileStat]] = defaultdict(list)
+    for file in new:
+        arrived[(file.size, file.mtime_ns)].append(file)
+    return [
+        (images[0], arrived[fingerprint][0])
+        for fingerprint, images in gone.items()
+        if len(images) == 1 and len(arrived.get(fingerprint, ())) == 1
+    ]
+
+
+def _valid_media(files: list[FileStat]) -> list[FileStat]:
+    """Drop image files whose bytes do not match their extension."""
+    return [
+        file
+        for file in files
+        if Path(file.name).suffix.lower() in VIDEO_EXTENSIONS or validate_image_magic(Path(file.path))
+    ]
 
 
 def _restore_links(states: LinkStates) -> None:
@@ -228,12 +240,12 @@ def _restore_links(states: LinkStates) -> None:
             logger.error("[link_sync] failed to restore library link %s: %s", link, exc)
 
 
-async def _expose(source: str, source_id: str, filename: str, blob, external_path: str, states: LinkStates) -> None:
+async def _expose(source: str, source_id: str, filename: str, external_path: str, states: LinkStates) -> None:
     link = library_dir(source, source_id) / filename
     if link.exists() and not link.is_symlink():
         raise FileExistsError(f"refusing to replace non-symlink library file: {link}")
     states.append((link, os.readlink(link) if link.is_symlink() else None))
-    await create_library_symlink(source, source_id, filename, blob, external_path=external_path)
+    await create_library_symlink(source, source_id, filename, None, external_path=external_path)
 
 
 async def _commit(session, states: LinkStates) -> None:
@@ -245,22 +257,36 @@ async def _commit(session, states: LinkStates) -> None:
     states.clear()
 
 
-async def _page_count(session, gallery_id: int) -> int:
-    return (await session.execute(select(func.count(Image.id)).where(Image.gallery_id == gallery_id))).scalar_one()
+async def _active_page_count(session, gallery_id: int) -> int:
+    return (
+        await session.execute(
+            select(func.count(Image.id)).where(Image.gallery_id == gallery_id, Image.visibility == "active")
+        )
+    ).scalar_one()
 
 
-async def _sync_locked(
-    gallery_id: int,
-    *,
-    force: bool,
-    max_hash_files: int | None,
-    max_hash_bytes: int | None,
-) -> LinkSyncResult:
+async def _pending_count(session, gallery_id: int) -> int:
+    return (
+        await session.execute(
+            select(func.count(Image.id)).where(
+                Image.gallery_id == gallery_id,
+                Image.blob_sha256.is_(None),
+                Image.external_path.is_not(None),
+            )
+        )
+    ).scalar_one()
+
+
+async def enqueue_link_hash(gallery_id: int) -> None:
+    """Queue the hash pass; SAQ drops the enqueue while one is already queued or running."""
+    await core.queue.enqueue("link_hash_job", gallery_id=gallery_id, _timeout=14400, _job_id=f"link-hash:{gallery_id}")
+
+
+async def _sync_locked(gallery_id: int, *, force: bool) -> LinkSyncResult:
     result = LinkSyncResult(status="synced")
     removed_shas: list[str] = []
     stale_link_names: list[str] = []
     link_states: LinkStates = []
-    needs_thumbnails = False
     sidecar_payload = None
 
     async with AsyncSessionLocal() as session:
@@ -272,9 +298,6 @@ async def _sync_locked(
             return LinkSyncResult(status="skipped_trashed")
         if gallery.import_mode != "link" or not gallery.source_path:
             return LinkSyncResult(status="not_link", pages=gallery.pages)
-        if gallery.download_status == "importing":
-            # The first import owns the gallery until it reaches a terminal status.
-            return LinkSyncResult(status="importing", pages=gallery.pages)
 
         source, source_id = gallery.source, gallery.source_id
         source_dir = Path(gallery.source_path)
@@ -297,206 +320,144 @@ async def _sync_locked(
         # past this value, so the next sync still sees a change.
         dir_mtime_ns = dir_stat.st_mtime_ns
         if not force and gallery.source_dir_mtime_ns == dir_mtime_ns:
-            return LinkSyncResult(status="unchanged", pages=gallery.pages)
-
-        files = await asyncio.to_thread(scan_media_files, source_dir)
-        rows = (
-            await session.execute(
-                select(
-                    Image.id,
-                    Image.page_num,
-                    Image.external_path,
-                    Image.blob_sha256,
-                    Image.source_size,
-                    Image.source_mtime_ns,
-                ).where(Image.gallery_id == gallery_id)
+            result = LinkSyncResult(
+                status="unchanged", pages=gallery.pages, pending=await _pending_count(session, gallery_id)
             )
-        ).all()
-        known = [
-            KnownImage(
-                image_id=row.id,
-                external_path=row.external_path,
-                sha256=row.blob_sha256,
-                size=row.source_size,
-                mtime_ns=row.source_mtime_ns,
-            )
-            for row in rows
-            # Merged galleries keep pages whose files live in another folder;
-            # this sync only owns files directly inside source_dir.
-            if row.external_path and os.path.dirname(row.external_path) == str(source_dir)
-        ]
-        plan = plan_link_sync(known, files, now_ns=time.time_ns())
-
-        to_hash = plan.needs_hash
-        over_files = max_hash_files is not None and len(to_hash) > max_hash_files
-        over_bytes = max_hash_bytes is not None and sum(file.size for file in to_hash) > max_hash_bytes
-        if over_files or over_bytes:
-            return LinkSyncResult(status="deferred", pending=len(to_hash), pages=gallery.pages)
-
-        excluded = set(
-            (await session.execute(select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)))
-            .scalars()
-            .all()
-        )
-        missing_ids = {image.image_id for image in plan.missing}
-        present_shas = {row.blob_sha256 for row in rows if row.id not in missing_ids}
-        missing_by_sha: dict[str, list[KnownImage]] = defaultdict(list)
-        for image in plan.missing:
-            missing_by_sha[image.sha256].append(image)
-        max_page = max((row.page_num for row in rows), default=0)
-        clean = not plan.unsettled
-        last_event = 0.0
-
-        try:
-            # 1. Rows that predate fingerprints: record the stat, do not re-read.
-            if plan.adopt:
+        else:
+            files = await asyncio.to_thread(scan_media_files, source_dir)
+            rows = (
                 await session.execute(
-                    update(Image),
-                    [
-                        {"id": image.image_id, "source_size": file.size, "source_mtime_ns": file.mtime_ns}
-                        for image, file in plan.adopt
-                    ],
+                    select(
+                        Image.id,
+                        Image.page_num,
+                        Image.external_path,
+                        Image.blob_sha256,
+                        Image.source_size,
+                        Image.source_mtime_ns,
+                    ).where(Image.gallery_id == gallery_id)
                 )
+            ).all()
+            known = [
+                KnownImage(
+                    image_id=row.id,
+                    external_path=row.external_path,
+                    sha256=row.blob_sha256,
+                    size=row.source_size,
+                    mtime_ns=row.source_mtime_ns,
+                )
+                for row in rows
+                # Merged galleries keep pages whose files live in another folder;
+                # this sync only owns files directly inside source_dir.
+                if row.external_path and os.path.dirname(row.external_path) == str(source_dir)
+            ]
+            plan = plan_link_sync(known, files, now_ns=time.time_ns())
+            renames = pair_renames(plan.missing, plan.new)
+            renamed_ids = {image.image_id for image, _ in renames}
+            renamed_paths = {file.path for _, file in renames}
+            missing = [image for image in plan.missing if image.image_id not in renamed_ids]
+            new_files = await asyncio.to_thread(
+                _valid_media, [file for file in plan.new if file.path not in renamed_paths]
+            )
+            max_page = max((row.page_num for row in rows), default=0)
 
-            # 2. New files: a rename, a duplicate, or a new page.
-            in_chunk = 0
-            for file in plan.new:
-                is_video = Path(file.name).suffix.lower() in VIDEO_EXTENSIONS
-                if not is_video and not validate_image_magic(Path(file.path)):
-                    logger.warning("[link_sync] gallery_id=%d: %s is not a valid image", gallery_id, file.name)
-                    continue
-                hashed = await _hash(file)
-                if hashed is None:
-                    clean = False
-                    continue
-                sha256, identity = hashed
-                if sha256 in excluded:
-                    continue
-
-                renamed_from = missing_by_sha.get(sha256)
-                if renamed_from:
-                    image = renamed_from.pop()
-                    blob = await store_blob(
-                        Path(file.path), sha256, session, storage="external", external_path=file.path
+            try:
+                # 1. Rows that predate fingerprints: record the stat, do not re-read.
+                if plan.adopt:
+                    await session.execute(
+                        update(Image),
+                        [
+                            {"id": image.image_id, "source_size": file.size, "source_mtime_ns": file.mtime_ns}
+                            for image, file in plan.adopt
+                        ],
                     )
-                    await session.flush()
+
+                # 2. Renames keep the Image row, and its blob if it has one. The
+                # composite FK (blob_sha256, external_path) is not deferrable, so
+                # the new location must exist before the image points at it.
+                for image, file in renames:
+                    if image.sha256 is not None:
+                        await session.execute(
+                            pg_insert(BlobLocation)
+                            .values(blob_sha256=image.sha256, external_path=file.path)
+                            .on_conflict_do_nothing(index_elements=["blob_sha256", "external_path"])
+                        )
                     await session.execute(
                         update(Image)
                         .where(Image.id == image.image_id)
-                        .values(
-                            external_path=file.path,
-                            filename=file.name,
-                            source_size=identity.size,
-                            source_mtime_ns=identity.mtime_ns,
-                        )
+                        .values(external_path=file.path, filename=file.name)
                     )
-                    await _expose(source, source_id, file.name, blob, file.path, link_states)
+                    await _expose(source, source_id, file.name, file.path, link_states)
                     stale_link_names.append(Path(image.external_path).name)
-                    present_shas.add(sha256)
                     result.renamed += 1
-                elif sha256 in present_shas:
-                    # Same bytes as an existing page of this gallery (HR-006).
-                    continue
-                else:
-                    blob = await store_blob(
-                        Path(file.path), sha256, session, storage="external", external_path=file.path
-                    )
-                    await session.flush()
-                    max_page += 1
+
+                # 3. New files become pending pages: readable now, hashed later.
+                if new_files:
+                    now = datetime.now(UTC)
                     await session.execute(
-                        insert(Image).values(
-                            gallery_id=gallery_id,
-                            page_num=max_page,
-                            filename=file.name,
-                            blob_sha256=sha256,
-                            external_path=file.path,
-                            source_size=identity.size,
-                            source_mtime_ns=identity.mtime_ns,
-                            added_at=datetime.now(UTC),
-                        )
+                        insert(Image),
+                        [
+                            {
+                                "gallery_id": gallery_id,
+                                "page_num": max_page + offset,
+                                "filename": file.name,
+                                "blob_sha256": None,
+                                "external_path": file.path,
+                                "source_size": file.size,
+                                "source_mtime_ns": file.mtime_ns,
+                                "added_at": now,
+                            }
+                            for offset, file in enumerate(new_files, start=1)
+                        ],
                     )
-                    await increment_ref_count(sha256, session)
-                    await _expose(source, source_id, file.name, blob, file.path, link_states)
-                    present_shas.add(sha256)
-                    result.added += 1
-                    needs_thumbnails = True
+                    for file in new_files:
+                        await _expose(source, source_id, file.name, file.path, link_states)
+                    result.added = len(new_files)
 
-                in_chunk += 1
-                if in_chunk >= LINK_SYNC_CHUNK:
-                    in_chunk = 0
-                    gallery.pages = await _page_count(session, gallery_id)
-                    await _commit(session, link_states)
-                    if time.monotonic() - last_event >= 1.0:
-                        last_event = time.monotonic()
-                        await emit_safe(
-                            EventType.GALLERY_UPDATED,
-                            resource_type="gallery",
-                            resource_id=gallery_id,
-                            reason="link_sync_progress",
-                        )
+                # 4. A changed file loses its blob and waits for the next hash pass.
+                # Blob statements come first: lock order is blobs -> images -> galleries.
+                for image, file in plan.changed:
+                    if image.sha256 is not None:
+                        await decrement_ref_count(image.sha256, session)
+                        removed_shas.append(image.sha256)
+                    await session.execute(
+                        update(Image)
+                        .where(Image.id == image.image_id)
+                        .values(blob_sha256=None, source_size=file.size, source_mtime_ns=file.mtime_ns)
+                    )
+                    result.replaced += 1
 
-            # 3. Same name, different fingerprint.
-            for image, file in plan.changed:
-                hashed = await _hash(file)
-                if hashed is None:
-                    clean = False
-                    continue
-                sha256, identity = hashed
-                fingerprint = {"source_size": identity.size, "source_mtime_ns": identity.mtime_ns}
-                if sha256 == image.sha256:
-                    # Touched, not edited.
-                    await session.execute(update(Image).where(Image.id == image.image_id).values(**fingerprint))
-                    continue
-                if sha256 in excluded or sha256 in present_shas:
-                    # The new bytes are hidden here or duplicate another page.
+                # 5. Files that are gone and were not a rename.
+                for image in missing:
+                    if image.sha256 is not None:
+                        await decrement_ref_count(image.sha256, session)
+                        removed_shas.append(image.sha256)
                     await session.execute(delete(Image).where(Image.id == image.image_id))
-                    await decrement_ref_count(image.sha256, session)
-                    removed_shas.append(image.sha256)
-                    stale_link_names.append(file.name)
-                    result.removed += 1
-                    continue
-                await store_blob(Path(file.path), sha256, session, storage="external", external_path=file.path)
-                await session.flush()
-                await session.execute(
-                    update(Image).where(Image.id == image.image_id).values(blob_sha256=sha256, **fingerprint)
-                )
-                await increment_ref_count(sha256, session)
-                await decrement_ref_count(image.sha256, session)
-                removed_shas.append(image.sha256)
-                present_shas.add(sha256)
-                result.replaced += 1
-                needs_thumbnails = True
-
-            # 4. Files that are gone and were not matched as a rename.
-            for images in missing_by_sha.values():
-                for image in images:
-                    await session.execute(delete(Image).where(Image.id == image.image_id))
-                    await decrement_ref_count(image.sha256, session)
-                    removed_shas.append(image.sha256)
                     stale_link_names.append(Path(image.external_path).name)
                     result.removed += 1
 
-            # 5. Gallery bookkeeping.
-            pages = await _page_count(session, gallery_id)
-            gallery.pages = pages
-            if pages == 0:
-                gallery.download_status = "missing"
-            elif clean and gallery.download_status in ("missing", "partial", "failed"):
-                gallery.download_status = "complete"
-            # Only a clean pass may arm the directory-mtime shortcut.
-            gallery.source_dir_mtime_ns = dir_mtime_ns if clean else None
-            gallery.last_scanned_at = datetime.now(UTC)
-            if result.changed:
-                gallery.metadata_updated_at = func.now()
-                sidecar_payload = sidecar_payload_from_gallery(gallery)
-            await _commit(session, link_states)
-        except Exception:
-            _restore_links(link_states)
-            raise
+                # 6. Gallery bookkeeping, last: lock order is blobs -> galleries,
+                # and these ORM changes only flush at commit.
+                pages = await _active_page_count(session, gallery_id)
+                pending = await _pending_count(session, gallery_id)
+                gallery.pages = pages
+                if pages == 0 and gallery.download_status != "importing":
+                    gallery.download_status = "missing"
+                elif pages > 0 and gallery.download_status == "missing":
+                    gallery.download_status = "complete"
+                # Only a pass with no unsettled file may arm the directory-mtime shortcut.
+                gallery.source_dir_mtime_ns = dir_mtime_ns if not plan.unsettled else None
+                gallery.last_scanned_at = datetime.now(UTC)
+                if result.changed:
+                    gallery.metadata_updated_at = func.now()
+                    sidecar_payload = sidecar_payload_from_gallery(gallery)
+                await _commit(session, link_states)
+            except Exception:
+                _restore_links(link_states)
+                raise
 
-        result.pages = pages
-        if removed_shas:
-            await cleanup_unreferenced_thumbnails(session, removed_shas)
+            result.pages, result.pending = pages, pending
+            if removed_shas:
+                await cleanup_unreferenced_thumbnails(session, removed_shas)
 
     # Rows are committed; the remaining work is best-effort.
     link_dir = library_dir(source, source_id)
@@ -510,13 +471,8 @@ async def _sync_locked(
 
     if sidecar_payload is not None:
         await write_gallery_sidecar(source, source_id, sidecar_payload)
-    if needs_thumbnails:
-        await core.queue.enqueue(
-            "cover_thumbnail_job", gallery_id=gallery_id, _timeout=300, _job_id=f"cover-thumbnail:{gallery_id}"
-        )
-        await core.queue.enqueue(
-            "thumbnail_job", gallery_id=gallery_id, _timeout=3600, _job_id=f"thumbnail:{gallery_id}"
-        )
+    if result.pending:
+        await enqueue_link_hash(gallery_id)
     if result.changed:
         await emit_safe(
             EventType.GALLERY_UPDATED,

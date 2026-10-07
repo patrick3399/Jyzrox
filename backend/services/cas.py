@@ -102,10 +102,12 @@ def ensure_library_dir(source: str, source_id: str) -> Path:
     return d
 
 
-def resolve_blob_path(blob: Blob, external_path: str | None = None) -> Path:
+def resolve_blob_path(blob: Blob | None, external_path: str | None = None) -> Path:
     """Return the filesystem path for a blob or a specific image binding."""
     if external_path:
         return Path(external_path)
+    if blob is None:
+        raise ValueError("a pending page has no blob; pass its external_path")
     if blob.storage == "external" and blob.external_path:
         # Compatibility fallback for callers that do not represent one Image.
         # New image-bound reads pass ``external_path`` explicitly.
@@ -301,7 +303,7 @@ async def create_library_symlink(
     source: str,
     source_id: str,
     filename: str,
-    blob: Blob,
+    blob: Blob | None,
     *,
     external_path: str | None = None,
 ) -> None:
@@ -329,7 +331,7 @@ async def create_library_symlink(
     # browsed from the host (file browser / Samba). External blobs live outside
     # the data volume and rely on an identical bind-mount path, so they keep an
     # absolute target.
-    if external_path or (blob.storage == "external" and blob.external_path):
+    if external_path or (blob is not None and blob.storage == "external" and blob.external_path):
         link.symlink_to(target)
     else:
         link.symlink_to(os.path.relpath(target, link_dir))

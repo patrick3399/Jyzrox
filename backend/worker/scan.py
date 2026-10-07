@@ -633,8 +633,9 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             return {"status": "skipped", "reason": "trashed"}
 
         if gallery.import_mode == "link" and gallery.source_path and Path(gallery.source_path).is_dir():
-            # A link gallery with a live source directory uses the fingerprint
-            # sync: it hashes only new or changed files. The legacy path below
+            # A link gallery with a live source directory uses the stat-only
+            # fingerprint sync (new files become pending pages, hashed later by
+            # link_hash_job). The legacy path below
             # still handles a source directory that has vanished.
             await session.rollback()  # release the snapshot before the sync opens its own session
             sync_result = await sync_link_gallery(gallery_id, redis=ctx["redis"], force=True)
@@ -642,7 +643,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 "status": "done" if sync_result.status in ("synced", "unchanged") else sync_result.status,
                 "gallery_id": gallery_id,
                 "removed": sync_result.removed,
-                "added": sync_result.added + sync_result.replaced,
+                "added": sync_result.added,
                 "pages": sync_result.pages,
             }
         if gallery.import_mode == "link" and not library_root_available(gallery.library_path):

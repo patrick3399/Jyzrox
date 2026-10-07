@@ -91,3 +91,27 @@ def test_library_root_missing_or_empty_is_unavailable(tmp_path):
     assert library_root_available(str(empty)) is False
     assert library_root_available(str(populated)) is True
     assert library_root_available(None) is True
+
+
+def test_pair_renames_matches_unique_size_and_mtime():
+    from services.link_sync import pair_renames
+
+    gone = _known(1, "old.jpg", size=10, mtime_ns=OLD)
+    new = _file("new.jpg", size=10, mtime_ns=OLD)
+
+    assert pair_renames([gone], [new]) == [(gone, new)]
+
+
+def test_pair_renames_ignores_ambiguous_fingerprints():
+    from services.link_sync import pair_renames
+
+    gone = [_known(1, "a.jpg"), _known(2, "b.jpg")]  # same size + mtime
+    new = [_file("c.jpg"), _file("d.jpg")]
+
+    assert pair_renames(gone, new) == []
+
+
+def test_pair_renames_needs_a_fingerprint_on_the_vanished_page():
+    from services.link_sync import pair_renames
+
+    assert pair_renames([_known(1, "a.jpg", size=None, mtime_ns=None)], [_file("b.jpg")]) == []
