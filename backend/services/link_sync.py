@@ -321,7 +321,9 @@ async def _sync_locked(
                 mtime_ns=row.source_mtime_ns,
             )
             for row in rows
-            if row.external_path
+            # Merged galleries keep pages whose files live in another folder;
+            # this sync only owns files directly inside source_dir.
+            if row.external_path and os.path.dirname(row.external_path) == str(source_dir)
         ]
         plan = plan_link_sync(known, files, now_ns=time.time_ns())
 

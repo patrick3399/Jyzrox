@@ -259,3 +259,51 @@ async def test_sync_held_lock_returns_busy(db_session, db_session_factory, mock_
 
     assert result.status == "busy"
     assert await _images(db_session, gallery_id) == []
+
+
+async def test_sync_keeps_page_whose_file_lives_outside_the_source_dir(
+    db_session, db_session_factory, mock_redis, layout
+):
+    """A merged gallery keeps pages whose files live in another folder (workbench_merge)."""
+    from services.link_sync import sync_link_gallery
+
+    root, source, library = layout
+    _write(source / "001.jpg", b"one")
+    gallery_id = await _gallery(db_session, source, root)
+
+    with _env(db_session_factory, library):
+        await sync_link_gallery(gallery_id, redis=mock_redis)
+
+        other = root / "other"
+        other.mkdir()
+        _write(other / "m01.jpg", b"merged")
+        external = str(other / "m01.jpg")
+        sha = hashlib.sha256(JPEG + b"merged").hexdigest()
+        await db_session.execute(
+            text(
+                "INSERT INTO blobs (sha256, file_size, media_type, extension, storage, external_path, ref_count) "
+                "VALUES (:sha, :size, 'image', '.jpg', 'external', :path, 1)"
+            ),
+            {"sha": sha, "size": len(JPEG + b"merged"), "path": external},
+        )
+        await db_session.execute(
+            text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :path)"),
+            {"sha": sha, "path": external},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path) "
+                "VALUES (:gid, 2, 'm01.jpg', :sha, :path)"
+            ),
+            {"gid": gallery_id, "sha": sha, "path": external},
+        )
+        await db_session.commit()
+        merged_before = [row for row in await _images(db_session, gallery_id) if row[2] == external]
+
+        result = await sync_link_gallery(gallery_id, redis=mock_redis, force=True)
+
+    after = await _images(db_session, gallery_id)
+    assert result.removed == 0
+    assert result.pages == 2
+    assert len(after) == 2
+    assert [row for row in after if row[2] == external] == merged_before
