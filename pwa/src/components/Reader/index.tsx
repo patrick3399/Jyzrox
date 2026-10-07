@@ -289,6 +289,74 @@ function MediaElement({
   )
 }
 
+// ── PageSlot ──────────────────────────────────────────────────────────
+
+// Inline rather than a class: the scale classes carry `block`, and an inline
+// declaration is the only one guaranteed to win over it.
+const RETAINED_SLOT_STYLE: React.CSSProperties = { display: 'none' }
+const NO_PAGES: ReadonlySet<number> = new Set()
+
+interface PageSlotProps {
+  image: ReaderImage
+  isCurrent: boolean
+  className: string
+  onCurrentLoaded: () => void
+  onCurrentError: () => void
+  onSlotLoaded: (pageNum: number) => void
+  onToggleOverlay: () => void
+  overlayVisible: boolean
+}
+
+/**
+ * One page of the single-page view. The view keeps the previous and next page
+ * mounted next to the current one, hidden, so turning back reuses an element
+ * that already holds its image instead of requesting it again.
+ */
+function PageSlot({
+  image,
+  isCurrent,
+  className,
+  onCurrentLoaded,
+  onCurrentError,
+  onSlotLoaded,
+  onToggleOverlay,
+  overlayVisible,
+}: PageSlotProps) {
+  // Load outcome of the element this slot holds, tagged with the URL so a page
+  // that gains or changes its URL starts over as pending.
+  const [settled, setSettled] = useState<{
+    url: string | null
+    status: 'loaded' | 'error'
+  } | null>(null)
+  const status = settled && settled.url === image.url ? settled.status : 'pending'
+
+  // A retained slot has usually finished loading while hidden, and its element
+  // will not fire `load` again. Replaying the outcome when the slot becomes
+  // current keeps the parent spinner from waiting on an event that already
+  // happened.
+  useEffect(() => {
+    if (!isCurrent) return
+    if (status === 'loaded') onCurrentLoaded()
+    else if (status === 'error') onCurrentError()
+  }, [isCurrent, status, onCurrentLoaded, onCurrentError])
+
+  return (
+    <MediaElement
+      image={image}
+      className={className}
+      style={isCurrent ? undefined : RETAINED_SLOT_STYLE}
+      draggable={false}
+      onLoad={() => {
+        setSettled({ url: image.url, status: 'loaded' })
+        onSlotLoaded(image.pageNum)
+      }}
+      onError={() => setSettled({ url: image.url, status: 'error' })}
+      onToggleOverlay={onToggleOverlay}
+      overlayVisible={overlayVisible}
+    />
+  )
+}
+
 // ── Props ─────────────────────────────────────────────────────────────
 
 interface ReaderProps {
@@ -321,6 +389,10 @@ interface ImageLongPressHandlers {
 
 interface SinglePageViewProps {
   image: ReaderImage
+  prevImage: ReaderImage | null
+  nextImage: ReaderImage | null
+  /** Pages the prefetcher has finished with; a neighbour is only mounted once it is here. */
+  prefetchedPages: ReadonlySet<number>
   isLoading: boolean
   onNext: () => void
   onPrev: () => void
@@ -337,6 +409,9 @@ interface SinglePageViewProps {
 
 function SinglePageView({
   image,
+  prevImage,
+  nextImage,
+  prefetchedPages,
   isLoading,
   onNext,
   onPrev,
@@ -376,6 +451,23 @@ function SinglePageView({
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
   const isVideo = image.mediaType === 'video'
 
+  // Pages whose bytes are known to be local: loaded here as a slot, or reported
+  // by the prefetcher. Only these are retained, so keeping a neighbour mounted
+  // pins it in memory but never starts a download next to the prefetcher's.
+  const [loadedPages, setLoadedPages] = useState<ReadonlySet<number>>(() => new Set())
+  const markSlotLoaded = useCallback((pageNum: number) => {
+    setLoadedPages((prev) => (prev.has(pageNum) ? prev : new Set(prev).add(pageNum)))
+  }, [])
+  // Videos are never retained: a hidden <video> still buffers (FE-T16).
+  const retainable = (candidate: ReaderImage | null): candidate is ReaderImage =>
+    candidate != null &&
+    candidate.mediaType === 'image' &&
+    candidate.url != null &&
+    (loadedPages.has(candidate.pageNum) || prefetchedPages.has(candidate.pageNum))
+  const slots = [prevImage, image, nextImage].filter(
+    (slot): slot is ReaderImage => slot === image || retainable(slot),
+  )
+
   return (
     <div
       ref={containerRef}
@@ -394,15 +486,19 @@ function SinglePageView({
         }}
         className="w-full h-full flex items-center justify-center"
       >
-        <MediaElement
-          image={image}
-          className={getScaleImageClass(scaleMode)}
-          draggable={false}
-          onLoad={onImageLoaded}
-          onError={onImageError}
-          onToggleOverlay={onToggleOverlay}
-          overlayVisible={showOverlay}
-        />
+        {slots.map((slot) => (
+          <PageSlot
+            key={slot.pageNum}
+            image={slot}
+            isCurrent={slot === image}
+            className={getScaleImageClass(scaleMode)}
+            onCurrentLoaded={onImageLoaded}
+            onCurrentError={onImageError}
+            onSlotLoaded={markSlotLoaded}
+            onToggleOverlay={onToggleOverlay}
+            overlayVisible={showOverlay}
+          />
+        ))}
       </div>
       {isLoading && (
         <div
@@ -1571,7 +1667,7 @@ export default function Reader({
     [setPage, onSeekToPage],
   )
 
-  useSequentialPrefetch(images, state.currentPage, isProxyMode)
+  const prefetchedPages = useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(source, sourceId, state.currentPage, !isProxyMode)
 
   const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
@@ -1880,6 +1976,7 @@ export default function Reader({
   }, [])
 
   const currentImage = images.find((i) => i.pageNum === state.currentPage)
+  const prevImage = images.find((i) => i.pageNum === state.currentPage - 1) ?? null
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
   // When downloading progressively, the current page may not have been imported yet.
@@ -1945,6 +2042,12 @@ export default function Reader({
         {state.viewMode === 'single' && currentImage && (
           <SinglePageView
             image={currentImage}
+            prevImage={prevImage}
+            nextImage={nextImage}
+            // Proxy mode: a prefetch that errored (pToken not in Redis yet) is
+            // also reported as settled, and pre-mounting it would start
+            // ReaderImg's auto-retry backoff before the user arrives (FE-T15).
+            prefetchedPages={isProxyMode ? NO_PAGES : prefetchedPages}
             isLoading={pageLoading}
             onNext={rawNextPage}
             onPrev={rawPrevPage}
