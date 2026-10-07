@@ -1263,3 +1263,74 @@ class TestRescanLibraryJobDeletedAtFilter:
         first_call = session.execute.call_args_list[0]
         stmt_str = str(first_call.args[0]).lower()
         assert "deleted_at" in stmt_str, "rescan_library_job must filter trashed galleries via deleted_at IS NULL"
+
+
+class TestRescanLibraryPathJob:
+    """Tests for rescan_library_path_job(ctx, library_path)."""
+
+    @staticmethod
+    def _session() -> AsyncMock:
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        relevant = MagicMock()
+        relevant.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(return_value=relevant)
+        return session
+
+    async def _run(self, tmp_path, statuses: dict[str, str | None]):
+        from worker.scan import _ImportRequest, _LibrarySpec, rescan_library_path_job
+
+        for name in statuses:
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "001.jpg").write_bytes(b"data")
+
+        async def discover(_session, _spec, current):
+            return _ImportRequest(gallery_id=7, source_dir=str(current), mode="link")
+
+        async def existing_status(_session, rel_path):
+            return statuses[rel_path]
+
+        with (
+            patch(
+                "worker.scan._get_library_specs",
+                new_callable=AsyncMock,
+                return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
+            ),
+            patch(
+                "worker.scan._existing_local_status",
+                new_callable=AsyncMock,
+                side_effect=existing_status,
+                create=True,
+            ),
+            patch(
+                "worker.scan._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover
+            ) as discover_mock,
+            patch("worker.scan.AsyncSessionLocal", return_value=self._session()),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
+        ):
+            result = await rescan_library_path_job({"redis": _make_redis()}, str(tmp_path))
+
+        discovered = sorted(call.args[2].name for call in discover_mock.await_args_list)
+        imported = sorted(
+            Path(call.kwargs["source_dir"]).name
+            for call in enqueue.await_args_list
+            if call.args[0] == "local_import_job"
+        )
+        return result, discovered, imported
+
+    async def test_completed_existing_gallery_is_not_reimported(self, tmp_path):
+        """One new folder must not replay local_import_job for the whole library."""
+        result, discovered, imported = await self._run(tmp_path, {"existing": "complete", "brand_new": None})
+
+        assert result["status"] == "done"
+        assert discovered == ["brand_new"]
+        assert imported == ["brand_new"]
+
+    async def test_interrupted_import_is_still_replayed(self, tmp_path):
+        """A gallery stranded on `importing` (HR-019) keeps its recovery path."""
+        _, discovered, imported = await self._run(tmp_path, {"stranded": "importing"})
+
+        assert discovered == ["stranded"]
+        assert imported == ["stranded"]

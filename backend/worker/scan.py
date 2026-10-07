@@ -149,6 +149,15 @@ def _media_count(filenames: list[str]) -> int:
     return sum(1 for f in filenames if Path(f).suffix.lower() in _SUPPORTED_MEDIA_EXTS)
 
 
+async def _existing_local_status(session, rel_path: str) -> str | None:
+    """Return the download_status of the local gallery at rel_path, if any."""
+    return (
+        await session.execute(
+            select(Gallery.download_status).where(Gallery.source == "local", Gallery.source_id == rel_path)
+        )
+    ).scalar_one_or_none()
+
+
 def _match_library_candidate(spec: _LibrarySpec, root: Path, candidate: Path) -> tuple[str, dict[str, str]] | None:
     try:
         rel_path = normalize_relative_path(str(candidate.relative_to(root)))
@@ -1350,6 +1359,15 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
                         except ValueError:
                             continue
                         if pattern_re.match(rel_path):
+                            # Replaying local_import_job for a gallery that already
+                            # finished importing re-hashes every file and makes new
+                            # folders queue behind the whole library (2026-09-26: one
+                            # new gallery waited 396 s behind 1,391 replays). Existing
+                            # galleries are refreshed by rescan_gallery_job below; an
+                            # interrupted import is still replayed (HR-019).
+                            existing_status = await _existing_local_status(session, rel_path)
+                            if existing_status is not None and existing_status != "importing":
+                                continue
                             import_request = await _discover_single_library_dir(session, spec, current)
                             if import_request:
                                 import_requests.append(import_request)
