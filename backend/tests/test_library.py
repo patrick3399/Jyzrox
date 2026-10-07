@@ -1403,17 +1403,21 @@ class TestImageTimeRange:
     async def test_returns_min_max_timestamps(self, client, db_session):
         """Images with different added_at should return correct min/max (200 or 500 on SQLite)."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="tr001")
+        # The image browser only counts hashed pages, so each image needs a blob.
+        await db_session.execute(
+            text("INSERT INTO blobs (sha256, file_size, extension) VALUES ('tr001a', 1, 'jpg'), ('tr001b', 1, 'jpg')")
+        )
         await db_session.execute(
             text(
-                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
-                "VALUES (:gid, 1, 'a.jpg', '2025-01-01T00:00:00')"
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, added_at) "
+                "VALUES (:gid, 1, 'a.jpg', 'tr001a', '2025-01-01T00:00:00')"
             ),
             {"gid": gid},
         )
         await db_session.execute(
             text(
-                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
-                "VALUES (:gid, 2, 'b.jpg', '2025-06-01T00:00:00')"
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, added_at) "
+                "VALUES (:gid, 2, 'b.jpg', 'tr001b', '2025-06-01T00:00:00')"
             ),
             {"gid": gid},
         )

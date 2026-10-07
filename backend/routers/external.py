@@ -310,7 +310,7 @@ async def get_gallery_images(
             (
                 await session.execute(
                     select(Image)
-                    .where(Image.gallery_id == gallery_id)
+                    .where(Image.gallery_id == gallery_id, Image.blob_sha256.is_not(None))
                     .order_by(Image.page_num.desc())
                     .options(selectinload(Image.blob))
                 )
@@ -364,14 +364,19 @@ async def get_image_file(
             )
         ).scalar_one_or_none()
 
-    if not row or not row.blob:
+    if not row or (not row.blob and not row.external_path):
         raise HTTPException(status_code=404, detail="Image not found")
 
+    # A pending link page has no blob yet; its own DB-recorded external_path
+    # (never a request value) is the file to serve.
     file_path = resolve_blob_path(row.blob, row.external_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
     ext_map = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".png": "image/png",
@@ -379,7 +384,8 @@ async def get_image_file(
         ".webp": "image/webp",
         ".avif": "image/avif",
     }
-    content_type = ext_map.get(row.blob.extension.lower(), "application/octet-stream")
+    extension = row.blob.extension if row.blob else file_path.suffix
+    content_type = ext_map.get(extension.lower(), "application/octet-stream")
 
     from fastapi.responses import FileResponse
 

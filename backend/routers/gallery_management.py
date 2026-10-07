@@ -239,13 +239,16 @@ async def public_share_image(token: str, image_id: int, db: AsyncSession = Depen
     row = (
         await db.execute(
             select(Image, Blob)
-            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .outerjoin(Blob, Blob.sha256 == Image.blob_sha256)
             .where(Image.id == image_id, Image.gallery_id == gallery.id, Image.visibility == "active")
         )
     ).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
     image, blob = row
+    if blob is None and not image.external_path:
+        raise HTTPException(status_code=404, detail="Image not found")
+    # A pending link page has no blob: serve the row's own external_path.
     path = resolve_blob_path(blob, image.external_path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Image file not found")

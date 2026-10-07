@@ -58,6 +58,7 @@ from db.models import (
 )
 from services.cas import (
     cas_url,
+    decrement_ref_count,
     library_dir,
     library_url,
     thumb_dir,
@@ -72,6 +73,7 @@ from services.gallery_lifecycle import (
 )
 from services.library_sidecar import SIDECAR_FILENAME
 from services.link_sync import LinkSyncResult, sync_link_gallery
+from services.media_formats import media_type_for_extension
 from services.settings_store import get_toggle as _get_toggle
 from services.site_catalog import get_site_config as _get_gdl_site_config
 
@@ -522,7 +524,7 @@ def _i_browse(img: Image) -> dict:
         "thumb_srcset": _thumb_srcset(blob),
         "file_path": _to_url(blob, img.external_path),
         "thumbhash": blob.thumbhash if blob else None,
-        "media_type": blob.media_type if blob else "image",
+        "media_type": _media_type(img),
         "added_at": img.added_at.isoformat() if img.added_at else None,
         "source": gallery.source if gallery else None,
         "source_id": gallery.source_id if gallery else None,
@@ -536,6 +538,9 @@ async def _apply_image_filters(stmt, *, source, gallery_id, auth, db, category=N
     """Apply common image browser filters (source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
     stmt = stmt.where(Image.visibility == "active")
+    # Pending link pages have no thumbnail or dimensions: keep them out of the
+    # grid, the timeline scrubber and the time range alike.
+    stmt = stmt.where(Image.blob_sha256.is_not(None))
 
     if gallery_id is not None:
         stmt = stmt.where(Image.gallery_id == gallery_id)
@@ -951,10 +956,11 @@ async def list_artist_images(
                 "file_path": _to_url(blob, img.external_path),
                 "thumb_path": _thumb_url(blob),
                 "thumb_srcset": _thumb_srcset(blob),
-                "file_size": blob.file_size if blob else None,
+                "file_size": _file_size(img),
                 "file_hash": blob.sha256 if blob else None,
-                "media_type": blob.media_type if blob else "image",
+                "media_type": _media_type(img),
                 "duration": blob.duration if blob else None,
+                "pending": _is_pending(img),
                 "gallery_title": gallery_title,
                 "gallery_source": gallery_source,
                 "gallery_source_id": gallery_source_id,
@@ -989,7 +995,7 @@ async def source_stats(
             Gallery.import_mode,
             func.count(func.distinct(Gallery.id)).label("gallery_count"),
             func.count(Image.id).label("file_count"),
-            func.coalesce(func.sum(Blob.file_size), 0).label("disk_size"),
+            func.coalesce(func.sum(func.coalesce(Blob.file_size, Image.source_size)), 0).label("disk_size"),
         )
         .outerjoin(Image, Image.gallery_id == Gallery.id)
         .outerjoin(Blob, Blob.sha256 == Image.blob_sha256)
@@ -1033,7 +1039,7 @@ async def list_files(
     total = (await db.execute(select(func.count()).select_from(Gallery).where(*filters))).scalar_one()
 
     image_counts = func.count(Image.id).label("file_count")
-    disk_size = func.coalesce(func.sum(Blob.file_size), 0).label("disk_size")
+    disk_size = func.coalesce(func.sum(func.coalesce(Blob.file_size, Image.source_size)), 0).label("disk_size")
     stmt = (
         select(Gallery, image_counts, disk_size)
         .outerjoin(Image, Image.gallery_id == Gallery.id)
@@ -1154,7 +1160,7 @@ async def list_gallery_files(
                 "width": blob.width if blob else None,
                 "height": blob.height if blob else None,
                 "file_size": f["file_size"],
-                "media_type": blob.media_type if blob else "image",
+                "media_type": _media_type(img) if img else "image",
                 "thumb_path": _thumb_url(blob),
                 "thumb_srcset": _thumb_srcset(blob),
                 "file_path": _to_url(blob, img.external_path if img else None),
@@ -2460,6 +2466,8 @@ async def find_similar_images(
     ).scalar_one_or_none()
     if not img_row:
         raise HTTPException(status_code=404, detail="Image not found")
+    if _is_pending(img_row):
+        raise HTTPException(status_code=409, detail="Image is still being processed")
     if not img_row.blob or not img_row.blob.phash:
         raise HTTPException(status_code=400, detail="Image has no perceptual hash")
 
@@ -2643,6 +2651,25 @@ async def restore_excluded_blob(
     if not blob:
         raise HTTPException(status_code=404, detail="Excluded blob not found")
     await db.delete(blob)
+    # A link page whose hash was excluded keeps its row as visibility='excluded'
+    # so the next folder sync does not register the file again. Dropping the
+    # exclusion must drop that row too, otherwise the file stays hidden forever.
+    excluded_rows = (
+        (
+            await db.execute(
+                select(Image.id).where(
+                    Image.gallery_id == gallery_id,
+                    Image.blob_sha256 == sha256,
+                    Image.visibility == "excluded",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if excluded_rows:
+        await db.execute(sa_delete(Image).where(Image.id.in_(excluded_rows)))
+        await decrement_ref_count(sha256, db, amount=len(excluded_rows))
     await db.commit()
     return {"status": "ok"}
 
@@ -2720,16 +2747,40 @@ async def _build_updated_response(
 
 
 def _to_url(blob, external_path: str | None = None) -> str | None:
-    """Convert an image-bound Blob to its nginx-served URL."""
-    if not blob:
-        return None
+    """Convert an image to its nginx-served URL.
+
+    A pending link page has no blob yet but its file is already readable from
+    the library mount, so ``external_path`` is honoured before the blob check.
+    """
     if external_path:
         return library_url(external_path)
+    if not blob:
+        return None
     if blob.storage == "external" and blob.external_path:
         # Compatibility for callers/tests without an Image binding. Migrated
         # production Image rows carry their own external_path.
         return library_url(blob.external_path)
     return cas_url(blob.sha256, blob.extension)
+
+
+def _is_pending(img: Image) -> bool:
+    """True for a link page that is registered but not hashed yet."""
+    return img.blob_sha256 is None and img.external_path is not None
+
+
+def _pending_media_type(img: Image) -> str:
+    """Media type of a page without a blob, derived from its file extension."""
+    return media_type_for_extension(img.filename or img.external_path or "") or "image"
+
+
+def _media_type(img: Image) -> str:
+    blob = img.blob
+    return blob.media_type if blob else _pending_media_type(img)
+
+
+def _file_size(img: Image) -> int | None:
+    blob = img.blob
+    return blob.file_size if blob else img.source_size
 
 
 def _thumb_url(blob) -> str | None:
@@ -2832,11 +2883,12 @@ def _i(img: Image) -> dict:
         "file_path": _to_url(blob, img.external_path),
         "thumb_path": _thumb_url(blob),
         "thumb_srcset": _thumb_srcset(blob),
-        "file_size": blob.file_size if blob else None,
+        "file_size": _file_size(img),
         "file_hash": blob.sha256 if blob else None,
-        "media_type": blob.media_type if blob else "image",
+        "media_type": _media_type(img),
         "duration": blob.duration if blob else None,
         "thumbhash": blob.thumbhash if blob else None,
+        "pending": _is_pending(img),
         "visibility": img.visibility,
         "source_item_id": img.source_item_id,
         "source_item_url": img.source_item_url,

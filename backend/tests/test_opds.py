@@ -549,9 +549,11 @@ class TestOPDSGalleryDetail:
     async def test_gallery_detail_entries_have_pse_index(self, opds_client, db_session):
         """Each image entry should carry a pse:index attribute (0-based)."""
         gid = await _insert_gallery(db_session, source="test", source_id="gd5", pages=3)
-        await _insert_image(db_session, gid, page_num=1, filename="001.jpg")
-        await _insert_image(db_session, gid, page_num=2, filename="002.jpg")
-        await _insert_image(db_session, gid, page_num=3, filename="003.jpg")
+        # OPDS only lists hashed pages (pending link pages have no blob yet).
+        for page in (1, 2, 3):
+            await _insert_image_with_blob(
+                db_session, gid, page_num=page, filename=f"00{page}.jpg", sha256=f"{page}" * 64
+            )
 
         resp = await opds_client.get("/opds/gallery/test/gd5")
         entries = _entries(_parse(resp))
@@ -563,7 +565,7 @@ class TestOPDSGalleryDetail:
     async def test_gallery_detail_entries_have_title(self, opds_client, db_session):
         """Each image entry should have a title like 'Page N'."""
         gid = await _insert_gallery(db_session, source="test", source_id="gd6")
-        await _insert_image(db_session, gid, page_num=1)
+        await _insert_image_with_blob(db_session, gid, page_num=1, sha256="6" * 64)
         resp = await opds_client.get("/opds/gallery/test/gd6")
         entries = _entries(_parse(resp))
         assert entries[0].findtext(f"{ATOM}title") == "Page 1"

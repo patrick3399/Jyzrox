@@ -52,14 +52,19 @@ async def _load_image(image_id: int, auth: dict) -> tuple[Image, Blob, Gallery]:
         row = (
             await session.execute(
                 select(Image, Blob, Gallery)
-                .join(Blob, Image.blob_sha256 == Blob.sha256)
+                .outerjoin(Blob, Image.blob_sha256 == Blob.sha256)
                 .join(Gallery, Gallery.id == Image.gallery_id)
                 .where(Image.id == image_id, gallery_access_filter(auth))
             )
         ).one_or_none()
         if row is None:
             raise HTTPException(status_code=404, detail="Image not found")
-        return row.tuple()
+        image, blob, gallery = row.tuple()
+        if blob is None:
+            # A pending link page is registered but not hashed yet; there is no
+            # blob to name or look up, so ask the caller to retry later.
+            raise HTTPException(status_code=409, detail="Image is still being processed")
+        return image, blob, gallery
 
 
 @router.post("/search")

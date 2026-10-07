@@ -120,6 +120,8 @@ async def _visible_image_ids(db: AsyncSession, auth: dict, image_ids: list[int])
                 .where(
                     Image.id.in_(image_ids),
                     Image.visibility == "active",
+                    # Datasets hold hashed pages only; a pending page has no blob.
+                    Image.blob_sha256.is_not(None),
                     gallery_access_filter(auth),
                 )
             )
@@ -198,6 +200,7 @@ async def _gallery_image_ids(
                 select(Image.id).where(
                     Image.gallery_id.in_(visible_galleries),
                     Image.visibility == "active",
+                    Image.blob_sha256.is_not(None),
                 )
             )
         )
@@ -268,7 +271,7 @@ async def _tag_query_image_ids(
     stmt = (
         select(Image.id)
         .join(Gallery, Gallery.id == Image.gallery_id)
-        .where(Image.visibility == "active", gallery_access_filter(auth))
+        .where(Image.visibility == "active", Image.blob_sha256.is_not(None), gallery_access_filter(auth))
         .order_by(Image.id)
         .limit(limit + 1)
     )
@@ -361,6 +364,7 @@ async def _counts(db: AsyncSession, dataset_id: int, auth: dict) -> tuple[int, i
             .where(
                 DatasetImage.dataset_id == dataset_id,
                 Image.visibility == "active",
+                Image.blob_sha256.is_not(None),
                 gallery_access_filter(auth),
             )
         )
@@ -546,6 +550,7 @@ async def get_dataset(
         DatasetImage.dataset_id == dataset_id,
         DatasetImage.state == state,
         Image.visibility == "active",
+        Image.blob_sha256.is_not(None),
         gallery_access_filter(auth),
     )
     total = (
