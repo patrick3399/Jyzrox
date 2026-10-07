@@ -26,6 +26,13 @@ from services.cas import (
     thumbnails_complete_at,
 )
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
+from services.source_identity import (
+    SourceDirectoryChangedError,
+    SourceDirectoryIdentity,
+    SourceFileChangedError,
+    SourceFileIdentity,
+    hash_file_with_identity,
+)
 from services.tag_helpers import (
     rebuild_gallery_tags_array,
     upsert_metadata_gallery_tags,
@@ -37,13 +44,6 @@ from worker.constants import (
     logger,
 )
 from worker.helpers import _sha256, _validate_image_magic
-from worker.source_identity import (
-    SourceDirectoryChangedError,
-    SourceDirectoryIdentity,
-    SourceFileChangedError,
-    SourceFileIdentity,
-    hash_file_with_identity,
-)
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
 

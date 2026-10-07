@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 
 def test_source_identity_accepts_content_changes_without_directory_replacement(tmp_path):
-    from worker.source_identity import SourceDirectoryIdentity
+    from services.source_identity import SourceDirectoryIdentity
 
     source = tmp_path / "source"
     source.mkdir()
@@ -20,7 +20,7 @@ def test_source_identity_accepts_content_changes_without_directory_replacement(t
 
 
 def test_source_identity_rejects_rename_and_same_path_replacement(tmp_path):
-    from worker.source_identity import SourceDirectoryChangedError, SourceDirectoryIdentity
+    from services.source_identity import SourceDirectoryChangedError, SourceDirectoryIdentity
 
     source = tmp_path / "source"
     source.mkdir()
@@ -64,7 +64,7 @@ async def test_link_import_rename_rolls_back_new_rows_and_reports_resumable(
 
     def hash_with_rename(path: Path):
         """Rename the source directory out from under the second file's hash."""
-        from worker.source_identity import SourceFileIdentity
+        from services.source_identity import SourceFileIdentity
 
         payload = path.read_bytes()
         identity = SourceFileIdentity._from_stat(path, path.stat())
@@ -179,7 +179,7 @@ async def test_link_import_rename_at_finalize_removes_deferred_symlink(
 
 
 def test_hash_and_identity_describe_the_same_bytes(tmp_path):
-    from worker.source_identity import hash_file_with_identity
+    from services.source_identity import hash_file_with_identity
 
     target = tmp_path / "a.jpg"
     target.write_bytes(b"payload")
@@ -200,7 +200,7 @@ def test_replacing_a_file_in_place_is_detected_though_the_directory_is_untouched
     every SourceDirectoryIdentity assertion passes while link mode would record
     a sha256 that no longer matches the bytes at the stored path.
     """
-    from worker.source_identity import (
+    from services.source_identity import (
         SourceDirectoryIdentity,
         SourceFileChangedError,
         hash_file_with_identity,
@@ -227,7 +227,7 @@ def test_rewriting_a_file_in_place_is_detected(tmp_path):
     """Same inode, new content — caught via size/mtime rather than inode."""
     import time
 
-    from worker.source_identity import SourceFileChangedError, hash_file_with_identity
+    from services.source_identity import SourceFileChangedError, hash_file_with_identity
 
     target = tmp_path / "a.jpg"
     target.write_bytes(b"original")
@@ -242,7 +242,7 @@ def test_rewriting_a_file_in_place_is_detected(tmp_path):
 
 
 def test_deleted_file_is_reported_as_changed(tmp_path):
-    from worker.source_identity import SourceFileChangedError, hash_file_with_identity
+    from services.source_identity import SourceFileChangedError, hash_file_with_identity
 
     target = tmp_path / "a.jpg"
     target.write_bytes(b"payload")
@@ -255,7 +255,7 @@ def test_deleted_file_is_reported_as_changed(tmp_path):
 
 def test_hash_detects_a_file_growing_while_it_is_read(tmp_path, monkeypatch):
     """The read itself must not silently produce a digest for a moving target."""
-    from worker import source_identity as mod
+    from services import source_identity as mod
 
     target = tmp_path / "a.jpg"
     target.write_bytes(b"x" * 200)
@@ -290,8 +290,8 @@ async def test_link_import_aborts_when_a_file_is_swapped_after_hashing(
     Without it the import committed rows whose blob_sha256 described the old
     bytes while Image.external_path pointed at a path now holding new ones.
     """
+    from services.source_identity import SourceFileIdentity
     from worker.importer import local_import_job
-    from worker.source_identity import SourceFileIdentity
 
     source = tmp_path / "source-swap"
     source.mkdir()

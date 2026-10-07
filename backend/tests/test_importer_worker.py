@@ -624,7 +624,7 @@ def _hash_stub(test_sha: str):
     Returning the real stat keeps the commit-boundary re-check satisfied while
     the digest itself stays fixed for the assertions.
     """
-    from worker.source_identity import SourceFileIdentity
+    from services.source_identity import SourceFileIdentity
 
     def _hash(path):
         return test_sha, SourceFileIdentity._from_stat(path, path.stat())

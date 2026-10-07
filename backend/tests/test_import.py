@@ -850,8 +850,8 @@ def _to_thread_stub(fixed_hash: str):
     (sha256, identity) so the digest and the bytes it describes stay pinned
     together; import_job still uses the plain _sha256. One stub serves both.
     """
+    from services.source_identity import SourceFileIdentity
     from worker import importer as _importer
-    from worker.source_identity import SourceFileIdentity
 
     async def _fake(fn, *args, **kwargs):
         if fn is _importer.hash_file_with_identity:
