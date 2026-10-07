@@ -317,6 +317,56 @@ class TestRescanLibraryJob:
         delete_calls = [c for c in all_executed if c.args and "DELETE" in str(c.args[0]).upper()]
         assert delete_calls, "Expected a batch DELETE execute call for missing images"
 
+    async def test_missing_file_decrements_blob_refs_before_gallery_rows_are_flushed(self):
+        """Lock order must be blobs → galleries, the same as the importer.
+
+        The loop leaves gallery updates (pages, last_scanned_at) pending. If the
+        ref_count UPDATE autoflushes them first, this job locks gallery rows
+        before blob rows. An import that holds a blob lock and then updates its
+        own gallery row deadlocks with that (prod, 2026-10-07 23:24:47:
+        "UPDATE blobs SET ref_count" vs "UPDATE galleries SET pages").
+        """
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="deadbeef")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        gallery = _make_gallery(gallery_id=10, pages=1)
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        autoflush_suspended = {"now": False}
+
+        class _NoAutoflush:
+            def __enter__(self):
+                autoflush_suspended["now"] = True
+
+            def __exit__(self, *exc):
+                autoflush_suspended["now"] = False
+                return False
+
+        session.no_autoflush = _NoAutoflush()
+        suspended_during_decrement: list[bool] = []
+
+        async def record_decrement(*_args, **_kwargs):
+            suspended_during_decrement.append(autoflush_suspended["now"])
+
+        missing_path = MagicMock(spec=Path)
+        missing_path.exists.return_value = False
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan.decrement_ref_count", side_effect=record_decrement),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        assert suspended_during_decrement == [True], (
+            "blob ref_count updates must run with autoflush suspended so pending "
+            "gallery updates are not sent (and gallery rows locked) first"
+        )
+
     async def test_gallery_with_zero_pages_marked_missing(self):
         """Gallery with 0 remaining pages (non-link mode) → download_status='missing'."""
         from worker.scan import rescan_library_job

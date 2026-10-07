@@ -515,8 +515,15 @@ async def rescan_library_job(ctx: dict) -> dict:
                 # images referencing the same sha (each missing image = -1).
                 if shas_to_decrement:
                     sha_counts = Counter(shas_to_decrement)
-                    for sha256, count in sha_counts.items():
-                        await decrement_ref_count(sha256, session, count)
+                    # Lock order must be blobs → galleries, the same as the
+                    # importer and the link sync. The loop above left gallery
+                    # updates (pages, last_scanned_at) pending; autoflush would
+                    # send them before the first ref_count UPDATE and lock
+                    # gallery rows first. An import holding a blob lock that
+                    # then updates its own gallery row deadlocks with that.
+                    with session.no_autoflush:
+                        for sha256, count in sha_counts.items():
+                            await decrement_ref_count(sha256, session, count)
 
                 # Batch delete orphaned/missing images
                 if images_to_delete:
