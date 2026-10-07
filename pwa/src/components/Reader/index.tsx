@@ -405,7 +405,10 @@ function SinglePageView({
         />
       </div>
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
+        <div
+          data-testid="reader-page-loading"
+          className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none"
+        >
           <Spinner />
         </div>
       )}
@@ -1503,7 +1506,13 @@ export default function Reader({
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const handleImageLoaded = useCallback(() => {
-    loadedPagesRef.current.add(state.currentPage)
+    // Remember the load only while the page-change effect has not run for this
+    // page yet (load fired first). After that the entry has no consumer and
+    // would outlive this visit, making the next visit to the page skip the
+    // spinner timer even though the image has to load again.
+    if (loadingPageRef.current !== state.currentPage) {
+      loadedPagesRef.current.add(state.currentPage)
+    }
     if (loadingTimerRef.current) {
       clearTimeout(loadingTimerRef.current)
       loadingTimerRef.current = undefined
