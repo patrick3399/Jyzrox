@@ -290,6 +290,26 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                     if k in gallery_by_key and gallery_by_key[k].import_mode == "link"
                 ]
                 if empty_gids:
+                    # An empty directory only proves the library links are gone.
+                    # A gallery that still has Image rows (pending link pages
+                    # keep no blob, and reconstructable pages can lose their
+                    # links) holds live data; its links are rebuilt by Phase 2
+                    # on a later run instead of deleting the gallery.
+                    still_has_pages = set(
+                        (
+                            await session.execute(
+                                select(Image.gallery_id).where(Image.gallery_id.in_(empty_gids)).distinct()
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    empty_gids = [gid for gid in empty_gids if gid not in still_has_pages]
+                if empty_gids:
+                    # Textual statements do not autoflush and the ORM cannot see
+                    # this DELETE: send any pending gallery change first so it
+                    # cannot hit a vanished row at commit.
+                    await session.flush()
                     await session.execute(
                         text("DELETE FROM galleries WHERE id = ANY(:ids)"),
                         {"ids": empty_gids},
@@ -361,7 +381,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             orphan_rows = (
                 await session.execute(
                     select(Image.gallery_id, Image.filename, Image.external_path, Blob)
-                    .join(Blob, Blob.sha256 == Image.blob_sha256)
+                    .outerjoin(Blob, Blob.sha256 == Image.blob_sha256)
                     .where(Image.gallery_id.in_(chunk_ids))
                 )
             ).all()
@@ -374,6 +394,10 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             for gallery in orphan_galleries:
                 for row in rows_by_gallery.get(gallery.id, []):
                     if not row.filename:
+                        continue
+                    # A pending link page has no blob yet; its link points at
+                    # external_path. A row with neither has nothing to link to.
+                    if row.Blob is None and not row.external_path:
                         continue
                     try:
                         await create_library_symlink(

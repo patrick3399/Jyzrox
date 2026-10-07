@@ -29,6 +29,7 @@ from db.models import (
     UserReadingList,
 )
 from services.cas import resolve_blob_path
+from services.workbench_merge import PENDING_MERGE_DETAIL, count_pending_pages
 
 router = APIRouter(tags=["gallery-management"])
 _member = require_role("member")
@@ -318,6 +319,8 @@ async def merge_gallery(
     source = await _gallery(db, body.source_gallery_id, auth)
     await _require_write(db, target, auth)
     await _require_write(db, source, auth)
+    if await count_pending_pages(db, [target.id, source.id]):
+        raise HTTPException(status_code=409, detail=PENDING_MERGE_DETAIL)
     max_page = (
         await db.execute(select(func.max(Image.page_num)).where(Image.gallery_id == target.id))
     ).scalar_one() or 0

@@ -237,7 +237,9 @@ async def _prepare_library_move(
         for image in images:
             if not image.filename or Path(image.filename).name != image.filename:
                 raise _LibraryMoveConflict(f"image {image.id} has an unsafe filename: {image.filename!r}")
-            if image.blob is None:
+            if image.blob is None and not new_external_paths.get(image.id):
+                # A pending link page has no blob by design; it is only
+                # linkable through its (moved) external path.
                 raise _LibraryMoveConflict(f"image {image.id} has no blob")
 
             link = new_dir / image.filename
@@ -459,6 +461,21 @@ async def rescan_library_job(ctx: dict) -> dict:
                     for img in images:
                         blob = img.blob
                         if not blob:
+                            if img.external_path:
+                                # Pending link page: registered from the folder
+                                # but not hashed yet, so it has no blob. It is
+                                # live data; only a vanished file removes it,
+                                # and there is no blob ref_count to give back.
+                                if Path(img.external_path).exists():
+                                    existing_images_for_cover.append(img)
+                                    continue
+                                logger.warning(
+                                    "[rescan_library] gallery_id=%d image_id=%d missing pending file: %s",
+                                    gid,
+                                    img.id,
+                                    img.external_path,
+                                )
+                            # No blob and no file to serve it from is an orphan row.
                             images_to_delete.append(img.id)
                             removed += 1
                             continue
@@ -678,6 +695,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
 
         # --- Step 1: Verify existing records ---
         known_sha256s: set[str] = set()
+        pending_paths: set[str] = set()
         missing_thumb = False
         missing_cover_thumb = False
         removed = 0
@@ -686,6 +704,12 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         for img in images:
             blob = img.blob
             if not blob:
+                if img.external_path and Path(img.external_path).exists():
+                    # Pending link page (not hashed yet): live data, keep it.
+                    pending_paths.add(img.external_path)
+                    continue
+                # A pending page whose file is gone, or a row with neither a
+                # blob nor a file, is removed. Neither holds a blob reference.
                 await session.delete(img)
                 removed += 1
                 continue
@@ -753,6 +777,11 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 dir_files = []
 
             for fpath in dir_files:
+                # A pending page has no sha to match on, so recognise its file
+                # by path (directly or through the library symlink); otherwise
+                # it would be registered a second time.
+                if pending_paths and (str(fpath) in pending_paths or os.path.realpath(fpath) in pending_paths):
+                    continue
                 file_hash = await asyncio.to_thread(_sha256, fpath)
                 if file_hash in known_sha256s:
                     continue
@@ -1041,11 +1070,17 @@ async def reconcile_library_path_job(
         return {"status": "stale", "reason": "destination_unavailable", "new_path": new_real}
 
     def _size_signature(gallery) -> list[tuple[str, int]]:
-        return sorted(
-            (image.filename, image.blob.file_size)
-            for image in gallery.images
-            if image.filename and image.blob is not None
-        )
+        signature: list[tuple[str, int]] = []
+        for image in gallery.images:
+            if not image.filename:
+                continue
+            if image.blob is not None:
+                signature.append((image.filename, image.blob.file_size))
+            elif image.external_path is not None and image.source_size is not None:
+                # A pending link page has no blob yet; its registered size
+                # stands in for it.
+                signature.append((image.filename, image.source_size))
+        return sorted(signature)
 
     plausible = [g for g in candidates if g.images and _size_signature(g) == destination_sizes]
     if not plausible:
@@ -1056,16 +1091,30 @@ async def reconcile_library_path_job(
         )
         return {"status": "conflict", "reason": "content_mismatch", "new_path": new_real}
 
-    destination_signature = []
-    for path in media_files:
-        destination_signature.append((path.name, await asyncio.to_thread(_sha256, path)))
-    destination_signature.sort()
-    matches = [
-        gallery
-        for gallery in plausible
-        if sorted((image.filename, image.blob_sha256) for image in gallery.images if image.filename)
-        == destination_signature
-    ]
+    # Pending pages have no hash, so they take no part in the hash signature on
+    # either side: the destination files that correspond to a candidate's
+    # pending pages are neither hashed nor compared. Hashes are computed once
+    # per file name and only for names some candidate needs.
+    destination_hashes: dict[str, str] = {}
+
+    async def _destination_signature(gallery) -> list[tuple[str, str]]:
+        pending_names = {image.filename for image in gallery.images if image.filename and image.blob_sha256 is None}
+        signature = []
+        for path in media_files:
+            if path.name in pending_names:
+                continue
+            if path.name not in destination_hashes:
+                destination_hashes[path.name] = await asyncio.to_thread(_sha256, path)
+            signature.append((path.name, destination_hashes[path.name]))
+        return sorted(signature)
+
+    matches = []
+    for gallery in plausible:
+        gallery_signature = sorted(
+            (image.filename, image.blob_sha256) for image in gallery.images if image.filename and image.blob_sha256
+        )
+        if gallery_signature == await _destination_signature(gallery):
+            matches.append(gallery)
     if len(matches) != 1:
         reason = "content_mismatch" if not matches else "ambiguous_content_match"
         logger.warning(
@@ -1220,11 +1269,23 @@ async def move_library_path_job(
                     raise _LibraryMoveConflict(
                         f"moved image path is unavailable for image {image.id}: {moved_image_path}"
                     )
-                moved_hash = await asyncio.to_thread(_sha256, moved_image_path)
-                if moved_hash != image.blob_sha256:
-                    raise _LibraryMoveConflict(
-                        f"moved image content does not match image {image.id}: {moved_image_path}"
-                    )
+                is_pending = image.blob_sha256 is None
+                if is_pending:
+                    # A pending link page has no hash to compare. Its size, taken
+                    # when it was registered, is the strongest check available
+                    # without hashing the whole folder on the move path.
+                    if image.external_path is None or image.source_size is None:
+                        raise _LibraryMoveConflict(f"image {image.id} has no blob and no recorded size to verify")
+                    if moved_image_path.stat().st_size != image.source_size:
+                        raise _LibraryMoveConflict(
+                            f"moved image size does not match pending image {image.id}: {moved_image_path}"
+                        )
+                else:
+                    moved_hash = await asyncio.to_thread(_sha256, moved_image_path)
+                    if moved_hash != image.blob_sha256:
+                        raise _LibraryMoveConflict(
+                            f"moved image content does not match image {image.id}: {moved_image_path}"
+                        )
 
                 if gallery.import_mode == "link":
                     if image.external_path is None:
@@ -1241,7 +1302,7 @@ async def move_library_path_job(
                             f"image {image.id} filename and external path disagree after move: {moved_external_path}"
                         )
                     new_external_paths[image.id] = moved_external_path
-                    if moved_external_path != image.external_path:
+                    if moved_external_path != image.external_path and not is_pending:
                         location = await session.get(BlobLocation, (image.blob_sha256, moved_external_path))
                         if location is None:
                             session.add(BlobLocation(blob_sha256=image.blob_sha256, external_path=moved_external_path))

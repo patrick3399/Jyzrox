@@ -54,7 +54,8 @@ async def hard_delete_galleries(db: AsyncSession, galleries: list[Gallery]) -> d
 
     img_stmt = select(Image).where(Image.gallery_id.in_([g.id for g in galleries])).options(selectinload(Image.blob))
     images = (await db.execute(img_stmt)).scalars().all()
-    blob_sha256s = [img.blob_sha256 for img in images]
+    # A pending link page has no blob (and so no reference to give back).
+    blob_sha256s = [img.blob_sha256 for img in images if img.blob_sha256 is not None]
 
     for sha256 in blob_sha256s:
         await decrement_ref_count(sha256, db)

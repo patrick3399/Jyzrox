@@ -1553,3 +1553,181 @@ class TestSyncAllLinkGalleries:
         assert result == {"checked": 2, "changed": 1}
         assert [call.args[0] for call in sync.await_args_list] == [3, 4]
         assert all(call.kwargs["force"] is True for call in sync.await_args_list)
+
+
+# ---------------------------------------------------------------------------
+# Pending link pages (no blob yet) must survive the rescans
+# ---------------------------------------------------------------------------
+
+
+def _make_pending_image(image_id: int, gallery_id: int, external_path: str | None, page_num: int = 1) -> MagicMock:
+    """A pending link page: registered from the folder, not hashed yet."""
+    img = _make_image(image_id=image_id, gallery_id=gallery_id, page_num=page_num, blob=None)
+    img.blob = None
+    img.blob_sha256 = None
+    img.external_path = external_path
+    return img
+
+
+def _executed_sql(session) -> list[str]:
+    return [" ".join(str(c.args[0]).split()).upper() for c in session.execute.call_args_list if c.args]
+
+
+class TestPendingLinkPagesSurviveRescans:
+    async def test_pending_page_with_existing_file_is_kept_by_library_rescan(self, tmp_path):
+        from worker.scan import rescan_library_job
+
+        root = tmp_path / "root"
+        folder = root / "g"
+        folder.mkdir(parents=True)
+        (folder / "001.jpg").write_bytes(b"jpeg")
+        img = _make_pending_image(1, 10, str(folder / "001.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(root))
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        decrement.assert_not_awaited()
+        statements = _executed_sql(session)
+        assert not any(s.startswith("DELETE") for s in statements), statements
+        assert gallery.pages == 1
+
+    async def test_pending_page_with_missing_file_is_removed_without_decrement(self, tmp_path):
+        from worker.scan import rescan_library_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "keep.txt").write_text("root is available")
+        img = _make_pending_image(1, 10, str(root / "g" / "gone.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="cas", pages=1, library_path=str(root))
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        decrement.assert_not_awaited()
+        assert any(s.startswith("DELETE FROM IMAGES") for s in _executed_sql(session))
+        assert gallery.pages == 0
+
+    async def test_row_with_no_blob_and_no_external_path_is_still_an_orphan(self):
+        from worker.scan import rescan_library_job
+
+        img = _make_pending_image(1, 10, None)
+        gallery = _make_gallery(gallery_id=10, import_mode="cas", pages=1)
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            await rescan_library_job({"redis": _make_redis()})
+
+        decrement.assert_not_awaited()
+        assert any(s.startswith("DELETE FROM IMAGES") for s in _executed_sql(session))
+
+    def _gallery_rescan_session(self, gallery, images, surviving):
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=gallery)
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.delete = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        def _res(rows):
+            res = MagicMock()
+            res.scalars.return_value.all.return_value = rows
+            return res
+
+        session.execute = AsyncMock(
+            side_effect=[_res([]), _res(images), _res(surviving), _res(surviving)] + [MagicMock()] * 6
+        )
+        return session
+
+    async def test_pending_page_with_existing_file_is_kept_by_gallery_rescan(self, tmp_path):
+        from worker.scan import rescan_gallery_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "001.jpg").write_bytes(b"jpeg")
+        img = _make_pending_image(1, 10, str(root / "001.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(root))
+        gallery.source_path = str(tmp_path / "vanished-source")  # not a dir: legacy path
+        session = self._gallery_rescan_session(gallery, [img], [img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan.library_dir", return_value=tmp_path / "no-library-dir"),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
+
+        session.delete.assert_not_awaited()
+        decrement.assert_not_awaited()
+        assert result["removed"] == 0
+        assert result["pages"] == 1
+
+    async def test_pending_page_with_missing_file_is_removed_by_gallery_rescan_without_decrement(self, tmp_path):
+        from worker.scan import rescan_gallery_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        img = _make_pending_image(1, 10, str(root / "gone.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="cas", pages=1)
+        session = self._gallery_rescan_session(gallery, [img], [])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan.library_dir", return_value=tmp_path / "no-library-dir"),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
+
+        session.delete.assert_awaited_with(img)
+        decrement.assert_not_awaited()
+        assert result["removed"] == 1
+
+    async def test_legacy_gallery_rescan_does_not_register_a_pending_files_twice(self, tmp_path):
+        """A pending page has no sha to match on: the directory walk must
+        recognise its file by path or it would insert a duplicate page."""
+        from worker.scan import rescan_gallery_job
+
+        library = tmp_path / "library" / "local" / "g"
+        library.mkdir(parents=True)
+        real = tmp_path / "files" / "001.jpg"
+        real.parent.mkdir()
+        real.write_bytes(b"jpeg")
+        (library / "001.jpg").symlink_to(real)
+        img = _make_pending_image(1, 10, str(real))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(tmp_path))
+        gallery.source_path = str(tmp_path / "vanished-source")
+        session = self._gallery_rescan_session(gallery, [img], [img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.library_dir", return_value=library),
+            patch("worker.scan.store_blob", new_callable=AsyncMock) as store,
+            patch("worker.scan._sha256", side_effect=AssertionError("pending file must not be re-registered")),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
+
+        store.assert_not_awaited()
+        assert result["added"] == 0

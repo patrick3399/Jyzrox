@@ -330,3 +330,216 @@ async def test_reconcile_still_hashes_a_size_compatible_candidate(
     sha_spy.assert_called_once()
     assert result["status"] == "conflict"
     assert result["reason"] == "content_mismatch"
+
+
+async def _seed_gallery_with_pending_pages(db_session, root_a, root_b, old_dir, library_root):
+    """A link gallery with one hashed page (001.jpg) and one pending page (002.jpg)."""
+    for root in (root_a, root_b):
+        await db_session.execute(
+            text(
+                "INSERT INTO library_paths (path, label, pattern, import_mode, enabled, monitor) "
+                "VALUES (:path, :label, '{title}', 'link', 1, 1)"
+            ),
+            {"path": str(root), "label": root.name},
+        )
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, pages, import_mode, library_path, source_path, "
+            "download_status) VALUES ('local', 'old-gallery', 'Mixed', 2, 'link', :library_path, :source_path, "
+            "'importing')"
+        ),
+        {"library_path": str(root_a), "source_path": str(old_dir)},
+    )
+    gallery_id = (await db_session.execute(text("SELECT id FROM galleries WHERE source_id='old-gallery'"))).scalar_one()
+    hashed_file = old_dir / "001.jpg"
+    pending_file = old_dir / "002.jpg"
+    sha = hashlib.sha256(hashed_file.read_bytes()).hexdigest()
+    await db_session.execute(
+        text(
+            "INSERT INTO blobs (sha256, file_size, extension, storage, external_path, ref_count) "
+            "VALUES (:sha, :size, '.jpg', 'external', :path, 1)"
+        ),
+        {"sha": sha, "size": hashed_file.stat().st_size, "path": str(hashed_file)},
+    )
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :path)"),
+        {"sha": sha, "path": str(hashed_file)},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path, source_size) VALUES "
+            "(:gid, 1, '001.jpg', :sha, :hashed, :hashed_size), "
+            "(:gid, 2, '002.jpg', NULL, :pending, :pending_size)"
+        ),
+        {
+            "gid": gallery_id,
+            "sha": sha,
+            "hashed": str(hashed_file),
+            "hashed_size": hashed_file.stat().st_size,
+            "pending": str(pending_file),
+            "pending_size": pending_file.stat().st_size,
+        },
+    )
+    await db_session.commit()
+    old_library_dir = library_root / "local" / "old-gallery"
+    old_library_dir.mkdir(parents=True)
+    (old_library_dir / ".gallery-owner").write_text("local:old-gallery", encoding="utf-8")
+    (old_library_dir / "001.jpg").symlink_to(hashed_file)
+    (old_library_dir / "002.jpg").symlink_to(pending_file)
+    return gallery_id, sha
+
+
+def _move_patches(db_session_factory, library_root, sha_spy=None):
+    scan_settings = MagicMock(library_monitor_enabled=True, data_library_path=str(library_root))
+    patches = [
+        patch("worker.scan.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan.settings", scan_settings),
+        patch("services.cas.settings", MagicMock(data_library_path=str(library_root))),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ]
+    if sha_spy is not None:
+        patches.append(patch("worker.scan._sha256", sha_spy))
+    return patches
+
+
+async def test_monitored_move_keeps_gallery_identity_with_pending_pages(
+    db_session, db_session_factory, mock_redis, tmp_path
+):
+    """A pending page has no hash to compare after the move: it is verified by
+    size, gets no BlobLocation, and its link follows the moved file."""
+    from contextlib import ExitStack
+
+    from worker.scan import _sha256, move_library_path_job
+
+    root_a, root_b, library_root = tmp_path / "source-a", tmp_path / "source-b", tmp_path / "library"
+    root_a.mkdir()
+    root_b.mkdir()
+    old_dir = root_a / "old-gallery"
+    old_dir.mkdir()
+    (old_dir / "001.jpg").write_bytes(b"hashed-page")
+    (old_dir / "002.jpg").write_bytes(b"pending-page-bytes")
+    gallery_id, sha = await _seed_gallery_with_pending_pages(db_session, root_a, root_b, old_dir, library_root)
+
+    new_dir = root_a / "renamed-gallery"
+    old_dir.rename(new_dir)
+    destination_stat = new_dir.stat()
+    mock_redis.get = AsyncMock(return_value=b"1")
+    hashed_paths: list[str] = []
+
+    def spy(path):
+        hashed_paths.append(path.name)
+        return _sha256(path)
+
+    with ExitStack() as stack:
+        for p in _move_patches(db_session_factory, library_root, MagicMock(side_effect=spy)):
+            stack.enter_context(p)
+        result = await move_library_path_job(
+            {"redis": mock_redis},
+            old_path=str(old_dir),
+            new_path=str(new_dir),
+            destination_device=destination_stat.st_dev,
+            destination_inode=destination_stat.st_ino,
+            watcher_origin=True,
+        )
+
+    assert result["status"] == "moved", result
+    assert result["gallery_id"] == gallery_id
+    assert hashed_paths == ["001.jpg"], "a pending page must not be hashed by the move"
+    paths = dict(
+        (
+            await db_session.execute(
+                text("SELECT filename, external_path FROM images WHERE gallery_id=:g"), {"g": gallery_id}
+            )
+        )
+        .tuples()
+        .all()
+    )
+    assert paths == {"001.jpg": str(new_dir / "001.jpg"), "002.jpg": str(new_dir / "002.jpg")}
+    locations = (await db_session.execute(text("SELECT external_path FROM blob_locations"))).scalars().all()
+    assert sorted(locations) == sorted([str(old_dir / "001.jpg"), str(new_dir / "001.jpg")])
+    new_library_dir = library_root / "local" / "renamed-gallery"
+    assert (new_library_dir / "002.jpg").resolve() == new_dir / "002.jpg"
+
+
+async def test_monitored_move_refuses_a_pending_page_whose_size_changed(
+    db_session, db_session_factory, mock_redis, tmp_path
+):
+    from contextlib import ExitStack
+
+    from worker.scan import move_library_path_job
+
+    root_a, root_b, library_root = tmp_path / "source-a", tmp_path / "source-b", tmp_path / "library"
+    root_a.mkdir()
+    root_b.mkdir()
+    old_dir = root_a / "old-gallery"
+    old_dir.mkdir()
+    (old_dir / "001.jpg").write_bytes(b"hashed-page")
+    (old_dir / "002.jpg").write_bytes(b"pending-page-bytes")
+    await _seed_gallery_with_pending_pages(db_session, root_a, root_b, old_dir, library_root)
+
+    new_dir = root_a / "renamed-gallery"
+    old_dir.rename(new_dir)
+    (new_dir / "002.jpg").write_bytes(b"different size entirely!!")
+    destination_stat = new_dir.stat()
+    mock_redis.get = AsyncMock(return_value=b"1")
+
+    with ExitStack() as stack:
+        for p in _move_patches(db_session_factory, library_root):
+            stack.enter_context(p)
+        result = await move_library_path_job(
+            {"redis": mock_redis},
+            old_path=str(old_dir),
+            new_path=str(new_dir),
+            destination_device=destination_stat.st_dev,
+            destination_inode=destination_stat.st_ino,
+            watcher_origin=True,
+        )
+
+    assert result["status"] == "conflict"
+    assert "size does not match" in result["error"]
+
+
+async def test_cross_root_move_matches_gallery_with_pending_pages(db_session, db_session_factory, mock_redis, tmp_path):
+    """The size signature counts a pending page by (filename, source_size) and
+    the hash signature leaves it out on both sides."""
+    from contextlib import ExitStack
+
+    from worker.scan import _sha256, reconcile_library_path_job
+
+    root_a, root_b, library_root = tmp_path / "source-a", tmp_path / "source-b", tmp_path / "library"
+    root_a.mkdir()
+    root_b.mkdir()
+    old_dir = root_a / "old-gallery"
+    old_dir.mkdir()
+    (old_dir / "001.jpg").write_bytes(b"hashed-page")
+    (old_dir / "002.jpg").write_bytes(b"pending-page-bytes")
+    gallery_id, _ = await _seed_gallery_with_pending_pages(db_session, root_a, root_b, old_dir, library_root)
+
+    new_dir = root_b / "renamed-gallery"
+    new_dir.mkdir()
+    (new_dir / "001.jpg").write_bytes(b"hashed-page")
+    (new_dir / "002.jpg").write_bytes(b"pending-page-bytes")
+    destination_stat = new_dir.stat()
+    mock_redis.get = AsyncMock(return_value=b"1")
+    hashed_paths: list[str] = []
+
+    def spy(path):
+        hashed_paths.append(path.name)
+        return _sha256(path)
+
+    with ExitStack() as stack:
+        for p in _move_patches(db_session_factory, library_root, MagicMock(side_effect=spy)):
+            stack.enter_context(p)
+        result = await reconcile_library_path_job(
+            {"redis": mock_redis},
+            old_paths=[str(old_dir)],
+            new_path=str(new_dir),
+            destination_device=destination_stat.st_dev,
+            destination_inode=destination_stat.st_ino,
+            watcher_origin=True,
+        )
+
+    assert result["status"] == "moved", result
+    assert result["gallery_id"] == gallery_id
+    assert hashed_paths.count("002.jpg") == 0, "the destination copy of a pending page is not hashed"

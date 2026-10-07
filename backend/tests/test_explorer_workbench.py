@@ -381,3 +381,30 @@ async def test_bulk_actions_manage_personal_state_collections_and_manual_tags(cl
     assert len(memberships) == 2
     assert len(manual_tags) == 2
     assert all(tag.source == "manual" for tag in manual_tags)
+
+
+async def test_merge_with_pending_pages_is_rejected_with_409(client, db_session):
+    """Both the preview and the merge refuse a selection holding a page that
+    has no blob yet (a link page still waiting for its hash)."""
+    await _seed_user_and_galleries(db_session)
+    await db_session.execute(
+        text("INSERT INTO blobs (sha256, file_size, extension, ref_count) VALUES ('sha-a', 100, 'jpg', 1)")
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (id, gallery_id, page_num, filename, blob_sha256, external_path) VALUES "
+            "(201, 101, 1, 'target.jpg', 'sha-a', NULL), "
+            "(202, 102, 1, 'pending.jpg', NULL, '/mnt/lib/two/pending.jpg')"
+        )
+    )
+    await db_session.commit()
+    body = {"gallery_ids": [101, 102], "target_id": 101}
+
+    preview = await client.post("/api/explorer/merge/preview", json=body)
+    with patch("core.audit.log_audit", new_callable=AsyncMock):
+        merged = await client.post("/api/explorer/merge", json=body)
+
+    for response in (preview, merged):
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "Wait for pages to finish processing before merging galleries"
+    assert (await db_session.get(Gallery, 102)).deleted_at is None

@@ -44,6 +44,26 @@ def _hamming_distance(left: int, right: int) -> int:
     return ((left & mask) ^ (right & mask)).bit_count()
 
 
+PENDING_MERGE_DETAIL = "Wait for pages to finish processing before merging galleries"
+
+
+async def count_pending_pages(db: AsyncSession, gallery_ids: Sequence[int]) -> int:
+    """Count pages with no blob yet (link pages still waiting for their hash).
+
+    Merging copies pages by sha256 and moves blob references, so a page without
+    a blob cannot take part until the hash job has filled it in.
+    """
+    if not gallery_ids:
+        return 0
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(Image)
+            .where(Image.gallery_id.in_(list(gallery_ids)), Image.blob_sha256.is_(None))
+        )
+    ).scalar_one()
+
+
 async def validate_merge_selection(
     db: AsyncSession,
     gallery_ids: Sequence[int],
@@ -71,6 +91,8 @@ async def validate_merge_selection(
     ).scalar_one()
     if active_count:
         raise HTTPException(status_code=409, detail="Cancel active downloads before merging galleries")
+    if await count_pending_pages(db, unique_ids):
+        raise HTTPException(status_code=409, detail=PENDING_MERGE_DETAIL)
     return target, sources
 
 

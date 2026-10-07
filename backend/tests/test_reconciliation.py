@@ -1160,6 +1160,7 @@ class TestSidecarReconciliation:
         execute_returns = [
             _make_result_with_rows([gallery]),  # Phase 1 raw tuple IN
             _make_result_with_rows([]),  # Phase 1 images
+            _make_result_with_rows([]),  # empty-dir galleries that still have image rows
             _make_empty_result(),  # DELETE empty link galleries
             _make_result_with_rows([]),  # Phase 2
             _make_result_with_rows([]),  # Phase 3
@@ -1195,6 +1196,7 @@ class TestSidecarReconciliation:
         execute_returns = [
             _make_result_with_rows([gallery]),  # Phase 1 raw tuple IN
             _make_result_with_rows([]),  # Phase 1 images
+            _make_result_with_rows([]),  # empty-dir galleries that still have image rows
             _make_empty_result(),  # DELETE empty link galleries
             _make_result_with_rows([]),  # Phase 2
             _make_result_with_rows([]),  # Phase 3
@@ -1400,3 +1402,139 @@ class TestCasOrphanScan:
         assert result["status"] == "done"
         assert orphan.exists(), "a failed DB check must never delete CAS files"
         assert result["cas_orphans_removed"] == 0
+
+
+class TestPendingLinkPagesInReconciliation:
+    """A pending link page (no blob yet, external_path set) is live data."""
+
+    _fs = TestSidecarReconciliation._fs
+    _patches = TestSidecarReconciliation._patches
+
+    def _settings(self, lib_base):
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+        return mock_settings
+
+    async def test_reconciliation_keeps_empty_dir_gallery_that_still_has_pages(self, tmp_path):
+        """An empty library dir only proves the links are gone. A link gallery
+        whose Image rows survive (pending pages have no blob and no links
+        before their first hash) must not be deleted."""
+        from contextlib import ExitStack
+
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir()
+        gallery = _gallery_entity(5, "local", "gal_1", import_mode="link")
+        execute_returns = [
+            _make_result_with_rows([gallery]),  # Phase 1 raw tuple IN
+            _make_result_with_rows([]),  # Phase 1 images (inner join: pending pages are not here)
+            _make_result_with_rows([5]),  # empty-dir galleries that still have image rows
+            _make_result_with_rows([]),  # Phase 2
+            _make_result_with_rows([]),  # Phase 3
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+
+        with ExitStack() as stack:
+            for p in self._patches(
+                self._settings(lib_base), self._fs(lib_base, []), session, AsyncMock(return_value=True)
+            ):
+                stack.enter_context(p)
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["status"] == "done"
+        assert result["removed_galleries"] == 0
+        statements = [" ".join(str(c.args[0]).split()).upper() for c in session.execute.call_args_list if c.args]
+        assert not any(s.startswith("DELETE FROM GALLERIES") for s in statements), statements
+
+    async def test_reconciliation_flushes_before_deleting_an_empty_dir_gallery(self, tmp_path):
+        """Textual DELETEs do not autoflush: pending ORM changes go out first."""
+        from contextlib import ExitStack
+
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir()
+        gallery = _gallery_entity(5, "local", "gal_1", import_mode="link")
+        execute_returns = [
+            _make_result_with_rows([gallery]),
+            _make_result_with_rows([]),
+            _make_result_with_rows([]),  # no image rows left
+            _make_empty_result(),  # DELETE
+            _make_result_with_rows([]),
+            _make_result_with_rows([]),
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        order: list[str] = []
+        original_execute = session.execute
+
+        async def execute(statement, *args, **kwargs):
+            sql = " ".join(str(statement).split()).upper()
+            if sql.startswith("DELETE FROM GALLERIES"):
+                order.append("DELETE")
+            return await original_execute(statement, *args, **kwargs)
+
+        async def flush():
+            order.append("FLUSH")
+
+        session.execute = execute
+        session.flush = AsyncMock(side_effect=flush)
+
+        with ExitStack() as stack:
+            for p in self._patches(
+                self._settings(lib_base), self._fs(lib_base, []), session, AsyncMock(return_value=True)
+            ):
+                stack.enter_context(p)
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["removed_galleries"] == 1
+        assert order == ["FLUSH", "DELETE"]
+
+    async def test_reconciliation_rebuilds_symlink_for_pending_page(self, tmp_path):
+        """Phase 2 must load pages with an outer join so a page with no blob
+        still gets its library link rebuilt from external_path."""
+
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        existing = lib_base / "local" / "existing"
+        existing.mkdir(parents=True)
+        (existing / "keep.jpg").write_bytes(b"image")
+
+        existing_gallery = _gallery_entity(1, "local", "existing", import_mode="copy")
+        missing_gallery = MagicMock(id=2, source="local", source_id="missing", import_mode="link", deleted_at=None)
+        pending_row = MagicMock(gallery_id=2, filename="a.jpg", external_path="/mnt/src/a.jpg", Blob=None)
+        neither_row = MagicMock(gallery_id=2, filename="b.jpg", external_path=None, Blob=None)
+        execute_returns = [
+            _make_result_with_rows([existing_gallery]),  # Phase 1 gallery lookup
+            _make_result_with_rows([]),  # Phase 1 images
+            _make_result_with_rows([_orphan_row(1, "local", "existing", "copy"), _orphan_row(2, "local", "missing")]),
+            _make_result_with_rows([missing_gallery]),  # Phase 2 galleries
+            _make_result_with_rows([pending_row, neither_row]),  # Phase 2 images
+            _make_result_with_rows([]),  # Phase 3
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        symlink_spy = AsyncMock()
+
+        with (
+            patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.reconciliation._cron_record", new_callable=AsyncMock),
+            patch("worker.reconciliation.settings", self._settings(lib_base)),
+            patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
+            patch("worker.reconciliation.create_library_symlink", symlink_spy),
+            patch("worker.reconciliation.write_gallery_sidecar", AsyncMock(return_value=True)),
+            patch("worker.reconciliation.sidecar_payload_from_gallery", MagicMock(return_value={})),
+        ):
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["status"] == "done"
+        symlink_spy.assert_awaited_once_with("local", "missing", "a.jpg", None, external_path="/mnt/src/a.jpg")
+        image_statement = next(
+            str(c.args[0])
+            for c in session.execute.call_args_list
+            if c.args
+            and "images.filename" in str(c.args[0])
+            and "blobs" in str(c.args[0])
+            and "images.id" not in str(c.args[0])
+        )
+        assert "LEFT OUTER JOIN blobs" in image_statement
