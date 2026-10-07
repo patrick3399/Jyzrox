@@ -428,6 +428,9 @@ async def rescan_library_job(ctx: dict) -> dict:
                 galleries_needing_cover_thumbs: list[int] = []
 
                 for gid in chunk_ids:
+                    # The checks below are synchronous filesystem calls. Yield
+                    # so imports and syncs sharing this worker are not starved.
+                    await asyncio.sleep(0)
                     gallery = gallery_map.get(gid)
                     if not gallery:
                         continue

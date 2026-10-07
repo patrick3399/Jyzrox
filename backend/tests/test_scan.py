@@ -266,6 +266,23 @@ class TestRescanLibraryJob:
         assert result["total"] == 0
         assert result["status"] == "done"
 
+    async def test_rescan_yields_to_the_event_loop_between_galleries(self):
+        """The per-gallery checks are synchronous filesystem calls; each gallery must yield once."""
+        from worker.scan import rescan_library_job
+
+        galleries = [_make_gallery(gallery_id=gid, pages=0) for gid in (10, 11, 12)]
+        session = _make_session(gallery_ids=[10, 11, 12], galleries=galleries, images=[])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("core.watcher.watcher_instance", None),
+            patch("worker.scan.asyncio.sleep", new_callable=AsyncMock) as sleep,
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["total"] == 3
+        assert [call.args for call in sleep.await_args_list] == [(0,), (0,), (0,)]
+
     async def test_missing_blob_files_removes_image_records(self):
         """Images whose blob files are missing on disk should be deleted."""
         from worker.scan import rescan_library_job
