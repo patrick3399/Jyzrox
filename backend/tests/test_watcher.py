@@ -101,3 +101,15 @@ def test_unpaired_cross_root_events_are_reconciled_before_discovery(tmp_path):
         destination_stat.st_dev,
         destination_stat.st_ino,
     )
+
+
+def test_watcher_debounce_defaults_to_five_seconds_and_keeps_move_windows():
+    from core.config import Settings
+    from core.watcher import _LibraryHandler
+
+    debounce = Settings().watcher_debounce_seconds
+    handler = _LibraryHandler(lambda *_args: None, debounce)
+
+    assert debounce == 5
+    assert handler._debounce_secs == 5
+    assert handler._directory_event_window() == 300.0

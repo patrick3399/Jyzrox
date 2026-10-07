@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     library_base_path: str = "/mnt"  # Default root for user-mounted external media
     watcher_use_polling: bool = False
     watcher_polling_interval: int = 60  # seconds
+    watcher_debounce_seconds: int = 5  # quiet period before a watcher event becomes a job
 
     @property
     def gdl_archive_dsn(self) -> str:

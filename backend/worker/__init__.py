@@ -574,7 +574,7 @@ async def startup(ctx: dict) -> None:
             kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
-        _watcher.start(paths, enqueue_sync)
+        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
         await r.set(
             "watcher:status",
             json.dumps({"running": True, "paths": paths}),
@@ -648,7 +648,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
             kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
-        _watcher.start(paths, enqueue_sync)
+        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
         await r.set("watcher:status", json.dumps({"running": True, "paths": paths}))
         logger.info("[toggle_watcher] Started, watching %d path(s)", len(paths))
         return {"status": "started", "paths": paths}
