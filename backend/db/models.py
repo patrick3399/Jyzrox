@@ -254,7 +254,8 @@ class Image(Base):
     gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
     page_num: Mapped[int] = mapped_column(Integer, nullable=False)
     filename: Mapped[str | None] = mapped_column(Text)
-    blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
+    # NULL while a link page is pending: registered from the folder, not hashed yet (ADR 0015).
+    blob_sha256: Mapped[str | None] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=True)
     external_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     # stat fingerprint of external_path when blob_sha256 was computed (link mode).
     source_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -275,7 +276,7 @@ class Image(Base):
     )
 
     gallery: Mapped[Gallery] = relationship(back_populates="images")
-    blob: Mapped[Blob] = relationship()
+    blob: Mapped[Blob | None] = relationship()
 
 
 class Tag(Base):

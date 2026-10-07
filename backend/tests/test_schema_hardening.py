@@ -147,3 +147,20 @@ def test_link_sync_fingerprint_columns_exist_in_model_init_sql_and_migration():
         assert "ALTER TABLE images ADD COLUMN IF NOT EXISTS source_size BIGINT" in source
         assert "ALTER TABLE images ADD COLUMN IF NOT EXISTS source_mtime_ns BIGINT" in source
         assert "ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_dir_mtime_ns BIGINT" in source
+
+
+_PENDING_MIGRATION = Path(__file__).parent.parent / "migrations" / "versions" / "0027_images_pending_blob.py"
+
+
+def test_images_blob_sha256_is_nullable_with_blob_or_path_check():
+    from db.models import Image
+
+    assert Image.__table__.c.blob_sha256.nullable is True
+
+    init_sql = _INIT_SQL.read_text()
+    assert "blob_sha256     TEXT REFERENCES blobs(sha256)," in init_sql
+    for source in (init_sql, _PENDING_MIGRATION.read_text()):
+        assert "ck_images_blob_or_external_path" in source
+        assert "blob_sha256 IS NOT NULL OR external_path IS NOT NULL" in source
+        assert "idx_images_pending" in source
+    assert "ALTER COLUMN blob_sha256 DROP NOT NULL" in _PENDING_MIGRATION.read_text()

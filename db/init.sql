@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS images (
     gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     page_num        INT NOT NULL,
     filename        TEXT,
-    blob_sha256     TEXT NOT NULL REFERENCES blobs(sha256),
+    blob_sha256     TEXT REFERENCES blobs(sha256),
     external_path   TEXT,
     caption         TEXT,
     visibility      TEXT NOT NULL DEFAULT 'active',
@@ -106,6 +106,8 @@ CREATE TABLE IF NOT EXISTS images (
     CONSTRAINT fk_images_blob_location
         FOREIGN KEY (blob_sha256, external_path)
         REFERENCES blob_locations(blob_sha256, external_path),
+    CONSTRAINT ck_images_blob_or_external_path
+        CHECK (blob_sha256 IS NOT NULL OR external_path IS NOT NULL),
     UNIQUE (gallery_id, page_num)
 );
 CREATE INDEX IF NOT EXISTS idx_images_external_path
@@ -115,6 +117,9 @@ CREATE INDEX IF NOT EXISTS idx_images_external_path
 ALTER TABLE images ADD COLUMN IF NOT EXISTS source_size BIGINT;
 ALTER TABLE images ADD COLUMN IF NOT EXISTS source_mtime_ns BIGINT;
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_dir_mtime_ns BIGINT;
+
+-- Pending link pages (mirrors migration 0027).
+CREATE INDEX IF NOT EXISTS idx_images_pending ON images (gallery_id) WHERE blob_sha256 IS NULL;
 
 CREATE TABLE IF NOT EXISTS tags (
     id              BIGSERIAL PRIMARY KEY,
