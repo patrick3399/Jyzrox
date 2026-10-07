@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +47,10 @@ from worker.constants import (
 from worker.helpers import _sha256, _validate_image_magic
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
+
+# Link imports commit every N new files so a gallery is readable while the rest
+# is still being hashed (ADR 0014).
+LINK_IMPORT_CHUNK = 20
 
 
 def _subscription_artist_id(source: str, source_id: str, artist_id: str | None, source_url: str | None) -> str | None:
@@ -503,6 +508,9 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     if not src_path.is_dir():
         return {"status": "failed", "error": f"not a directory: {source_dir}"}
     source_identity = SourceDirectoryIdentity.capture(src_path) if mode == "link" else None
+    # Captured before listing: a file added during the import moves the
+    # directory mtime past this value, so the next link sync notices it.
+    source_dir_mtime_ns = src_path.stat().st_mtime_ns if mode == "link" else None
 
     files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
     # Validate magic bytes for image files; pass video files through without magic check
@@ -567,6 +575,51 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             pending_link_symlinks: list[tuple[str, Blob, str]] = []
             # Link mode only: re-verified at the commit boundary below.
             file_identities: list[SourceFileIdentity] = []
+            last_progress_event = 0.0
+
+            async def _commit_link_chunk(*, commit: bool) -> None:
+                """Verify and expose the link files hashed since the last chunk."""
+                if source_identity is None:
+                    return
+                source_identity.assert_unchanged("finalize")
+                # Per-file re-check: the directory may be untouched while an
+                # individual file was rewritten or swapped since we hashed it.
+                for identity in file_identities:
+                    identity.assert_unchanged("finalize")
+                link_states: list[tuple[Path, str | None]] = []
+                try:
+                    for filename, blob, external_path in pending_link_symlinks:
+                        link = library_dir(gallery_source, gallery_source_id) / filename
+                        if link.exists() and not link.is_symlink():
+                            raise FileExistsError(f"refusing to replace non-symlink library file: {link}")
+                        previous_target = os.readlink(link) if link.is_symlink() else None
+                        link_states.append((link, previous_target))
+                        await create_library_symlink(
+                            gallery_source,
+                            gallery_source_id,
+                            filename,
+                            blob,
+                            external_path=external_path,
+                        )
+                    source_identity.assert_unchanged("commit")
+                    for identity in file_identities:
+                        identity.assert_unchanged("commit")
+                    if commit:
+                        chunk_gallery = await session.get(Gallery, gallery_id)
+                        if chunk_gallery is not None:
+                            chunk_gallery.pages = (
+                                await session.execute(
+                                    select(func.count(Image.id)).where(Image.gallery_id == gallery_id)
+                                )
+                            ).scalar_one()
+                            if not chunk_gallery.source_path:
+                                chunk_gallery.source_path = source_identity.real_path
+                        await session.commit()
+                except Exception:
+                    _restore_library_links(link_states)
+                    raise
+                pending_link_symlinks.clear()
+                file_identities.clear()
 
             for f in files:
                 if source_identity is not None:
@@ -644,6 +697,8 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                         filename=f.name,
                         blob_sha256=sha256,
                         external_path=image_external_path,
+                        source_size=file_identity.size if mode == "link" else None,
+                        source_mtime_ns=file_identity.mtime_ns if mode == "link" else None,
                         added_at=datetime.now(UTC),
                     )
                     .on_conflict_do_nothing()
@@ -676,33 +731,21 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                         _json.dumps({"processed": processed, "total": total, "status": "running"}),
                     )
 
-            if source_identity is not None:
-                source_identity.assert_unchanged("finalize")
-                # Per-file re-check: the directory may be untouched while an
-                # individual file was rewritten or swapped since we hashed it.
-                for identity in file_identities:
-                    identity.assert_unchanged("finalize")
-                link_states: list[tuple[Path, str | None]] = []
-                try:
-                    for filename, blob, external_path in pending_link_symlinks:
-                        link = library_dir(gallery_source, gallery_source_id) / filename
-                        if link.exists() and not link.is_symlink():
-                            raise FileExistsError(f"refusing to replace non-symlink library file: {link}")
-                        previous_target = os.readlink(link) if link.is_symlink() else None
-                        link_states.append((link, previous_target))
-                        await create_library_symlink(
-                            gallery_source,
-                            gallery_source_id,
-                            filename,
-                            blob,
-                            external_path=external_path,
+                if len(pending_link_symlinks) >= LINK_IMPORT_CHUNK:
+                    await _commit_link_chunk(commit=True)
+                    if time.monotonic() - last_progress_event >= 1.0:
+                        last_progress_event = time.monotonic()
+                        from core.events import EventType, emit_safe
+
+                        await emit_safe(
+                            EventType.GALLERY_UPDATED,
+                            resource_type="gallery",
+                            resource_id=gallery_id,
+                            reason="import_progress",
                         )
-                    source_identity.assert_unchanged("commit")
-                    for identity in file_identities:
-                        identity.assert_unchanged("commit")
-                except Exception:
-                    _restore_library_links(link_states)
-                    raise
+
+            # The last chunk is committed together with the terminal status below.
+            await _commit_link_chunk(commit=False)
 
             # Update gallery page count and status
             gallery = await session.get(Gallery, gallery_id)
@@ -723,6 +766,8 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                     gallery.source_path = (
                         source_identity.real_path if source_identity is not None else os.path.realpath(src_path)
                     )
+                if mode == "link" and terminal_status == "complete":
+                    gallery.source_dir_mtime_ns = source_dir_mtime_ns
                 gallery.metadata_updated_at = func.now()
                 # Capture before commit: attributes expire on commit
                 sidecar_payload = sidecar_payload_from_gallery(gallery)
