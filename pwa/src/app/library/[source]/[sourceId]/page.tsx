@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import useSWR from 'swr'
 import { useLibraryGallery, useInfiniteGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
+import { useLinkGallerySync } from '@/hooks/useLinkGallerySync'
 import { api } from '@/lib/api'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
@@ -106,6 +107,10 @@ export default function GalleryDetailPage() {
     loadMore: loadMoreImages,
     mutate: mutateImages,
   } = useInfiniteGalleryImages(source, sourceId, { limit: 120 })
+  useLinkGallerySync(gallery, () => {
+    void mutateGallery()
+    void mutateImages()
+  })
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(
     source ?? '',
     sourceId ?? '',

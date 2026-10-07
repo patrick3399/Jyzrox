@@ -4,6 +4,7 @@ import type {
   Gallery,
   GalleryImage,
   GalleryListResponse,
+  GallerySyncResult,
   GallerySearchParams,
   ReadProgress,
   ArtistSummary,
@@ -29,6 +30,12 @@ export const library = {
 
   getGallery: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<Gallery>(galleryApiPath(source, sourceId), init),
+
+  syncGallery: (source: string, sourceId: string, init?: RequestInit) =>
+    apiFetch<GallerySyncResult>(galleryApiPath(source, sourceId, '/sync'), {
+      ...init,
+      method: 'POST',
+    }),
 
   getImages: (
     source: string,

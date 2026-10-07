@@ -43,6 +43,27 @@ export interface Gallery {
   metadata_updated_at?: string | null
 }
 
+export interface GallerySyncResult {
+  status:
+    | 'synced'
+    | 'unchanged'
+    | 'deferred'
+    | 'busy'
+    | 'importing'
+    | 'not_link'
+    | 'not_found'
+    | 'skipped_trashed'
+    | 'root_unavailable'
+    | 'source_missing'
+  changed: boolean
+  added: number
+  removed: number
+  renamed: number
+  replaced: number
+  pending: number
+  pages: number | null
+}
+
 export interface GalleryImage {
   id: number
   gallery_id: number
