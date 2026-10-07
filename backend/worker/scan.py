@@ -32,6 +32,7 @@ from services.cas import (
     thumb_dir,
     thumbnails_complete_at,
 )
+from services.link_sync import library_root_available, sync_link_gallery
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_MEDIA_EXTS
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 from worker.constants import logger
@@ -378,6 +379,7 @@ async def rescan_library_job(ctx: dict) -> dict:
             CHUNK = 500
             processed = 0
             pending_thumbnail_galleries: list[int] = []
+            root_available: dict[str, bool] = {}
 
             for chunk_start in range(0, total, CHUNK):
                 # Check for cancel signal once per chunk
@@ -429,6 +431,20 @@ async def rescan_library_job(ctx: dict) -> dict:
                     gallery = gallery_map.get(gid)
                     if not gallery:
                         continue
+
+                    # An unmounted or empty library root makes every link file
+                    # look deleted. Fail closed: skip verification, remove nothing.
+                    if gallery.import_mode == "link" and gallery.library_path:
+                        root = gallery.library_path
+                        if root not in root_available:
+                            root_available[root] = library_root_available(root)
+                            if not root_available[root]:
+                                logger.error(
+                                    "[rescan_library] library root %s is missing or empty; skipping its link galleries",
+                                    root,
+                                )
+                        if not root_available[root]:
+                            continue
 
                     images = images_by_gallery.get(gid, [])
                     missing_thumb = False
@@ -601,6 +617,23 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         if gallery.deleted_at is not None:
             logger.info("[rescan_gallery] gallery_id=%d is trashed; skipping", gallery_id)
             return {"status": "skipped", "reason": "trashed"}
+
+        if gallery.import_mode == "link" and gallery.source_path and Path(gallery.source_path).is_dir():
+            # A link gallery with a live source directory uses the fingerprint
+            # sync: it hashes only new or changed files. The legacy path below
+            # still handles a source directory that has vanished.
+            await session.rollback()  # release the snapshot before the sync opens its own session
+            sync_result = await sync_link_gallery(gallery_id, redis=ctx["redis"], force=True)
+            return {
+                "status": "done" if sync_result.status in ("synced", "unchanged") else sync_result.status,
+                "gallery_id": gallery_id,
+                "removed": sync_result.removed,
+                "added": sync_result.added + sync_result.replaced,
+                "pages": sync_result.pages,
+            }
+        if gallery.import_mode == "link" and not library_root_available(gallery.library_path):
+            logger.error("[rescan_gallery] gallery_id=%d: library root unavailable; nothing removed", gallery_id)
+            return {"status": "skipped", "reason": "root_unavailable"}
 
         # Load excluded blob hashes for this gallery
         excluded_rows = (
@@ -1427,6 +1460,39 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
     return {"status": "done", "total": total}
 
 
+async def sync_all_link_galleries(ctx: dict) -> dict:
+    """Fingerprint-check every link gallery.
+
+    Opening a gallery only compares the directory mtime, which a file rewritten
+    in place does not move. This sweep forces the full stat diff, and also picks
+    up folders nobody has opened while the watcher was off.
+    """
+    async with AsyncSessionLocal() as session:
+        gallery_ids = (
+            (
+                await session.execute(
+                    select(Gallery.id)
+                    .where(
+                        Gallery.import_mode == "link",
+                        Gallery.source_path.is_not(None),
+                        Gallery.deleted_at.is_(None),
+                    )
+                    .order_by(Gallery.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    changed = 0
+    for gallery_id in gallery_ids:
+        result = await sync_link_gallery(gallery_id, redis=ctx["redis"], force=True)
+        if result.changed:
+            changed += 1
+    logger.info("[link_sweep] checked %d link galleries, %d changed", len(gallery_ids), changed)
+    return {"checked": len(gallery_ids), "changed": changed}
+
+
 async def scheduled_scan_job(ctx: dict, force: bool = False) -> dict:
     """Scheduled library scan — uses croniter-based gating."""
     if not force and not await _cron_should_run(ctx, "library_scan", "0 * * * *"):
@@ -1437,6 +1503,7 @@ async def scheduled_scan_job(ctx: dict, force: bool = False) -> dict:
         logger.info("[scheduled_scan] Starting scheduled library scan")
         await auto_discover_job(ctx)
         await rescan_library_job(ctx)
+        await sync_all_link_galleries(ctx)
         await _cron_record(ctx, "library_scan", "ok")
         logger.info("[scheduled_scan] Scheduled scan complete")
         return {"status": "done"}

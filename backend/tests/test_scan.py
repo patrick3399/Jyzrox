@@ -8,7 +8,7 @@ Filesystem operations are mocked via patch on resolve_blob_path / thumb_dir.
 """
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -544,6 +544,32 @@ class TestRescanLibraryJob:
 
         mock_enqueue.assert_not_awaited()
 
+    async def test_missing_library_root_does_not_remove_link_gallery_images(self, tmp_path):
+        """An unmounted root makes every link file look deleted; nothing may be removed."""
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="deadbeef", storage="external")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        img.external_path = str(tmp_path / "unmounted" / "g" / "001.jpg")
+        gallery = _make_gallery(
+            gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(tmp_path / "unmounted")
+        )
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        decrement.assert_not_awaited()
+        statements = [str(call.args[0]).upper() for call in session.execute.call_args_list if call.args]
+        assert not any(statement.lstrip().startswith("DELETE") for statement in statements), statements
+        assert gallery.pages == 1
+
 
 # ---------------------------------------------------------------------------
 # TestRescanGalleryJob
@@ -877,6 +903,28 @@ class TestRescanGalleryJob:
 
         assert gallery.download_status == "missing"
 
+    async def test_link_gallery_with_live_source_dir_delegates_to_link_sync(self, tmp_path):
+        """A link gallery must use the fingerprint sync instead of re-hashing its folder."""
+        from services.link_sync import LinkSyncResult
+        from worker.scan import rescan_gallery_job
+
+        source_dir = tmp_path / "g"
+        source_dir.mkdir()
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", library_path=str(tmp_path))
+        gallery.source_path = str(source_dir)
+        session = _make_session(gallery_get_result=gallery)
+        sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=2, removed=1, pages=5))
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.sync_link_gallery", sync, create=True),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, 10)
+
+        sync.assert_awaited_once_with(10, redis=ANY, force=True)
+        assert result == {"status": "done", "gallery_id": 10, "removed": 1, "added": 2, "pages": 5}
+        session.execute.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # TestAutoDiscoverJob
@@ -1091,6 +1139,12 @@ class TestScheduledScanJob:
             patch("worker.scan._cron_record", new_callable=AsyncMock),
             patch("worker.scan.auto_discover_job", auto_discover_mock),
             patch("worker.scan.rescan_library_job", rescan_mock),
+            patch(
+                "worker.scan.sync_all_link_galleries",
+                new_callable=AsyncMock,
+                return_value={"checked": 0, "changed": 0},
+                create=True,
+            ),
         ):
             result = await scheduled_scan_job({"redis": r}, force=True)
 
@@ -1113,6 +1167,12 @@ class TestScheduledScanJob:
             patch("worker.scan._cron_record", new_callable=AsyncMock),
             patch("worker.scan.auto_discover_job", auto_discover_mock),
             patch("worker.scan.rescan_library_job", rescan_mock),
+            patch(
+                "worker.scan.sync_all_link_galleries",
+                new_callable=AsyncMock,
+                return_value={"checked": 0, "changed": 0},
+                create=True,
+            ),
         ):
             result = await scheduled_scan_job({"redis": r})
 
@@ -1133,6 +1193,12 @@ class TestScheduledScanJob:
             patch("worker.scan.auto_discover_job", new_callable=AsyncMock, return_value={"discovered": 0}),
             patch(
                 "worker.scan.rescan_library_job", new_callable=AsyncMock, return_value={"status": "done", "total": 0}
+            ),
+            patch(
+                "worker.scan.sync_all_link_galleries",
+                new_callable=AsyncMock,
+                return_value={"checked": 0, "changed": 0},
+                create=True,
             ),
         ):
             await scheduled_scan_job({"redis": r})
@@ -1334,3 +1400,27 @@ class TestRescanLibraryPathJob:
 
         assert discovered == ["stranded"]
         assert imported == ["stranded"]
+
+
+class TestSyncAllLinkGalleries:
+    async def test_every_live_link_gallery_gets_a_forced_sync(self):
+        from services.link_sync import LinkSyncResult
+        from worker.scan import sync_all_link_galleries
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        ids = MagicMock()
+        ids.scalars.return_value.all.return_value = [3, 4]
+        session.execute = AsyncMock(return_value=ids)
+        sync = AsyncMock(side_effect=[LinkSyncResult(status="synced", added=1), LinkSyncResult(status="unchanged")])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.sync_link_gallery", sync),
+        ):
+            result = await sync_all_link_galleries({"redis": _make_redis()})
+
+        assert result == {"checked": 2, "changed": 1}
+        assert [call.args[0] for call in sync.await_args_list] == [3, 4]
+        assert all(call.kwargs["force"] is True for call in sync.await_args_list)
