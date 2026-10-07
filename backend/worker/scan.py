@@ -525,6 +525,13 @@ async def rescan_library_job(ctx: dict) -> dict:
                         for sha256, count in sha_counts.items():
                             await decrement_ref_count(sha256, session, count)
 
+                # Send the pending gallery updates now: after the blob updates
+                # (lock order), and before the raw DELETEs below. Textual
+                # statements do not autoflush and the ORM cannot see them
+                # delete a gallery row, so an update still pending for that
+                # row would fail the commit with StaleDataError.
+                await session.flush()
+
                 # Batch delete orphaned/missing images
                 if images_to_delete:
                     await session.execute(

@@ -367,6 +367,68 @@ class TestRescanLibraryJob:
             "gallery updates are not sent (and gallery rows locked) first"
         )
 
+    async def test_vanished_link_gallery_update_is_flushed_before_its_row_is_deleted(self):
+        """Pending gallery updates must be flushed before the raw DELETEs.
+
+        The raw `DELETE FROM galleries` is invisible to the ORM and textual
+        statements do not autoflush. With autoflush suspended around the
+        ref_count updates, `gallery.pages = 0` stayed pending until commit and
+        the UPDATE then matched no row (prod, 2026-10-07 23:42:52:
+        "UPDATE statement on table 'galleries' expected to update 1 row(s); 0
+        were matched"). The flush must also come after the blob updates so the
+        lock order stays blobs → galleries.
+        """
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="deadbeef", storage="external")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        img.external_path = "/mnt/lib/gone/001.jpg"
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1)
+
+        order: list[str] = []
+        ids_res = MagicMock()
+        ids_res.scalars.return_value.all.return_value = [10]
+        imgs_res = MagicMock()
+        imgs_res.scalars.return_value.all.return_value = [img]
+        gals_res = MagicMock()
+        gals_res.scalars.return_value.all.return_value = [gallery]
+        scripted = [ids_res, imgs_res, gals_res]
+
+        async def execute(statement, *_args, **_kwargs):
+            sql = " ".join(str(statement).split()).upper()
+            if sql.startswith("DELETE FROM"):
+                order.append(" ".join(sql.split()[:3]))
+            return scripted.pop(0) if scripted else MagicMock()
+
+        async def flush():
+            order.append("FLUSH")
+
+        async def decrement(*_args, **_kwargs):
+            order.append("DECREMENT")
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=execute)
+        session.flush = AsyncMock(side_effect=flush)
+        session.commit = AsyncMock()
+        session.no_autoflush = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        missing_path = MagicMock(spec=Path)
+        missing_path.exists.return_value = False
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan.decrement_ref_count", side_effect=decrement),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        assert order == ["DECREMENT", "FLUSH", "DELETE FROM IMAGES", "DELETE FROM GALLERIES"]
+
     async def test_gallery_with_zero_pages_marked_missing(self):
         """Gallery with 0 remaining pages (non-link mode) → download_status='missing'."""
         from worker.scan import rescan_library_job
