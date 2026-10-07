@@ -118,6 +118,8 @@ class Gallery(Base):
     )
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # mtime of source_path at the last clean link sync; NULL forces a full diff.
+    source_dir_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metadata_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -254,6 +256,9 @@ class Image(Base):
     filename: Mapped[str | None] = mapped_column(Text)
     blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
     external_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # stat fingerprint of external_path when blob_sha256 was computed (link mode).
+    source_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     visibility: Mapped[str] = mapped_column(Text, default="active", server_default="active", nullable=False)

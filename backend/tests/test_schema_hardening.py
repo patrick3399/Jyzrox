@@ -131,3 +131,19 @@ class TestUsersRoleConstraint:
         assert set(ROLE_HIERARCHY.keys()) == db_allowed, (
             "core.auth.ROLE_HIERARCHY and the DB chk_users_role constraint must allow identical role sets"
         )
+
+
+_LINK_SYNC_MIGRATION = Path(__file__).parent.parent / "migrations" / "versions" / "0026_link_sync_fingerprints.py"
+
+
+def test_link_sync_fingerprint_columns_exist_in_model_init_sql_and_migration():
+    from db.models import Gallery, Image
+
+    assert "source_dir_mtime_ns" in Gallery.__table__.c
+    assert "source_size" in Image.__table__.c
+    assert "source_mtime_ns" in Image.__table__.c
+
+    for source in (_INIT_SQL.read_text(), _LINK_SYNC_MIGRATION.read_text()):
+        assert "ALTER TABLE images ADD COLUMN IF NOT EXISTS source_size BIGINT" in source
+        assert "ALTER TABLE images ADD COLUMN IF NOT EXISTS source_mtime_ns BIGINT" in source
+        assert "ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_dir_mtime_ns BIGINT" in source

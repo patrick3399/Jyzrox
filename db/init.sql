@@ -111,6 +111,11 @@ CREATE TABLE IF NOT EXISTS images (
 CREATE INDEX IF NOT EXISTS idx_images_external_path
     ON images(external_path) WHERE external_path IS NOT NULL;
 
+-- Link-sync fingerprints (mirrors migration 0026).
+ALTER TABLE images ADD COLUMN IF NOT EXISTS source_size BIGINT;
+ALTER TABLE images ADD COLUMN IF NOT EXISTS source_mtime_ns BIGINT;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_dir_mtime_ns BIGINT;
+
 CREATE TABLE IF NOT EXISTS tags (
     id              BIGSERIAL PRIMARY KEY,
     namespace       TEXT NOT NULL,
