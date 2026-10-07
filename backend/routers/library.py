@@ -27,6 +27,7 @@ from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
 from sqlalchemy.sql.elements import ColumnElement
 
+import core.queue
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import get_db
 from core.gallery_helpers import (
@@ -71,6 +72,7 @@ from services.gallery_lifecycle import (
     invalidate_sources_cache as _invalidate_sources_cache,
 )
 from services.library_sidecar import SIDECAR_FILENAME
+from services.link_sync import LinkSyncResult, sync_link_gallery
 from services.settings_store import get_toggle as _get_toggle
 from services.site_catalog import get_site_config as _get_gdl_site_config
 
@@ -1671,6 +1673,40 @@ async def get_gallery_images(
         "images": await _images_with_source_items(db, images),
         "favorited_image_ids": sorted(fav_ids),
     }
+
+
+# Work a gallery-open request may do inline. Above this the sync is handed to
+# the worker and the page refreshes from the gallery.updated event.
+_LINK_SYNC_INLINE_MAX_FILES = 40
+_LINK_SYNC_INLINE_MAX_BYTES = 512 * 1024 * 1024
+
+
+@router.post("/galleries/{source}/{source_id}/sync")
+async def sync_gallery_with_source(
+    source: str,
+    source_id: str,
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reconcile a link-mode gallery with its folder before it is read.
+
+    Anyone who can read the gallery may call this: the sync mirrors the folder
+    on the system's behalf and is not a user edit (ADR 0014).
+    """
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    if g.import_mode != "link" or not g.source_path:
+        return LinkSyncResult(status="not_link", pages=g.pages).as_dict()
+
+    gallery_id = g.id
+    result = await sync_link_gallery(
+        gallery_id,
+        redis=get_redis(),
+        max_hash_files=_LINK_SYNC_INLINE_MAX_FILES,
+        max_hash_bytes=_LINK_SYNC_INLINE_MAX_BYTES,
+    )
+    if result.status == "deferred":
+        await core.queue.enqueue("rescan_gallery_job", gallery_id=gallery_id, _job_id=f"link-sync:{gallery_id}")
+    return result.as_dict()
 
 
 @router.get("/galleries/{source}/{source_id}/hidden")
