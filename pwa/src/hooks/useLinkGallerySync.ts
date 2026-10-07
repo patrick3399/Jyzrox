@@ -13,9 +13,10 @@ interface SyncableGallery {
  * Reconciles a link-mode gallery with its source folder when it is opened.
  *
  * The backend compares one directory mtime, so this is cheap for an unchanged
- * folder. `onChanged` fires only when pages were added, removed, renamed or
- * replaced; a large change is handed to the worker instead, and the existing
- * `gallery.updated` WebSocket invalidation refreshes the page when it lands.
+ * folder. `onChanged` fires when pages were added, removed, renamed or
+ * replaced, or when pages are still waiting for their hash (the sync registers
+ * them without hashing; the worker fills them in in the background, and the
+ * `gallery.updated` WebSocket event refreshes the page when that lands).
  */
 export function useLinkGallerySync(
   gallery: SyncableGallery | null | undefined,
@@ -36,7 +37,9 @@ export function useLinkGallerySync(
     api.library
       .syncGallery(source, sourceId)
       .then((result) => {
-        if (!cancelled && result.changed) onChangedRef.current()
+        // `pending` is the number of pages the sync left unhashed: they were
+        // registered by this sync (or an earlier one), so the grid must refetch.
+        if (!cancelled && (result.changed || (result.pending ?? 0) > 0)) onChangedRef.current()
       })
       .catch(() => {
         // Best-effort: the gallery still opens from what the DB already has.

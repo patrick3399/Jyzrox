@@ -8,6 +8,7 @@ import useSWR from 'swr'
 import { useLibraryGallery, useInfiniteGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { useLinkGallerySync } from '@/hooks/useLinkGallerySync'
+import { useGalleryEventRefresh } from '@/hooks/useGalleryEventRefresh'
 import { api } from '@/lib/api'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
@@ -83,6 +84,10 @@ const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: stri
     labelKey: 'library.statusDownloading',
     className: 'bg-blue-900/40 border-blue-700/50 text-blue-400',
   },
+  importing: {
+    labelKey: 'library.statusImporting',
+    className: 'bg-blue-900/40 border-blue-700/50 text-blue-400',
+  },
 }
 
 export default function GalleryDetailPage() {
@@ -109,6 +114,11 @@ export default function GalleryDetailPage() {
   } = useInfiniteGalleryImages(source, sourceId, { limit: 120 })
   useLinkGallerySync(gallery, () => {
     void mutateGallery()
+    void mutateImages()
+  })
+  // SWR's global mutate(filter) skips useSWRInfinite keys, so the grid has to
+  // refetch itself when the backend finishes hashing pages in the background.
+  useGalleryEventRefresh(gallery?.id, () => {
     void mutateImages()
   })
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(
@@ -345,7 +355,9 @@ export default function GalleryDetailPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [gallery?.source, gallery?.source_id, router, selectMode])
 
-  const isDownloading = gallery?.download_status === 'downloading'
+  // `importing` (link pages registered, hash pass running) is in progress too.
+  const isDownloading =
+    gallery?.download_status === 'downloading' || gallery?.download_status === 'importing'
   // Fallback poll — only runs when WS is down. While connected, the effect
   // below reacts to WS job-progress events instead (see wsInvalidation.tsx
   // module docstring for why download.* can't drive this via lastEvent).
@@ -741,6 +753,7 @@ export default function GalleryDetailPage() {
     pagesOutdated: !!pagesOutdated,
   })
   const artistDisplayName = getArtistDisplayName(gallery)
+  const pageCount = gallery.pages ?? images.length
 
   return (
     <div>
@@ -870,9 +883,9 @@ export default function GalleryDetailPage() {
                 {
                   labelKey: 'library.metaPages',
                   value:
-                    gallery.source_pages && gallery.source_pages > gallery.pages
-                      ? `${gallery.pages}/${gallery.source_pages}`
-                      : String(gallery.pages),
+                    gallery.source_pages && gallery.source_pages > pageCount
+                      ? `${pageCount}/${gallery.source_pages}`
+                      : String(pageCount),
                 },
                 {
                   labelKey: 'library.metaAdded',
@@ -1149,7 +1162,7 @@ export default function GalleryDetailPage() {
         </p>
       )}
 
-      {activeJobId && gallery.download_status !== 'downloading' && (
+      {activeJobId && !isDownloading && (
         <div className="bg-vault-accent/10 border border-vault-accent/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-vault-accent text-sm">
           <span className="flex gap-0.5">
             <span className="w-1.5 h-1.5 rounded-full bg-vault-accent animate-bounce [animation-delay:0ms]" />
@@ -1160,7 +1173,7 @@ export default function GalleryDetailPage() {
         </div>
       )}
 
-      {gallery.download_status === 'downloading' && (
+      {isDownloading && (
         <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-blue-400 text-sm">
           <span className="flex gap-0.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
@@ -1183,8 +1196,8 @@ export default function GalleryDetailPage() {
       <div className="bg-vault-card border border-vault-border rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
-            {t('library.images')} ({gallery.pages}
-            {gallery.source_pages && gallery.source_pages > gallery.pages
+            {t('library.images')} ({pageCount}
+            {gallery.source_pages && gallery.source_pages > pageCount
               ? `/${gallery.source_pages}`
               : ''}{' '}
             {t('library.metaPages')})
@@ -1393,7 +1406,7 @@ export default function GalleryDetailPage() {
 
             {images.length === 0 && (
               <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-                {Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
+                {Array.from({ length: Math.min(pageCount, 40) }).map((_, i) => (
                   <Link
                     key={i}
                     href={readerHref(gallery.source, gallery.source_id, i + 1)}

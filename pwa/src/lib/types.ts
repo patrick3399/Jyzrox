@@ -32,7 +32,14 @@ export interface Gallery {
   uploader: string
   artist_id: string | null
   artist_name?: string | null
-  download_status: 'proxy_only' | 'partial' | 'complete' | 'downloading'
+  download_status:
+    | 'proxy_only'
+    | 'partial'
+    | 'complete'
+    | 'downloading'
+    | 'importing'
+    | 'failed'
+    | 'missing'
   import_mode: string | null
   tags_array: string[]
   cover_thumb?: string | null
@@ -47,9 +54,7 @@ export interface GallerySyncResult {
   status:
     | 'synced'
     | 'unchanged'
-    | 'deferred'
     | 'busy'
-    | 'importing'
     | 'not_link'
     | 'not_found'
     | 'skipped_trashed'
@@ -79,6 +84,8 @@ export interface GalleryImage {
   media_type: 'image' | 'video' | 'gif'
   duration: number | null
   thumbhash?: string | null
+  /** Link page registered but not hashed yet: original file readable, no thumbnail. */
+  pending?: boolean
   visibility?: 'active' | 'user_hidden' | 'source_missing' | 'replaced'
   source_item_id?: string | null
   source_item_url?: string | null

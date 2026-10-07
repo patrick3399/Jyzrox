@@ -2,6 +2,14 @@ import type { Gallery, GalleryImage } from '@/lib/types'
 
 export const READER_DOWNLOAD_REFRESH_INTERVAL_MS = 4000
 
+/**
+ * A gallery whose pages may still change underneath the reader: a download in
+ * flight, or a link gallery whose pages are registered but still being hashed.
+ */
+export function isGalleryInProgress(status: Gallery['download_status'] | undefined): boolean {
+  return status === 'downloading' || status === 'importing'
+}
+
 export function readerImagesEqual(current: GalleryImage[], next: GalleryImage[]): boolean {
   if (current.length !== next.length) return false
   return current.every((image, index) => {
@@ -11,6 +19,7 @@ export function readerImagesEqual(current: GalleryImage[], next: GalleryImage[])
       image.id === candidate.id &&
       image.page_num === candidate.page_num &&
       image.file_path === candidate.file_path &&
+      image.file_hash === candidate.file_hash &&
       image.thumb_path === candidate.thumb_path &&
       image.media_type === candidate.media_type &&
       image.visibility === candidate.visibility

@@ -306,6 +306,7 @@ const ko: Record<string, string> = {
   'library.statusPartial': '부분',
   'library.statusProxyOnly': '프록시만',
   'library.statusDownloading': '다운로드 중',
+  'library.statusImporting': '처리 중',
   'library.downloadingBanner': '다운로드 진행 중 — 가져오는 순서대로 이미지가 표시됩니다',
   'library.checkingForUpdates': '업데이트 확인 중...',
   'library.favoriteError': '즐겨찾기 업데이트 실패',

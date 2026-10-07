@@ -728,6 +728,7 @@ const zhCN: Record<string, string> = {
   'library.statusPartial': '部分',
   'library.statusProxyOnly': '仅代理',
   'library.statusDownloading': '下载中',
+  'library.statusImporting': '处理中',
   'library.downloadingBanner': '正在下载 — 图片将在导入时逐一显示',
   'library.checkingForUpdates': '正在检查更新...',
   'library.favoriteError': '更新收藏失败',

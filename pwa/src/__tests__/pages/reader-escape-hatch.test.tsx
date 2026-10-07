@@ -30,6 +30,7 @@ vi.mock('@/lib/i18n', () => ({ t: (key: string) => key }))
 vi.mock('@/lib/ws', () => ({
   useWsConnection: () => ({ connected: true }),
   useWsJobs: () => ({ lastJobUpdate: null }),
+  useWsEvents: () => ({ lastEvent: null }),
 }))
 
 vi.mock('@/components/Reader', () => ({

@@ -501,6 +501,7 @@ const en: Record<string, string> = {
   'library.statusPartial': 'Partial',
   'library.statusProxyOnly': 'Proxy Only',
   'library.statusDownloading': 'Downloading',
+  'library.statusImporting': 'Processing',
   'library.downloadingBanner': 'Download in progress — images appear as they are imported',
   'library.checkingForUpdates': 'Checking for updates...',
   'library.favoriteError': 'Failed to update favorite',

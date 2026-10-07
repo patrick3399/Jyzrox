@@ -74,7 +74,9 @@ export function ThumbnailCell({
       thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
     }
   } else if (image.isLocal) {
-    thumbSrc = image.thumbUrl || image.url
+    // A video has no usable <img> source other than its generated thumbnail;
+    // a pending video (not hashed yet) has none, so it keeps the placeholder.
+    thumbSrc = image.thumbUrl || (image.mediaType !== 'video' ? image.url : null)
   }
 
   return (

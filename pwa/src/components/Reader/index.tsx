@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { GalleryImage } from '@/lib/types'
+import type { Gallery, GalleryImage } from '@/lib/types'
 import type { ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings } from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
 import { t } from '@/lib/i18n'
@@ -362,7 +362,7 @@ function PageSlot({
 interface ReaderProps {
   source: string
   sourceId: string
-  downloadStatus: 'proxy_only' | 'partial' | 'complete' | 'downloading'
+  downloadStatus: Gallery['download_status']
   images: GalleryImage[]
   totalPages: number
   initialPage?: number

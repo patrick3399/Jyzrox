@@ -30,8 +30,17 @@ describe('useLinkGallerySync', () => {
     expect(mockSyncGallery).toHaveBeenCalledWith('local', 'Cosplay/a/b')
   })
 
+  it('calls onChanged when the sync left pages pending even though nothing changed', async () => {
+    mockSyncGallery.mockResolvedValue({ status: 'unchanged', changed: false, pending: 3 })
+    const onChanged = vi.fn()
+
+    renderHook(() => useLinkGallerySync(linkGallery, onChanged))
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+  })
+
   it('does not call onChanged when the folder is unchanged', async () => {
-    mockSyncGallery.mockResolvedValue({ status: 'unchanged', changed: false })
+    mockSyncGallery.mockResolvedValue({ status: 'unchanged', changed: false, pending: 0 })
     const onChanged = vi.fn()
 
     renderHook(() => useLinkGallerySync(linkGallery, onChanged))

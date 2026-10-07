@@ -639,6 +639,7 @@ const ja: Record<string, string> = {
   'library.statusPartial': '部分',
   'library.statusProxyOnly': 'プロキシのみ',
   'library.statusDownloading': 'ダウンロード中',
+  'library.statusImporting': '処理中',
   'library.downloadingBanner': 'ダウンロード中 — インポートされた画像から順に表示されます',
   'library.checkingForUpdates': '更新を確認中...',
   'library.favoriteError': 'お気に入りの更新に失敗しました',

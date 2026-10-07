@@ -306,6 +306,7 @@ const zhTW: Record<string, string> = {
   'library.downloadingBanner': '下載進行中 — 圖片在匯入後逐一顯示',
   'library.checkingForUpdates': '正在檢查更新...',
   'library.statusDownloading': '下載中',
+  'library.statusImporting': '處理中',
   'library.statusOutdated': '已過期',
   'library.updateNow': '更新',
   'library.repairNow': '修復',
