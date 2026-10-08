@@ -221,12 +221,15 @@ async def test_v3_config_has_file_unique(mock_config_path):
 
 
 @pytest.mark.asyncio
-async def test_v3_subscription_has_archive_mode_memory(mock_config_path):
+async def test_subscription_archive_is_written_per_file_not_buffered_in_memory(mock_config_path):
+    """Memory mode only flushes on an error-free exit, so one failed file or a
+    killed process would drop every archive entry of the run."""
     from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
 
     await _build_gallery_dl_config({}, job_context="subscription")
     config = json.loads(mock_config_path.read_text())
-    assert config["extractor"]["archive-mode"] == "memory"
+    assert "archive-mode" not in config["extractor"]
+    assert config["extractor"]["archive"].startswith("postgresql://")
 
 
 @pytest.mark.asyncio
@@ -244,7 +247,7 @@ async def test_v3_config_has_postprocessors(mock_config_path):
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
-    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "hash" in pp_names
     assert "mtime" in pp_names
 
@@ -255,7 +258,7 @@ async def test_v3_metadata_pp_with_include_filter(mock_config_path):
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
-    meta_pps = [pp for pp in config["postprocessors"] if pp["name"] == "metadata"]
+    meta_pps = [pp for pp in config["extractor"]["postprocessors"] if pp["name"] == "metadata"]
     assert len(meta_pps) == 1
     assert "include" in meta_pps[0]
     assert "title" in meta_pps[0]["include"]
@@ -301,7 +304,7 @@ async def test_v3_pixiv_has_ugoira_pp(mock_config_path):
 
     await _build_gallery_dl_config({"pixiv": "token123"})
     config = json.loads(mock_config_path.read_text())
-    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "ugoira" in pp_names
 
 
@@ -311,7 +314,7 @@ async def test_v3_non_pixiv_no_ugoira(mock_config_path):
 
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
-    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "ugoira" not in pp_names
 
 
@@ -447,8 +450,8 @@ async def test_v3_full_config_integration(mock_config_path):
     assert config["extractor"]["archive-table"] == "{category}"
     assert "archive-format" not in config["extractor"]
 
-    # N10a: subscription has archive-mode memory
-    assert config["extractor"]["archive-mode"] == "memory"
+    # Subscription archive entries are written per file (no memory buffering)
+    assert "archive-mode" not in config["extractor"]
 
     # N10b: file-unique
     assert config["extractor"]["file-unique"] is True
@@ -466,13 +469,13 @@ async def test_v3_full_config_integration(mock_config_path):
     assert config["downloader"]["adjust-extensions"] is True
 
     # N5: postprocessors
-    pp_names = [pp["name"] for pp in config["postprocessors"]]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "hash" in pp_names
     assert "mtime" in pp_names
 
     # N10d: metadata PP with include filter (replaces --write-metadata)
     assert "metadata" in pp_names
-    meta_pp = next(pp for pp in config["postprocessors"] if pp["name"] == "metadata")
+    meta_pp = next(pp for pp in config["extractor"]["postprocessors"] if pp["name"] == "metadata")
     assert "include" in meta_pp
     assert "title" in meta_pp["include"]
     assert "tags" in meta_pp["include"]
@@ -486,3 +489,38 @@ async def test_v3_full_config_integration(mock_config_path):
     # Credentials merged correctly
     assert config["extractor"]["ehentai"]["cookies"] == {"ipb_member_id": "1"}
     assert config["extractor"]["pixiv"]["refresh-token"] == "refresh_token_123"
+
+
+@pytest.mark.asyncio
+async def test_postprocessors_live_under_extractor_so_cli_print_cannot_replace_them(mock_config_path):
+    """gallery-dl's --Print does config.set((), "postprocessors", [...]), replacing a
+    root-level list wholesale. Only extractor-level entries survive (and run first)."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+
+    assert "postprocessors" not in config
+    names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
+    assert names[:3] == ["hash", "mtime", "metadata"]
+
+
+@pytest.mark.asyncio
+async def test_hash_postprocessor_requests_sha256_with_the_option_gallery_dl_reads(mock_config_path):
+    """HashPP reads "hashes"/"mode"; the old "algorithm" key was ignored (md5+sha1)."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    hash_pp = config["extractor"]["postprocessors"][0]
+    assert hash_pp == {"name": "hash", "hashes": "sha256"}
+
+
+@pytest.mark.asyncio
+async def test_metadata_include_keeps_the_fields_artist_extraction_reads(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    include = next(pp for pp in config["extractor"]["postprocessors"] if pp["name"] == "metadata")["include"]
+    assert {"author", "username", "user_id", "user", "content"} <= set(include)

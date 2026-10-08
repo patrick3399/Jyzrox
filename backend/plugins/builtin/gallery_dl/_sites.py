@@ -26,6 +26,9 @@ class GdlSiteConfig:
 
     # ── Artist extraction strategy (replaces if/elif chains) ──
     artist_from: Literal["uploader", "tag", "twitter_author", "pixiv_user", "none"] = "uploader"
+    # Dotted metadata paths tried in order for the artist key; when set they
+    # take precedence over ``artist_from``.
+    artist_fields: tuple[str, ...] = ()
 
     # ── Subscription (replaces SITE_CONFIG in _subscribe.py) ──
     subscribe_id_key: str | None = None
@@ -65,6 +68,12 @@ class GdlSiteConfig:
     # Index of the path segment used as source_id in ensure_gallery_from_url.
     # E.g. weibo.com/u/USERID has the ID at index 1 (skip the "u" prefix).
     url_path_id_index: int = 0
+
+    # ── URL identity (ADR 0016) ──
+    # gallery-dl subcategories that are views of one account; they all map to
+    # the bare account name taken from match group ``account_group``.
+    account_subcategories: tuple[str, ...] = ()
+    account_group: int = 0
 
 
 GDL_SITES: tuple[GdlSiteConfig, ...] = (
@@ -160,6 +169,8 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         cover_page="first",
         title_fields=("author.name", "user.name", "username"),
         artist_from="twitter_author",
+        artist_fields=("author.name", "user.name"),
+        account_subcategories=("user", "media", "timeline", "tweets", "with-replies", "highlights"),
         subscribe_id_key="tweet_id",
         subscribe_url_tpl="https://x.com/{}/media",
         source_id_fields=("tweet_id",),
@@ -177,6 +188,8 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         cover_page="first",
         title_fields=("author.name", "user.name", "username"),
         artist_from="twitter_author",
+        artist_fields=("author.name", "user.name"),
+        account_subcategories=("user", "media", "timeline", "tweets", "with-replies", "highlights"),
         subscribe_id_key="tweet_id",
         subscribe_url_tpl="https://x.com/{}/media",
         source_id_fields=("tweet_id",),
@@ -193,6 +206,8 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         subscribe_id_key="shortcode",
         subscribe_url_tpl="https://www.instagram.com/{}/",
         subscribe_id_pattern=r"^/(@?[^/]+)",
+        artist_fields=("username",),
+        account_subcategories=("user", "posts", "reels"),
     ),
     GdlSiteConfig(
         domain="weibo.com",
@@ -209,6 +224,9 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         sleep_request=(1.0, 3.0),
         url_path_id_index=1,
         source_id_fields=("user.idstr",),
+        artist_fields=("user.idstr",),
+        account_subcategories=("user", "home", "feed", "videos", "newvideo", "article", "album"),
+        account_group=1,
     ),
     GdlSiteConfig(
         domain="facebook.com",
@@ -224,6 +242,8 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         http_timeout=45,
         source_id_fields=("set_id", "user_id", "id"),
         artist_from="uploader",
+        artist_fields=("user_id",),
+        account_subcategories=("user", "photos"),
     ),
     GdlSiteConfig(
         domain="bsky.app",

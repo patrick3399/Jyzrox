@@ -253,6 +253,15 @@ def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
     cfg = get_site_config(source)
     strategy = cfg.artist_from
 
+    for field in cfg.artist_fields:
+        val: object = meta
+        for part in field.split("."):
+            val = val.get(part) if isinstance(val, dict) else None
+        if val and isinstance(val, (str, int)):
+            return f"{source}:{val}"
+    if cfg.artist_fields:
+        return None
+
     if strategy == "twitter_author":
         handle = None
         author = meta.get("author")

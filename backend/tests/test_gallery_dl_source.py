@@ -567,8 +567,8 @@ class TestGalleryDlParseMetadata:
 class TestConfigGeneration:
     """Tests for _build_gallery_dl_config — config file generation logic."""
 
-    async def test_subscription_mode_sets_archive_mode_without_initial_skip(self, tmp_path):
-        """Initial subscription downloads use archive-mode but no abort skip before a success cutoff exists."""
+    async def test_subscription_mode_writes_archive_per_file_without_initial_skip(self, tmp_path):
+        """Initial subscription downloads write the archive per file and set no abort skip before a success cutoff exists."""
         from unittest.mock import MagicMock, patch
 
         from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
@@ -584,7 +584,7 @@ class TestConfigGeneration:
 
         config = json.loads(path.read_text())
         assert "skip" not in config["extractor"]
-        assert config["extractor"].get("archive-mode") == "memory"
+        assert "archive-mode" not in config["extractor"]
 
     async def test_manual_mode_does_not_set_skip(self, tmp_path):
         """Default (manual) job_context should NOT set skip or archive-mode in extractor config."""

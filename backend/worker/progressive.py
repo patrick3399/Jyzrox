@@ -438,6 +438,89 @@ class ProgressiveImporter:
         await self._load_gallery_state()
         return self.gallery_id
 
+    async def ensure_gallery_from_identity(self, identity, metadata: dict | None, dest_dir: Path) -> int:
+        """Create or attach the gallery a download URL maps to (ADR 0016).
+
+        The URL decides ``(source, source_id)``. Per-file metadata only fills
+        uploader/artist, plus title and tags on work-type sites where one
+        file's metadata describes the whole gallery.
+        """
+        from sqlalchemy import case, func
+
+        from plugins.builtin.gallery_dl._metadata import _extract_artist, parse_gallery_dl_import
+        from plugins.builtin.gallery_dl._sites import get_site_config
+
+        source, source_id = identity.source, identity.source_id
+        is_work = get_site_config(identity.category).category in ("gallery", "manga")
+        data = parse_gallery_dl_import(dest_dir, metadata, fallback_source=source) if metadata else None
+
+        title = data.title if (data and is_work and data.title) else source_id
+        tags = data.tags if (data and is_work) else []
+        if identity.is_account:
+            artist_id: str | None = f"{source}:{source_id}"
+        else:
+            artist_id = _extract_artist(source, metadata, data.tags) if (metadata and data) else None
+
+        self.title = title
+        self.source = source
+        self.source_id = source_id
+
+        async with AsyncSessionLocal() as session:
+            trashed_id = await self._detect_trashed_conflict(session, source, source_id)
+            if trashed_id is not None:
+                return trashed_id
+            excluded = pg_insert(Gallery).excluded
+            set_ = _upsert_metadata_set(excluded, include_title_tags=is_work)
+            # Existing galleries gain an uploader once metadata supplies one,
+            # but a blank value never overwrites a real one.
+            set_["uploader"] = case(
+                (func.coalesce(excluded.uploader, "") != "", excluded.uploader),
+                else_=Gallery.uploader,
+            )
+            stmt = (
+                pg_insert(Gallery)
+                .values(
+                    source=source,
+                    source_id=source_id,
+                    title=title,
+                    title_jpn=(data.title_jpn if data and is_work else ""),
+                    language=(data.language if data and is_work else ""),
+                    pages=0,
+                    source_pages=None,
+                    posted_at=(data.posted_at if data and is_work else None),
+                    uploader=(data.uploader if data else ""),
+                    download_status="downloading",
+                    tags_array=tags,
+                    artist_id=artist_id,
+                    created_by_user_id=self.user_id,
+                    source_url=self.source_url,
+                )
+                .on_conflict_do_update(index_elements=["source", "source_id"], set_=set_)
+                .returning(Gallery.id)
+            )
+            self.gallery_id = (await session.execute(stmt)).scalar_one()
+            if is_work and tags:
+                await upsert_metadata_gallery_tags(session, self.gallery_id, tags)
+
+            if self.db_job_id:
+                from db.models import DownloadJob
+
+                job = await session.get(DownloadJob, uuid.UUID(self.db_job_id))
+                if job:
+                    job.gallery_id = self.gallery_id
+
+            await session.commit()
+
+        logger.info(
+            "[progressive] gallery from URL identity: id=%d %s/%s account=%s",
+            self.gallery_id,
+            source,
+            source_id,
+            identity.is_account,
+        )
+        await self._load_gallery_state()
+        return self.gallery_id
+
     async def ensure_gallery_from_url(self, url: str, dest_dir: Path) -> int:
         """Fallback: create gallery from URL when no metadata JSON is available."""
         from urllib.parse import urlparse

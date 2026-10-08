@@ -580,12 +580,24 @@ async def _run_download_job(
             async with _gallery_create_lock:
                 if not importer.gallery_id:  # double-check after acquiring lock
                     meta_path = Path(str(file_path) + ".json")
+                    raw: dict | None = None
                     if meta_path.exists():
                         try:
                             raw = json.loads(meta_path.read_text(encoding="utf-8"))
-                            await importer.ensure_gallery(raw, target_dir)
                         except Exception as exc:
                             logger.warning("[download] failed to parse metadata: %s", exc)
+                    identity = None
+                    if plugin.meta.source_id == "gallery_dl":
+                        from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+                        identity = resolve_url_identity(url)
+                    try:
+                        if identity is not None:
+                            await importer.ensure_gallery_from_identity(identity, raw, target_dir)
+                        elif raw is not None:
+                            await importer.ensure_gallery(raw, target_dir)
+                    except Exception as exc:
+                        logger.warning("[download] failed to create gallery from metadata: %s", exc)
                     if not importer.gallery_id:
                         try:
                             await importer.ensure_gallery_from_url(url, target_dir)

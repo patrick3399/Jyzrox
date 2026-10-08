@@ -80,6 +80,10 @@ _METADATA_INCLUDE = (
     "num",
     "rating",
     "language",
+    "author",
+    "username",
+    "user_id",
+    "content",
 )
 
 
@@ -142,7 +146,7 @@ async def _build_gallery_dl_config(
     Args:
         credentials: Dict mapping source name -> credential value string.
         config_id: Per-job config isolation key.
-        job_context: "manual" or "subscription" — controls archive-mode and skip behavior.
+        job_context: "manual" or "subscription" — controls skip and date-after behavior.
         last_completed_at: For subscription context, enables date-after optimization.
         force_full_scan: Subscription force re-scan mode. Disables both
             date-after and gallery-dl's archive so remote items are fetched
@@ -175,19 +179,22 @@ async def _build_gallery_dl_config(
             "filesize-min": "1k",
             # N10b: file-unique prevents duplicate URLs within a single run
             "file-unique": True,
+            # Must live under "extractor": the --Print flags we pass make
+            # gallery-dl replace the root-level "postprocessors" list wholesale,
+            # so root-level entries never ran (no sha256, no mtime, no JSON).
+            "postprocessors": [
+                # N5: hash PP — sha256 streamed via --Print ("hashes" is the option HashPP reads)
+                {"name": "hash", "hashes": "sha256"},
+                # N5: mtime PP — preserves original upload timestamp
+                {"name": "mtime"},
+                # N10d: metadata PP with include filter (replaces --write-metadata --write-tags)
+                {"name": "metadata", "mode": "json", "include": list(_METADATA_INCLUDE)},
+            ],
         },
         "downloader": {
             # N4: adjust-extensions ensures correct file extensions
             "adjust-extensions": True,
         },
-        "postprocessors": [
-            # N5: hash PP — sha256 streamed via --Print
-            {"name": "hash", "algorithm": "sha256"},
-            # N5: mtime PP — preserves original upload timestamp
-            {"name": "mtime"},
-            # N10d: metadata PP with include filter (replaces --write-metadata --write-tags)
-            {"name": "metadata", "mode": "json", "include": list(_METADATA_INCLUDE)},
-        ],
     }
 
     # Custom extractors bundled under plugins/builtin/gallery_dl/extractors.
@@ -220,9 +227,8 @@ async def _build_gallery_dl_config(
             # local-only images remain in the gallery sequence.
             config["extractor"].pop("archive", None)
             config["extractor"].pop("archive-table", None)
-        else:
-            # N10a: archive-mode memory for batch writes (subscription)
-            config["extractor"]["archive-mode"] = "memory"
+        # No archive-mode "memory": it only flushes on an error-free exit, so a
+        # single failed file or a killed process dropped every entry of the run.
 
         if not force_full_scan and last_completed_at:
             # Incremental mode: a full download was confirmed before.
@@ -304,7 +310,7 @@ async def _build_gallery_dl_config(
 
     # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
     if "pixiv" in credentials and credentials["pixiv"]:
-        config["postprocessors"].append(
+        config["extractor"]["postprocessors"].append(
             {
                 "name": "ugoira",
                 "ffmpeg-output": True,

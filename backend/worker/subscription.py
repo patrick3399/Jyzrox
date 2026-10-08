@@ -255,7 +255,7 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
                 )
                 return {"status": "skipped", "reason": "active_job_exists"}
 
-        # v3.0: inject subscription context for archive-mode and date-after optimization
+        # v3.0: inject subscription context for skip and date-after optimization
         options: dict = {
             "job_context": "subscription",
         }

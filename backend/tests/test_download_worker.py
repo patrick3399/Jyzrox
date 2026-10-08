@@ -2690,3 +2690,149 @@ class TestFailedRepairIsNotDemotedToPartial:
 
         importer.abort.assert_not_awaited()
         assert set_status.await_args_list[-1].args[1] == "partial"
+
+
+# ---------------------------------------------------------------------------
+# TestOnFileGalleryIdentity — URL identity vs metadata vs URL fallback (ADR 0016)
+# ---------------------------------------------------------------------------
+
+
+class TestOnFileGalleryIdentity:
+    """Which importer method on_file uses to create the gallery."""
+
+    @staticmethod
+    async def _drive_on_file(plugin_source_id: str, url: str, *, identity, metadata: dict | None):
+        """Run download_job to capture on_file, then fire it once for a media file.
+
+        ``metadata`` simulates the ``<file>.json`` sidecar (None = no sidecar).
+        Returns the importer mock so callers can assert which ensure_* ran.
+        """
+        import json
+
+        from worker.download import download_job
+
+        captured_on_file: list = []
+
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            captured_on_file.append(on_file)
+            return _make_plugin_result()
+
+        plugin = MagicMock()
+        plugin.meta.source_id = plugin_source_id
+        plugin.meta.name = plugin_source_id
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _capturing_download
+
+        importer = MagicMock()
+        importer.gallery_id = None
+        importer.title = None
+        importer.source_url = None
+        importer.existing_page_nums = None
+        importer.import_file = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-1")
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+
+        async def _creates_gallery(*args, **kwargs):
+            importer.gallery_id = "gal-1"
+            importer.title = "T"
+
+        importer.ensure_gallery = AsyncMock(side_effect=_creates_gallery)
+        importer.ensure_gallery_from_identity = AsyncMock(side_effect=_creates_gallery)
+        importer.ensure_gallery_from_url = AsyncMock(side_effect=_creates_gallery)
+
+        registry = MagicMock()
+        registry.get_handler = AsyncMock(return_value=plugin)
+        registry.get_fallback = MagicMock(return_value=None)
+        registry.get_downloader = MagicMock(return_value=None)
+
+        with (
+            patch("plugins.registry.plugin_registry", registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", MagicMock(return_value=_make_mock_sem())),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.helpers._validate_image_magic", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            await download_job(_make_ctx(), url, db_job_id="job-identity-01")
+
+        assert len(captured_on_file) == 1
+        on_file = captured_on_file[0]
+        importer.gallery_id = None  # ignore any state from the (empty) run
+
+        def _exists(self) -> bool:
+            return metadata is not None and str(self).endswith(".json")
+
+        def _read_text(self, *args, **kwargs) -> str:
+            return json.dumps(metadata)
+
+        with (
+            patch("plugins.builtin.gallery_dl._identity.resolve_url_identity", return_value=identity),
+            patch.object(Path, "exists", _exists),
+            patch.object(Path, "read_text", _read_text),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+        ):
+            await on_file(Path("/data/gallery/image001.jpg"))
+        return importer
+
+    async def test_gallery_dl_job_with_metadata_json_still_uses_the_url_identity(self):
+        """Metadata appearing next to the file must not switch identity back to
+        per-item ids (twitter source_id_fields=tweet_id would give one gallery per tweet)."""
+        from plugins.builtin.gallery_dl._identity import UrlIdentity
+
+        identity = UrlIdentity("twitter", "u1", True, "twitter")
+        meta = {"category": "twitter", "tweet_id": 111, "author": {"name": "u1"}}
+
+        importer = await self._drive_on_file("gallery_dl", "https://x.com/u1/media", identity=identity, metadata=meta)
+
+        importer.ensure_gallery_from_identity.assert_awaited_once()
+        args = importer.ensure_gallery_from_identity.await_args.args
+        assert args[0] == identity
+        assert args[1] == meta
+        importer.ensure_gallery.assert_not_awaited()
+        importer.ensure_gallery_from_url.assert_not_awaited()
+
+    async def test_gallery_dl_job_without_metadata_json_passes_none_to_the_url_identity(self):
+        from plugins.builtin.gallery_dl._identity import UrlIdentity
+
+        identity = UrlIdentity("twitter", "u1", True, "twitter")
+
+        importer = await self._drive_on_file("gallery_dl", "https://x.com/u1/media", identity=identity, metadata=None)
+
+        importer.ensure_gallery_from_identity.assert_awaited_once()
+        assert importer.ensure_gallery_from_identity.await_args.args[1] is None
+
+    async def test_native_plugin_job_keeps_metadata_based_identity(self):
+        """ehentai (non gallery_dl plugin) must never consult the URL identity resolver."""
+        from plugins.builtin.gallery_dl._identity import UrlIdentity
+
+        meta = {"gid": 1, "token": "abc"}
+        # A resolver result is supplied on purpose: it must be ignored for native plugins.
+        identity = UrlIdentity("ehentai", "1", False, "ehentai")
+
+        importer = await self._drive_on_file(
+            "ehentai", "https://e-hentai.org/g/1/abc/", identity=identity, metadata=meta
+        )
+
+        importer.ensure_gallery.assert_awaited_once()
+        assert importer.ensure_gallery.await_args.args[0] == meta
+        importer.ensure_gallery_from_identity.assert_not_awaited()
+
+    async def test_unparseable_url_falls_back_to_legacy_url_identity(self):
+        """resolve_url_identity -> None and no metadata JSON -> ensure_gallery_from_url."""
+        importer = await self._drive_on_file(
+            "gallery_dl", "https://unknown.example/whatever", identity=None, metadata=None
+        )
+
+        importer.ensure_gallery_from_url.assert_awaited_once()
+        importer.ensure_gallery_from_identity.assert_not_awaited()
+        importer.ensure_gallery.assert_not_awaited()
