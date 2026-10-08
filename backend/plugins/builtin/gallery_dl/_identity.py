@@ -8,6 +8,7 @@ by per-file metadata.
 
 import hashlib
 import logging
+import re
 from dataclasses import dataclass
 
 from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG, get_site_config
@@ -15,6 +16,8 @@ from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG, get_site_config
 logger = logging.getLogger(__name__)
 
 _MAX_SOURCE_ID_LEN = 120
+# Characters Windows rejects in names; the library tree is exported over SMB.
+_WINDOWS_ILLEGAL_RE = re.compile(r'[<>:"\\|?*\x00-\x1f]')
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,11 +42,20 @@ def _match_url(url: str) -> tuple[str, str, tuple[str | None, ...]] | None:
     return extr.category, extr.subcategory, tuple(getattr(extr, "groups", None) or ())
 
 
+def _digest(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+
+
+def _folder_safe(source_id: str) -> str:
+    """Drop what Windows cannot show; a digest of the original keeps it unique."""
+    safe = _WINDOWS_ILLEGAL_RE.sub("_", source_id).rstrip(". ")
+    return safe if safe == source_id else f"{safe}~{_digest(source_id)}"
+
+
 def _bounded(source_id: str) -> str:
     if len(source_id) <= _MAX_SOURCE_ID_LEN:
         return source_id
-    digest = hashlib.sha1(source_id.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
-    return f"{source_id[: _MAX_SOURCE_ID_LEN - 13]}~{digest}"
+    return f"{source_id[: _MAX_SOURCE_ID_LEN - 13]}~{_digest(source_id)}"
 
 
 def resolve_url_identity(url: str) -> UrlIdentity | None:
@@ -61,7 +73,6 @@ def resolve_url_identity(url: str) -> UrlIdentity | None:
             return UrlIdentity(source, _bounded(account), True, category)
 
     parts = "/".join(g for g in groups if g)
-    # "=" rather than ":" — the library tree is exported over SMB and Windows
-    # rejects colons in names.
+    # "=" rather than ":" — Windows rejects colons in names.
     source_id = f"{subcategory}={parts}" if parts else subcategory
-    return UrlIdentity(source, _bounded(source_id), False, category)
+    return UrlIdentity(source, _bounded(_folder_safe(source_id)), False, category)

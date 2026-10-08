@@ -127,3 +127,25 @@ def test_artist_is_none_when_metadata_carries_no_account_field():
 
 def test_generated_identity_has_no_colon_because_windows_smb_clients_reject_it():
     assert ":" not in resolve_url_identity("https://x.com/someuser/status/123").source_id
+
+
+@pytest.mark.parametrize("char", list('<>:"\\|?*') + ["\x07"])
+def test_search_identity_with_a_character_windows_rejects_is_made_folder_safe(monkeypatch, char):
+    monkeypatch.setattr(_identity, "_match_url", lambda url: ("twitter", "search", (f"cat{char}dog",)))
+    source_id = resolve_url_identity("https://x.com/search?q=whatever").source_id
+    assert source_id.startswith("search=cat_dog~")
+    assert not set(source_id) & set('<>:"\\|?*\x07')
+
+
+def test_searches_differing_only_in_a_replaced_character_stay_separate_galleries(monkeypatch):
+    monkeypatch.setattr(_identity, "_match_url", lambda url: ("twitter", "search", (url,)))
+    assert resolve_url_identity("a?b").source_id != resolve_url_identity("a*b").source_id
+
+
+def test_identity_does_not_end_in_a_dot_or_space_which_windows_strips(monkeypatch):
+    monkeypatch.setattr(_identity, "_match_url", lambda url: ("twitter", "search", ("cat. ",)))
+    assert resolve_url_identity("https://x.com/search?q=cat.").source_id[-1] not in ". "
+
+
+def test_identity_without_illegal_characters_is_left_exactly_as_parsed():
+    assert resolve_url_identity("https://danbooru.donmai.us/posts?tags=a+b").source_id == "tag=a+b"
