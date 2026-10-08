@@ -116,9 +116,9 @@ class TestSettingsDefaults:
         assert s.csrf_enabled is True
 
     def test_settings_default_data_gallery_path(self):
-        """data_gallery_path defaults to /data/gallery (container-side mount)."""
+        """data_gallery_path defaults to /data/download_temp (container-side mount)."""
         s = self._make_settings()
-        assert s.data_gallery_path == "/data/gallery"
+        assert s.data_gallery_path == "/data/download_temp"
 
     def test_settings_default_pixiv_client_id(self):
         """pixiv_client_id defaults to the public Android app credential."""

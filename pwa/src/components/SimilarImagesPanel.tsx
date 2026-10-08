@@ -8,7 +8,6 @@ import Link from 'next/link'
 import { AppImage } from '@/components/AppImage'
 
 function toMediaUrl(path: string): string {
-  if (path.startsWith('/data/gallery/')) return path.replace('/data/gallery/', '/media/')
   if (path.startsWith('/data/')) return path.replace('/data/', '/media/')
   return path
 }

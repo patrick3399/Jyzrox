@@ -187,9 +187,9 @@ class TestGalleryDlCanHandle:
         root.
 
         Regression: returning the root (``base_path``) means finalize()/cleanup()
-        rmtree of the download dir wipes the entire /data/gallery tree — deleting
+        rmtree of the download dir wipes the entire /data/download_temp tree — deleting
         the staging dirs of any concurrently downloading gallery (e.g. an EH
-        gallery under /data/gallery/ehentai/<gid>/). See EH gid 3746208 incident.
+        gallery under /data/download_temp/ehentai/<gid>/). See EH gid 3746208 incident.
         """
         from plugins.builtin.gallery_dl.source import GalleryDlPlugin
 
@@ -228,8 +228,8 @@ class TestGalleryDlDownloadHappyPath:
     async def test_download_success_returns_done_status(self, tmp_path):
         """When gallery-dl exits 0 with JYZROX_FILE lines, status=done is returned."""
         lines = [
-            b"JYZROX_FILE\t/data/gallery/test/img001.jpg\tabc123\n",
-            b"JYZROX_FILE\t/data/gallery/test/img002.jpg\tdef456\n",
+            b"JYZROX_FILE\t/data/download_temp/test/img001.jpg\tabc123\n",
+            b"JYZROX_FILE\t/data/download_temp/test/img002.jpg\tdef456\n",
         ]
         proc = _make_fake_process(lines, returncode=0)
 

@@ -841,9 +841,9 @@ class TestProgressiveImporterFinalize:
         """finalize() must refuse to rmtree the shared gallery root, even when a
         caller passes it as dest_dir.
 
-        Regression: a gallery-dl job whose dest_dir resolved to the /data/gallery
+        Regression: a gallery-dl job whose dest_dir resolved to the /data/download_temp
         root ran rmtree(root) in finalize(), deleting the staging dir of an EH
-        gallery downloading concurrently under /data/gallery/ehentai/<gid>/
+        gallery downloading concurrently under /data/download_temp/ehentai/<gid>/
         (EH gid 3746208 incident — 262 pages lost, then ENOENT on metadata.json).
         """
         from worker.progressive import ProgressiveImporter

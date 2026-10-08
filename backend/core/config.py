@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # Remote image processing
 
     # Storage paths (inside container)
-    data_gallery_path: str = "/data/gallery"
+    data_gallery_path: str = "/data/download_temp"
     data_thumbs_path: str = "/data/thumbs"
     data_avatars_path: str = "/data/avatars"
     data_cas_path: str = "/data/cas"
@@ -129,7 +129,7 @@ async def get_all_library_paths() -> list[str]:
 
     Only returns paths the user has explicitly added (via env var or DB).
     Does NOT include ``library_base_path`` (/mnt) automatically — users
-    must add paths themselves.  ``data_gallery_path`` (/data/gallery) is
+    must add paths themselves.  ``data_gallery_path`` (/data/download_temp) is
     never included as it is the download engine's internal workspace.
     """
 

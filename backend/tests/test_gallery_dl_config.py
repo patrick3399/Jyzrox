@@ -76,7 +76,7 @@ def mock_config_path(tmp_path):
     """Mock settings.gallery_dl_config to a temp file."""
     config_file = tmp_path / "gallery-dl.json"
     with patch("plugins.builtin.gallery_dl.source.settings") as mock_settings:
-        mock_settings.data_gallery_path = "/data/gallery"
+        mock_settings.data_gallery_path = "/data/download_temp"
         mock_settings.gallery_dl_config = str(config_file)
         mock_settings.gdl_archive_dsn = "postgresql://test:test@localhost:5432/test"
         yield config_file

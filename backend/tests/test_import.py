@@ -35,7 +35,7 @@ class TestBatchScan:
             ("/mnt/test_lib/root/gallery2", [], ["a.webp"]),
         ]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -86,7 +86,7 @@ class TestBatchScan:
             return path
 
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -129,7 +129,7 @@ class TestBatchScan:
             return path
 
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -162,14 +162,14 @@ class TestBatchScan:
     async def test_scan_rejects_internal_path(self, client):
         """root_dir inside data_gallery_path should return 400."""
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.sep", "/"),
         ):
             resp = await client.post(
                 "/api/import/batch/scan",
-                json={"root_dir": "/data/gallery/subdir", "pattern": "{title}"},
+                json={"root_dir": "/data/download_temp/subdir", "pattern": "{title}"},
             )
 
         assert resp.status_code == 400
@@ -193,7 +193,7 @@ class TestBatchStart:
             {"path": "/mnt/test_lib/root/gallery2", "artist": None, "title": "Gallery Two"},
         ]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -236,7 +236,7 @@ class TestBatchStart:
             {"path": "/mnt/test_lib/root/art1", "artist": "Artist", "title": "Work One"},
         ]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -260,7 +260,7 @@ class TestBatchStart:
     async def test_start_invalid_mode_returns_400(self, client, mock_redis):
         """Mode other than copy or link should return 400."""
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -1931,7 +1931,7 @@ class TestBatchStartCategoryTypeChecking:
 
         galleries = [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1", "category": "x" * 5000}]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -1955,7 +1955,7 @@ class TestBatchStartCategoryTypeChecking:
 
         galleries = [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1", "category": "  Cosplay  "}]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -1980,7 +1980,7 @@ class TestBatchStartCategoryTypeChecking:
         to `list[BatchGalleryItem]` must not break this existing caller."""
         galleries = [{"path": "/mnt/test_lib/root/g1", "artist": "abfluss", "category": "Cosplay", "title": "G1"}]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),

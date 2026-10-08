@@ -114,7 +114,7 @@ def _source_patches():
         patch(
             "plugins.builtin.gallery_dl.source.settings",
             MagicMock(
-                data_gallery_path="/data/gallery",
+                data_gallery_path="/data/download_temp",
                 gallery_dl_config="/tmp/gallery-dl-test.json",
                 gdl_archive_dsn="postgresql://test:test@localhost:5432/test",
             ),
@@ -139,9 +139,9 @@ class TestGalleryDlCancel:
         plugin = GalleryDlPlugin()
 
         lines = [
-            b"JYZROX_FILE\t/data/gallery/image001.jpg\tabc1\n",
-            b"JYZROX_FILE\t/data/gallery/image002.jpg\tabc2\n",
-            b"JYZROX_FILE\t/data/gallery/image003.jpg\tabc3\n",
+            b"JYZROX_FILE\t/data/download_temp/image001.jpg\tabc1\n",
+            b"JYZROX_FILE\t/data/download_temp/image002.jpg\tabc2\n",
+            b"JYZROX_FILE\t/data/download_temp/image003.jpg\tabc3\n",
         ]
         # block_wait=True: proc.wait() blocks until kill() is called by the cancel watcher
         mock_proc = _make_mock_proc(lines, returncode=0, block_wait=True)
@@ -160,7 +160,7 @@ class TestGalleryDlCancel:
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
             result = await plugin.download(
                 url="https://example.com/gallery/123",
-                dest_dir=Path("/data/gallery"),
+                dest_dir=Path("/data/download_temp"),
                 credentials={},
                 cancel_check=cancel_check,
                 pid_callback=AsyncMock(),
@@ -179,8 +179,8 @@ class TestGalleryDlCancel:
         # cancel_check always returns True, so _pause_cancel_watcher fires immediately
         # and sets state.cancelled=True, which prevents the last pending file import.
         lines = [
-            b"JYZROX_FILE\t/data/gallery/image001.jpg\tabc1\n",
-            b"JYZROX_FILE\t/data/gallery/image002.jpg\tabc2\n",
+            b"JYZROX_FILE\t/data/download_temp/image001.jpg\tabc1\n",
+            b"JYZROX_FILE\t/data/download_temp/image002.jpg\tabc2\n",
         ]
         mock_proc = _make_mock_proc(lines, returncode=0, block_wait=True)
 
@@ -199,7 +199,7 @@ class TestGalleryDlCancel:
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
             result = await plugin.download(
                 url="https://example.com/gallery/123",
-                dest_dir=Path("/data/gallery"),
+                dest_dir=Path("/data/download_temp"),
                 credentials={},
                 cancel_check=cancel_check,
                 on_file=on_file,
@@ -230,8 +230,8 @@ class TestGalleryDlPartial:
         plugin = GalleryDlPlugin()
 
         lines = [
-            b"JYZROX_FILE\t/data/gallery/image001.jpg\tabc123\n",
-            b"JYZROX_FILE\t/data/gallery/image002.jpg\tdef456\n",
+            b"JYZROX_FILE\t/data/download_temp/image001.jpg\tabc123\n",
+            b"JYZROX_FILE\t/data/download_temp/image002.jpg\tdef456\n",
         ]
         mock_proc = _make_mock_proc(lines, returncode=1, stderr=b"some error")
 
@@ -245,7 +245,7 @@ class TestGalleryDlPartial:
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
             result = await plugin.download(
                 url="https://example.com/gallery/123",
-                dest_dir=Path("/data/gallery"),
+                dest_dir=Path("/data/download_temp"),
                 credentials={},
                 cancel_check=cancel_check,
             )
@@ -273,7 +273,7 @@ class TestGalleryDlPartial:
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
             result = await plugin.download(
                 url="https://example.com/gallery/123",
-                dest_dir=Path("/data/gallery"),
+                dest_dir=Path("/data/download_temp"),
                 credentials={},
                 cancel_check=cancel_check,
             )
@@ -1975,7 +1975,7 @@ class TestOnFileConcurrency:
         ensure_gallery_from_url_call_count[0] = 0
 
         # Fire 8 concurrent on_file calls for a valid media file.
-        media_path = Path("/data/gallery/image001.jpg")
+        media_path = Path("/data/download_temp/image001.jpg")
         await asyncio.gather(*[on_file(media_path) for _ in range(8)])
 
         # The double-checked lock must have allowed only one call through.
@@ -2049,11 +2049,11 @@ class TestOnFileConcurrency:
         on_file = captured_on_file[0]
 
         non_media_paths = [
-            Path("/data/gallery/metadata.json"),
-            Path("/data/gallery/notes.txt"),
-            Path("/data/gallery/readme.html"),
-            Path("/data/gallery/data.xml"),
-            Path("/data/gallery/archive.zip"),
+            Path("/data/download_temp/metadata.json"),
+            Path("/data/download_temp/notes.txt"),
+            Path("/data/download_temp/readme.html"),
+            Path("/data/download_temp/data.xml"),
+            Path("/data/download_temp/archive.zip"),
         ]
         for path in non_media_paths:
             await on_file(path)
@@ -2781,7 +2781,7 @@ class TestOnFileGalleryIdentity:
             patch.object(Path, "read_text", _read_text),
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
         ):
-            await on_file(Path("/data/gallery/image001.jpg"))
+            await on_file(Path("/data/download_temp/image001.jpg"))
         return importer
 
     async def test_gallery_dl_job_with_metadata_json_still_uses_the_url_identity(self):
