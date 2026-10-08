@@ -992,6 +992,92 @@ class TestFindSimilarImages:
         resp = await client.get(f"/api/library/images/{img_id}/similar")
         assert resp.status_code == 400
 
+    async def _insert_private_image(self, db_session, *, owner_id: int, source_id: str, phash: str | None) -> int:
+        """Insert a private gallery owned by ``owner_id`` with one image; return the image id."""
+        gid = await _insert_gallery(db_session, source="local", source_id=source_id, title="Private")
+        await db_session.execute(
+            text("UPDATE galleries SET visibility = 'private', created_by_user_id = :uid WHERE id = :gid"),
+            {"uid": owner_id, "gid": gid},
+        )
+        sha = f"sha_{source_id}"
+        await db_session.execute(
+            text("INSERT INTO blobs (sha256, file_size, extension, phash) VALUES (:sha, 500, 'jpg', :phash)"),
+            {"sha": sha, "phash": phash},
+        )
+        await db_session.execute(
+            text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, 1, 'p.jpg', :sha)"),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
+        return (
+            await db_session.execute(text("SELECT id FROM images WHERE blob_sha256 = :sha"), {"sha": sha})
+        ).scalar_one()
+
+    async def test_find_similar_target_in_other_users_private_gallery_returns_404(self, make_client, db_session):
+        """A non-admin must not learn anything about an image in a gallery they cannot read.
+
+        Before the fix the target lookup had no gallery_access_filter, so this
+        returned 400 "Image has no perceptual hash" — confirming the image exists
+        and, for a hashed image, going on to return its phash and neighbours.
+        """
+        img_id = await self._insert_private_image(db_session, owner_id=1, source_id="sim_private_other", phash=None)
+
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get(f"/api/library/images/{img_id}/similar")
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Image not found"
+
+    async def test_find_similar_target_in_own_private_gallery_is_still_reachable(self, make_client, db_session):
+        """The access filter must not lock an owner out of their own private gallery."""
+        img_id = await self._insert_private_image(db_session, owner_id=2, source_id="sim_private_own", phash=None)
+
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get(f"/api/library/images/{img_id}/similar")
+
+        # Past the lookup: the only complaint left is the missing phash.
+        assert resp.status_code == 400
+
+    @pytest.mark.parametrize("threshold", [10, 20], ids=["indexed-prefilter", "full-scan"])
+    async def test_find_similar_candidate_query_applies_gallery_access_filter(self, make_client, db_session, threshold):
+        """Candidates from galleries the caller cannot read must be filtered in SQL.
+
+        The candidate query is PostgreSQL-only (bit_count / bit(64)), so it cannot
+        run on the SQLite test DB. Capture the statement instead and assert it joins
+        galleries and carries the caller's gallery_access_filter predicate.
+        """
+        from unittest.mock import MagicMock
+
+        from sqlalchemy.dialects import postgresql
+
+        from core.auth import gallery_access_filter
+
+        img_id = await self._insert_private_image(
+            db_session, owner_id=2, source_id=f"sim_candidates_{threshold}", phash="00ff00ff00ff00ff"
+        )
+
+        captured: list[str] = []
+        real_execute = db_session.execute
+
+        async def _capture_candidate_query(statement, *args, **kwargs):
+            sql = str(statement.compile(dialect=postgresql.dialect()))
+            if "bit_count" not in sql:
+                return await real_execute(statement, *args, **kwargs)
+            captured.append(sql)
+            return MagicMock(all=MagicMock(return_value=[]))
+
+        async with make_client(user_id=2, role="member") as ac:
+            with patch.object(db_session, "execute", _capture_candidate_query):
+                resp = await ac.get(f"/api/library/images/{img_id}/similar?threshold={threshold}")
+
+        assert resp.status_code == 200
+        assert len(captured) == 1
+        access_predicate = str(
+            gallery_access_filter({"user_id": 2, "role": "member"}).compile(dialect=postgresql.dialect())
+        )
+        assert "JOIN galleries" in captured[0]
+        assert access_predicate in captured[0]
+
 
 # ---------------------------------------------------------------------------
 # Regression: SQLAlchemy text() bind-param truncation with :: cast (commit a425a08)
