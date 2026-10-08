@@ -794,54 +794,63 @@ CREATE INDEX IF NOT EXISTS idx_twitter_unlinked ON twitter (job_id) WHERE galler
 CREATE TABLE IF NOT EXISTS instagram (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS danbooru (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS gelbooru (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS newgrounds (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS nijie (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS kemono (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS nhentai (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS hitomi (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS rule34 (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
