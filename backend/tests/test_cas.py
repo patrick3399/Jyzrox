@@ -157,6 +157,42 @@ class TestLibraryUrl:
 # ---------------------------------------------------------------------------
 
 
+class TestImageFileUrl:
+    """Unit tests for image_file_url(blob, external_path) -> str | None."""
+
+    def test_image_bound_external_path_wins_over_external_blob_without_cas_file(self):
+        """A hashed link page has a blob but no CAS file; the URL must follow the Image binding."""
+        from services.cas import image_file_url
+
+        blob = MagicMock(sha256=SHA, extension=".jpg", storage="external", external_path="/mnt/lib/other/copy.jpg")
+
+        assert image_file_url(blob, "/mnt/lib/book/001.jpg") == "/media/libraries/lib/book/001.jpg"
+
+    def test_pending_page_without_blob_uses_external_path(self):
+        from services.cas import image_file_url
+
+        assert image_file_url(None, "/mnt/lib/book/001.jpg") == "/media/libraries/lib/book/001.jpg"
+
+    def test_cas_blob_without_external_path_uses_cas_url(self):
+        from services.cas import cas_url, image_file_url
+
+        blob = MagicMock(sha256=SHA, extension=".png", storage="cas", external_path=None)
+
+        assert image_file_url(blob, None) == cas_url(SHA, ".png")
+
+    def test_external_blob_without_image_binding_falls_back_to_blob_path(self):
+        from services.cas import image_file_url
+
+        blob = MagicMock(sha256=SHA, extension=".jpg", storage="external", external_path="/mnt/lib/legacy.jpg")
+
+        assert image_file_url(blob) == "/media/libraries/lib/legacy.jpg"
+
+    def test_no_blob_and_no_external_path_is_none(self):
+        from services.cas import image_file_url
+
+        assert image_file_url(None, None) is None
+
+
 class TestSafeSourceId:
     """Unit tests for safe_source_id(source_id) -> str."""
 

@@ -20,7 +20,7 @@ from core.database import async_session
 from core.redis_client import get_redis
 from core.utils import detect_source, normalize_download_url
 from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
-from services.cas import cas_url, resolve_blob_path
+from services.cas import image_file_url, resolve_blob_path
 from services.cas import thumb_srcset as cas_thumb_srcset
 from services.cas import thumb_url as cas_thumb_url
 
@@ -332,7 +332,8 @@ async def get_gallery_images(
                 "file_size": blob.file_size if blob else None,
                 "media_type": blob.media_type if blob else None,
                 "duration": blob.duration if blob else None,
-                "file_url": cas_url(blob.sha256, blob.extension) if blob else None,
+                # A link page's bytes stay in the user's folder; it has no CAS file.
+                "file_url": image_file_url(blob, r.external_path),
                 "thumb_url": cas_thumb_url(blob.sha256) if blob else None,
                 "thumb_srcset": cas_thumb_srcset(blob.sha256) if blob else None,
             }
