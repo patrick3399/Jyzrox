@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql import column as sql_column
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
 from sqlalchemy.sql.elements import ColumnElement
@@ -2450,7 +2451,7 @@ async def find_similar_images(
     image_id: int,
     threshold: int = Query(default=10, ge=0, le=32),
     limit: int = Query(default=20, ge=1, le=100),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Find visually similar images by perceptual hash Hamming distance.
@@ -2462,7 +2463,12 @@ async def find_similar_images(
     32 = very loose match.
     """
     img_row = (
-        await db.execute(select(Image).where(Image.id == image_id).options(selectinload(Image.blob)))
+        await db.execute(
+            select(Image)
+            .join(Gallery, Image.gallery_id == Gallery.id)
+            .where(Image.id == image_id, gallery_access_filter(auth))
+            .options(selectinload(Image.blob))
+        )
     ).scalar_one_or_none()
     if not img_row:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -2485,11 +2491,12 @@ async def find_similar_images(
     ]
 
     max_quarter_dist = threshold // 4  # floor(T/4) — pigeonhole guarantee
+    params: dict = {"phash_int": phash_int_val, "image_id": image_id, "threshold": threshold}
 
     if max_quarter_dist > 2 or threshold > 11:
         # For loose thresholds the neighbor sets become large (>137 per quarter);
         # fall back to full scan on phash_int with exact bit_count filter.
-        stmt = sql_text("""
+        candidates = sql_text("""
             SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                    i.external_path, b.phash,
                    bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
@@ -2498,20 +2505,7 @@ async def find_similar_images(
             WHERE b.phash_int IS NOT NULL
               AND i.id != :image_id
               AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
-            ORDER BY distance ASC
-            LIMIT :limit
         """)
-        results = (
-            await db.execute(
-                stmt,
-                {
-                    "phash_int": phash_int_val,
-                    "image_id": image_id,
-                    "threshold": threshold,
-                    "limit": limit,
-                },
-            )
-        ).all()
     else:
         # Phase 1: generate Hamming neighborhoods for each quarter
         neighbors = _hamming_neighbors_all(quarters, max_quarter_dist)
@@ -2520,7 +2514,7 @@ async def find_similar_images(
         # become counterproductive — fall back to the full scan path instead.
         total_neighbors = sum(len(s) for s in neighbors)
         if total_neighbors > 10000:
-            stmt = sql_text("""
+            candidates = sql_text("""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                        i.external_path, b.phash,
                        bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
@@ -2529,30 +2523,11 @@ async def find_similar_images(
                 WHERE b.phash_int IS NOT NULL
                   AND i.id != :image_id
                   AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
-                ORDER BY distance ASC
-                LIMIT :limit
             """)
-            results = (
-                await db.execute(
-                    stmt,
-                    {
-                        "phash_int": phash_int_val,
-                        "image_id": image_id,
-                        "threshold": threshold,
-                        "limit": limit,
-                    },
-                )
-            ).all()
         else:
             # Phase 2: indexed pre-filter — OR across all four quarter columns,
             # then exact bit_count check on the surviving candidates only.
             conditions = []
-            params: dict = {
-                "image_id": image_id,
-                "phash_int": phash_int_val,
-                "threshold": threshold,
-                "limit": limit,
-            }
             for qi, neighbor_set in enumerate(neighbors):
                 param_name = f"q{qi}_neighbors"
                 conditions.append(f"b.phash_q{qi} = ANY(:{param_name})")
@@ -2560,7 +2535,7 @@ async def find_similar_images(
 
             where_prefilter = " OR ".join(conditions)
 
-            stmt = sql_text(f"""
+            candidates = sql_text(f"""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                        i.external_path, b.phash,
                        bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
@@ -2570,10 +2545,30 @@ async def find_similar_images(
                   AND i.id != :image_id
                   AND ({where_prefilter})
                   AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
-                ORDER BY distance ASC
-                LIMIT :limit
             """)
-            results = (await db.execute(stmt, params)).all()
+
+    # Candidates carry CAS URLs (capabilities, see docs/security-model.md BR-006),
+    # so drop the ones from galleries the caller cannot read before ranking.
+    sim = candidates.columns(
+        sql_column("id"),
+        sql_column("gallery_id"),
+        sql_column("filename"),
+        sql_column("sha256"),
+        sql_column("extension"),
+        sql_column("external_path"),
+        sql_column("phash"),
+        sql_column("distance"),
+    ).subquery("sim")
+    results = (
+        await db.execute(
+            select(sim)
+            .join(Gallery, Gallery.id == sim.c.gallery_id)
+            .where(gallery_access_filter(auth))
+            .order_by(sim.c.distance.asc())
+            .limit(limit),
+            params,
+        )
+    ).all()
 
     def _row_to_url(r) -> str:
         if r.external_path:
