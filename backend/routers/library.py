@@ -59,6 +59,7 @@ from db.models import (
 from services.cas import (
     cas_url,
     decrement_ref_count,
+    image_file_url,
     library_dir,
     library_url,
     thumb_dir,
@@ -522,7 +523,7 @@ def _i_browse(img: Image) -> dict:
         "height": blob.height if blob else None,
         "thumb_path": _thumb_url(blob),
         "thumb_srcset": _thumb_srcset(blob),
-        "file_path": _to_url(blob, img.external_path),
+        "file_path": image_file_url(blob, img.external_path),
         "thumbhash": blob.thumbhash if blob else None,
         "media_type": _media_type(img),
         "added_at": img.added_at.isoformat() if img.added_at else None,
@@ -953,7 +954,7 @@ async def list_artist_images(
                 "filename": img.filename,
                 "width": blob.width if blob else None,
                 "height": blob.height if blob else None,
-                "file_path": _to_url(blob, img.external_path),
+                "file_path": image_file_url(blob, img.external_path),
                 "thumb_path": _thumb_url(blob),
                 "thumb_srcset": _thumb_srcset(blob),
                 "file_size": _file_size(img),
@@ -1163,7 +1164,7 @@ async def list_gallery_files(
                 "media_type": _media_type(img) if img else "image",
                 "thumb_path": _thumb_url(blob),
                 "thumb_srcset": _thumb_srcset(blob),
-                "file_path": _to_url(blob, img.external_path if img else None),
+                "file_path": image_file_url(blob, img.external_path if img else None),
                 "is_symlink": f["is_symlink"],
                 "is_broken": f["is_broken"],
                 "symlink_target": f["symlink_target"],
@@ -2746,23 +2747,6 @@ async def _build_updated_response(
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _to_url(blob, external_path: str | None = None) -> str | None:
-    """Convert an image to its nginx-served URL.
-
-    A pending link page has no blob yet but its file is already readable from
-    the library mount, so ``external_path`` is honoured before the blob check.
-    """
-    if external_path:
-        return library_url(external_path)
-    if not blob:
-        return None
-    if blob.storage == "external" and blob.external_path:
-        # Compatibility for callers/tests without an Image binding. Migrated
-        # production Image rows carry their own external_path.
-        return library_url(blob.external_path)
-    return cas_url(blob.sha256, blob.extension)
-
-
 def _is_pending(img: Image) -> bool:
     """True for a link page that is registered but not hashed yet."""
     return img.blob_sha256 is None and img.external_path is not None
@@ -2880,7 +2864,7 @@ def _i(img: Image) -> dict:
         "filename": img.filename,
         "width": blob.width if blob else None,
         "height": blob.height if blob else None,
-        "file_path": _to_url(blob, img.external_path),
+        "file_path": image_file_url(blob, img.external_path),
         "thumb_path": _thumb_url(blob),
         "thumb_srcset": _thumb_srcset(blob),
         "file_size": _file_size(img),

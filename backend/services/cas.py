@@ -48,6 +48,24 @@ def library_url(external_path: str) -> str:
     return quote(external_path.replace("/mnt/", "/media/libraries/", 1), safe="/")
 
 
+def image_file_url(blob: Blob | None, external_path: str | None = None) -> str | None:
+    """Return the nginx-served URL for one image's original file.
+
+    Link-mode pages keep their bytes in the user's folder and have no CAS file,
+    so an Image-bound ``external_path`` is honoured before the blob check. That
+    also covers a pending link page, which has no blob yet.
+    """
+    if external_path:
+        return library_url(external_path)
+    if blob is None:
+        return None
+    if blob.storage == "external" and blob.external_path:
+        # Compatibility for callers/tests without an Image binding. Migrated
+        # production Image rows carry their own external_path.
+        return library_url(blob.external_path)
+    return cas_url(blob.sha256, blob.extension)
+
+
 def safe_source_id(source_id: str) -> str:
     """Sanitize a source_id for use as a filesystem path component.
 

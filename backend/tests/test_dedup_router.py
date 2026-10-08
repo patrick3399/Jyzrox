@@ -164,6 +164,92 @@ async def test_dedup_review_returns_gallery_occurrences(client, db_session, db_s
     }
 
 
+async def _insert_link_occurrence(db_session, sha: str, source_id: str, external_path: str) -> None:
+    """Bind ``sha`` to one gallery page that lives at ``external_path`` (link mode)."""
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, download_status) "
+            "VALUES ('local', :source_id, :source_id, 'downloaded')"
+        ),
+        {"source_id": source_id},
+    )
+    gallery_id = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id=:source_id"), {"source_id": source_id})
+    ).scalar_one()
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :path)"),
+        {"sha": sha, "path": external_path},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path) "
+            "VALUES (:gallery_id, 1, 'page.jpg', :sha, :path)"
+        ),
+        {"gallery_id": gallery_id, "sha": sha, "path": external_path},
+    )
+    await db_session.commit()
+
+
+async def test_dedup_review_external_blob_image_url_uses_occurrence_library_path_not_cas(
+    client, db_session, db_session_factory
+):
+    """A link-mode blob has no CAS file, so a /media/cas/ click-through URL would 404."""
+    await _insert_user(db_session)
+    await _insert_blob(db_session, "link_a")
+    await _insert_blob(db_session, "link_b")
+    # Blob.external_path is a compatibility scalar that goes stale; the Image binding is authoritative.
+    await db_session.execute(
+        text("UPDATE blobs SET storage='external', external_path='/mnt/lib/moved/stale.jpg' WHERE sha256='link_a'")
+    )
+    await db_session.commit()
+    await _insert_relationship(db_session, "link_a", "link_b", "needs_review")
+    await _insert_link_occurrence(db_session, "link_a", "link-gallery", "/mnt/lib/book #1/001.jpg")
+
+    with patch("routers.dedup.async_session", db_session_factory):
+        resp = await client.get("/api/dedup/review")
+
+    assert resp.status_code == 200
+    image_url = resp.json()["items"][0]["blob_a"]["image_url"]
+    assert not image_url.startswith("/media/cas/")
+    assert image_url == "/media/libraries/lib/book%20%231/001.jpg"
+
+
+async def test_dedup_review_external_blob_without_occurrence_falls_back_to_blob_external_path(
+    client, db_session, db_session_factory
+):
+    await _insert_user(db_session)
+    await _insert_blob(db_session, "orphan_link_a")
+    await _insert_blob(db_session, "orphan_link_b")
+    await db_session.execute(
+        text("UPDATE blobs SET storage='external', external_path='/mnt/lib/legacy.jpg' WHERE sha256='orphan_link_a'")
+    )
+    await db_session.commit()
+    await _insert_relationship(db_session, "orphan_link_a", "orphan_link_b", "needs_review")
+
+    with patch("routers.dedup.async_session", db_session_factory):
+        resp = await client.get("/api/dedup/review")
+
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["blob_a"]["image_url"] == "/media/libraries/lib/legacy.jpg"
+
+
+async def test_dedup_review_cas_blob_with_external_occurrence_keeps_cas_image_url(
+    client, db_session, db_session_factory
+):
+    """A CAS-stored blob keeps its capability URL even when a link page shares its bytes."""
+    await _insert_user(db_session)
+    await _insert_blob(db_session, "cas_shared_a")
+    await _insert_blob(db_session, "cas_shared_b")
+    await _insert_relationship(db_session, "cas_shared_a", "cas_shared_b", "needs_review")
+    await _insert_link_occurrence(db_session, "cas_shared_a", "shared-gallery", "/mnt/lib/shared/001.jpg")
+
+    with patch("routers.dedup.async_session", db_session_factory):
+        resp = await client.get("/api/dedup/review")
+
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["blob_a"]["image_url"] == "/media/cas/ca/s_/cas_shared_ajpg"
+
+
 async def test_dedup_review_filter_by_relationship_type(client, db_session, db_session_factory):
     await _insert_user(db_session)
     await _insert_blob(db_session, "sha_q1")

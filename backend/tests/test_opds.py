@@ -17,7 +17,8 @@ and the `unauthed_opds_client` fixture (real require_opds_auth logic runs).
 
 import base64
 import xml.etree.ElementTree as ET
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+from urllib.parse import unquote, urlsplit
 
 import bcrypt
 from sqlalchemy import text
@@ -142,6 +143,54 @@ async def _insert_image_with_blob(
     await db_session.commit()
     result = await db_session.execute(text("SELECT last_insert_rowid()"))
     return result.scalar()
+
+
+async def _insert_link_image(
+    db_session,
+    gallery_id: int,
+    *,
+    page_num: int,
+    sha256: str,
+    external_path: str,
+    extension: str = ".jpg",
+) -> int:
+    """Insert a hashed link-mode page: the bytes stay at ``external_path``, not in CAS."""
+    await db_session.execute(
+        text(
+            "INSERT INTO blobs (sha256, extension, media_type, file_size, storage, external_path) "
+            "VALUES (:sha, :ext, 'image', 1000, 'external', :ep)"
+        ),
+        {"sha": sha256, "ext": extension, "ep": external_path},
+    )
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :ep)"),
+        {"sha": sha256, "ep": external_path},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path) "
+            "VALUES (:gid, :pnum, :fn, :sha, :ep)"
+        ),
+        {
+            "gid": gallery_id,
+            "pnum": page_num,
+            "fn": external_path.rsplit("/", 1)[-1],
+            "sha": sha256,
+            "ep": external_path,
+        },
+    )
+    await db_session.commit()
+    result = await db_session.execute(text("SELECT last_insert_rowid()"))
+    return result.scalar()
+
+
+def _library_file_for(href: str) -> str:
+    """Filesystem path nginx serves for a ``/media/libraries/`` href (``alias /mnt/``)."""
+    parts = urlsplit(href)
+    assert parts.path.startswith("/media/libraries/"), href
+    # A raw '#' or '?' in the filename would be split off here and truncate the request.
+    assert not parts.query and not parts.fragment, href
+    return "/mnt/" + unquote(parts.path[len("/media/libraries/") :])
 
 
 def _basic_auth_header(username: str, password: str) -> str:
@@ -797,6 +846,42 @@ class TestOPDSGalleryDetailImageLinks:
         assert len(thumb_links) == 1
         assert thumb_links[0].get("type") == "image/webp"
         assert "thumb_160" in thumb_links[0].get("href", "")
+
+    async def test_hashed_link_page_image_link_resolves_to_library_file_not_cas(self, opds_client, db_session):
+        """A link-mode page has no CAS file; its image link must address the user's own file."""
+        gid = await _insert_gallery(db_session, source="local", source_id="link1")
+        sha = "c" * 64
+        path = "/mnt/lib/Artist/Book #1/001 what?.jpg"
+        await _insert_link_image(db_session, gid, page_num=1, sha256=sha, external_path=path)
+
+        resp = await opds_client.get("/opds/gallery/local/link1")
+
+        rels = _link_rels(_entries(_parse(resp))[0])
+        href = rels["http://opds-spec.org/image"]
+        assert "/media/cas/" not in href
+        assert _library_file_for(href) == path
+        # Thumbnails are generated per sha for external blobs too.
+        assert f"/media/thumbs/{sha[:2]}/" in rels["http://opds-spec.org/image/thumbnail"]
+
+    async def test_hashed_link_page_image_link_passes_media_authz_for_gallery_reader(
+        self, opds_client, db_session, db_session_factory
+    ):
+        """The emitted link must be fetchable by a non-admin who can read the gallery."""
+        from services.media_authz import authorize_media_uri
+
+        gid = await _insert_gallery(db_session, source="local", source_id="link2")
+        await _insert_link_image(
+            db_session, gid, page_num=1, sha256="d" * 64, external_path="/mnt/lib/Artist/Book #2/001.jpg"
+        )
+
+        resp = await opds_client.get("/opds/gallery/local/link2")
+
+        href = _link_rels(_entries(_parse(resp))[0])["http://opds-spec.org/image"]
+        request_uri = urlsplit(href).path
+        # /media/cas/ is not ACL-checked at all, so pin the prefix that is.
+        assert request_uri.startswith("/media/libraries/")
+        with patch("services.media_authz.async_session", db_session_factory):
+            assert await authorize_media_uri({"user_id": 1, "role": "viewer"}, request_uri) is True
 
     async def test_png_image_content_type(self, opds_client, db_session):
         """PNG image should have content type image/png."""

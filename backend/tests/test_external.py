@@ -10,6 +10,7 @@ routers.external.async_session to use the SQLite test engine.
 import hashlib
 import uuid
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
 
 from sqlalchemy import text
 
@@ -493,6 +494,36 @@ async def _insert_image(db_session, gallery_id: int, page_num: int, blob_sha256:
     return result.scalar_one()
 
 
+async def _insert_link_image(db_session, gallery_id: int, page_num: int, sha256: str, external_path: str) -> int:
+    """Insert a hashed link-mode page: the bytes stay at ``external_path``, not in CAS."""
+    await db_session.execute(
+        text(
+            "INSERT INTO blobs (sha256, file_size, extension, media_type, width, height, storage, external_path) "
+            "VALUES (:sha, 1024, '.jpg', 'image', 800, 600, 'external', :ep)"
+        ),
+        {"sha": sha256, "ep": external_path},
+    )
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :ep)"),
+        {"sha": sha256, "ep": external_path},
+    )
+    result = await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path) "
+            "VALUES (:gid, :page, :fname, :sha, :ep) RETURNING id"
+        ),
+        {
+            "gid": gallery_id,
+            "page": page_num,
+            "fname": external_path.rsplit("/", 1)[-1],
+            "sha": sha256,
+            "ep": external_path,
+        },
+    )
+    await db_session.commit()
+    return result.scalar_one()
+
+
 class TestExternalGalleryImages:
     """GET /api/external/v1/galleries/{id}/images"""
 
@@ -520,6 +551,34 @@ class TestExternalGalleryImages:
         # Verify URL patterns match CAS layout
         assert "/media/cas/" in img["file_url"]
         assert "/media/thumbs/" in img["thumb_url"]
+
+    async def test_get_gallery_images_hashed_link_page_file_url_resolves_to_library_file_not_cas(
+        self, ext_client, db_session
+    ):
+        """A link-mode page has no CAS file; file_url must address the user's own file."""
+        user_id = await _insert_user(db_session)
+        await _insert_token(db_session, user_id, _TEST_TOKEN_HASH)
+        gid = await _insert_gallery(db_session, source="local", source_id="img_link_1")
+        sha = "e" * 64
+        path = "/mnt/lib/Artist/Book #1/001 what?.jpg"
+        await _insert_link_image(db_session, gid, 1, sha, path)
+
+        resp = await ext_client.get(
+            f"/api/external/v1/galleries/{gid}/images",
+            headers={"X-API-Token": _TEST_TOKEN},
+        )
+
+        assert resp.status_code == 200
+        img = resp.json()["images"][0]
+        assert "/media/cas/" not in img["file_url"]
+        parts = urlsplit(img["file_url"])
+        assert parts.path.startswith("/media/libraries/")
+        # A raw '#' or '?' in the filename would be split off and truncate the request.
+        assert not parts.query and not parts.fragment
+        # nginx serves /media/libraries/ with `alias /mnt/`.
+        assert "/mnt/" + unquote(parts.path[len("/media/libraries/") :]) == path
+        # Thumbnails are generated per sha for external blobs too.
+        assert img["thumb_url"].startswith(f"/media/thumbs/{sha[:2]}/")
 
     async def test_get_gallery_images_returns_correct_page_order(self, ext_client, db_session):
         """Images are ordered by page_num descending (production uses ORDER BY page_num DESC)."""

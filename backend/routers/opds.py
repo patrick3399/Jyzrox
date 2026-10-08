@@ -15,7 +15,7 @@ from core.gallery_helpers import build_cover_sha_map, image_not_excluded_clause
 from core.redis_client import get_redis
 from core.source_display import get_display_config
 from db.models import Gallery, Image, UserFavorite
-from services.cas import cas_url
+from services.cas import image_file_url
 from services.cas import thumb_url as cas_thumb_url
 
 
@@ -516,7 +516,8 @@ async def opds_gallery(
             # Full image link
             img_link = ET.SubElement(entry, f"{{{ATOM_NS}}}link")
             img_link.set("rel", "http://opds-spec.org/image")
-            img_link.set("href", f"{base}{cas_url(blob.sha256, blob.extension)}")
+            # A link page's bytes stay in the user's folder; it has no CAS file.
+            img_link.set("href", f"{base}{image_file_url(blob, img.external_path)}")
 
             # Determine image content type
             ext_map = {
