@@ -442,8 +442,8 @@ class ProgressiveImporter:
         """Create or attach the gallery a download URL maps to (ADR 0016).
 
         The URL decides ``(source, source_id)``. Per-file metadata only fills
-        uploader/artist, plus title and tags on work-type sites where one
-        file's metadata describes the whole gallery.
+        uploader/artist of non-account galleries, plus title and tags on
+        work-type sites where one file's metadata describes the whole gallery.
         """
         from sqlalchemy import case, func
 
@@ -488,7 +488,9 @@ class ProgressiveImporter:
                     pages=0,
                     source_pages=None,
                     posted_at=(data.posted_at if data and is_work else None),
-                    uploader=(data.uploader if data else ""),
+                    # An account gallery spans many posts; its first file may be a
+                    # collab post or repost owned by someone else.
+                    uploader=(data.uploader if data and not identity.is_account else ""),
                     download_status="downloading",
                     tags_array=tags,
                     artist_id=artist_id,

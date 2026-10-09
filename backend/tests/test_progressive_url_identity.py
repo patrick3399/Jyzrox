@@ -149,3 +149,26 @@ async def test_work_type_site_keeps_the_title_from_metadata(harness):
     params, _ = harness.last()
     assert params["title"] == "Some Book"
     assert (params["source"], params["source_id"]) == ("nhentai", "gallery=123456")
+
+
+_COLLAB_POST_META = {"category": "instagram", "subcategory": "user", "username": "mancity", "fullname": "Man City"}
+
+
+@pytest.mark.asyncio
+async def test_account_gallery_does_not_take_its_uploader_from_a_collab_post_owned_by_someone_else(harness):
+    """instagram/o4.18 got uploader "mancity": its first file was a collab post."""
+    importer = harness.make("https://www.instagram.com/o4.18")
+    await harness.run(importer, UrlIdentity("instagram", "o4.18", True, "instagram"), _COLLAB_POST_META)
+
+    params, _ = harness.last()
+    assert params["uploader"] == ""
+    assert params["artist_id"] == "instagram:o4.18"
+
+
+@pytest.mark.asyncio
+async def test_single_post_gallery_still_takes_its_uploader_from_metadata(harness):
+    importer = harness.make("https://www.instagram.com/p/Cabc/")
+    await harness.run(importer, UrlIdentity("instagram", "post=Cabc", False, "instagram"), _COLLAB_POST_META)
+
+    params, _ = harness.last()
+    assert params["uploader"] == "mancity"
