@@ -16,6 +16,7 @@ import { pollingRefreshInterval } from '@/lib/wsPolling'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import { galleryStatusAction } from '@/lib/galleryUtils'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
+import { ThumbPlaceholder } from '@/components/library/ThumbPlaceholder'
 import { AppImage } from '@/components/AppImage'
 import type { GalleryImage } from '@/lib/types'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
@@ -785,9 +786,13 @@ export default function GalleryDetailPage() {
                 sizes="160px"
               />
             ) : (
-              <div className="w-40 h-56 bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+              <ThumbPlaceholder
+                category={gallery.category}
+                categories={categoryRegistry?.categories}
+                className="w-40 h-56 rounded"
+              >
                 {t('library.noCover')}
-              </div>
+              </ThumbPlaceholder>
             )}
           </div>
 
@@ -1337,9 +1342,13 @@ export default function GalleryDetailPage() {
                           className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
                         />
                       ) : (
-                        <div className="w-full aspect-[3/4] bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+                        <ThumbPlaceholder
+                          category={gallery.category}
+                          categories={categoryRegistry?.categories}
+                          className="w-full aspect-[3/4] rounded"
+                        >
                           {image.page_num}
-                        </div>
+                        </ThumbPlaceholder>
                       )}
                       {isSelected && (
                         <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
@@ -1393,9 +1402,13 @@ export default function GalleryDetailPage() {
                         className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
                       />
                     ) : (
-                      <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
+                      <ThumbPlaceholder
+                        category={gallery.category}
+                        categories={categoryRegistry?.categories}
+                        className="w-full aspect-[3/4] rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
+                      >
                         {image.page_num}
-                      </div>
+                      </ThumbPlaceholder>
                     )}
                     {isFavorited(image.id) && (
                       <div className="absolute top-1 right-1">
@@ -1413,12 +1426,14 @@ export default function GalleryDetailPage() {
             {images.length === 0 && (
               <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
                 {Array.from({ length: Math.min(pageCount, 40) }).map((_, i) => (
-                  <Link
-                    key={i}
-                    href={readerHref(gallery.source, gallery.source_id, i + 1)}
-                    className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
-                  >
-                    {i + 1}
+                  <Link key={i} href={readerHref(gallery.source, gallery.source_id, i + 1)}>
+                    <ThumbPlaceholder
+                      category={gallery.category}
+                      categories={categoryRegistry?.categories}
+                      className="w-full aspect-[3/4] rounded border border-vault-border hover:border-vault-border-hover transition-colors"
+                    >
+                      {i + 1}
+                    </ThumbPlaceholder>
                   </Link>
                 ))}
               </div>
