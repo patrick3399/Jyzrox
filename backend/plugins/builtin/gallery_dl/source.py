@@ -611,16 +611,46 @@ async def _heartbeat_loop(
             logger.warning("[gallery_dl] heartbeat callback error: %s", exc)
 
 
+def _partial_bytes(watch_dir: Path) -> int:
+    """Total size of the files gallery-dl is still writing (``*.part``)."""
+    total = 0
+    try:
+        with os.scandir(watch_dir) as entries:
+            for entry in entries:
+                if entry.name.endswith(".part"):
+                    try:
+                        total += entry.stat().st_size
+                    except OSError:
+                        continue
+    except OSError:
+        return 0
+    return total
+
+
 async def _inactivity_watchdog(
     state: _DownloadState,
-    timeout: int,
+    timeout: float,
     proc: asyncio.subprocess.Process,
+    watch_dir: Path | None = None,
+    poll_s: float = 10,
 ) -> str:
-    """Kill the process if no stdout/stderr activity for `timeout` seconds."""
+    """Kill the process after `timeout` seconds without output or download progress.
+
+    gallery-dl prints nothing while one file is in flight, so a large file on a
+    slow CDN looked idle and was killed mid-download. A growing ``*.part`` file
+    in `watch_dir` counts as activity.
+    """
+    last_partial = 0
     while True:
-        await asyncio.sleep(10)
+        await asyncio.sleep(poll_s)
         if state.cancelled:
             return "cancelled"
+        if watch_dir is not None:
+            partial = await asyncio.to_thread(_partial_bytes, watch_dir)
+            if partial != last_partial:
+                last_partial = partial
+                if partial:
+                    state.last_activity = asyncio.get_running_loop().time()
         elapsed = asyncio.get_running_loop().time() - state.last_activity
         if elapsed >= timeout:
             logger.error("[gallery_dl] inactivity timeout (%ds) — killing process", timeout)
@@ -934,7 +964,7 @@ class GalleryDlPlugin(SourcePlugin):
 
         # Sentinel tasks — any of these finishing first triggers cleanup
         proc_wait_task = asyncio.create_task(proc.wait())
-        inactivity_task = asyncio.create_task(_inactivity_watchdog(state, inactivity_timeout, proc))
+        inactivity_task = asyncio.create_task(_inactivity_watchdog(state, inactivity_timeout, proc, watch_dir=dest_dir))
         sentinel_tasks: list[asyncio.Task] = [proc_wait_task, inactivity_task]
 
         sem_heartbeat = (options or {}).get("sem_heartbeat")
