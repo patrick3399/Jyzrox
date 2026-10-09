@@ -536,6 +536,8 @@ const ko: Record<string, string> = {
   'categories.backfillMatched': '갤러리 {count}개가 업데이트됩니다',
   'categories.backfillApplied': '갤러리 {count}개를 업데이트했습니다',
   'categories.localFolderNote': '분류를 바꿔도 디스크의 폴더는 이동하지 않습니다.',
+  'categories.uncategorizedDesc': '분류가 지정되지 않은 갤러리입니다. 라이브러리에서 지정하거나, 로컬 갤러리는 아래 "폴더 기준 분류 적용"을 사용할 수 있습니다.',
+  'categories.viewInLibrary': '라이브러리에서 보기',
   'import.batch.categoryUnregistered': '분류 목록에 없어 미분류가 됩니다',
   'settingsGroup.personal': '개인',
   'settingsGroup.appearance': '모양',

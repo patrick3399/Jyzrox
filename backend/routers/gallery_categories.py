@@ -57,6 +57,17 @@ async def _usage_counts(db: AsyncSession) -> dict[str, int]:
     return {key: count for key, count in rows}
 
 
+async def _uncategorized_count(db: AsyncSession) -> int:
+    """Active galleries with no category; the same predicate as the library's __uncategorized__ filter."""
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(Gallery)
+            .where(Gallery.deleted_at.is_(None), or_(Gallery.category.is_(None), Gallery.category == ""))
+        )
+    ).scalar_one()
+
+
 def _validate_color(color: str) -> None:
     if color not in PALETTE:
         raise HTTPException(status_code=422, detail="Unknown colour")
@@ -76,7 +87,11 @@ async def list_categories(_: dict = Depends(require_auth), db: AsyncSession = De
         .all()
     )
     usage = await _usage_counts(db)
-    return {"categories": [_item(r, usage) for r in rows], "palette": list(PALETTE)}
+    return {
+        "categories": [_item(r, usage) for r in rows],
+        "palette": list(PALETTE),
+        "uncategorized_count": await _uncategorized_count(db),
+    }
 
 
 @router.post("/", status_code=201)

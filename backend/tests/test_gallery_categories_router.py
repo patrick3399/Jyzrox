@@ -42,6 +42,20 @@ async def test_list_returns_categories_usage_counts_and_palette(client, db_sessi
     assert [c["name"] for c in body["categories"]] == ["Cosplay", "Novel"]
 
 
+async def test_list_reports_uncategorized_count_for_null_and_empty_but_not_trashed(client, db_session):
+    await _seed(db_session, ("Cosplay", "red", True))
+    await _insert_gallery(db_session, source_id="a", category=None)
+    await _insert_gallery(db_session, source_id="b", category="")
+    await _insert_gallery(db_session, source_id="c", category="Cosplay")
+    trashed = await _insert_gallery(db_session, source_id="d", category=None)
+    await db_session.execute(text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :i"), {"i": trashed})
+    await db_session.commit()
+
+    resp = await client.get(f"{BASE}/")
+
+    assert resp.json()["uncategorized_count"] == 2
+
+
 async def test_list_is_readable_by_viewer(make_client, db_session):
     await _seed(db_session, ("Cosplay", "red", True))
     async with make_client(user_id=2, role="viewer") as ac:

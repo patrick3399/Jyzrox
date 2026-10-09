@@ -1189,6 +1189,7 @@ export interface GalleryCategoryDef {
 export interface GalleryCategoriesResponse {
   categories: GalleryCategoryDef[]
   palette: string[]
+  uncategorized_count: number
 }
 
 export interface CategoryBackfillResult {

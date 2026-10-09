@@ -260,6 +260,8 @@ const en: Record<string, string> = {
   'categories.backfillMatched': '{count} galleries would be updated',
   'categories.backfillApplied': '{count} galleries updated',
   'categories.localFolderNote': 'Changing the category does not move the gallery\'s folder on disk.',
+  'categories.uncategorizedDesc': 'Active galleries with no category. Assign one in the Library, or use "Apply folder categories" below for local galleries.',
+  'categories.viewInLibrary': 'View in Library',
   'import.batch.categoryUnregistered': 'Not in category list — will be uncategorized',
   'settingsGroup.personal': 'Personal',
   'settingsGroup.appearance': 'Appearance',

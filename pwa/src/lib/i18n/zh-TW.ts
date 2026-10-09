@@ -476,6 +476,8 @@ const zhTW: Record<string, string> = {
   'categories.backfillMatched': '將更新 {count} 個圖庫',
   'categories.backfillApplied': '已更新 {count} 個圖庫',
   'categories.localFolderNote': '變更分類不會移動此圖庫在磁碟上的資料夾。',
+  'categories.uncategorizedDesc': '尚未指定分類的圖庫。可在圖庫中指定，本地圖庫也可使用下方「依資料夾補套分類」。',
+  'categories.viewInLibrary': '在圖庫中檢視',
   'import.batch.categoryUnregistered': '不在分類清單內，將成為未分類',
   'settingsGroup.personal': '個人',
   'settingsGroup.appearance': '外觀',

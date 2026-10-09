@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import { useSWRConfig } from 'swr'
 import { BackButton } from '@/components/BackButton'
@@ -10,7 +11,16 @@ import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { api } from '@/lib/api'
 import { CATEGORY_PALETTE } from '@/lib/categoryPalette'
 import { t } from '@/lib/i18n'
+import { updateFilter } from '@/lib/queryParser'
 import type { GalleryCategoryDef } from '@/lib/types'
+
+// The Library page is driven by the `q` search string (a `category:` token), not a
+// `category` query param. The sentinel matches the library's own "uncategorized" option.
+const UNCATEGORIZED_FILTER = '__uncategorized__'
+
+function libraryCategoryHref(category: string): string {
+  return `/library?q=${encodeURIComponent(updateFilter('', 'category', category))}`
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : t('common.failedToLoad')
@@ -131,18 +141,39 @@ export default function CategoriesSettingsPage() {
         <h2 className="mb-3 text-sm font-medium text-vault-text">{t('categories.builtin')}</h2>
         <ul className="flex flex-wrap gap-2">
           {builtin.map((c) => (
-            <li
-              key={c.id}
-              className="flex items-center gap-2 rounded-full border border-vault-border px-3 py-1 text-sm text-vault-text"
-            >
-              <span className={`h-3 w-3 rounded-full ${CATEGORY_PALETTE[c.color]?.swatch ?? 'bg-gray-500'}`} />
-              {c.name}
-              <span className="text-xs text-vault-text-muted">
-                {t('categories.galleryCount', { count: String(c.gallery_count) })}
-              </span>
+            <li key={c.id}>
+              <Link
+                href={libraryCategoryHref(c.name)}
+                title={t('categories.viewInLibrary')}
+                className="flex items-center gap-2 rounded-full border border-vault-border px-3 py-1 text-sm text-vault-text transition-colors hover:border-vault-accent hover:text-vault-accent"
+              >
+                <span className={`h-3 w-3 rounded-full ${CATEGORY_PALETTE[c.color]?.swatch ?? 'bg-gray-500'}`} />
+                {c.name}
+                <span className="text-xs text-vault-text-muted">
+                  {t('categories.galleryCount', { count: String(c.gallery_count) })}
+                </span>
+              </Link>
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className={card}>
+        <h2 className="mb-1 text-sm font-medium text-vault-text">
+          {t('library.categoryUncategorized')}
+        </h2>
+        <p className="mb-3 text-xs text-vault-text-muted">{t('categories.uncategorizedDesc')}</p>
+        <Link
+          href={libraryCategoryHref(UNCATEGORIZED_FILTER)}
+          title={t('categories.viewInLibrary')}
+          className="inline-flex items-center gap-2 rounded-full border border-vault-border px-3 py-1 text-sm text-vault-text transition-colors hover:border-vault-accent hover:text-vault-accent"
+        >
+          <span className="h-3 w-3 rounded-full bg-gray-500" />
+          {t('library.categoryUncategorized')}
+          <span className="text-xs text-vault-text-muted">
+            {t('categories.galleryCount', { count: String(data.uncategorized_count) })}
+          </span>
+        </Link>
       </section>
 
       <section className={card}>
@@ -150,7 +181,13 @@ export default function CategoriesSettingsPage() {
         <ul className="space-y-3">
           {custom.map((c) => (
             <li key={c.id} className="flex flex-wrap items-center gap-3">
-              <span className="min-w-24 text-sm text-vault-text">{c.name}</span>
+              <Link
+                href={libraryCategoryHref(c.name)}
+                title={t('categories.viewInLibrary')}
+                className="min-w-24 text-sm text-vault-text transition-colors hover:text-vault-accent hover:underline"
+              >
+                {c.name}
+              </Link>
               <ColorPicker
                 palette={data.palette}
                 value={c.color}

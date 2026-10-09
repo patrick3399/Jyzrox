@@ -404,6 +404,8 @@ const ja: Record<string, string> = {
   'categories.backfillMatched': '{count} 件が更新されます',
   'categories.backfillApplied': '{count} 件を更新しました',
   'categories.localFolderNote': 'カテゴリを変更しても、ディスク上のフォルダは移動しません。',
+  'categories.uncategorizedDesc': 'カテゴリ未設定のギャラリーです。ライブラリで設定するか、ローカルギャラリーは下の「フォルダからカテゴリを適用」を使えます。',
+  'categories.viewInLibrary': 'ライブラリで表示',
   'import.batch.categoryUnregistered': 'カテゴリ一覧にないため未分類になります',
   'settingsGroup.personal': '個人',
   'settingsGroup.appearance': '外観',

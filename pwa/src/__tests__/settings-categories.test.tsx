@@ -40,6 +40,7 @@ vi.mock('next/navigation', () => ({
 
 import CategoriesSettingsPage from '@/app/settings/categories/page'
 import { getVisibleCategories } from '@/lib/settingsRegistry'
+import { parseQuery } from '@/lib/queryParser'
 
 const data = {
   categories: [
@@ -47,6 +48,7 @@ const data = {
     { id: 11, name: 'Novel', color: 'teal', sort_order: 11, is_builtin: false, gallery_count: 7 },
   ],
   palette: ['red', 'teal', 'gray'],
+  uncategorized_count: 12,
 }
 
 beforeEach(() => {
@@ -74,6 +76,74 @@ describe('CategoriesSettingsPage', () => {
     expect(screen.getByText('Cosplay')).toBeInTheDocument()
     expect(screen.getByText('Novel')).toBeInTheDocument()
     expect(screen.getByText('categories.galleryCount:{"count":"7"}')).toBeInTheDocument()
+  })
+
+  it('test_categories_page_builtin_and_custom_names_link_to_library_category_filter', () => {
+    render(<CategoriesSettingsPage />)
+    expect(screen.getByRole('link', { name: /Cosplay/ })).toHaveAttribute(
+      'href',
+      '/library?q=category%3ACosplay',
+    )
+    expect(screen.getByRole('link', { name: /Novel/ })).toHaveAttribute(
+      'href',
+      '/library?q=category%3ANovel',
+    )
+  })
+
+  it('test_categories_page_library_link_url_encodes_special_characters_in_name', () => {
+    mockRegistry.mockReturnValue({
+      data: {
+        ...data,
+        categories: [
+          { id: 12, name: 'Sci-Fi & Co', color: 'teal', sort_order: 12, is_builtin: false, gallery_count: 1 },
+        ],
+      },
+      mutate: mockMutate,
+      isLoading: false,
+    })
+    render(<CategoriesSettingsPage />)
+    expect(screen.getByRole('link', { name: /Sci-Fi & Co/ })).toHaveAttribute(
+      'href',
+      '/library?q=category%3A%22Sci-Fi%20%26%20Co%22',
+    )
+  })
+
+  it('test_categories_page_library_links_round_trip_through_the_library_query_parser', () => {
+    mockRegistry.mockReturnValue({
+      data: {
+        ...data,
+        categories: [
+          { id: 1, name: 'Artist CG', color: 'yellow', sort_order: 3, is_builtin: true, gallery_count: 2 },
+        ],
+      },
+      mutate: mockMutate,
+      isLoading: false,
+    })
+    render(<CategoriesSettingsPage />)
+    const href = screen.getByRole('link', { name: /Artist CG/ }).getAttribute('href') ?? ''
+    const q = new URL(href, 'http://x').searchParams.get('q') ?? ''
+    expect(parseQuery(q).category).toBe('Artist CG')
+    const uncategorized = screen.getByRole('link', { name: /library\.categoryUncategorized/ })
+    const uq = new URL(uncategorized.getAttribute('href') ?? '', 'http://x').searchParams.get('q') ?? ''
+    expect(parseQuery(uq).category).toBe('__uncategorized__')
+  })
+
+  it('test_categories_page_uncategorized_section_shows_count_and_links_to_uncategorized_filter', () => {
+    render(<CategoriesSettingsPage />)
+    const link = screen.getByRole('link', { name: /library\.categoryUncategorized/ })
+    expect(link).toHaveAttribute('href', '/library?q=category%3A__uncategorized__')
+    expect(screen.getByText('categories.galleryCount:{"count":"12"}')).toBeInTheDocument()
+  })
+
+  it('test_categories_page_uncategorized_section_still_renders_when_count_is_zero', () => {
+    mockRegistry.mockReturnValue({
+      data: { ...data, uncategorized_count: 0 },
+      mutate: mockMutate,
+      isLoading: false,
+    })
+    render(<CategoriesSettingsPage />)
+    expect(screen.getByRole('link', { name: /library\.categoryUncategorized/ })).toBeInTheDocument()
+    expect(screen.getByText('categories.galleryCount:{"count":"0"}')).toBeInTheDocument()
   })
 
   it('test_categories_page_add_calls_create_with_name_and_color', async () => {

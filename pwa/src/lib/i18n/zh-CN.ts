@@ -403,6 +403,8 @@ const zhCN: Record<string, string> = {
   'categories.backfillMatched': '将更新 {count} 个图库',
   'categories.backfillApplied': '已更新 {count} 个图库',
   'categories.localFolderNote': '更改分类不会移动此图库在磁盘上的文件夹。',
+  'categories.uncategorizedDesc': '尚未指定分类的图库。可在图库中指定，本地图库也可使用下方“按文件夹补套分类”。',
+  'categories.viewInLibrary': '在图库中查看',
   'import.batch.categoryUnregistered': '不在分类列表内，将成为未分类',
   'settingsGroup.personal': '个人',
   'settingsGroup.appearance': '外观',
