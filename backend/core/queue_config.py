@@ -7,9 +7,10 @@ edit only this file. core/queue.py and worker/__init__.py import from here.
 # ── Queue names ──────────────────────────────────────────────────────────────
 QUEUE_INTERACTIVE = "interactive"  # user-triggered actions + cron
 QUEUE_INGEST = "ingest"  # import pipeline stages 1–2
+QUEUE_COVER = "cover"  # one cover thumbnail per gallery, ahead of bulk work
 QUEUE_RENDER = "render"  # CPU-bound bulk image processing
 
-ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
+ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_COVER, QUEUE_RENDER)
 
 # ── Job → queue routing ───────────────────────────────────────────────────────
 # Jobs NOT listed here default to QUEUE_INTERACTIVE at every enqueue() call.
@@ -18,7 +19,12 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 #
 #   interactive (95–5):  user-triggered + cron/maintenance
 #   ingest      (40–30): import pipeline, prerequisite for gallery display
+#   cover       (35):    first visible thumbnail of a gallery
 #   render      (15–10): CPU-bound bulk image processing, always yields
+#
+# The numbers only explain which queue a job belongs to. SAQ's Redis queue is
+# FIFO and has no per-job priority, so a job that must not wait behind another
+# kind of job needs a queue of its own.
 #
 # job_name                    queue            priority  notes
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,8 +55,10 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 # ─────────────────────────────────────────────────────────────────────────────
 # local_import_job            ingest            40       creates images/pages
 # link_hash_job               ingest            38       hashes pending link pages
-# cover_thumbnail_job         ingest            35       single cover, fast
 # auto_discover_job           ingest            30       triggers local_import
+# ─────────────────────────────────────────────────────────────────────────────
+# cover_thumbnail_job         cover             35       single cover, fast; own queue so
+#                                                        bulk imports cannot queue ahead
 # ─────────────────────────────────────────────────────────────────────────────
 # thumbnail_job               render            15       full-book thumbnails
 # thumbhash_backfill_job      render            10       batch maintenance
@@ -66,9 +74,10 @@ JOB_QUEUE_ROUTING: dict[str, str] = {
     # ingest — import pipeline, must precede render
     "local_import_job": QUEUE_INGEST,
     "link_hash_job": QUEUE_INGEST,
-    "cover_thumbnail_job": QUEUE_INGEST,
     "auto_discover_job": QUEUE_INGEST,
     "explorer_folder_stats_job": QUEUE_INGEST,
+    # cover — nothing else may share this queue
+    "cover_thumbnail_job": QUEUE_COVER,
     # everything else → QUEUE_INTERACTIVE (default)
 }
 
@@ -76,10 +85,12 @@ JOB_QUEUE_ROUTING: dict[str, str] = {
 # Override at runtime via environment variables:
 #   WORKER_CONCURRENCY_INTERACTIVE  (default 6)
 #   WORKER_CONCURRENCY_INGEST       (default 4)
+#   WORKER_CONCURRENCY_COVER        (default 2)
 #   WORKER_CONCURRENCY_RENDER       (default 2)
 #
 DEFAULT_CONCURRENCY: dict[str, int] = {
     QUEUE_INTERACTIVE: 6,  # I/O-bound; high concurrency is safe
     QUEUE_INGEST: 4,  # mixed disk I/O
+    QUEUE_COVER: 2,  # one image each; decodes are bounded by THUMBNAIL_WORKERS
     QUEUE_RENDER: 2,  # CPU-bound; limited by core count
 }

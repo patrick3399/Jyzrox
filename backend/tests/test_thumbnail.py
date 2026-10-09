@@ -556,7 +556,7 @@ class TestThumbnailJob:
 
         seen: list[str] = []
 
-        async def _fake_run(sha256, media_type, src):
+        async def _fake_run(sha256, media_type, src, **_kwargs):
             seen.append(sha256)
             return _ThumbnailResult(width=1, height=1)
 
@@ -632,7 +632,7 @@ class TestThumbnailJob:
         session = _make_mock_session_ctx(images=[img1, img2], gallery=_make_gallery("last-cover-source"))
         seen: list[str] = []
 
-        async def _fake_run(sha256, media_type, src):
+        async def _fake_run(sha256, media_type, src, **_kwargs):
             seen.append(sha256)
             return _ThumbnailResult(width=1, height=1)
 
@@ -684,6 +684,132 @@ class TestThumbnailJob:
 
         assert len(results) == 5
         assert max_active == 2
+
+
+# ---------------------------------------------------------------------------
+# TestThumbnailDecodePriority
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def single_decode_slot(monkeypatch):
+    """Fresh one-slot decode gate, as deployed (THUMBNAIL_WORKERS=1)."""
+    from worker import thumbnail as thumbnail_module
+
+    monkeypatch.setenv("THUMBNAIL_WORKERS", "1")
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore", None)
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore_size", None)
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor", None)
+    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor_size", None)
+    return thumbnail_module
+
+
+class TestThumbnailDecodePriority:
+    """A cover must not queue behind the pages of other galleries.
+
+    Regression (2026-10-09 library rescan): every decode shared one FIFO slot,
+    and each full-gallery job pre-queued a batch of 25, so a one-image cover
+    job waited ~40 s (up to 204 s) behind up to 50 bulk decodes.
+    """
+
+    async def test_cover_decode_overtakes_bulk_decodes_already_waiting(self, single_decode_slot, monkeypatch):
+        import threading
+
+        from worker.thumbnail import _PRIORITY_COVER, _run_thumbnail_in_thread, _ThumbnailResult
+
+        order: list[str] = []
+        release_first = threading.Event()
+
+        def _fake_sync(sha256, media_type, src):
+            order.append(sha256)
+            if sha256 == "in-flight":
+                release_first.wait(5)
+            return _ThumbnailResult(width=1, height=1)
+
+        monkeypatch.setattr(single_decode_slot, "_generate_single_thumbnail_sync", _fake_sync)
+        src = Path("unused")
+        try:
+            in_flight = asyncio.create_task(_run_thumbnail_in_thread("in-flight", "image", src))
+            while order != ["in-flight"]:
+                await asyncio.sleep(0.001)
+            bulk = [asyncio.create_task(_run_thumbnail_in_thread(f"bulk-{i}", "image", src)) for i in range(3)]
+            await asyncio.sleep(0)
+            cover = asyncio.create_task(_run_thumbnail_in_thread("cover", "image", src, priority=_PRIORITY_COVER))
+            await asyncio.sleep(0)
+        finally:
+            release_first.set()
+        await asyncio.gather(in_flight, cover, *bulk)
+
+        assert order == ["in-flight", "cover", "bulk-0", "bulk-1", "bulk-2"]
+
+    async def test_cover_thumbnail_job_requests_cover_priority(self):
+        from worker.thumbnail import _PRIORITY_COVER, _ThumbnailResult, cover_thumbnail_job
+
+        cover = _make_thumbnail_image(1, "a" * 64)
+        session = _make_mock_session_ctx(images=[cover])
+        priorities: list[int] = []
+
+        async def _fake_run(sha256, media_type, src, *, priority):
+            priorities.append(priority)
+            return _ThumbnailResult(width=1, height=1)
+
+        with (
+            patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
+            patch("worker.thumbnail.select_cover_image", new_callable=AsyncMock, return_value=cover),
+            patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
+            patch("worker.thumbnail._run_thumbnail_in_thread", side_effect=_fake_run),
+        ):
+            await cover_thumbnail_job({}, gallery_id=99)
+
+        assert priorities == [_PRIORITY_COVER]
+
+    async def test_full_thumbnail_job_requests_bulk_priority(self):
+        from worker.thumbnail import _PRIORITY_BULK, _PRIORITY_COVER, _ThumbnailResult, thumbnail_job
+
+        session = _make_mock_session_ctx(images=[_make_thumbnail_image(1, "a" * 64)])
+        priorities: list[int] = []
+
+        async def _fake_run(sha256, media_type, src, *, priority):
+            priorities.append(priority)
+            return _ThumbnailResult(width=1, height=1)
+
+        with (
+            patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
+            patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
+            patch("worker.thumbnail._run_thumbnail_in_thread", side_effect=_fake_run),
+        ):
+            await thumbnail_job({}, gallery_id=99)
+
+        assert priorities == [_PRIORITY_BULK]
+        assert _PRIORITY_COVER < _PRIORITY_BULK, "lower value is served first"
+
+    async def test_waiter_cancelled_while_queued_does_not_take_the_decode_slot(self, single_decode_slot):
+        """SAQ cancels a job on timeout; its queued decode must not swallow the slot."""
+        from worker.thumbnail import _PRIORITY_BULK, _get_thumbnail_semaphore
+
+        gate = _get_thumbnail_semaphore()
+        await gate.acquire(_PRIORITY_BULK)
+        abandoned = asyncio.create_task(gate.acquire(_PRIORITY_BULK))
+        await asyncio.sleep(0)
+        abandoned.cancel()
+        await asyncio.gather(abandoned, return_exceptions=True)
+
+        gate.release()
+
+        await asyncio.wait_for(gate.acquire(_PRIORITY_BULK), timeout=1)
+
+    async def test_waiter_cancelled_after_being_handed_the_slot_passes_it_on(self, single_decode_slot):
+        from worker.thumbnail import _PRIORITY_BULK, _get_thumbnail_semaphore
+
+        gate = _get_thumbnail_semaphore()
+        await gate.acquire(_PRIORITY_BULK)
+        handed = asyncio.create_task(gate.acquire(_PRIORITY_BULK))
+        await asyncio.sleep(0)
+        gate.release()  # the slot now belongs to `handed`, which has not resumed yet
+        handed.cancel()
+        await asyncio.gather(handed, return_exceptions=True)
+
+        await asyncio.wait_for(gate.acquire(_PRIORITY_BULK), timeout=1)
 
 
 # ---------------------------------------------------------------------------

@@ -155,6 +155,7 @@ services:
       <<: *backend-env
       WORKER_CONCURRENCY_INTERACTIVE: ${WORKER_CONCURRENCY_INTERACTIVE:-6}
       WORKER_CONCURRENCY_INGEST: ${WORKER_CONCURRENCY_INGEST:-4}
+      WORKER_CONCURRENCY_COVER: ${WORKER_CONCURRENCY_COVER:-2}
       WORKER_CONCURRENCY_RENDER: ${WORKER_CONCURRENCY_RENDER:-2}
       # Cap glibc per-thread arenas so freed heap from heavy batch jobs (dedup /
       # import / thumbnail) returns to the OS instead of fragmenting; pairs with

@@ -986,6 +986,7 @@ def _make_startup_log(label: str):
 
 
 _ingest_startup = _make_startup_log("ingest")
+_cover_startup = _make_startup_log("cover")
 
 
 async def _render_startup(ctx: dict) -> None:
@@ -1030,7 +1031,7 @@ def _build_cron_jobs() -> list[CronJob]:
 
 
 def build_workers() -> tuple:
-    """Build and return all three SAQ Worker instances.
+    """Build and return every SAQ Worker instance, one per queue.
 
     Queue objects are pre-registered in core.queue._queues so that enqueue()
     works immediately from startup() onwards without a separate init call.
@@ -1041,6 +1042,7 @@ def build_workers() -> tuple:
     from core.queue_config import (
         ALL_QUEUES,
         DEFAULT_CONCURRENCY,
+        QUEUE_COVER,
         QUEUE_INGEST,
         QUEUE_INTERACTIVE,
         QUEUE_RENDER,
@@ -1053,12 +1055,14 @@ def build_workers() -> tuple:
     concurrency = {
         QUEUE_INTERACTIVE: env_int("WORKER_CONCURRENCY_INTERACTIVE", DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE]),
         QUEUE_INGEST: env_int("WORKER_CONCURRENCY_INGEST", DEFAULT_CONCURRENCY[QUEUE_INGEST]),
+        QUEUE_COVER: env_int("WORKER_CONCURRENCY_COVER", DEFAULT_CONCURRENCY[QUEUE_COVER]),
         QUEUE_RENDER: env_int("WORKER_CONCURRENCY_RENDER", DEFAULT_CONCURRENCY[QUEUE_RENDER]),
     }
     logger.info(
-        "Worker concurrency — interactive: %d, ingest: %d, render: %d",
+        "Worker concurrency — interactive: %d, ingest: %d, cover: %d, render: %d",
         concurrency[QUEUE_INTERACTIVE],
         concurrency[QUEUE_INGEST],
+        concurrency[QUEUE_COVER],
         concurrency[QUEUE_RENDER],
     )
 
@@ -1111,12 +1115,23 @@ def build_workers() -> tuple:
         functions=[
             local_import_job,
             link_hash_job,
+            # Routed to the cover queue now. Still registered here so cover
+            # jobs already queued on ingest (or enqueued by an api container
+            # that predates the cover queue) drain instead of failing.
             cover_thumbnail_job,
             auto_discover_job,
             explorer_folder_stats_job,
         ],
         concurrency=concurrency[QUEUE_INGEST],
         startup=_ingest_startup,
+        after_process=after_process_hook,
+    )
+
+    worker_cover = Worker(
+        queues[QUEUE_COVER],
+        functions=[cover_thumbnail_job],
+        concurrency=concurrency[QUEUE_COVER],
+        startup=_cover_startup,
         after_process=after_process_hook,
     )
 
@@ -1131,7 +1146,7 @@ def build_workers() -> tuple:
         after_process=after_process_hook,
     )
 
-    return worker_interactive, worker_ingest, worker_render
+    return worker_interactive, worker_ingest, worker_cover, worker_render
 
 
 # Keep old name as alias for any external scripts that import it

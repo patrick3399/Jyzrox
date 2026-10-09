@@ -2,6 +2,8 @@
 
 import asyncio
 import concurrent.futures
+import heapq
+import itertools
 import json
 import os
 import subprocess
@@ -47,7 +49,50 @@ try:
 except ImportError:
     pass
 
-_thumbnail_semaphore: asyncio.Semaphore | None = None
+# Decode priorities; the lower value is served first.
+_PRIORITY_COVER = 0
+_PRIORITY_BULK = 1
+
+
+class _PrioritySemaphore:
+    """Semaphore that serves waiters by priority, then by arrival.
+
+    Every decode in the worker shares these slots. A full-gallery job queues a
+    whole commit batch at once, so with plain FIFO a one-image cover job waited
+    behind the pages of every gallery ahead of it. A cover now waits for the
+    decode already in flight at most.
+    """
+
+    def __init__(self, size: int) -> None:
+        self._free = size
+        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
+        self._arrival = itertools.count()
+
+    async def acquire(self, priority: int) -> None:
+        if self._free > 0:
+            self._free -= 1
+            return
+        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._waiters, (priority, next(self._arrival), waiter))
+        try:
+            await waiter
+        except asyncio.CancelledError:
+            # release() may have handed this waiter the slot just before the
+            # cancellation landed; pass it on or it is lost for good.
+            if waiter.done() and not waiter.cancelled():
+                self.release()
+            raise
+
+    def release(self) -> None:
+        while self._waiters:
+            _, _, waiter = heapq.heappop(self._waiters)
+            if not waiter.done():  # a cancelled waiter is skipped
+                waiter.set_result(None)
+                return
+        self._free += 1
+
+
+_thumbnail_semaphore: _PrioritySemaphore | None = None
 _thumbnail_semaphore_size: int | None = None
 _thumbnail_executor: concurrent.futures.ThreadPoolExecutor | None = None
 _thumbnail_executor_size: int | None = None
@@ -75,12 +120,12 @@ def _thumbnail_commit_batch() -> int:
     return env_int("THUMBNAIL_COMMIT_BATCH", 25)
 
 
-def _get_thumbnail_semaphore() -> asyncio.Semaphore:
+def _get_thumbnail_semaphore() -> _PrioritySemaphore:
     global _thumbnail_semaphore, _thumbnail_semaphore_size
 
     size = _thumbnail_workers()
     if _thumbnail_semaphore is None or _thumbnail_semaphore_size != size:
-        _thumbnail_semaphore = asyncio.Semaphore(size)
+        _thumbnail_semaphore = _PrioritySemaphore(size)
         _thumbnail_semaphore_size = size
     return _thumbnail_semaphore
 
@@ -108,10 +153,14 @@ def _get_thumbnail_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _thumbnail_executor
 
 
-async def _run_thumbnail_in_thread(*args) -> _ThumbnailResult | None:
-    async with _get_thumbnail_semaphore():
+async def _run_thumbnail_in_thread(*args, priority: int = _PRIORITY_BULK) -> _ThumbnailResult | None:
+    semaphore = _get_thumbnail_semaphore()
+    await semaphore.acquire(priority)
+    try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(_get_thumbnail_executor(), _generate_single_thumbnail_sync, *args)
+    finally:
+        semaphore.release()
 
 
 def _unique_tmp_path(dest: Path) -> Path:
@@ -491,7 +540,7 @@ async def _load_gallery_images(
     return gallery, list(images)
 
 
-async def _process_images(session, images: list[Image], *, commit_batch: int) -> int:
+async def _process_images(session, images: list[Image], *, commit_batch: int, priority: int = _PRIORITY_BULK) -> int:
     processed = 0
     pending: list[Image] = []
 
@@ -499,22 +548,22 @@ async def _process_images(session, images: list[Image], *, commit_batch: int) ->
         if img.blob:
             pending.append(img)
         if len(pending) >= commit_batch:
-            processed += await _process_image_batch(session, pending)
+            processed += await _process_image_batch(session, pending, priority)
             pending = []
 
     if pending:
-        processed += await _process_image_batch(session, pending)
+        processed += await _process_image_batch(session, pending, priority)
 
     return processed
 
 
-async def _process_image_batch(session, images: list[Image]) -> int:
+async def _process_image_batch(session, images: list[Image], priority: int = _PRIORITY_BULK) -> int:
     work = [(img, resolve_blob_path(img.blob, img.external_path)) for img in images if _blob_needs_thumbnail(img.blob)]
     if not work:
         return 0
 
     results = await asyncio.gather(
-        *[_run_thumbnail_in_thread(img.blob.sha256, img.blob.media_type, src) for img, src in work],
+        *[_run_thumbnail_in_thread(img.blob.sha256, img.blob.media_type, src, priority=priority) for img, src in work],
         return_exceptions=True,
     )
 
@@ -570,7 +619,7 @@ async def cover_thumbnail_job(ctx: dict, gallery_id: int) -> dict:
         if gallery:
             cover = await select_cover_image(session, gallery_id, gallery.source or "")
             if cover:
-                processed = await _process_images(session, [cover], commit_batch=1)
+                processed = await _process_images(session, [cover], commit_batch=1, priority=_PRIORITY_COVER)
 
     logger.info("[thumbnail_cover] gallery_id=%d: %d done", gallery_id, processed)
     return {"status": "done", "processed": processed}

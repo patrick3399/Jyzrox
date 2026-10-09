@@ -12,9 +12,9 @@ async def _main() -> None:
     workers = build_workers()
 
     # SAQ's Worker.start() registers its own SIGINT/SIGTERM handlers, but all
-    # three workers share this one event loop and asyncio keeps a single handler
-    # per signal — the last worker to start (render) silently replaced the other
-    # two. `docker stop` then stopped only render, the process idled until the
+    # workers share this one event loop and asyncio keeps a single handler per
+    # signal — the last worker to start (render) silently replaced the others.
+    # `docker stop` then stopped only render, the process idled until the
     # grace period expired and was SIGKILLed, and the interactive worker's
     # shutdown() (which clears worker:run_marker) never ran. Own the signals here
     # and fan the stop out to every worker instead.
