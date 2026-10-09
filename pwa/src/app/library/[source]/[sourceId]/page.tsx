@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import useSWR from 'swr'
 import { useLibraryGallery, useInfiniteGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
+import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { useLinkGallerySync } from '@/hooks/useLinkGallerySync'
 import { useGalleryEventRefresh } from '@/hooks/useGalleryEventRefresh'
@@ -440,6 +441,17 @@ export default function GalleryDetailPage() {
     },
     [gallery, updateGallery, mutateGallery],
   )
+
+  const { data: categoryRegistry } = useCategoryRegistry()
+  const categoryOptions = useMemo(() => {
+    const names = (categoryRegistry?.categories ?? []).map((c) => c.name)
+    const current = gallery?.category ?? ''
+    // Keep an out-of-registry value (e.g. from a remote source) selectable so
+    // the control never shows a blank for a gallery that does have one.
+    return current && !names.some((n) => n.toLowerCase() === current.toLowerCase())
+      ? [...names, current]
+      : names
+  }, [categoryRegistry, gallery?.category])
 
   const handleCategoryChange = useCallback(
     async (category: string) => {
@@ -904,28 +916,22 @@ export default function GalleryDetailPage() {
               <div>
                 <span className="text-vault-text-muted">{t('library.metaCategory')}: </span>
                 <select
-                  value={gallery.category}
+                  value={gallery.category ?? ''}
                   onChange={(e) => handleCategoryChange(e.target.value)}
                   className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
                 >
                   <option value="">{t('library.categoryUncategorized')}</option>
-                  {[
-                    'Doujinshi',
-                    'Manga',
-                    'Artist CG',
-                    'Game CG',
-                    'Western',
-                    'Non-H',
-                    'Image Set',
-                    'Cosplay',
-                    'Asian Porn',
-                    'Misc',
-                  ].map((cat) => (
+                  {categoryOptions.map((cat) => (
                     <option key={cat} value={cat}>
                       {cat}
                     </option>
                   ))}
                 </select>
+                {gallery.source === 'local' && (
+                  <p className="mt-1 text-xs text-vault-text-muted">
+                    {t('categories.localFolderNote')}
+                  </p>
+                )}
               </div>
               {/* Artist and uploader have distinct meanings on E-Hentai. */}
               <div>

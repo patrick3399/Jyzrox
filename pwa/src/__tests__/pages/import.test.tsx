@@ -39,6 +39,10 @@ vi.mock('@/hooks/useImport', () => ({
   useRecentImports: () => ({ data: [] }),
 }))
 
+vi.mock('@/hooks/useCategoryRegistry', () => ({
+  useCategoryRegistry: () => ({ data: { categories: [], palette: [] } }),
+}))
+
 describe('ImportPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -48,6 +52,8 @@ describe('ImportPage', () => {
           rel_path: 'Alice/Gallery',
           abs_path: '/mnt/media/Alice/Gallery',
           artist: 'Alice',
+          category: null,
+          category_resolved: null,
           title: 'Gallery',
           file_count: 3,
         },
@@ -83,7 +89,9 @@ describe('ImportPage', () => {
       expect(mockBatchStartTrigger).toHaveBeenCalledWith({
         rootDir: '/mnt/media/{artist}/{_}/{title}',
         mode: 'copy',
-        galleries: [{ path: '/mnt/media/Alice/Gallery', artist: 'Alice', title: 'Gallery' }],
+        galleries: [
+          { path: '/mnt/media/Alice/Gallery', artist: 'Alice', category: null, title: 'Gallery' },
+        ],
       })
     })
   })

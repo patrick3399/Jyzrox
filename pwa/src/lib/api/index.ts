@@ -21,6 +21,7 @@ import { import_ } from './import'
 import { history, savedSearches } from './history'
 import { plugins } from './plugins'
 import { galleryManagement } from './galleryManagement'
+import { galleryCategories } from './galleryCategories'
 import { pixiv } from './pixiv'
 import { artists } from './artists'
 import { collections } from './collections'
@@ -51,6 +52,7 @@ export const api = {
   savedSearches,
   plugins,
   galleryManagement,
+  galleryCategories,
   pixiv,
   artists,
   collections,

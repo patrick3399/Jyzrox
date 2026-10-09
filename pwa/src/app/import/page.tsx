@@ -33,6 +33,7 @@ import {
 import { useRouter } from 'next/navigation'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
+import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { api } from '@/lib/api'
 
 // ── Folder Picker modal ───────────────────────────────────────────────
@@ -418,7 +419,10 @@ type BatchMatch = {
   rel_path: string
   abs_path: string
   artist: string | null
+  // Registry name chosen for import (null = uncategorized).
   category: string | null
+  // Raw folder-derived value, kept to explain why a row is uncategorized.
+  raw_category: string | null
   title: string
   file_count: number
   selected: boolean
@@ -439,6 +443,7 @@ function ZoneB() {
   const { trigger: scan, isMutating: scanLoading } = useBatchScan()
   const { trigger: startBatch } = useBatchStart()
   const { data: progress } = useBatchProgress(batchId)
+  const { data: categoryRegistry } = useCategoryRegistry()
 
   const presets = [
     '{title}',
@@ -455,7 +460,14 @@ function ZoneB() {
     if (!selectedDir) return
     try {
       const result = await scan({ rootDir: selectedDir, pattern })
-      setMatches(result.matches.map((m) => ({ ...m, selected: true })))
+      setMatches(
+        result.matches.map(({ category_resolved, category, ...rest }) => ({
+          ...rest,
+          raw_category: category,
+          category: category_resolved ?? null,
+          selected: true,
+        })),
+      )
       setUnmatched(result.unmatched)
       setPhase('previewing')
     } catch (err) {
@@ -686,13 +698,25 @@ function ZoneB() {
                         className={editInputClass}
                         placeholder="—"
                       />
-                      <input
-                        type="text"
-                        value={m.category ?? ''}
-                        onChange={(e) => updateMatch(idx, 'category', e.target.value || null)}
-                        className={editInputClass}
-                        placeholder="—"
-                      />
+                      <div className="min-w-0">
+                        <select
+                          value={m.category ?? ''}
+                          onChange={(e) => updateMatch(idx, 'category', e.target.value || null)}
+                          className={editInputClass}
+                        >
+                          <option value="">{t('library.categoryUncategorized')}</option>
+                          {(categoryRegistry?.categories ?? []).map((c) => (
+                            <option key={c.id} value={c.name}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        {m.raw_category && m.category === null && (
+                          <p className="mt-0.5 truncate text-xs text-vault-text-muted">
+                            {m.raw_category} — {t('import.batch.categoryUnregistered')}
+                          </p>
+                        )}
+                      </div>
                       <input
                         type="text"
                         value={m.title}

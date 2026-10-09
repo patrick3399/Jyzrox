@@ -1176,3 +1176,23 @@ export interface QueueOverview {
   scheduled: number
   workers: SaqWorker[]
 }
+
+export interface GalleryCategoryDef {
+  id: number
+  name: string
+  color: string
+  sort_order: number
+  is_builtin: boolean
+  gallery_count: number
+}
+
+export interface GalleryCategoriesResponse {
+  categories: GalleryCategoryDef[]
+  palette: string[]
+}
+
+export interface CategoryBackfillResult {
+  dry_run: boolean
+  matched: number
+  applied: number
+}

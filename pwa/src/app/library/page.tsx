@@ -21,6 +21,7 @@ import {
   HelpCircle,
 } from 'lucide-react'
 import { useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
+import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useLibraryBrowseSession } from '@/hooks/useLibraryBrowseSession'
@@ -100,6 +101,7 @@ function LibraryContent() {
   } = useUnifiedSearch()
 
   const { data: categoriesData } = useGalleryCategories()
+  const { data: categoryRegistry } = useCategoryRegistry()
   const { data: sourcesData } = useLibrarySources()
 
   const [colCount, setColCount] = useState(4)
@@ -800,6 +802,9 @@ function LibraryContent() {
           isLoading={isSessionLoading}
           renderItem={(gallery) => {
             const Card = viewMode === 'list' ? GalleryListCard : LibraryGalleryCard
+            // The list card shows plain text, so only the grid card takes the registry colours.
+            const cardExtras =
+              viewMode === 'list' ? {} : { categories: categoryRegistry?.categories }
             if (selectMode) {
               const isSelected = selectedIds.has(gallery.id)
               return (
@@ -811,6 +816,7 @@ function LibraryContent() {
                 >
                   <Card
                     gallery={gallery}
+                    {...cardExtras}
                     thumbUrl={gallery.cover_thumb ?? undefined}
                     selected={isSelected}
                     selectMode={true}
@@ -824,6 +830,7 @@ function LibraryContent() {
             return (
               <Card
                 gallery={gallery}
+                {...cardExtras}
                 thumbUrl={gallery.cover_thumb ?? undefined}
                 onClick={() => openGallery(gallery)}
                 onFavoriteToggle={handleFavoriteToggle}

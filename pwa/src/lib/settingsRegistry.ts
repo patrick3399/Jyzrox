@@ -15,6 +15,7 @@ import {
   ScrollText,
   Tags,
   CalendarClock,
+  Shapes,
 } from 'lucide-react'
 import { hasRole } from '@/lib/pageRegistry'
 import type { UserRole } from '@/lib/types'
@@ -148,6 +149,14 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
     labelKey: 'settingsCategory.scheduled',
     descKey: 'settingsCategory.scheduledDesc',
     icon: CalendarClock,
+    minRole: 'admin',
+    group: 'admin',
+  },
+  {
+    slug: 'categories',
+    labelKey: 'settingsCategory.categories',
+    descKey: 'settingsCategory.categoriesDesc',
+    icon: Shapes,
     minRole: 'admin',
     group: 'admin',
   },
