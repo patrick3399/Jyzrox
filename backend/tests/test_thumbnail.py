@@ -600,6 +600,29 @@ class TestThumbnailJob:
         assert result["processed"] == 3
         assert session.commit.await_count == 2
 
+    async def test_thumbnail_job_with_image_ids_loads_only_those_images(self):
+        """A mid-download batch must not scan the whole gallery: the image query is limited to its ids."""
+        from worker.thumbnail import _ThumbnailResult, thumbnail_job
+
+        session = _make_mock_session_ctx(images=[_make_thumbnail_image(7, "a" * 64)])
+
+        with (
+            patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
+            patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
+            patch(
+                "worker.thumbnail._run_thumbnail_in_thread",
+                new_callable=AsyncMock,
+                return_value=_ThumbnailResult(width=1, height=1),
+            ),
+        ):
+            result = await thumbnail_job({}, gallery_id=99, image_ids=[11, 12])
+
+        assert result["processed"] == 1
+        stmt = session.execute.await_args.args[0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "images.id IN (11, 12)" in compiled
+        assert "images.gallery_id = 99" in compiled
+
     async def test_cover_thumbnail_job_only_processes_cover_image(self):
         """Cover job should process exactly the configured cover image and commit."""
         from worker.thumbnail import _ThumbnailResult, cover_thumbnail_job

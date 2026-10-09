@@ -473,24 +473,20 @@ def _blob_needs_thumbnail(blob) -> bool:
     return blob.media_type != "video" and blob.phash is None
 
 
-async def _load_gallery_images(session, gallery_id: int) -> tuple[Gallery | None, list[Image]]:
+async def _load_gallery_images(
+    session, gallery_id: int, image_ids: list[int] | None = None
+) -> tuple[Gallery | None, list[Image]]:
     from sqlalchemy.orm import selectinload
 
     gallery = await session.get(Gallery, gallery_id)
     if not gallery:
         return None, []
 
+    stmt = select(Image).where(Image.gallery_id == gallery_id)
+    if image_ids is not None:
+        stmt = stmt.where(Image.id.in_(image_ids))
     images = (
-        (
-            await session.execute(
-                select(Image)
-                .where(Image.gallery_id == gallery_id)
-                .order_by(Image.page_num.asc())
-                .options(selectinload(Image.blob))
-            )
-        )
-        .scalars()
-        .all()
+        (await session.execute(stmt.order_by(Image.page_num.asc()).options(selectinload(Image.blob)))).scalars().all()
     )
     return gallery, list(images)
 
@@ -536,15 +532,20 @@ async def _process_image_batch(session, images: list[Image]) -> int:
     return processed
 
 
-async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
-    """Generate 160/360/720px WebP thumbnails for all images in a gallery."""
+async def thumbnail_job(ctx: dict, gallery_id: int, image_ids: list[int] | None = None) -> dict:
+    """Generate 160/360/720px WebP thumbnails for a gallery's images.
+
+    `image_ids` limits the job to those images. A download publishes its pages
+    in batches this way, so thumbnails appear while it is still running and a
+    batch never rescans the whole gallery.
+    """
     from core.source_display import get_display_config
 
     logger.info("[thumbnail] gallery_id=%d", gallery_id)
     processed = 0
 
     async with AsyncSessionLocal() as session:
-        gallery, images = await _load_gallery_images(session, gallery_id)
+        gallery, images = await _load_gallery_images(session, gallery_id, image_ids)
         if gallery:
             display_cfg = get_display_config(gallery.source or "")
             ordered_images = _cover_first(images, display_cfg.cover_page)

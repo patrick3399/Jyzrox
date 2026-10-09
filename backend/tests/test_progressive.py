@@ -1829,3 +1829,201 @@ class TestProgressiveImporterExistingPageNums:
         importer = await self._attach(db_session, db_session_factory, gallery_id)
 
         assert importer.existing_page_nums == set()
+
+
+# ---------------------------------------------------------------------------
+# TestProgressiveImporterMidDownloadProgress
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveImporterMidDownloadProgress:
+    """Thumbnails and the page count must not wait for finalize().
+
+    A slow source (Twitter at ~40 s/file) keeps a gallery `downloading` for
+    hours. Before this, every page imported in that time had no thumbnail and
+    the gallery reported 0 pages until the whole download ended.
+    """
+
+    @staticmethod
+    async def _make_importer(db_session, monkeypatch, **gallery_kwargs):
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        from worker import progressive as progressive_mod
+        from worker.progressive import ProgressiveImporter
+
+        monkeypatch.setattr(progressive_mod, "pg_insert", sqlite_insert)
+        gallery_id = await _insert_gallery(db_session, **gallery_kwargs)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "test_001"
+        return importer
+
+    @staticmethod
+    async def _import_one(importer, db_session, db_session_factory, tmp_path, name: str, sha: str) -> None:
+        import asyncio
+
+        from db.models import Blob
+
+        await _insert_blob(db_session, sha, ref_count=0)
+        fake_file = tmp_path / name
+        fake_file.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+        blob = Blob(sha256=sha, file_size=100, extension=".jpg", storage="cas", ref_count=0)
+        with (
+            patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
+            patch("worker.progressive.store_blob", new=AsyncMock(return_value=blob)),
+            patch("worker.progressive.create_library_symlink", new=AsyncMock()),
+        ):
+            await importer.import_file(fake_file, sha256=sha)
+            await asyncio.gather(*importer._tasks)
+
+    @staticmethod
+    async def _pages(db_session, gallery_id: int) -> int:
+        db_session.expire_all()
+        return (
+            await db_session.execute(text("SELECT pages FROM galleries WHERE id = :id"), {"id": gallery_id})
+        ).scalar_one()
+
+    @staticmethod
+    async def _image_ids(db_session, gallery_id: int) -> list[int]:
+        rows = await db_session.execute(
+            text("SELECT id FROM images WHERE gallery_id = :gid ORDER BY id"), {"gid": gallery_id}
+        )
+        return [row[0] for row in rows]
+
+    async def test_first_imported_file_enqueues_thumbnail_batch_before_finalize(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        importer = await self._make_importer(db_session, monkeypatch)
+
+        with patch("core.queue.enqueue", new=AsyncMock()) as enqueue:
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "a1" + "0" * 62)
+
+        (image_id,) = await self._image_ids(db_session, importer.gallery_id)
+        enqueue.assert_awaited_once()
+        assert enqueue.await_args.args == ("thumbnail_job",)
+        assert enqueue.await_args.kwargs["gallery_id"] == importer.gallery_id
+        assert enqueue.await_args.kwargs["image_ids"] == [image_id]
+
+    async def test_first_imported_file_updates_gallery_pages_before_finalize(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        importer = await self._make_importer(db_session, monkeypatch, pages=0)
+
+        with patch("core.queue.enqueue", new=AsyncMock()):
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "a2" + "0" * 62)
+
+        assert await self._pages(db_session, importer.gallery_id) == 1
+
+    async def test_files_inside_batch_window_are_held_until_batch_size_is_reached(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        from worker import progressive as progressive_mod
+
+        monkeypatch.setattr(progressive_mod, "_PROGRESS_BATCH_SIZE", 2)
+        importer = await self._make_importer(db_session, monkeypatch)
+
+        with patch("core.queue.enqueue", new=AsyncMock()) as enqueue:
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "b1" + "0" * 62)
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "b.jpg", "b2" + "0" * 62)
+            assert enqueue.await_count == 1, "one file inside the window must not be published on its own"
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "c.jpg", "b3" + "0" * 62)
+
+        ids = await self._image_ids(db_session, importer.gallery_id)
+        assert enqueue.await_count == 2
+        assert enqueue.await_args.kwargs["image_ids"] == ids[1:]
+        assert await self._pages(db_session, importer.gallery_id) == 3
+
+    async def test_file_imported_after_batch_interval_publishes_a_partial_batch(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        from worker import progressive as progressive_mod
+
+        importer = await self._make_importer(db_session, monkeypatch)
+
+        with patch("core.queue.enqueue", new=AsyncMock()) as enqueue:
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "c1" + "0" * 62)
+            importer._last_progress_at -= progressive_mod._PROGRESS_INTERVAL_S + 1
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "b.jpg", "c2" + "0" * 62)
+
+        ids = await self._image_ids(db_session, importer.gallery_id)
+        assert enqueue.await_count == 2
+        assert enqueue.await_args.kwargs["image_ids"] == ids[1:]
+
+    async def test_thumbnail_batches_do_not_share_the_finalize_job_key(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        """SAQ drops an enqueue whose key is still queued or running. A batch that
+        reused `thumbnail:{gallery_id}` could swallow finalize()'s full-gallery
+        job and leave the last pages without thumbnails."""
+        importer = await self._make_importer(db_session, monkeypatch)
+
+        with patch("core.queue.enqueue", new=AsyncMock()) as enqueue:
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "d1" + "0" * 62)
+
+        (image_id,) = await self._image_ids(db_session, importer.gallery_id)
+        assert enqueue.await_args.kwargs["_job_id"] == f"thumbnail:{importer.gallery_id}:{image_id}"
+
+    async def test_finalize_still_enqueues_full_gallery_thumbnail_job_after_batches(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        importer = await self._make_importer(db_session, monkeypatch)
+        dest_dir = tmp_path / "staging"
+        dest_dir.mkdir()
+
+        with patch("core.queue.enqueue", new=AsyncMock()) as enqueue:
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "e1" + "0" * 62)
+            with patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)):
+                await importer.finalize(dest_dir)
+
+        full_jobs = [
+            call
+            for call in enqueue.await_args_list
+            if call.args == ("thumbnail_job",) and call.kwargs.get("_job_id") == f"thumbnail:{importer.gallery_id}"
+        ]
+        assert len(full_jobs) == 1
+        assert "image_ids" not in full_jobs[0].kwargs
+
+    async def test_abort_publishes_pages_still_waiting_for_a_batch(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        from worker import progressive as progressive_mod
+
+        monkeypatch.setattr(progressive_mod, "_PROGRESS_BATCH_SIZE", 50)
+        importer = await self._make_importer(db_session, monkeypatch)
+
+        with patch("core.queue.enqueue", new=AsyncMock()) as enqueue:
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "f1" + "0" * 62)
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "b.jpg", "f2" + "0" * 62)
+            assert enqueue.await_count == 1
+            with patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)):
+                await importer.abort()
+
+        ids = await self._image_ids(db_session, importer.gallery_id)
+        assert enqueue.await_count == 2
+        assert enqueue.await_args.kwargs["image_ids"] == ids[1:]
+
+    async def test_thumbnail_enqueue_failure_is_not_recorded_as_import_failure(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        importer = await self._make_importer(db_session, monkeypatch)
+
+        with patch("core.queue.enqueue", new=AsyncMock(side_effect=RuntimeError("redis down"))):
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "g1" + "0" * 62)
+
+        assert importer.import_failures == ()
+        assert importer.import_success_count == 1
+
+    async def test_gallery_trashed_mid_download_keeps_its_page_count(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        importer = await self._make_importer(db_session, monkeypatch, pages=7)
+        await db_session.execute(
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id"), {"id": importer.gallery_id}
+        )
+        await db_session.commit()
+
+        with patch("core.queue.enqueue", new=AsyncMock()):
+            await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "h1" + "0" * 62)
+
+        assert await self._pages(db_session, importer.gallery_id) == 7

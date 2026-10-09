@@ -2,10 +2,12 @@
 
 import asyncio
 import re
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import func, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import select
@@ -31,6 +33,12 @@ from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
 
 _FILENAME_NUMBER_RE = re.compile(r"(\d+)")
+# Imported pages are published (page count + thumbnails) while the download is
+# still running: once this many are waiting, or once the oldest has waited this
+# long. A slow source can keep a gallery `downloading` for hours.
+_PROGRESS_BATCH_SIZE = 20
+_PROGRESS_INTERVAL_S = 30.0
+_PROGRESS_THUMBNAIL_TIMEOUT = 900
 _PIXIV_USER_WORK_PAGE_RE = re.compile(r"^\d+_p\d+$")
 _ROUTE_LIKE_SOURCE_IDS = frozenset(
     {
@@ -189,6 +197,9 @@ class ProgressiveImporter:
         # (complete / partial / failed) instead of always reporting complete.
         self._import_failures: list[dict[str, str]] = []
         self._import_success_count = 0
+        # Images inserted by this run that no thumbnail batch covers yet.
+        self._pending_thumbnail_ids: list[int] = []
+        self._last_progress_at: float | None = None
         # Set by finalize() to the resolved gallery.download_status; callers
         # (worker/download.py) read this to decide the DB DownloadJob status.
         self.download_status: str | None = None
@@ -815,6 +826,8 @@ class ProgressiveImporter:
 
             if inserted is not None:
                 self._import_success_count += 1
+                self._pending_thumbnail_ids.append(inserted)
+                await self._publish_progress()
             logger.info("[progressive] imported: %s (page %d)", file_path.name, page_num)
 
         except Exception as exc:
@@ -826,6 +839,57 @@ class ProgressiveImporter:
                     "error": str(exc),
                 }
             )
+
+    async def _publish_progress(self, *, force: bool = False) -> None:
+        """Refresh the page count and queue thumbnails for pages imported so far.
+
+        Best-effort: finalize() recounts the pages and queues a full-gallery
+        thumbnail job, so a failure here costs only timeliness and must never
+        be reported as an import failure.
+        """
+        if not self._pending_thumbnail_ids or not self.gallery_id:
+            return
+        now = time.monotonic()
+        due = (
+            self._last_progress_at is None
+            or len(self._pending_thumbnail_ids) >= _PROGRESS_BATCH_SIZE
+            or now - self._last_progress_at >= _PROGRESS_INTERVAL_S
+        )
+        if not (force or due):
+            return
+        image_ids, self._pending_thumbnail_ids = self._pending_thumbnail_ids, []
+        self._last_progress_at = now
+
+        try:
+            active_pages = (
+                select(func.count())
+                .where(Image.gallery_id == self.gallery_id, Image.visibility == "active")
+                .scalar_subquery()
+            )
+            async with AsyncSessionLocal() as session:
+                # Own transaction, galleries only: takes no blob lock. A gallery
+                # trashed while its download runs keeps the count it had.
+                await session.execute(
+                    update(Gallery)
+                    .where(Gallery.id == self.gallery_id, Gallery.deleted_at.is_(None))
+                    .values(pages=active_pages)
+                )
+                await session.commit()
+        except Exception as exc:
+            logger.warning("[progressive] page count refresh failed for gallery %d: %s", self.gallery_id, exc)
+
+        try:
+            # Not `thumbnail:{gallery_id}`: SAQ drops an enqueue whose key is
+            # still queued or running, and that key belongs to finalize().
+            await core.queue.enqueue(
+                "thumbnail_job",
+                gallery_id=self.gallery_id,
+                image_ids=image_ids,
+                _timeout=_PROGRESS_THUMBNAIL_TIMEOUT,
+                _job_id=f"thumbnail:{self.gallery_id}:{image_ids[0]}",
+            )
+        except Exception as exc:
+            logger.warning("[progressive] thumbnail batch enqueue failed for gallery %d: %s", self.gallery_id, exc)
 
     async def _touch_existing_source_item(self, image_id: int, visibility: str, page_num: int | None) -> None:
         """Refresh seen metadata for a source item that was already imported."""
@@ -992,6 +1056,8 @@ class ProgressiveImporter:
             "[progressive] finalized: gallery_id=%d pages=%d%s", self.gallery_id, self._page_counter, skip_summary
         )
 
+        # The full-gallery job below covers whatever no batch picked up.
+        self._pending_thumbnail_ids.clear()
         await core.queue.enqueue(
             "cover_thumbnail_job",
             gallery_id=self.gallery_id,
@@ -1021,6 +1087,10 @@ class ProgressiveImporter:
 
         if not self.gallery_id:
             return
+
+        # The gallery survives as partial; pages still waiting for a batch
+        # would otherwise stay without thumbnails until a retry finalizes.
+        await self._publish_progress(force=True)
 
         async with AsyncSessionLocal() as session:
             from sqlalchemy import func
