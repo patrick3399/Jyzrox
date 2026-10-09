@@ -689,6 +689,17 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS gallery_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT 'gray',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_builtin BOOLEAN NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_gallery_categories_name_lower ON gallery_categories (lower(name))",
+    """
     CREATE TABLE IF NOT EXISTS plugin_config (
         source_id TEXT PRIMARY KEY,
         enabled BOOLEAN DEFAULT 1,

@@ -19,7 +19,6 @@ from core.auth import require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session, get_db
 from core.events import EventType, emit_safe
-from core.local_category_plan import normalize_category
 from core.local_patterns import (
     DEFAULT_IMPORT_MODE,
     DEFAULT_LIBRARY_PATTERN,
@@ -32,6 +31,7 @@ from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
 from db.models import Gallery, Image, ImportConflict, LibraryPath
 from services.cas import create_library_symlink, increment_ref_count, store_blob
+from services.gallery_categories import load_category_map, resolve_with_map
 from services.image_magic import validate_image_magic
 from services.media_formats import IMAGE_EXTENSIONS as _SUPPORTED_IMAGE_EXTS
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_EXTS
@@ -181,11 +181,13 @@ def _build_pattern_regex(pattern: str) -> re.Pattern:
 async def batch_scan(
     req: BatchScanRequest,
     _: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
 ):
     """Scan root_dir using pattern to find importable gallery directories."""
     real_root = await _validate_root_dir(req.root_dir)
     pattern_re = _build_pattern_regex(req.pattern)
 
+    category_map = await load_category_map(db)
     matches = []
     unmatched = []
 
@@ -222,6 +224,7 @@ async def batch_scan(
                     "abs_path": abs_path,
                     "artist": artist,
                     "category": category,
+                    "category_resolved": resolve_with_map(category, category_map),
                     "title": title,
                     "file_count": len(media_files),
                 }
@@ -242,6 +245,7 @@ async def batch_start(
     req: BatchStartRequest,
     request: Request,
     auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
 ):
     """Start a batch import job for multiple galleries."""
     real_root = await _validate_root_dir(req.root_dir)
@@ -286,10 +290,13 @@ async def batch_start(
 
     # SAQ serializes job kwargs to JSON, so BatchGalleryItem instances cannot
     # be passed directly — model_dump() them into plain dicts. category is
-    # normalized here (not left to the worker alone) so a folder-name-derived
-    # or user-supplied value that Pydantic accepts as a `str` but is otherwise
-    # unusable (too long, etc.) never reaches the job payload.
-    galleries_payload = [{**g.model_dump(), "category": normalize_category(g.category)} for g in req.galleries]
+    # resolved against the registry here (and again in the worker) so a
+    # folder-name-derived or user-supplied value that Pydantic accepts as a
+    # `str` but is unusable or unregistered never reaches the job payload.
+    category_map = await load_category_map(db)
+    galleries_payload = [
+        {**g.model_dump(), "category": resolve_with_map(g.category, category_map)} for g in req.galleries
+    ]
     await core.queue.enqueue(
         "batch_import_job",
         root_dir=real_root,

@@ -427,6 +427,30 @@ ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_path TEXT;
 ALTER TABLE library_paths ADD COLUMN IF NOT EXISTS pattern TEXT NOT NULL DEFAULT '{title}';
 ALTER TABLE library_paths ADD COLUMN IF NOT EXISTS import_mode TEXT NOT NULL DEFAULT 'link';
 
+-- ── Gallery category registry ──────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS gallery_categories (
+    id          SERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    color       TEXT NOT NULL DEFAULT 'gray',
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    is_builtin  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gallery_categories_name_lower ON gallery_categories (lower(name));
+INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES
+    ('Doujinshi', 'pink', 1, TRUE),
+    ('Manga', 'orange', 2, TRUE),
+    ('Artist CG', 'yellow', 3, TRUE),
+    ('Game CG', 'green', 4, TRUE),
+    ('Western', 'sky', 5, TRUE),
+    ('Non-H', 'blue', 6, TRUE),
+    ('Image Set', 'purple', 7, TRUE),
+    ('Cosplay', 'red', 8, TRUE),
+    ('Asian Porn', 'rose', 9, TRUE),
+    ('Misc', 'gray', 10, TRUE)
+ON CONFLICT DO NOTHING;
+
 -- Image browser columns
 ALTER TABLE images ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ;
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS thumbhash TEXT;

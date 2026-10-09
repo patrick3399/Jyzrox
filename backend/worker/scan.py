@@ -12,7 +12,6 @@ from sqlalchemy.sql import select
 import core.queue
 from core.config import get_all_library_paths, get_monitored_library_paths, settings
 from core.database import AsyncSessionLocal
-from core.local_category_plan import normalize_category
 from core.local_patterns import (
     DEFAULT_IMPORT_MODE,
     DEFAULT_LIBRARY_PATTERN,
@@ -32,6 +31,7 @@ from services.cas import (
     thumb_dir,
     thumbnails_complete_at,
 )
+from services.gallery_categories import resolve_category
 from services.link_sync import library_root_available, sync_link_gallery
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_MEDIA_EXTS
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
@@ -272,10 +272,10 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
     title = groups.get("title") or current.name
     artist = groups.get("artist")
     raw_category = groups.get("category")
-    category = normalize_category(raw_category)
+    category = await resolve_category(session, raw_category)
     if raw_category and category is None:
         logger.warning(
-            "[discover] %s: unusable category folder name %r, importing without category",
+            "[discover] %s: category folder %r is not in the category registry, importing without category",
             rel_path,
             raw_category,
         )

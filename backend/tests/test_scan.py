@@ -157,6 +157,17 @@ class TestLibraryDiscoveryTrashedGuard:
 class TestLibraryDiscoveryCategory:
     """{category} is derived from the path on insert only (first-import-only)."""
 
+    @pytest.fixture(autouse=True)
+    def _registry(self, monkeypatch):
+        import worker.scan as scan
+
+        async def _resolve(_session, raw):
+            from core.local_category_plan import normalize_category
+
+            return normalize_category(raw)  # registry stubbed as "everything registered"
+
+        monkeypatch.setattr(scan, "resolve_category", _resolve)
+
     @staticmethod
     def _run(tmp_path, pattern, rel_parts):
         from worker.scan import _LibrarySpec

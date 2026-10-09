@@ -487,6 +487,20 @@ class LibraryPath(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class GalleryCategory(Base):
+    """Closed set of category names that local import and manual edits may assign."""
+
+    __tablename__ = "gallery_categories"
+    __table_args__ = (Index("uq_gallery_categories_name_lower", text("lower(name)"), unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    color: Mapped[str] = mapped_column(Text, nullable=False, default="gray", server_default="gray")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class PluginConfig(Base):
     __tablename__ = "plugin_config"
 

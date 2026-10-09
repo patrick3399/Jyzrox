@@ -1950,9 +1950,15 @@ class TestBatchStartCategoryTypeChecking:
         entry = enqueue_call.kwargs["galleries"][0]
         assert self._entry_category(entry) is None
 
-    async def test_category_with_surrounding_whitespace_is_trimmed_before_enqueue(self, client, mock_redis):
+    async def test_category_with_surrounding_whitespace_is_trimmed_before_enqueue(self, client, db_session, mock_redis):
+        from sqlalchemy import text
+
         from main import app
 
+        await db_session.execute(
+            text("INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES ('Cosplay', 'red', 1, 1)")
+        )
+        await db_session.commit()
         galleries = [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1", "category": "  Cosplay  "}]
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),

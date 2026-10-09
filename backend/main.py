@@ -29,6 +29,7 @@ from routers import (
     explorer,
     export,
     external,
+    gallery_categories,
     gallery_dl_admin,
     gallery_management,
     history,
@@ -200,6 +201,7 @@ app.include_router(plugins_router.router, prefix="/api/plugins")
 app.include_router(artists.router, prefix="/api/artists")
 app.include_router(collections.router, prefix="/api/collections")
 app.include_router(datasets.router, prefix="/api/datasets")
+app.include_router(gallery_categories.router, prefix="/api/gallery-categories")
 app.include_router(gallery_management.router, prefix="/api/gallery-management")
 app.include_router(novels.router, prefix="/api/novels")
 app.include_router(opds.router, prefix="/opds")

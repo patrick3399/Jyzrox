@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import gallery_access_filter
 from db.models import Gallery, GalleryMetadataChange, GalleryMetadataFieldState, GalleryTag, Tag
+from services.gallery_categories import load_category_map, resolve_with_map
 
 EDITABLE_SCALAR_FIELDS = frozenset(
     {"title", "title_jpn", "category", "language", "artist_id", "uploader", "visibility"}
@@ -112,6 +113,7 @@ async def apply_manual_scalar_changes(
     now = datetime.now(UTC)
     changed_count = 0
     field_names = list(changes)
+    category_map = await load_category_map(db) if "category" in changes else {}
     gallery_ids = [gallery.id for gallery in galleries]
     existing_states = {
         (state.gallery_id, state.field_name): state
@@ -134,6 +136,10 @@ async def apply_manual_scalar_changes(
                     raise HTTPException(status_code=400, detail="visibility must be public or private")
             elif value is not None and not isinstance(value, str):
                 raise HTTPException(status_code=400, detail=f"{field_name} must be a string or null")
+            if field_name == "category" and value is not None:
+                # Manual input is limited to the category registry; a miss
+                # (or an empty string) is stored as NULL, i.e. uncategorized.
+                value = resolve_with_map(value, category_map)
 
             old_value = getattr(gallery, field_name)
             state = existing_states.get((gallery.id, field_name))

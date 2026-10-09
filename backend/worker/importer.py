@@ -14,7 +14,6 @@ from sqlalchemy.sql import select
 
 import core.queue
 from core.database import AsyncSessionLocal
-from core.local_category_plan import normalize_category
 from core.social_order import reorder_social_gallery_images
 from db.models import ExcludedBlob, Gallery, Image, ImportConflict
 from services.cas import (
@@ -24,6 +23,7 @@ from services.cas import (
     thumb_dir,
     thumbnails_complete_at,
 )
+from services.gallery_categories import resolve_category
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from services.link_sync import sync_link_gallery
 from services.source_identity import SourceFileChangedError, hash_file_with_identity
@@ -778,7 +778,6 @@ async def batch_import_job(
     for entry in galleries:
         abs_path = entry["path"]
         artist = entry.get("artist")
-        category = normalize_category(entry.get("category"))
         title = entry.get("title", Path(abs_path).name)
 
         # Use relative path as source_id to avoid collisions
@@ -786,6 +785,7 @@ async def batch_import_job(
 
         try:
             async with AsyncSessionLocal() as session:
+                category = await resolve_category(session, entry.get("category"))
                 existing = (
                     await session.execute(
                         select(Gallery).where(

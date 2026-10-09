@@ -2733,6 +2733,12 @@ class TestUpdateGalleryMetadata:
 
     async def test_update_category_changes_category(self, client, db_session):
         """PATCH with category should update the gallery category."""
+        await db_session.execute(
+            text(
+                "INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES ('Artbook', 'gray', 1, 1)"
+            )
+        )
+        await db_session.commit()
         await _insert_gallery(db_session, source="local", source_id="edit_cat01", title="Cat Test", category="manga")
 
         resp = await client.patch(
@@ -2740,7 +2746,7 @@ class TestUpdateGalleryMetadata:
             json={"category": "artbook"},
         )
         assert resp.status_code == 200
-        assert resp.json()["category"] == "artbook"
+        assert resp.json()["category"] == "Artbook"
 
     async def test_update_title_jpn_changes_title_jpn(self, client, db_session):
         """PATCH with title_jpn should update the Japanese title."""
@@ -3035,13 +3041,17 @@ class TestUpdateGalleryEdgeCases:
 
     async def test_patch_category_updates_gallery(self, client, db_session):
         """PATCH with category field should update it."""
+        await db_session.execute(
+            text("INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES ('Manga', 'gray', 1, 1)")
+        )
+        await db_session.commit()
         await _insert_gallery(db_session, source="ehentai", source_id="patch02", category="doujinshi")
         resp = await client.patch(
             "/api/library/galleries/ehentai/patch02",
             json={"category": "manga"},
         )
         assert resp.status_code == 200
-        assert resp.json()["category"] == "manga"
+        assert resp.json()["category"] == "Manga"
 
     async def test_patch_favorited_true_adds_favorite(self, client, db_session):
         """PATCH favorited=true should add to user_favorites."""
