@@ -305,7 +305,11 @@ services:
       resources:
         limits:
           cpus: '1'
-          memory: 1G
+          # Must stay well above REDIS_MAXMEMORY (ADR 0006): maxmemory counts the
+          # dataset only, and an AOF rewrite or BGSAVE fork adds copy-on-write
+          # pages on top. At the limit the kernel kills Redis instead of Redis
+          # rejecting the write.
+          memory: 1536M
         reservations:
           memory: 256M
     logging: *default-logging
