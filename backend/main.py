@@ -48,6 +48,9 @@ from routers import (
     ws,
 )
 from routers import (
+    credential_accounts as credential_accounts_router,
+)
+from routers import (
     dedup as dedup_router,
 )
 from routers import (
@@ -188,6 +191,7 @@ app.include_router(library.router, prefix="/api/library")
 app.include_router(explorer.router, prefix="/api/explorer")
 app.include_router(download.router, prefix="/api/download")
 app.include_router(settings_router.router, prefix="/api/settings")
+app.include_router(credential_accounts_router.router, prefix="/api/settings/credentials")
 app.include_router(ws.router, prefix="/api")
 
 # rev 2.0 new routers

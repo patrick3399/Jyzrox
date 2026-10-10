@@ -195,3 +195,33 @@ async def dismiss_system_alert(message: str) -> int:
 
 async def clear_system_alerts() -> None:
     await get_redis().delete("system:alerts")
+
+
+# ── Account-scoped browse caches ─────────────────────────────────────
+
+# Cached browse responses that depend on which site account made the request.
+_ACCOUNT_SCOPED_PATTERNS: dict[str, tuple[str, ...]] = {
+    "ehentai": ("eh:favorites:*", "eh:search:*"),
+    "pixiv": (
+        "pixiv:search:my_bookmarks:*",
+        "pixiv:search:my_following:*",
+        "pixiv:search:following_feed:*",
+    ),
+}
+
+
+async def purge_account_scoped_cache(source: str) -> int:
+    """Drop cached responses tied to the previous active account of ``source``.
+
+    Best-effort: if Redis is unavailable the stale entries simply live out their
+    TTL (at most five minutes), so this must never fail the account switch.
+    """
+    patterns = _ACCOUNT_SCOPED_PATTERNS.get(source, ())
+    removed = 0
+    try:
+        for pattern in patterns:
+            async for key in get_redis().scan_iter(match=pattern, count=200):
+                removed += int(await get_redis().unlink(key))
+    except RedisError as exc:
+        logger.warning("[cache] could not purge account-scoped cache for %s: %s", source, exc)
+    return removed

@@ -625,12 +625,19 @@ _SQLITE_SCHEMA = [
     """,
     """
     CREATE TABLE IF NOT EXISTS credentials (
-        source TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        account TEXT NOT NULL DEFAULT 'default',
+        is_active BOOLEAN NOT NULL DEFAULT 0,
         credential_type TEXT NOT NULL,
         value_encrypted BLOB,
         expires_at TIMESTAMP,
-        last_verified TIMESTAMP
+        last_verified TIMESTAMP,
+        PRIMARY KEY (source, account)
     )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_credentials_active_per_source
+        ON credentials (source) WHERE is_active
     """,
     """
     CREATE TABLE IF NOT EXISTS api_tokens (

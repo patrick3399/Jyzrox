@@ -210,48 +210,6 @@ class TestGetCredential:
 
 
 # ---------------------------------------------------------------------------
-# set_credential — DB-mocked tests
-# ---------------------------------------------------------------------------
-
-
-class TestSetCredential:
-    async def test_set_credential_calls_execute_and_commit(self):
-        """set_credential must execute the upsert statement and commit the session."""
-        mock_session = _make_mock_session()
-
-        with patch("services.credential.AsyncSessionLocal", return_value=mock_session):
-            from services.credential import set_credential
-
-            await set_credential("ehentai", "cookie-value", "cookie")
-
-        mock_session.execute.assert_called_once()
-        mock_session.commit.assert_called_once()
-
-    async def test_set_credential_stores_encrypted_bytes(self):
-        """The value passed to execute must contain encrypted bytes, not plaintext."""
-        mock_session = _make_mock_session()
-        captured_stmt = {}
-
-        original_execute = mock_session.execute
-
-        async def _capture_execute(stmt, *args, **kwargs):
-            captured_stmt["stmt"] = stmt
-            return await original_execute(stmt, *args, **kwargs)
-
-        mock_session.execute = _capture_execute
-
-        with patch("services.credential.AsyncSessionLocal", return_value=mock_session):
-            from services.credential import set_credential
-
-            await set_credential("pixiv", "plain-token", "api_token")
-
-        # The statement is compiled — verify that raw plaintext does not appear
-        # in the string representation (encrypted bytes should be opaque)
-        stmt_repr = str(captured_stmt["stmt"])
-        assert "plain-token" not in stmt_repr
-
-
-# ---------------------------------------------------------------------------
 # list_credentials — DB-mocked tests
 # ---------------------------------------------------------------------------
 

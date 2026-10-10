@@ -1,6 +1,7 @@
 """Pixiv API client wrapping pixivpy3."""
 
 import asyncio
+import hashlib
 import logging
 import secrets
 import time
@@ -46,10 +47,20 @@ async def shutdown_shared_pixiv_clients() -> None:
         await _shared_img_http.aclose()
 
 
-_TOKEN_KEY = "pixiv:access_token"
-_LOCK_KEY = "pixiv:token_lock"
+_TOKEN_KEY_PREFIX = "pixiv:access_token"
+_LOCK_KEY_PREFIX = "pixiv:token_lock"
 _TOKEN_TTL = 3500  # seconds — Pixiv tokens last 3600s; refresh before expiry
 _LOCK_TIMEOUT = 10  # seconds
+
+
+def _token_keys(refresh_token: str) -> tuple[str, str]:
+    """Redis keys for one refresh token: (cached access token, refresh lock).
+
+    Keyed by a digest of the refresh token because an access token belongs to
+    the account that minted it; two stored accounts must never share one.
+    """
+    digest = hashlib.sha256(refresh_token.encode()).hexdigest()[:16]
+    return f"{_TOKEN_KEY_PREFIX}:{digest}", f"{_LOCK_KEY_PREFIX}:{digest}"
 
 
 class PixivClient:
@@ -97,20 +108,21 @@ class PixivClient:
     async def _ensure_token(self) -> None:
         """Load access token from Redis cache or refresh via pixivpy3."""
         r = get_redis()
-        cached = await r.get(_TOKEN_KEY)
+        token_key, lock_key = _token_keys(self.refresh_token)
+        cached = await r.get(token_key)
         if cached:
             access_token = cached.decode() if isinstance(cached, bytes) else cached
             await asyncio.to_thread(self._api_or_raise().set_auth, access_token, self.refresh_token)
             return
 
         # Acquire a Redis lock to prevent concurrent refreshes
-        lock_acquired = await r.set(_LOCK_KEY, "1", nx=True, ex=_LOCK_TIMEOUT)
+        lock_acquired = await r.set(lock_key, "1", nx=True, ex=_LOCK_TIMEOUT)
         if not lock_acquired:
             # Another instance is refreshing — wait with jitter to avoid stampede (#202/#203)
             deadline = time.monotonic() + _LOCK_TIMEOUT
             while time.monotonic() < deadline:
                 await asyncio.sleep(0.1 + secrets.randbelow(50) / 1000)
-                cached = await r.get(_TOKEN_KEY)
+                cached = await r.get(token_key)
                 if cached:
                     access_token = cached.decode() if isinstance(cached, bytes) else cached
                     await asyncio.to_thread(self._api_or_raise().set_auth, access_token, self.refresh_token)
@@ -120,7 +132,7 @@ class PixivClient:
         try:
             await self._refresh_token()
         finally:
-            await r.delete(_LOCK_KEY)
+            await r.delete(lock_key)
 
     async def _refresh_token(self) -> None:
         """Call pixivpy3 auth and cache the resulting access token."""
@@ -134,7 +146,7 @@ class PixivClient:
             raise PermissionError("Pixiv token invalid or expired")
 
         access_token = token_response.access_token
-        await r.setex(_TOKEN_KEY, _TOKEN_TTL, access_token)
+        await r.setex(_token_keys(self.refresh_token)[0], _TOKEN_TTL, access_token)
         logger.info("Pixiv access token refreshed, cached for %ds", _TOKEN_TTL)
 
     async def _call(self, fn, *args, **kwargs):
@@ -149,7 +161,7 @@ class PixivClient:
             if "403" in msg or "invalid_grant" in msg or "invalid_token" in msg:
                 logger.warning("Pixiv token expired mid-session, retrying refresh")
                 r = get_redis()
-                await r.delete(_TOKEN_KEY)
+                await r.delete(_token_keys(self.refresh_token)[0])
                 try:
                     await self._refresh_token()
                     result = await asyncio.to_thread(fn, *args, **kwargs)

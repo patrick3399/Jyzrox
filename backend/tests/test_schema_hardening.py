@@ -164,3 +164,26 @@ def test_images_blob_sha256_is_nullable_with_blob_or_path_check():
         assert "blob_sha256 IS NOT NULL OR external_path IS NOT NULL" in source
         assert "idx_images_pending" in source
     assert "ALTER COLUMN blob_sha256 DROP NOT NULL" in _PENDING_MIGRATION.read_text()
+
+
+_CREDENTIAL_ACCOUNTS_MIGRATION = (
+    Path(__file__).parent.parent / "migrations" / "versions" / "0030_credential_accounts.py"
+)
+
+
+class TestCredentialAccountsSchema:
+    def test_init_sql_and_migration_key_credentials_by_source_and_account(self):
+        for source in (_INIT_SQL.read_text(), _CREDENTIAL_ACCOUNTS_MIGRATION.read_text()):
+            assert "PRIMARY KEY (source, account)" in source
+            assert "uq_credentials_active_per_source" in source
+            assert "WHERE is_active" in source
+
+    def test_orm_credential_primary_key_is_source_and_account(self):
+        from db.models import Credential
+
+        assert [c.name for c in Credential.__table__.primary_key.columns] == ["source", "account"]
+
+    def test_migration_activates_the_rows_that_existed_before_it(self):
+        migration = _CREDENTIAL_ACCOUNTS_MIGRATION.read_text()
+        upgrade = migration[migration.index("def upgrade") : migration.index("def downgrade")]
+        assert "SET is_active = TRUE" in upgrade

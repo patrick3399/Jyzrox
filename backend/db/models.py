@@ -408,8 +408,20 @@ class GallerySourceItem(Base):
 
 class Credential(Base):
     __tablename__ = "credentials"
+    __table_args__ = (
+        # At most one active account per source; see ADR 0019.
+        Index(
+            "uq_credentials_active_per_source",
+            "source",
+            unique=True,
+            postgresql_where=text("is_active"),
+            sqlite_where=text("is_active"),
+        ),
+    )
 
     source: Mapped[str] = mapped_column(Text, primary_key=True)
+    account: Mapped[str] = mapped_column(Text, primary_key=True, server_default=text("'default'"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     credential_type: Mapped[str] = mapped_column(Text, nullable=False)
     value_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -253,13 +253,21 @@ CREATE INDEX IF NOT EXISTS ix_gallery_metadata_changes_gallery_created
 CREATE INDEX IF NOT EXISTS ix_gallery_metadata_changes_operation_id
   ON gallery_metadata_changes (operation_id);
 
+-- One row per (source, account). At most one account per source is active
+-- (enforced below); readers that ask for "the credential of a source" get it.
 CREATE TABLE IF NOT EXISTS credentials (
-    source          TEXT PRIMARY KEY,
+    source          TEXT NOT NULL,
+    account         TEXT NOT NULL DEFAULT 'default',
+    is_active       BOOLEAN NOT NULL DEFAULT FALSE,
     credential_type TEXT NOT NULL,
     value_encrypted BYTEA,
     expires_at      TIMESTAMPTZ,
-    last_verified   TIMESTAMPTZ
+    last_verified   TIMESTAMPTZ,
+    CONSTRAINT credentials_pkey PRIMARY KEY (source, account)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_credentials_active_per_source
+  ON credentials (source) WHERE is_active;
 
 CREATE TABLE IF NOT EXISTS api_tokens (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

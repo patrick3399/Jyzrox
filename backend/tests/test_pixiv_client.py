@@ -95,6 +95,38 @@ class TestTokenManagement:
 
         mock_redis.setex.assert_called_once()
 
+    async def test_ensure_token_does_not_reuse_access_token_cached_for_another_refresh_token(self):
+        """Two stored accounts must not share one cached access token (it used to be one global key)."""
+        from services.pixiv_client import PixivClient
+
+        store: dict[str, bytes] = {}
+
+        async def _get(key):
+            return store.get(key)
+
+        async def _setex(key, _ttl, value):
+            store[key] = value.encode()
+            return True
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=_get)
+        mock_redis.setex = AsyncMock(side_effect=_setex)
+
+        first = PixivClient("refresh_token_account_a")
+        first._api = _make_mock_api()
+        first._api.auth = MagicMock(return_value=_make_token_response("access_a"))
+        second = PixivClient("refresh_token_account_b")
+        second._api = _make_mock_api()
+        second._api.auth = MagicMock(return_value=_make_token_response("access_b"))
+
+        with patch("services.pixiv_client.get_redis", return_value=mock_redis):
+            await first._ensure_token()
+            await second._ensure_token()
+
+        second._api.auth.assert_called_once_with(refresh_token="refresh_token_account_b")
+        second._api.set_auth.assert_not_called()
+        assert len(store) == 2
+
     async def test_refresh_token_raises_on_failed_auth(self):
         """_refresh_token should raise PermissionError when pixivpy3 auth fails."""
         from services.pixiv_client import PixivClient

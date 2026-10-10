@@ -829,7 +829,7 @@ class TestCredentialOperations:
 
     async def test_delete_credential_not_found_returns_404(self, client, db_session_factory):
         """Deleting a credential that doesn't exist should return 404."""
-        with patch("routers.settings.async_session", db_session_factory):
+        with patch("services.credential.AsyncSessionLocal", db_session_factory):
             resp = await client.delete("/api/settings/credentials/nonexistent_source_xyz")
         assert resp.status_code == 404
 
@@ -1397,13 +1397,13 @@ class TestListCredentialsWithData:
 
         await db_session.execute(
             _text(
-                "INSERT OR REPLACE INTO credentials (source, credential_type, value_encrypted) "
-                "VALUES ('testsite', 'cookie', X'deadbeef')"
+                "INSERT OR REPLACE INTO credentials (source, is_active, credential_type, value_encrypted) "
+                "VALUES ('testsite', 1, 'cookie', X'deadbeef')"
             )
         )
         await db_session.commit()
 
-        with patch("routers.settings.async_session", db_session_factory):
+        with patch("services.credential.AsyncSessionLocal", db_session_factory):
             resp = await client.delete("/api/settings/credentials/testsite")
 
         assert resp.status_code == 200

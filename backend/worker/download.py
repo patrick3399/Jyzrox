@@ -71,15 +71,22 @@ async def _is_job_cancelled_in_db(db_job_id: str | None) -> bool:
         return False
 
 
-async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> None:
-    """Read cookie update files written by gallery-dl's cookies-update PP and save to DB."""
+async def _writeback_cookies(
+    credentials: dict | str | None, job_id: str, accounts: dict[str, str] | None = None
+) -> None:
+    """Read cookie update files written by gallery-dl's cookies-update PP and save to DB.
+
+    ``accounts`` maps each source to the account its cookies were loaded from
+    when the job started. The refreshed cookies go back to that account, not to
+    whichever one is active by the time the job ends.
+    """
     import http.cookiejar
 
     if not isinstance(credentials, dict):
         return
 
     from plugins.builtin.gallery_dl._sites import cookie_writeback_path, get_site_config
-    from services.credential import set_credential
+    from services.credential import DEFAULT_ACCOUNT, set_credential_for_account
 
     for src in credentials:
         cfg = get_site_config(src)
@@ -99,12 +106,38 @@ async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> Non
                 except json.JSONDecodeError, TypeError:
                     original = {}
                 if updated != original:
-                    await set_credential(src, json.dumps(updated), "cookies")
-                    logger.info("[download] cookies updated for %s (%d cookies)", src, len(updated))
+                    account = (accounts or {}).get(src, DEFAULT_ACCOUNT)
+                    if await set_credential_for_account(src, account, json.dumps(updated), "cookies"):
+                        logger.info("[download] cookies updated for %s/%s (%d cookies)", src, account, len(updated))
+                    else:
+                        logger.info(
+                            "[download] %s/%s was removed during the job; refreshed cookies dropped", src, account
+                        )
         except Exception as exc:
             logger.warning("[download] failed to update cookies for %s: %s", src, exc)
         finally:
             cookie_path.unlink(missing_ok=True)
+
+
+async def _load_credentials(plugin) -> tuple[dict | str | None, dict[str, str]]:
+    """Return the plugin's credentials and, per source, the account each value came from.
+
+    Value and account come from one read, so a switch of the active account
+    between two lookups cannot pair one account's cookies with another's name.
+    """
+    if not plugin.meta.needs_all_credentials:
+        return await get_credential(plugin.meta.source_id), {}
+
+    from services.credential import get_active_credential, list_credentials
+
+    values: dict[str, str] = {}
+    accounts: dict[str, str] = {}
+    for entry in await list_credentials():
+        active = await get_active_credential(entry["source"])
+        if active:
+            values[entry["source"]] = active.value
+            accounts[entry["source"]] = active.account
+    return values, accounts
 
 
 async def _set_subscription_result(
@@ -340,20 +373,11 @@ async def _run_download_job(
     started_at = datetime.now(UTC)
 
     from plugins.registry import plugin_registry
-    from services.credential import list_credentials as _list_creds
 
     source_id = plugin.meta.source_id
 
     # ── 2. Load credentials (unified) ───────────────────────────────
-    if plugin.meta.needs_all_credentials:
-        all_creds = await _list_creds()
-        credentials: dict | str | None = {}
-        for c in all_creds:
-            val = await get_credential(c["source"])
-            if val:
-                credentials[c["source"]] = val  # type: ignore[index]
-    else:
-        credentials = await get_credential(source_id)
+    credentials, credential_accounts = await _load_credentials(plugin)
 
     # ── 3. Output directory ─────────────────────────────────────────
     downloader = plugin_registry.get_downloader(source_id)
@@ -675,7 +699,7 @@ async def _run_download_job(
         # N8: cookie writeback (updated cookies → encrypted DB)
         if db_job_id and result.status in ("done", "partial"):
             try:
-                await _writeback_cookies(credentials, db_job_id)
+                await _writeback_cookies(credentials, db_job_id, credential_accounts)
             except Exception as exc:
                 logger.warning("[download] cookie writeback failed: %s", exc)
     except Exception as exc:

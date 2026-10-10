@@ -721,7 +721,7 @@ class TestPixivTokenRefresh:
         """_refresh_token should call pixivpy3.auth and store access_token in Redis."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from services.pixiv_client import PixivClient
+        from services.pixiv_client import PixivClient, _token_keys
 
         mock_redis = AsyncMock()
         mock_redis.setex = AsyncMock()
@@ -741,7 +741,7 @@ class TestPixivTokenRefresh:
 
         mock_redis.setex.assert_called_once()
         call_args = mock_redis.setex.call_args[0]
-        assert call_args[0] == "pixiv:access_token"
+        assert call_args[0] == _token_keys("valid_refresh_token")[0]
         assert call_args[2] == "new_access_token_xyz"
 
     async def test_refresh_token_raises_permission_error_on_auth_failure(self):
@@ -778,7 +778,7 @@ class TestPixivClientErrorHandling:
         """When a pixivpy3 call raises a 403 error, _call should flush Redis and retry once."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from services.pixiv_client import PixivClient
+        from services.pixiv_client import PixivClient, _token_keys
 
         mock_redis = AsyncMock()
         mock_redis.delete = AsyncMock()
@@ -805,7 +805,7 @@ class TestPixivClientErrorHandling:
             result = await client._call(_flaky_fn)
 
         assert call_count == 2
-        mock_redis.delete.assert_called_with("pixiv:access_token")
+        mock_redis.delete.assert_called_with(_token_keys("some_token")[0])
         assert result == {"illusts": [], "next_url": None}
 
     async def test_call_propagates_non_auth_exception(self):

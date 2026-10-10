@@ -11,16 +11,16 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import delete, select, text
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, text
 
 from core.auth import require_auth, require_role
 from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import BlobRelationship, Credential
+from db.models import BlobRelationship
 from services.cache import dismiss_system_alert, get_system_alerts, push_system_alert
-from services.credential import get_credential, list_credentials, set_credential
+from services.credential import ACCOUNT_PATTERN, delete_account, get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
 from services.settings_store import (
     get_float_setting as _get_float_setting,
@@ -45,27 +45,33 @@ _member = require_role("member")
 # ── Models ───────────────────────────────────────────────────────────
 
 
-class EhCookieRequest(BaseModel):
+class _AccountScoped(BaseModel):
+    """Save requests may name the account to write; omitted means the active account."""
+
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
+
+
+class EhCookieRequest(_AccountScoped):
     ipb_member_id: str
     ipb_pass_hash: str
     sk: str | None = None
     igneous: str | None = None
 
 
-class EhLoginRequest(BaseModel):
+class EhLoginRequest(_AccountScoped):
     username: str
     password: str
 
 
-class PixivTokenRequest(BaseModel):
+class PixivTokenRequest(_AccountScoped):
     refresh_token: str
 
 
-class PixivCookieRequest(BaseModel):
+class PixivCookieRequest(_AccountScoped):
     phpsessid: str
 
 
-class PixivOAuthCallbackRequest(BaseModel):
+class PixivOAuthCallbackRequest(_AccountScoped):
     code: str
     code_verifier: str
 
@@ -83,19 +89,19 @@ class EhSitePreference(BaseModel):
     use_ex: bool
 
 
-class GenericCookieRequest(BaseModel):
+class GenericCookieRequest(_AccountScoped):
     source: str
     cookies: dict[str, str]
 
 
-class SiteCredentialRequest(BaseModel):
+class SiteCredentialRequest(_AccountScoped):
     source: str
     cookies: str | None = None
     username: str | None = None
     password: str | None = None
 
 
-class SaucenaoApiKeyRequest(BaseModel):
+class SaucenaoApiKeyRequest(_AccountScoped):
     api_key: str
 
 
@@ -108,7 +114,7 @@ async def list_credentials_endpoint(_: dict = Depends(_admin)):
     all_creds = await list_credentials()
     result = {}
     for c in all_creds:
-        result[c["source"]] = {"configured": True}
+        result[c["source"]] = {"configured": True, "account": c.get("account"), "accounts": c.get("accounts", 1)}
     return result
 
 
@@ -199,7 +205,7 @@ async def eh_login_with_password(
         logger.error("EH cookie validation failed: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to validate cookies with E-Hentai") from None
 
-    await set_credential("ehentai", json.dumps(cookies), "cookie")
+    await set_credential("ehentai", json.dumps(cookies), "cookie", account=req.account)
     return {"status": "ok", "account": account, "use_ex": use_ex}
 
 
@@ -218,7 +224,7 @@ async def set_eh_credentials(
     if req.igneous:
         cookies["igneous"] = req.igneous
 
-    await set_credential("ehentai", json.dumps(cookies), "cookie")
+    await set_credential("ehentai", json.dumps(cookies), "cookie", account=req.account)
 
     # Try to fetch account info but don't fail if it doesn't work
     account: dict = {}
@@ -251,7 +257,7 @@ async def set_pixiv_credentials(
         logger.error("Pixiv auth failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Pixiv auth failed: {exc}")
 
-    await set_credential("pixiv", req.refresh_token, "oauth_token")
+    await set_credential("pixiv", req.refresh_token, "oauth_token", account=req.account)
     return {"status": "ok", "username": username}
 
 
@@ -322,7 +328,7 @@ async def pixiv_oauth_callback(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Pixiv OAuth failed: {exc}")
 
-    await set_credential("pixiv", refresh_token, "oauth_token")
+    await set_credential("pixiv", refresh_token, "oauth_token", account=req.account)
     return {"status": "ok", "username": username}
 
 
@@ -408,7 +414,7 @@ async def set_pixiv_cookie_credentials(
         raise HTTPException(status_code=400, detail=f"Pixiv cookie auth failed: {exc}")
 
     # Step 3: Save the credential
-    await set_credential("pixiv", refresh_token, "oauth_token")
+    await set_credential("pixiv", refresh_token, "oauth_token", account=req.account)
     return {"status": "ok", "username": username}
 
 
@@ -424,7 +430,7 @@ async def set_saucenao_credential(
     api_key = req.api_key.strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="API key is required")
-    await set_credential("saucenao", api_key, "api_key")
+    await set_credential("saucenao", api_key, "api_key", account=req.account)
     return {"status": "ok"}
 
 
@@ -438,7 +444,7 @@ async def set_generic_cookie(
         raise HTTPException(status_code=400, detail="Source name is required")
     if not req.cookies:
         raise HTTPException(status_code=400, detail="At least one cookie is required")
-    await set_credential(req.source.strip().lower(), json.dumps(req.cookies), "cookie")
+    await set_credential(req.source.strip().lower(), json.dumps(req.cookies), "cookie", account=req.account)
     return {"status": "ok", "source": req.source.strip().lower()}
 
 
@@ -464,7 +470,7 @@ async def set_site_credential(req: SiteCredentialRequest, _: dict = Depends(_adm
     if not fragment:
         raise HTTPException(status_code=400, detail="Cookies or username is required")
 
-    await set_credential(source, json.dumps(fragment), "gdl_fragment")
+    await set_credential(source, json.dumps(fragment), "gdl_fragment", account=req.account)
     return {"status": "ok", "source": source}
 
 
@@ -492,14 +498,12 @@ async def delete_credential_endpoint(
     source: str,
     _: dict = Depends(_admin),
 ):
-    """Delete stored credential for a source."""
-    async with async_session() as session:
-        result = await session.execute(select(Credential).where(Credential.source == source))
-        cred = result.scalar_one_or_none()
-        if not cred:
-            raise HTTPException(status_code=404, detail="No credential found")
-        await session.delete(cred)
-        await session.commit()
+    """Delete the stored credential of a source that has a single account."""
+    outcome = await delete_account(source)
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="No credential found")
+    if outcome == "active_in_use":
+        raise HTTPException(status_code=409, detail="This source has several accounts; delete them one by one")
     return {"status": "ok"}
 
 
