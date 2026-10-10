@@ -18,6 +18,7 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
+import { CredentialAccounts, sanitizeAccountName } from '@/components/CredentialAccounts'
 import type { Credentials, EhAccount, PluginInfo, CredentialFlow, FieldDef } from '@/lib/types'
 
 // ── Shared style constants ─────────────────────────────────────────────────
@@ -132,7 +133,13 @@ function EhExtras({
 
 // ── EhFieldsFlow ──────────────────────────────────────────────────────────
 
-function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
+function EhFieldsFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (account: EhAccount) => void
+  saveAs?: string
+}) {
   const [memberId, setMemberId] = useState('')
   const [passHash, setPassHash] = useState('')
   const [sk, setSk] = useState('')
@@ -148,7 +155,7 @@ function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
         { ipb_member_id: memberId.trim(), ipb_pass_hash: passHash.trim() }
       if (sk.trim()) data.sk = sk.trim()
       if (igneous.trim()) data.igneous = igneous.trim()
-      const result = await api.settings.setEhCookies(data)
+      const result = await api.settings.setEhCookies(data, saveAs)
       toast.success(t('settings.ehCookiesSaved'))
       onSaved(result.account)
     } catch (err) {
@@ -227,7 +234,13 @@ function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
 
 // ── PixivOAuthFlow ────────────────────────────────────────────────────────
 
-function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
+function PixivOAuthFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (username: string) => void
+  saveAs?: string
+}) {
   const [_oauthUrl, setOauthUrl] = useState('')
   const [codeVerifier, setCodeVerifier] = useState('')
   const [callbackUrl, setCallbackUrl] = useState('')
@@ -248,7 +261,7 @@ function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
     if (!callbackUrl.trim() || !codeVerifier) return
     setSaving(true)
     try {
-      const res = await api.settings.pixivOAuthCallback(callbackUrl.trim(), codeVerifier)
+      const res = await api.settings.pixivOAuthCallback(callbackUrl.trim(), codeVerifier, saveAs)
       toast.success(`${t('settings.pixivSaved')}: ${res.username}`)
       onSaved(res.username)
       setCallbackUrl('')
@@ -306,7 +319,13 @@ function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
 
 // ── PixivTokenFlow ────────────────────────────────────────────────────────
 
-function PixivTokenFlow({ onSaved }: { onSaved: (username: string) => void }) {
+function PixivTokenFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (username: string) => void
+  saveAs?: string
+}) {
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -314,7 +333,7 @@ function PixivTokenFlow({ onSaved }: { onSaved: (username: string) => void }) {
     if (!token.trim()) return
     setSaving(true)
     try {
-      const result = await api.settings.setPixivToken(token.trim())
+      const result = await api.settings.setPixivToken(token.trim(), saveAs)
       toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
       onSaved(result.username)
     } catch (err) {
@@ -348,7 +367,13 @@ function PixivTokenFlow({ onSaved }: { onSaved: (username: string) => void }) {
 
 // ── PixivCookieFlow ───────────────────────────────────────────────────────
 
-function PixivCookieFlow({ onSaved }: { onSaved: (username: string) => void }) {
+function PixivCookieFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (username: string) => void
+  saveAs?: string
+}) {
   const [cookie, setCookie] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -356,7 +381,7 @@ function PixivCookieFlow({ onSaved }: { onSaved: (username: string) => void }) {
     if (!cookie.trim()) return
     setSaving(true)
     try {
-      const result = await api.settings.setPixivCookie(cookie.trim())
+      const result = await api.settings.setPixivCookie(cookie.trim(), saveAs)
       toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
       onSaved(result.username)
       setCookie('')
@@ -455,10 +480,12 @@ function GenericFieldsFlow({
   plugin,
   flow,
   onSaved,
+  saveAs,
 }: {
   plugin: PluginInfo
   flow: CredentialFlow
   onSaved: () => void
+  saveAs?: string
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -477,7 +504,7 @@ function GenericFieldsFlow({
     if (!canSave) return
     setSaving(true)
     try {
-      await api.settings.setGenericCookie(plugin.source_id, filled)
+      await api.settings.setGenericCookie(plugin.source_id, filled, saveAs)
       toast.success(t('credentials.savedSite', { source: plugin.name }))
       setValues({})
       onSaved()
@@ -521,12 +548,16 @@ function PluginCredentialSection({
   onToggle,
   configured,
   onDeleted,
+  accountCount,
+  accountsRefreshKey,
 }: {
   plugin: PluginInfo
   isOpen: boolean
   onToggle: () => void
   configured: boolean
   onDeleted: () => void
+  accountCount: number
+  accountsRefreshKey: number
 }) {
   const flows = plugin.credential_flows ?? []
   const [activeFlow, setActiveFlow] = useState(0)
@@ -536,6 +567,15 @@ function PluginCredentialSection({
   const [useEx, setUseEx] = useState(false)
   const [useExLoading, setUseExLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [newAccount, setNewAccount] = useState('')
+  // The input is only rendered once a credential exists; never apply a name the
+  // user cannot see.
+  const saveAs = configured ? newAccount || undefined : undefined
+
+  const afterSave = useCallback(() => {
+    setNewAccount('')
+    onDeleted()
+  }, [onDeleted])
 
   const isEh = plugin.source_id === 'ehentai'
   const isPixiv = plugin.source_id === 'pixiv'
@@ -595,22 +635,26 @@ function PluginCredentialSection({
   if (currentFlow && isEh && currentFlow.flow_type === 'fields') {
     specialFlow = (
       <EhFieldsFlow
+        saveAs={saveAs}
         onSaved={(account) => {
-          setEhAccount(account)
-          onDeleted() // re-check configured status via parent refresh
+          // A named account is not made active by the backend, so the
+          // "current account" panel must keep showing the active one.
+          if (!saveAs) setEhAccount(account)
+          afterSave() // re-check configured status via parent refresh
         }}
       />
     )
   } else if (currentFlow && isPixiv) {
     const onPixivSaved = (username: string) => {
-      setPixivUsername(username)
-      onDeleted()
+      if (!saveAs) setPixivUsername(username)
+      afterSave()
     }
-    if (currentFlow.flow_type === 'oauth') specialFlow = <PixivOAuthFlow onSaved={onPixivSaved} />
+    if (currentFlow.flow_type === 'oauth')
+      specialFlow = <PixivOAuthFlow saveAs={saveAs} onSaved={onPixivSaved} />
     else if (currentFlow.flow_type === 'fields')
-      specialFlow = <PixivTokenFlow onSaved={onPixivSaved} />
+      specialFlow = <PixivTokenFlow saveAs={saveAs} onSaved={onPixivSaved} />
     else if (currentFlow.flow_type === 'login')
-      specialFlow = <PixivCookieFlow onSaved={onPixivSaved} />
+      specialFlow = <PixivCookieFlow saveAs={saveAs} onSaved={onPixivSaved} />
   }
 
   // A non-fields flow with no bespoke component has no UI to offer.
@@ -653,6 +697,16 @@ function PluginCredentialSection({
             />
           )}
 
+          {configured && (
+            <CredentialAccounts
+              source={plugin.source_id}
+              refreshKey={accountsRefreshKey}
+              onChanged={onDeleted}
+              newAccount={newAccount}
+              onNewAccountChange={setNewAccount}
+            />
+          )}
+
           {/* Flow tabs (only if multiple flows) */}
           {flows.length > 1 && (
             <div className="flex mt-4 bg-vault-input border border-vault-border rounded overflow-hidden">
@@ -673,7 +727,12 @@ function PluginCredentialSection({
           {currentFlow && (
             <div className="mt-4">
               {specialFlow ?? (
-                <GenericFieldsFlow plugin={plugin} flow={currentFlow} onSaved={onDeleted} />
+                <GenericFieldsFlow
+                  plugin={plugin}
+                  flow={currentFlow}
+                  onSaved={afterSave}
+                  saveAs={saveAs}
+                />
               )}
             </div>
           )}
@@ -687,7 +746,7 @@ function PluginCredentialSection({
           )}
 
           {/* Delete button */}
-          {configured && (
+          {configured && accountCount <= 1 && (
             <button
               onClick={handleDelete}
               disabled={deleting}
@@ -715,10 +774,14 @@ function SiteCredentialSection({
   credentials,
   credLoading,
   onCredentialsChange,
+  onRefresh,
+  accountsRefreshKey,
 }: {
   credentials: Credentials | null
   credLoading: boolean
   onCredentialsChange: (next: Credentials) => void
+  onRefresh: () => void
+  accountsRefreshKey: number
 }) {
   const [isOpen, setIsOpen] = useState(false)
 
@@ -735,6 +798,8 @@ function SiteCredentialSection({
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [clearingSource, setClearingSource] = useState<string | null>(null)
+  const [accountName, setAccountName] = useState('')
+  const [expandedSource, setExpandedSource] = useState<string | null>(null)
 
   const genericSites = credentials
     ? Object.entries(credentials).filter(
@@ -770,17 +835,20 @@ function SiteCredentialSection({
     setSaving(true)
     try {
       if (activeTab === 'cookies') {
-        await api.settings.setSiteCredential(source, { cookies: cookiesText.trim() })
+        await api.settings.setSiteCredential(source, {
+          cookies: cookiesText.trim(),
+          account: accountName || undefined,
+        })
       } else {
         await api.settings.setSiteCredential(source, {
           username: username.trim(),
           password: password.trim() || undefined,
+          account: accountName || undefined,
         })
       }
       toast.success(t('credentials.savedSite', { source }))
-      if (credentials) {
-        onCredentialsChange({ ...credentials, [source]: { configured: true } })
-      }
+      onRefresh()
+      setAccountName('')
       // Reset form
       setSourceName('')
       setCookiesText('')
@@ -806,6 +874,7 @@ function SiteCredentialSection({
         delete next[source]
         onCredentialsChange(next)
       }
+      onRefresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('credentials.clearFailed'))
     } finally {
@@ -852,23 +921,36 @@ function SiteCredentialSection({
                 {t('credentials.configuredSites')}
               </p>
               <div className="space-y-1.5">
-                {genericSites.map(([source]) => (
-                  <div
-                    key={source}
-                    className="flex items-center justify-between bg-vault-input border border-vault-border rounded-lg px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                      <span className="text-sm text-vault-text font-medium">{source}</span>
+                {genericSites.map(([source, status]) => (
+                  <div key={source}>
+                    <div className="flex items-center justify-between bg-vault-input border border-vault-border rounded-lg px-3 py-2">
+                      <button
+                        onClick={() => setExpandedSource((prev) => (prev === source ? null : source))}
+                        aria-label={t('credentials.showAccounts', { source })}
+                        aria-expanded={expandedSource === source}
+                        className="flex items-center gap-2 text-left"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        <span className="text-sm text-vault-text font-medium">{source}</span>
+                      </button>
+                      {(status.accounts ?? 1) <= 1 && (
+                        <button
+                          onClick={() => handleClear(source)}
+                          disabled={clearingSource === source}
+                          className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
+                          aria-label={t('credentials.clearConfirm', { source })}
+                        >
+                          {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
+                        </button>
+                      )}
                     </div>
-                    <button
-                      onClick={() => handleClear(source)}
-                      disabled={clearingSource === source}
-                      className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
-                      aria-label={t('credentials.clearConfirm', { source })}
-                    >
-                      {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
-                    </button>
+                    {expandedSource === source && (
+                      <CredentialAccounts
+                        source={source}
+                        refreshKey={accountsRefreshKey}
+                        onChanged={onRefresh}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -930,6 +1012,28 @@ function SiteCredentialSection({
                 />
                 <p className="text-xs text-vault-text-muted mt-1">
                   {t('credentials.orTypeManually')}
+                </p>
+              </div>
+
+              {/* Account name (optional) */}
+              <div>
+                <label
+                  htmlFor="site-credential-account"
+                  className="block text-xs text-vault-text-muted mb-1"
+                >
+                  {t('credentials.newAccountName')}
+                </label>
+                <input
+                  id="site-credential-account"
+                  type="text"
+                  value={accountName}
+                  onChange={(e) => setAccountName(sanitizeAccountName(e.target.value))}
+                  placeholder={t('credentials.newAccountPlaceholder')}
+                  autoComplete="off"
+                  className={inputClass}
+                />
+                <p className="text-xs text-vault-text-muted mt-1">
+                  {t('credentials.newAccountHint')}
                 </p>
               </div>
 
@@ -1117,6 +1221,8 @@ export default function CredentialsPage() {
   const [pluginsLoading, setPluginsLoading] = useState(true)
   const [credentials, setCredentials] = useState<Credentials | null>(null)
   const [credLoading, setCredLoading] = useState(true)
+  // Shared by every account list so a source shown in two sections stays in sync.
+  const [accountsRefresh, setAccountsRefresh] = useState(0)
 
   // Track which plugin section is expanded (by source_id)
   const [openSection, setOpenSection] = useState<string | null>('ehentai')
@@ -1143,6 +1249,7 @@ export default function CredentialsPage() {
 
   // Refresh credentials after a save/delete action
   const refreshCredentials = useCallback(() => {
+    setAccountsRefresh((n) => n + 1)
     api.settings
       .getCredentials()
       .then(setCredentials)
@@ -1184,6 +1291,8 @@ export default function CredentialsPage() {
               onToggle={() => toggleSection(plugin.source_id)}
               configured={credentials?.[plugin.source_id]?.configured ?? false}
               onDeleted={refreshCredentials}
+              accountCount={credentials?.[plugin.source_id]?.accounts ?? 1}
+              accountsRefreshKey={accountsRefresh}
             />
           ))}
 
@@ -1200,6 +1309,8 @@ export default function CredentialsPage() {
             credentials={credentials}
             credLoading={credLoading}
             onCredentialsChange={setCredentials}
+            onRefresh={refreshCredentials}
+            accountsRefreshKey={accountsRefresh}
           />
         </div>
       )}

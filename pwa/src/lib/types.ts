@@ -344,6 +344,16 @@ export interface TagHealthReport {
 
 export interface CredentialStatus {
   configured: boolean
+  /** Name of the active account. */
+  account?: string
+  /** How many accounts are stored for this source. */
+  accounts?: number
+}
+
+export interface CredentialAccount {
+  account: string
+  credential_type: string
+  is_active: boolean
 }
 
 export type Credentials = Record<string, CredentialStatus>
