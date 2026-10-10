@@ -139,7 +139,7 @@ function IntervalRow({
     return (
       <div
         data-testid="subscription-interval"
-        className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-vault-text-muted"
+        className="flex min-w-0 items-center gap-1.5 text-[10px] text-vault-text-muted"
       >
         <Clock size={11} className="shrink-0" />
         <span className="truncate">
@@ -163,7 +163,7 @@ function IntervalRow({
     return (
       <div
         data-testid="subscription-interval"
-        className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-vault-text-muted"
+        className="flex min-w-0 items-center gap-1.5 text-[10px] text-vault-text-muted"
       >
         <Clock size={11} className="shrink-0" />
         <span>{t('subscriptions.cronExpr')}:</span>
@@ -189,7 +189,7 @@ function IntervalRow({
   return (
     <div
       data-testid="subscription-interval"
-      className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-vault-text-muted"
+      className="flex flex-wrap items-center gap-1.5 text-[10px] text-vault-text-muted"
     >
       <Clock size={11} className="shrink-0" />
       <input
@@ -340,12 +340,6 @@ export function SubscriptionCard({
         </button>
       </div>
 
-      <IntervalRow
-        sub={sub}
-        group={groups.find((g) => g.id === sub.group_id) ?? null}
-        onCronChange={onCronChange}
-      />
-
       {/* Gallery identity + compact terminal status */}
       {(galleryTitle || galleryHref || (latestJob && !isRunning)) && (
         <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -464,8 +458,15 @@ export function SubscriptionCard({
             <Trash2 size={13} />
             {t('common.delete')}
           </button>
+          <div className="col-span-2 mt-1 border-t border-vault-border/50 px-2 pt-2">
+            <IntervalRow
+              sub={sub}
+              group={groups.find((g) => g.id === sub.group_id) ?? null}
+              onCronChange={onCronChange}
+            />
+          </div>
           {groups.length > 0 && (
-            <label className="col-span-2 mt-1 flex items-center gap-2 border-t border-vault-border/50 pt-2 text-vault-text-muted">
+            <label className="col-span-2 flex items-center gap-2 px-2 pt-1 text-vault-text-muted">
               <Users size={13} className="shrink-0" />
               <span className="shrink-0">{t('subscriptions.moveTo')}</span>
               <select

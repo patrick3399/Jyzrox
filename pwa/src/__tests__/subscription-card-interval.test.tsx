@@ -57,6 +57,11 @@ const GROUP: SubscriptionGroup = {
   sub_count: 1,
 } as SubscriptionGroup
 
+// The interval lives in the collapsed "more" panel to keep the card compact.
+function openMore() {
+  fireEvent.click(screen.getByLabelText('More'))
+}
+
 function renderCard(
   sub: Subscription,
   opts: {
@@ -81,9 +86,34 @@ function renderCard(
       checkingId={null}
     />,
   )
+  openMore()
 }
 
 describe('SubscriptionCard check interval', () => {
+  it('keeps the interval out of the card until the more panel is opened', () => {
+    const noop = vi.fn()
+    render(
+      <SubscriptionCard
+        sub={makeSub()}
+        latestJob={null}
+        groups={[]}
+        onToggle={noop}
+        onCheck={noop}
+        onBackfill={noop}
+        onDelete={noop}
+        onAutoDownloadToggle={noop}
+        onMoveToGroup={noop}
+        onRename={noop}
+        onCronChange={noop}
+        checkingId={null}
+      />,
+    )
+    expect(screen.queryByTestId('subscription-interval')).toBeNull()
+
+    openMore()
+    expect(screen.getByTestId('subscription-interval')).not.toBeNull()
+  })
+
   it('shows the own cron_expr of an ungrouped subscription', () => {
     renderCard(makeSub({ cron_expr: '0 */6 * * *' }), { onCronChange: vi.fn() })
     expect(screen.getByTestId('subscription-interval').textContent).toContain('0 */6 * * *')
