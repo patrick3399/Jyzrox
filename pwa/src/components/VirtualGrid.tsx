@@ -1,8 +1,10 @@
 'use client'
 
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 // Map of Tailwind breakpoints to column counts (px)
 export interface ColumnConfig {
@@ -191,6 +193,19 @@ export function VirtualGrid<T>({
     scrollMargin,
   })
 
+  // The virtualizer memoizes row offsets on count/scrollMargin and on measured
+  // sizes, not on `estimateSize`. Measured rows correct themselves, but fixed
+  // rows have no measurement to fall back on: a width change that keeps the
+  // column count would resize every row while leaving it at its old offset,
+  // overlapping or gapping the grid until something else invalidated the memo.
+  const fixedRowSize = measureRows ? null : rowHeight + gap
+  const appliedFixedRowSizeRef = useRef(fixedRowSize)
+  useIsomorphicLayoutEffect(() => {
+    if (appliedFixedRowSizeRef.current === fixedRowSize) return
+    appliedFixedRowSizeRef.current = fixedRowSize
+    if (fixedRowSize !== null) virtualizer.measure()
+  }, [fixedRowSize, virtualizer])
+
   const virtualItems = virtualizer.getVirtualItems()
   const firstVirtualRow = virtualItems[0]?.index
   const lastVirtualRow = virtualItems[virtualItems.length - 1]?.index
@@ -244,6 +259,15 @@ export function VirtualGrid<T>({
     if (!registeredElementsRef.current.has(restoreRequest.index)) return
     restoreAppliedRef.current = token
     onRestoreApplied?.(restoreRequest)
+    // `scrollToIndex` leaves the virtualizer reconciling towards the anchor
+    // row's start until it observes the viewport there. The consumer has just
+    // landed on the exact saved position instead, which is rarely that offset:
+    // left alone the virtualizer either overrides the landing on its next frame
+    // (the row offset moved because rows above were measured) or stays armed for
+    // seconds and snaps the viewport back to the row start the next time that
+    // offset is recomputed. Retarget it at the landing so the restore has one
+    // owner and ends here.
+    virtualizerRef.current.scrollToOffset(window.scrollY)
   }, [colCount, hasMeasuredLayout, items.length, materializedRestore, onRestoreApplied, restoreRequest])
 
   // Keep a ref to onLoadMore so the effect never needs it as a dependency

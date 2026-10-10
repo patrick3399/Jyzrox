@@ -33,6 +33,7 @@ import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
 
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateEhGridRowHeight } from '@/lib/ehLayout'
 import { CredentialBanner } from '@/components/CredentialBanner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
@@ -1883,7 +1884,8 @@ function BrowsePage() {
               getItemKey={(gallery) => gallery.gid}
               columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
               gap={8}
-              estimateHeight={220}
+              estimateHeight={estimateEhGridRowHeight}
+              measureRows={false}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onRegisterElement={(index, element) => {
