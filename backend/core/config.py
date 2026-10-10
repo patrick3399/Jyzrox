@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     # Redis alert threshold as a percentage of its configured maxmemory. Redis
     # stores control-plane state, so pressure must be visible before writes fail.
     redis_memory_alert_pct: float = 85.0
+    # Image-cache budget inside the control-plane Redis (ADR 0018), as
+    # percentages of maxmemory. The worker trims the oldest image bytes from
+    # `trim_high` down to `trim_target`; writers stop admitting new image bytes
+    # at `admit_max`. Keep trim_target < trim_high < redis_memory_alert_pct <
+    # admit_max so the alert means "trimming did not help".
+    redis_image_cache_trim_high_pct: float = 80.0
+    redis_image_cache_trim_target_pct: float = 60.0
+    redis_image_cache_admit_max_pct: float = 90.0
     # api self-sampling cadence (services/memory_watch.py); floor is 30s
     memory_watch_interval_sec: int = 300
     # Log top Python allocation sites each api memory sample (diagnosis only)

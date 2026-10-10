@@ -999,6 +999,9 @@ def mock_redis():
     redis.lrem = AsyncMock(return_value=1)
     redis.ltrim = AsyncMock(return_value=True)
     redis.scan = AsyncMock(return_value=(0, []))
+    redis.info = AsyncMock(
+        return_value={"used_memory": 0, "maxmemory": 0, "maxmemory_policy": "noeviction", "evicted_keys": 0}
+    )
     return redis
 
 
@@ -1031,6 +1034,7 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("core.queue.enqueue", _mock_enqueue),
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1093,6 +1097,7 @@ async def unauthed_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1136,6 +1141,7 @@ async def opds_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1173,6 +1179,7 @@ async def unauthed_opds_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1212,6 +1219,7 @@ async def ext_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1267,6 +1275,7 @@ def make_client(db_session, db_session_factory, mock_redis):
             patch("core.queue.enqueue", _mock_enqueue),
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.rate_limit.get_redis", return_value=mock_redis),
+            patch("services.cache.get_redis", return_value=mock_redis),
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
             patch("routers.auth.get_redis", return_value=mock_redis),
             patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1331,6 +1340,7 @@ async def hist_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1347,3 +1357,16 @@ async def hist_client(db_session, db_session_factory, mock_redis):
             yield ac
 
     _app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_redis_admission_memo():
+    """The image-cache admission decision is memoized per process for 10s."""
+    try:
+        from services.redis_memory import reset_admission_memo
+    except ImportError:  # module not created yet (plan Task 1, before implementation)
+        yield
+        return
+    reset_admission_memo()
+    yield
+    reset_admission_memo()

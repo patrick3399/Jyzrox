@@ -1165,8 +1165,8 @@ async def thumb_proxy(
         url = urlunparse(parsed._replace(scheme="https", netloc="ehgt.org"))
         parsed = urlparse(url)  # re-parse for the referer logic below
 
-    cache_key = f"thumb:cdn:{hashlib.md5(url.encode()).hexdigest()}"
-    cached_bytes = await get_redis().get(cache_key)
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    cached_bytes = await cache.get_cdn_thumb(url_hash)
     if cached_bytes:
         return Response(
             content=cached_bytes,
@@ -1195,7 +1195,7 @@ async def thumb_proxy(
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Thumbnail fetch failed: {exc}")
 
-    await get_redis().setex(cache_key, 86400, content)  # 24h
+    await cache.set_cdn_thumb(url_hash, content)
     return Response(
         content=content,
         media_type=media_type,

@@ -828,6 +828,61 @@ async def _check_oom_kills(ctx: dict) -> int | None:
     return oom_kills
 
 
+_REDIS_ALERT_MESSAGES = {
+    "high": "Redis memory is still high after trimming the image cache",
+    "unbounded": "Redis has no maxmemory limit",
+    "unsafe_policy": "Redis eviction policy is not noeviction",
+}
+
+
+async def _trim_image_cache_if_needed(redis, sample):
+    """Trim the oldest image-cache keys once Redis crosses the high watermark.
+
+    Returns the sample the alert should be judged on: a fresh one after a trim,
+    otherwise the one passed in. Never raises; a monitor must not fail its cron.
+    """
+    from core.config import settings
+
+    if sample is None:
+        return sample
+    limit_bytes = int(sample["limit_bytes"])
+    used_bytes = int(sample["used_bytes"])
+    if limit_bytes <= 0 or float(sample["pct"]) < settings.redis_image_cache_trim_high_pct:
+        return sample
+
+    from services.cache import IMAGE_CACHE_TTLS
+    from worker.redis_memory import sample_redis_memory, trim_image_cache
+
+    target_bytes = int(limit_bytes * settings.redis_image_cache_trim_target_pct / 100)
+    try:
+        trimmed = await trim_image_cache(redis, IMAGE_CACHE_TTLS, bytes_to_free=used_bytes - target_bytes)
+    except Exception as exc:
+        logger.warning("[memory_monitor] REDIS image cache trim failed: %s", exc)
+        return sample
+
+    logger.info(
+        "[memory_monitor] REDIS image cache trimmed at %.1f%%: deleted %d keys, freed %.1f MB%s",
+        float(sample["pct"]),
+        int(trimmed["deleted_keys"]),
+        int(trimmed["freed_bytes"]) / (1024 * 1024),
+        " (scan truncated, continuing next run)" if trimmed["truncated"] else "",
+    )
+    return await sample_redis_memory(redis) or sample
+
+
+async def _push_redis_memory_alert(status: str) -> None:
+    """Surface a Redis memory alert in the UI. Never raises."""
+    message = _REDIS_ALERT_MESSAGES.get(status)
+    if message is None:
+        return
+    try:
+        from services.cache import push_system_alert
+
+        await push_system_alert(message)
+    except Exception as exc:
+        logger.warning("[memory_monitor] could not publish Redis alert: %s", exc)
+
+
 async def memory_monitor_job(ctx: dict) -> dict:
     """Cron: warn when worker or Redis memory crosses its alert threshold.
 
@@ -836,13 +891,15 @@ async def memory_monitor_job(ctx: dict) -> dict:
     crosses ``settings.memory_alert_pct``. Redis is sampled independently because
     it holds non-evictable control-plane state and must alert before maxmemory
     causes writes to fail. Replaces the external memory_monitor.sh + CSV with an
-    in-app, log-visible alert.
+    in-app, log-visible alert. Before alerting on Redis it trims the oldest
+    image-cache keys (ADR 0018), so the alert means trimming did not help.
     """
     from core.config import settings
     from worker import memory as _mem
     from worker.redis_memory import sample_redis_memory
 
-    redis_sample = await sample_redis_memory(ctx.get("redis"))
+    redis = ctx.get("redis")
+    redis_sample = await _trim_image_cache_if_needed(redis, await sample_redis_memory(redis))
     redis_status = "unknown"
     if redis_sample is not None:
         redis_pct = float(redis_sample["pct"])
@@ -876,6 +933,7 @@ async def memory_monitor_job(ctx: dict) -> dict:
                 redis_policy,
                 int(redis_sample["evicted_keys"]),
             )
+            await _push_redis_memory_alert(redis_status)
     redis_is_alert = redis_status in {"high", "unbounded", "unsafe_policy"}
 
     mem = _mem.read_container_memory_detail()
