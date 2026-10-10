@@ -101,6 +101,8 @@ const HISTORY_KEY = 'eh_search_history'
 const HISTORY_ENABLED_KEY = 'eh_search_history_enabled'
 const VIEW_MODE_KEY = 'eh_view_mode'
 const MAX_HISTORY = 10
+// Idle time after the last keystroke before a typed query is sent to E-Hentai.
+const SEARCH_IDLE_MS = 1500
 
 function getSearchHistory(): string[] {
   if (typeof window === 'undefined') return []
@@ -260,19 +262,23 @@ function BrowsePage() {
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState<string[]>([])
   const [autocompleteHighlight, setAutocompleteHighlight] = useState(-1)
+  // The suggestion list is an overlay on top of the category chips, so it needs
+  // its own open state: an unfinished token in the input is not enough reason to
+  // keep it up (the input is also seeded from the URL on mount/back-nav).
+  const [autocompleteOpen, setAutocompleteOpen] = useState(false)
   const searchBoxRef = useRef<HTMLDivElement>(null)
 
   const autocompleteFragment = useMemo(() => getEhAutocompleteFragment(inputValue), [inputValue])
   const { data: autocompleteData } = useSWR<TagItem[]>(
-    autocompleteFragment && inputValue.trim()
+    autocompleteOpen && autocompleteFragment && inputValue.trim()
       ? ['tags/autocomplete', autocompleteFragment.query]
       : null,
     () => api.tags.autocomplete(autocompleteFragment?.query ?? '', 10),
     { keepPreviousData: false },
   )
   const autocompleteSuggestions = useMemo(
-    () => (Array.isArray(autocompleteData) ? autocompleteData : []),
-    [autocompleteData],
+    () => (autocompleteOpen && Array.isArray(autocompleteData) ? autocompleteData : []),
+    [autocompleteData, autocompleteOpen],
   )
 
   // Mobile search expand
@@ -504,13 +510,16 @@ function BrowsePage() {
 
   // Close dropdown on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    // pointerdown, not mousedown: iOS only synthesizes mouse events for taps on
+    // clickable elements, so a tap on empty page area would never dismiss.
+    const handler = (e: PointerEvent) => {
       if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
         setShowHistory(false)
+        setAutocompleteOpen(false)
       }
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('pointerdown', handler)
+    return () => document.removeEventListener('pointerdown', handler)
   }, [])
 
   // ── Handlers ────────────────────────────────────────────
@@ -528,9 +537,10 @@ function BrowsePage() {
     (value: string) => {
       setInputValue(value)
       setAutocompleteHighlight(-1)
+      setAutocompleteOpen(true)
       if (value.trim()) setShowHistory(false)
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => commitSearch(value), 600)
+      debounceRef.current = setTimeout(() => commitSearch(value), SEARCH_IDLE_MS)
     },
     [commitSearch],
   )
@@ -559,9 +569,11 @@ function BrowsePage() {
         )
       } else if (e.key === 'Enter') {
         if (debounceRef.current) clearTimeout(debounceRef.current)
+        setAutocompleteOpen(false)
         commitSearch(inputValue)
       } else if (e.key === 'Escape') {
         setShowHistory(false)
+        setAutocompleteOpen(false)
         setAutocompleteHighlight(-1)
       }
     },
@@ -602,7 +614,10 @@ function BrowsePage() {
     (value: string) => {
       setFavSearchInput(value)
       if (favDebounceRef.current) clearTimeout(favDebounceRef.current)
-      favDebounceRef.current = setTimeout(() => actions.setFilter({ favSearch: value }), 600)
+      favDebounceRef.current = setTimeout(
+        () => actions.setFilter({ favSearch: value }),
+        SEARCH_IDLE_MS,
+      )
     },
     [actions],
   )
@@ -861,6 +876,7 @@ function BrowsePage() {
               onFocus={() => {
                 refreshHistory()
                 setShowHistory(true)
+                setAutocompleteOpen(true)
               }}
               placeholder={t('browse.searchPlaceholder')}
               autoFocus
@@ -1058,6 +1074,7 @@ function BrowsePage() {
             onFocus={() => {
               refreshHistory()
               setShowHistory(true)
+              setAutocompleteOpen(true)
             }}
             placeholder={t('browse.searchPlaceholder')}
             className="w-full bg-vault-card border border-vault-border rounded-lg px-4 py-2.5 text-sm
@@ -1117,6 +1134,7 @@ function BrowsePage() {
         <button
           onClick={() => {
             if (debounceRef.current) clearTimeout(debounceRef.current)
+            setAutocompleteOpen(false)
             commitSearch(inputValue)
           }}
           className="hidden sm:block px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
