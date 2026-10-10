@@ -35,6 +35,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { estimateEhGridRowHeight } from '@/lib/ehLayout'
 import { CredentialBanner } from '@/components/CredentialBanner'
+import { DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { CATEGORY_META, GridCard, isLightColor, ListCard } from '@/components/eh/EhBrowseCards'
@@ -175,6 +176,7 @@ const CRON_PRESETS = [
   { label: 'browse.cron.every2Hours', value: '0 */2 * * *' },
   { label: 'browse.cron.every6Hours', value: '0 */6 * * *' },
   { label: 'browse.cron.daily', value: '0 0 * * *' },
+  { label: 'browse.cron.weekly', value: DEFAULT_SUBSCRIPTION_CRON },
 ]
 
 function getInitialViewMode(): ViewMode {
@@ -242,7 +244,7 @@ function BrowsePage() {
   const [showSubscribe, setShowSubscribe] = useState(false)
   const [subName, setSubName] = useState('')
   const [subAutoDownload, setSubAutoDownload] = useState(false)
-  const [subCron, setSubCron] = useState('0 */2 * * *')
+  const [subCron, setSubCron] = useState(DEFAULT_SUBSCRIPTION_CRON)
   const { trigger: createSub, isMutating: subCreating } = useCreateSubscription()
   const { data: watchedData, mutate: refreshWatched } = useSubscriptions({
     source: 'ehentai',

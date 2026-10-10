@@ -539,6 +539,11 @@ class SubscriptionGroup(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+# Weekly (Mondays 00:00). Applied by the application when a subscription is
+# created without an explicit cron_expr; the DB column DEFAULT is unused.
+DEFAULT_SUBSCRIPTION_CRON = "0 0 * * 1"
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
@@ -554,7 +559,7 @@ class Subscription(Base):
     # Source-specific download policy. Credentials remain global; this controls
     # what this subscription chooses to fetch with those credentials.
     download_options: Mapped[dict] = mapped_column(JSONB, default=dict)
-    cron_expr: Mapped[str | None] = mapped_column(Text, default="0 */2 * * *")
+    cron_expr: Mapped[str | None] = mapped_column(Text, default=DEFAULT_SUBSCRIPTION_CRON)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_item_id: Mapped[str | None] = mapped_column(Text)

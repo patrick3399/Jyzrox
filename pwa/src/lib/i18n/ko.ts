@@ -2343,6 +2343,7 @@ const ko: Record<string, string> = {
   'browse.cron.every2Hours': '2시간마다',
   'browse.cron.every6Hours': '6시간마다',
   'browse.cron.daily': '매일',
+  'browse.cron.weekly': '매주',
   'browse.language.english': '영어',
   'browse.language.chinese': '중국어',
   'browse.language.japanese': '일본어',

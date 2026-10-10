@@ -14,7 +14,7 @@ import core.queue
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
-from db.models import DownloadJob, Gallery, Subscription
+from db.models import DEFAULT_SUBSCRIPTION_CRON, DownloadJob, Gallery, Subscription
 from services.download_policy import normalize_source_options
 
 logger = logging.getLogger(__name__)
@@ -225,7 +225,7 @@ async def create_subscription(
     if req.cron_expr:
         validate_cron(req.cron_expr)
 
-    cron_expr = req.cron_expr or "0 */2 * * *"
+    cron_expr = req.cron_expr or DEFAULT_SUBSCRIPTION_CRON
     download_options = req.download_options or {}
     try:
         download_options = normalize_source_options(source, download_options)

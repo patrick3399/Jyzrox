@@ -2313,6 +2313,7 @@ const zhCN: Record<string, string> = {
   'browse.cron.every2Hours': '每 2 小时',
   'browse.cron.every6Hours': '每 6 小时',
   'browse.cron.daily': '每天',
+  'browse.cron.weekly': '每周',
   'browse.language.english': '英语',
   'browse.language.chinese': '中文',
   'browse.language.japanese': '日语',

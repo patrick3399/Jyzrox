@@ -2382,6 +2382,7 @@ const en: Record<string, string> = {
   'browse.cron.every2Hours': 'Every 2 hours',
   'browse.cron.every6Hours': 'Every 6 hours',
   'browse.cron.daily': 'Daily',
+  'browse.cron.weekly': 'Weekly',
   'browse.language.english': 'English',
   'browse.language.chinese': 'Chinese',
   'browse.language.japanese': 'Japanese',

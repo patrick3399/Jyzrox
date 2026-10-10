@@ -2364,6 +2364,7 @@ const ja: Record<string, string> = {
   'browse.cron.every2Hours': '2時間ごと',
   'browse.cron.every6Hours': '6時間ごと',
   'browse.cron.daily': '毎日',
+  'browse.cron.weekly': '毎週',
   'browse.language.english': '英語',
   'browse.language.chinese': '中国語',
   'browse.language.japanese': '日本語',

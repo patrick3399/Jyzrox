@@ -31,7 +31,7 @@ import { api } from '@/lib/api'
 import type { Subscription, SubscriptionGroup, DownloadJob } from '@/lib/types'
 import useSWR from 'swr'
 import { GroupCard } from '@/components/subscriptions/GroupCard'
-import { CRON_PRESETS } from '@/components/subscriptions/constants'
+import { CRON_PRESETS, DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
 
 const GroupModal = dynamic(
   () => import('@/components/subscriptions/GroupModal').then((module) => module.GroupModal),
@@ -174,7 +174,7 @@ export default function SubscriptionsPage() {
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
   const [autoDownload, setAutoDownload] = useState(false)
-  const [cronExpr, setCronExpr] = useState('0 */2 * * *')
+  const [cronExpr, setCronExpr] = useState(DEFAULT_SUBSCRIPTION_CRON)
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
   const [fanboxSubscriptionContent, setFanboxSubscriptionContent] = useState<
     'free_only' | 'accessible' | 'paid_only' | 'price_range'
@@ -185,7 +185,7 @@ export default function SubscriptionsPage() {
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [batchUrls, setBatchUrls] = useState('')
   const [batchAutoDownload, setBatchAutoDownload] = useState(false)
-  const [batchCron, setBatchCron] = useState('0 */2 * * *')
+  const [batchCron, setBatchCron] = useState(DEFAULT_SUBSCRIPTION_CRON)
   const [batchProgress, setBatchProgress] = useState<{
     done: number
     total: number
@@ -231,7 +231,7 @@ export default function SubscriptionsPage() {
       setUrl('')
       setName('')
       setAutoDownload(true)
-      setCronExpr('0 */2 * * *')
+      setCronExpr(DEFAULT_SUBSCRIPTION_CRON)
       setSelectedGroupId(null)
       setFanboxSubscriptionContent('accessible')
       setFanboxSubscriptionFeeMin('')

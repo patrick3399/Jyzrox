@@ -263,6 +263,47 @@ class TestCreateSubscriptionDefaults:
         assert req.auto_download is True
 
 
+class TestCreateSubscriptionDefaultCron:
+    """A subscription created without cron_expr is scheduled weekly, not every 2h."""
+
+    async def test_create_without_cron_uses_weekly_default(self, client, db_session):
+        from routers import subscriptions as router_mod
+
+        await _ensure_user(db_session)
+        captured: dict = {}
+        real = router_mod._build_subscription_upsert
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return real(**kwargs)
+
+        with patch.object(router_mod, "_build_subscription_upsert", side_effect=_capture):
+            # The pg upsert itself may 500 on SQLite; only the built args matter.
+            await client.post("/api/subscriptions/", json={"url": "https://example.com/artist/weekly"})
+
+        assert captured["cron_expr"] == "0 0 * * 1"
+        assert captured["auto_download"] is False
+
+    async def test_create_with_explicit_cron_keeps_it(self, client, db_session):
+        from routers import subscriptions as router_mod
+
+        await _ensure_user(db_session)
+        captured: dict = {}
+        real = router_mod._build_subscription_upsert
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return real(**kwargs)
+
+        with patch.object(router_mod, "_build_subscription_upsert", side_effect=_capture):
+            await client.post(
+                "/api/subscriptions/",
+                json={"url": "https://example.com/artist/hourly", "cron_expr": "0 * * * *"},
+            )
+
+        assert captured["cron_expr"] == "0 * * * *"
+
+
 class TestSubscriptionUpsertRefreshesSchedule:
     """Regression: re-subscribing (on-conflict) must refresh next_check_at and
     source, not just cron_expr.

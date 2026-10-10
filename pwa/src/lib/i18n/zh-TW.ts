@@ -2315,6 +2315,7 @@ const zhTW: Record<string, string> = {
   'browse.cron.every2Hours': '每 2 小時',
   'browse.cron.every6Hours': '每 6 小時',
   'browse.cron.daily': '每天',
+  'browse.cron.weekly': '每週',
   'browse.language.english': '英文',
   'browse.language.chinese': '中文',
   'browse.language.japanese': '日文',
