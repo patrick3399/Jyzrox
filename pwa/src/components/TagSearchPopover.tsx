@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { t } from '@/lib/i18n'
+import { tagNameSearchTerm } from '@/lib/queryParser'
 
 interface TagSearchPopoverProps {
   tag: string // "namespace:name" format, or bare name for general tags
@@ -44,7 +45,7 @@ export function TagSearchPopover({ tag, gallerySource, anchorEl, onClose }: TagS
 
   const handleSearchLocal = () => {
     onClose()
-    router.push(`/library?q=${encodeURIComponent(name)}`)
+    router.push(`/library?q=${encodeURIComponent(tagNameSearchTerm(name))}`)
   }
 
   const handleSearchEhentai = () => {

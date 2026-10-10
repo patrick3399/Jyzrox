@@ -61,6 +61,16 @@ def _token_value(token: str, prefix: str) -> str:
     return value
 
 
+def _tag_token(token: str) -> str:
+    """Drop the quotes around a tag value: cosplayer:"jun ye tako" → cosplayer:jun ye tako."""
+    if token.startswith('"'):
+        return _token_value(token, "")
+    namespace, sep, name = token.partition(":")
+    if not sep:
+        return token
+    return f"{namespace}:{_token_value(name, '')}"
+
+
 def _artist_display_name(artist_id: str | None, uploader: str | None) -> str:
     clean_uploader = (uploader or "").strip()
     if not artist_id:
@@ -213,9 +223,10 @@ async def search_galleries(
         elif t.startswith("rl:"):
             rl_filter = _token_value(t, "rl:").lower() == "true"
         elif t.startswith("-"):
-            exclude_tags.append(t[1:])
-        else:
-            include_tags.append(t)
+            if tag := _tag_token(t[1:]):
+                exclude_tags.append(tag)
+        elif tag := _tag_token(t):
+            include_tags.append(tag)
 
     # Build filters
     filters = []

@@ -69,6 +69,14 @@ function formatValue(value: string): string {
   return /\s/.test(escaped) ? `"${escaped}"` : escaped
 }
 
+/**
+ * Bare-name search term for a tag. Names with whitespace are quoted so the
+ * query tokenizer keeps them as one term: jun ye tako → "jun ye tako".
+ */
+export function tagNameSearchTerm(name: string): string {
+  return formatValue(name)
+}
+
 export function parseQuery(q: string): ParsedFilters {
   const result: ParsedFilters = {
     tags: [],

@@ -6,6 +6,7 @@ import { Pencil } from 'lucide-react'
 import { TagAutocomplete } from '@/components/TagAutocomplete'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
 import { t } from '@/lib/i18n'
+import { tagNameSearchTerm } from '@/lib/queryParser'
 
 type TagPrediction = { namespace: string; name: string; confidence: number; source: string }
 
@@ -131,7 +132,7 @@ export function GalleryTagSection({
                             const bare = fullTag.includes(':')
                               ? fullTag.split(':').slice(1).join(':')
                               : fullTag
-                            router.push(`/library?q=${encodeURIComponent(bare)}`)
+                            router.push(`/library?q=${encodeURIComponent(tagNameSearchTerm(bare))}`)
                           } else {
                             setTagPopover({
                               anchor: e.currentTarget,
@@ -200,7 +201,7 @@ export function GalleryTagSection({
                     onClick={(e) => {
                       const src = source
                       if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
-                        router.push(`/library?q=${encodeURIComponent(tag.name)}`)
+                        router.push(`/library?q=${encodeURIComponent(tagNameSearchTerm(tag.name))}`)
                       } else {
                         setTagPopover({ anchor: e.currentTarget, tag: aiFullTag, source: src })
                       }
