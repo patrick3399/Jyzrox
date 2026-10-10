@@ -45,6 +45,7 @@ export function GroupCard({
   onAutoDownloadToggle,
   onMoveToGroup,
   onRenameSub,
+  onCronChangeSub,
   checkingId,
   defaultExpanded,
 }: {
@@ -63,6 +64,7 @@ export function GroupCard({
   onAutoDownloadToggle: (sub: Subscription) => void
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
   onRenameSub: (sub: Subscription, name: string) => void
+  onCronChangeSub?: (sub: Subscription, cron: string) => void
   checkingId: number | null
   defaultExpanded: boolean
 }) {
@@ -186,6 +188,7 @@ export function GroupCard({
                 onAutoDownloadToggle={onAutoDownloadToggle}
                 onMoveToGroup={onMoveToGroup}
                 onRename={onRenameSub}
+                onCronChange={onCronChangeSub}
                 checkingId={checkingId}
               />
             ))

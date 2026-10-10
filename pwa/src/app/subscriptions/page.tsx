@@ -173,7 +173,7 @@ export default function SubscriptionsPage() {
   const [showBatch, setShowBatch] = useState(false)
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
-  const [autoDownload, setAutoDownload] = useState(true)
+  const [autoDownload, setAutoDownload] = useState(false)
   const [cronExpr, setCronExpr] = useState('0 */2 * * *')
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
   const [fanboxSubscriptionContent, setFanboxSubscriptionContent] = useState<
@@ -184,7 +184,7 @@ export default function SubscriptionsPage() {
   const [checkingId, setCheckingId] = useState<number | null>(null)
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [batchUrls, setBatchUrls] = useState('')
-  const [batchAutoDownload, setBatchAutoDownload] = useState(true)
+  const [batchAutoDownload, setBatchAutoDownload] = useState(false)
   const [batchCron, setBatchCron] = useState('0 */2 * * *')
   const [batchProgress, setBatchProgress] = useState<{
     done: number
@@ -305,6 +305,16 @@ export default function SubscriptionsPage() {
   const handleAutoDownloadToggle = async (sub: Subscription) => {
     try {
       await updateSub({ id: sub.id, data: { auto_download: !sub.auto_download } })
+      mutate()
+    } catch {
+      toast.error(t('subscriptions.updateFailed'))
+    }
+  }
+
+  const handleCronChange = async (sub: Subscription, cron: string) => {
+    try {
+      await updateSub({ id: sub.id, data: { cron_expr: cron } })
+      toast.success(t('subscriptions.intervalUpdated'))
       mutate()
     } catch {
       toast.error(t('subscriptions.updateFailed'))
@@ -824,6 +834,7 @@ export default function SubscriptionsPage() {
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}
               onRenameSub={handleRename}
+              onCronChangeSub={handleCronChange}
               checkingId={checkingId}
               defaultExpanded={true}
             />
@@ -847,6 +858,7 @@ export default function SubscriptionsPage() {
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}
               onRenameSub={handleRename}
+              onCronChangeSub={handleCronChange}
               checkingId={checkingId}
               defaultExpanded={true}
             />

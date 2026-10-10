@@ -241,7 +241,7 @@ function BrowsePage() {
   // Subscribe to search state
   const [showSubscribe, setShowSubscribe] = useState(false)
   const [subName, setSubName] = useState('')
-  const [subAutoDownload, setSubAutoDownload] = useState(true)
+  const [subAutoDownload, setSubAutoDownload] = useState(false)
   const [subCron, setSubCron] = useState('0 */2 * * *')
   const { trigger: createSub, isMutating: subCreating } = useCreateSubscription()
   const { data: watchedData, mutate: refreshWatched } = useSubscriptions({

@@ -4,7 +4,9 @@ import { useState } from 'react'
 import Link from 'next/link'
 import {
   AlertCircle,
+  Check,
   CheckCircle,
+  Clock,
   Download,
   ExternalLink,
   MoreHorizontal,
@@ -12,9 +14,11 @@ import {
   ScanSearch,
   Trash2,
   Users,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
+import { CRON_PRESETS } from './constants'
 import type { DownloadJob, Subscription, SubscriptionGroup } from '@/lib/types'
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -111,6 +115,128 @@ function JobStatusBadge({ job }: { job: DownloadJob }) {
   return status
 }
 
+/**
+ * Check interval of one subscription.
+ *
+ * A grouped subscription is scheduled by its group, so its own cron_expr is
+ * inert: show the group's schedule read-only instead of a value that would be
+ * silently ignored. An ungrouped one is scheduled by its own cron_expr, which
+ * is editable here.
+ */
+function IntervalRow({
+  sub,
+  group,
+  onCronChange,
+}: {
+  sub: Subscription
+  group: SubscriptionGroup | null
+  onCronChange?: (sub: Subscription, cron: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  if (sub.group_id !== null && sub.group_id !== undefined) {
+    return (
+      <div
+        data-testid="subscription-interval"
+        className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-vault-text-muted"
+      >
+        <Clock size={11} className="shrink-0" />
+        <span className="truncate">
+          {t('subscriptions.intervalFromGroup', {
+            name: group?.name ?? String(sub.group_id),
+            schedule: group?.schedule ?? '',
+          })}
+        </span>
+      </div>
+    )
+  }
+
+  const current = sub.cron_expr ?? ''
+  const commit = () => {
+    const next = draft.trim()
+    setEditing(false)
+    if (next && next !== current) onCronChange?.(sub, next)
+  }
+
+  if (!editing) {
+    return (
+      <div
+        data-testid="subscription-interval"
+        className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-vault-text-muted"
+      >
+        <Clock size={11} className="shrink-0" />
+        <span>{t('subscriptions.cronExpr')}:</span>
+        {onCronChange ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(current)
+              setEditing(true)
+            }}
+            className="rounded bg-vault-input px-1.5 py-0.5 font-mono text-vault-text transition-colors hover:text-vault-accent"
+            title={t('subscriptions.editInterval')}
+          >
+            {current || '—'}
+          </button>
+        ) : (
+          <span className="font-mono text-vault-text">{current || '—'}</span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      data-testid="subscription-interval"
+      className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-vault-text-muted"
+    >
+      <Clock size={11} className="shrink-0" />
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+          if (e.key === 'Escape') setEditing(false)
+        }}
+        aria-label={t('subscriptions.cronExpr')}
+        className="w-28 rounded border border-vault-border bg-vault-input px-1.5 py-0.5 font-mono text-xs text-vault-text focus:border-vault-accent focus:outline-none"
+      />
+      {CRON_PRESETS.map((p) => (
+        <button
+          key={p.value}
+          type="button"
+          onClick={() => setDraft(p.value)}
+          className={`rounded px-1.5 py-0.5 transition-colors ${
+            draft === p.value
+              ? 'bg-vault-accent/20 text-vault-accent'
+              : 'border border-vault-border bg-vault-bg hover:text-vault-text'
+          }`}
+        >
+          {p.label}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={commit}
+        className="rounded p-1 text-emerald-400 hover:bg-vault-card"
+        aria-label={t('common.save')}
+      >
+        <Check size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={() => setEditing(false)}
+        className="rounded p-1 hover:bg-vault-card hover:text-vault-text"
+        aria-label={t('common.cancel')}
+      >
+        <X size={12} />
+      </button>
+    </div>
+  )
+}
+
 function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
   const source = latestJob?.gallery_source ?? sub.gallery_source
   const sourceId = latestJob?.gallery_source_id ?? sub.gallery_source_id
@@ -129,6 +255,7 @@ export function SubscriptionCard({
   onAutoDownloadToggle,
   onMoveToGroup,
   onRename,
+  onCronChange,
   checkingId,
 }: {
   sub: Subscription
@@ -141,6 +268,7 @@ export function SubscriptionCard({
   onAutoDownloadToggle: (sub: Subscription) => void
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
   onRename: (sub: Subscription, name: string) => void
+  onCronChange?: (sub: Subscription, cron: string) => void
   checkingId: number | null
 }) {
   const [showActions, setShowActions] = useState(false)
@@ -211,6 +339,12 @@ export function SubscriptionCard({
           />
         </button>
       </div>
+
+      <IntervalRow
+        sub={sub}
+        group={groups.find((g) => g.id === sub.group_id) ?? null}
+        onCronChange={onCronChange}
+      />
 
       {/* Gallery identity + compact terminal status */}
       {(galleryTitle || galleryHref || (latestJob && !isRunning)) && (
