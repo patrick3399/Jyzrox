@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
@@ -32,6 +32,15 @@ interface CredentialAccountsProps {
   /** Name for the parent's next save. Omit both to hide the input. */
   newAccount?: string
   onNewAccountChange?: (value: string) => void
+  /**
+   * Heading that names the site. Set it wherever the list is not already
+   * inside a card titled with that site, so the panel says whose accounts
+   * these are.
+   */
+  title?: string
+  /** Renders an "add account" button below the list. */
+  onAddAccount?: () => void
+  addAccountLabel?: string
 }
 
 export function CredentialAccounts({
@@ -40,6 +49,9 @@ export function CredentialAccounts({
   onChanged,
   newAccount,
   onNewAccountChange,
+  title,
+  onAddAccount,
+  addAccountLabel,
 }: CredentialAccountsProps) {
   const [accounts, setAccounts] = useState<CredentialAccount[]>([])
   const [busy, setBusy] = useState(false)
@@ -101,9 +113,13 @@ export function CredentialAccounts({
   const inputId = `credential-new-account-${source}`
 
   return (
-    <div className="mt-4">
+    <div
+      className={title ? undefined : 'mt-4'}
+      role={title ? 'region' : undefined}
+      aria-label={title}
+    >
       <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-        {t('credentials.accounts')}
+        {title ?? t('credentials.accounts')}
       </p>
       {accounts.length > 0 && (
         <ul className="space-y-1.5">
@@ -139,6 +155,15 @@ export function CredentialAccounts({
             </li>
           ))}
         </ul>
+      )}
+      {onAddAccount && (
+        <button
+          onClick={onAddAccount}
+          className="mt-2 inline-flex items-center gap-1 text-xs text-vault-accent hover:underline"
+        >
+          <Plus size={13} />
+          {addAccountLabel ?? t('credentials.accounts')}
+        </button>
       )}
       {showInput && (
         <div className="mt-3">

@@ -1577,6 +1577,11 @@ const ja: Record<string, string> = {
   'credentials.newAccountHint':
     '空欄の場合は使用中のアカウントを更新します。新しい名前はアカウントを追加し、既存の名前は上書きされます。英数字と . _ @ - のみ使用できます。',
   'credentials.showAccounts': '{source} のアカウントを表示',
+  'credentials.accountsOf': '{source} のアカウント',
+  'credentials.accountCount': '{count} 件のアカウント',
+  'credentials.addAccountTo': '{source} にアカウントを追加',
+  'credentials.existingSiteHint':
+    '{source} は設定済みです。アカウント名を入力すると追加され、空欄の場合は使用中のアカウント（{account}）を更新します。',
   'credentials.flowUnavailable': 'このログイン方法はまだ利用できません。',
   'credentials.showValue': '値を表示',
   'credentials.hideValue': '値を隠す',

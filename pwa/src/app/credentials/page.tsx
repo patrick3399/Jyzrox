@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ChevronUp,
@@ -799,6 +799,7 @@ function SiteCredentialSection({
   const [saving, setSaving] = useState(false)
   const [clearingSource, setClearingSource] = useState<string | null>(null)
   const [accountName, setAccountName] = useState('')
+  const accountInputRef = useRef<HTMLInputElement>(null)
   const [expandedSource, setExpandedSource] = useState<string | null>(null)
 
   const genericSites = credentials
@@ -806,6 +807,19 @@ function SiteCredentialSection({
         ([source]) => source !== 'ehentai' && source !== 'pixiv' && credentials[source].configured,
       )
     : []
+
+  // "Add account" on a site's panel: aim the form below at that site, so the
+  // user does not have to retype which site the new account belongs to.
+  const handleAddAccountTo = (source: string) => {
+    setSourceName(source)
+    setUrlInput('')
+    setDetectedName(null)
+    accountInputRef.current?.focus()
+    accountInputRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  }
+
+  const targetSource = sourceName.trim().toLowerCase()
+  const existingTarget = credentials?.[targetSource]?.configured ? credentials[targetSource] : null
 
   const handleDetect = async () => {
     if (!urlInput.trim()) return
@@ -921,38 +935,70 @@ function SiteCredentialSection({
                 {t('credentials.configuredSites')}
               </p>
               <div className="space-y-1.5">
-                {genericSites.map(([source, status]) => (
-                  <div key={source}>
-                    <div className="flex items-center justify-between bg-vault-input border border-vault-border rounded-lg px-3 py-2">
-                      <button
-                        onClick={() => setExpandedSource((prev) => (prev === source ? null : source))}
-                        aria-label={t('credentials.showAccounts', { source })}
-                        aria-expanded={expandedSource === source}
-                        className="flex items-center gap-2 text-left"
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                        <span className="text-sm text-vault-text font-medium">{source}</span>
-                      </button>
-                      {(status.accounts ?? 1) <= 1 && (
+                {genericSites.map(([source, status]) => {
+                  const expanded = expandedSource === source
+                  const count = status.accounts ?? 1
+                  return (
+                    // One card per site: the account panel opens inside it, so
+                    // it is never a free-floating block under the list.
+                    <div
+                      key={source}
+                      data-site={source}
+                      className={`rounded-lg border overflow-hidden transition-colors ${expanded ? 'border-vault-accent/60' : 'border-vault-border'}`}
+                    >
+                      <div className="flex items-center justify-between bg-vault-input px-3 py-2">
                         <button
-                          onClick={() => handleClear(source)}
-                          disabled={clearingSource === source}
-                          className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
-                          aria-label={t('credentials.clearConfirm', { source })}
+                          onClick={() => setExpandedSource(expanded ? null : source)}
+                          aria-label={t('credentials.showAccounts', { source })}
+                          aria-expanded={expanded}
+                          className="flex-1 min-w-0 flex items-center gap-2 text-left"
                         >
-                          {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
+                          {expanded ? (
+                            <ChevronUp size={14} className="text-vault-text-muted shrink-0" />
+                          ) : (
+                            <ChevronDown size={14} className="text-vault-text-muted shrink-0" />
+                          )}
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                          <span className="text-sm text-vault-text font-medium truncate">
+                            {source}
+                          </span>
+                          {status.account && (
+                            <span className="text-xs text-vault-text-muted truncate">
+                              {status.account}
+                            </span>
+                          )}
+                          {count > 1 && (
+                            <span className="text-xs text-vault-text-muted bg-vault-card border border-vault-border rounded px-1.5 py-0.5 shrink-0">
+                              {t('credentials.accountCount', { count: String(count) })}
+                            </span>
+                          )}
                         </button>
+                        {count <= 1 && (
+                          <button
+                            onClick={() => handleClear(source)}
+                            disabled={clearingSource === source}
+                            className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
+                            aria-label={t('credentials.clearConfirm', { source })}
+                          >
+                            {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
+                          </button>
+                        )}
+                      </div>
+                      {expanded && (
+                        <div className="border-t border-vault-border px-3 py-3">
+                          <CredentialAccounts
+                            source={source}
+                            refreshKey={accountsRefreshKey}
+                            onChanged={onRefresh}
+                            title={t('credentials.accountsOf', { source })}
+                            onAddAccount={() => handleAddAccountTo(source)}
+                            addAccountLabel={t('credentials.addAccountTo', { source })}
+                          />
+                        </div>
                       )}
                     </div>
-                    {expandedSource === source && (
-                      <CredentialAccounts
-                        source={source}
-                        refreshKey={accountsRefreshKey}
-                        onChanged={onRefresh}
-                      />
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1013,6 +1059,14 @@ function SiteCredentialSection({
                 <p className="text-xs text-vault-text-muted mt-1">
                   {t('credentials.orTypeManually')}
                 </p>
+                {existingTarget && (
+                  <p className="text-xs text-vault-accent mt-1">
+                    {t('credentials.existingSiteHint', {
+                      source: targetSource,
+                      account: existingTarget.account ?? '',
+                    })}
+                  </p>
+                )}
               </div>
 
               {/* Account name (optional) */}
@@ -1025,6 +1079,7 @@ function SiteCredentialSection({
                 </label>
                 <input
                   id="site-credential-account"
+                  ref={accountInputRef}
                   type="text"
                   value={accountName}
                   onChange={(e) => setAccountName(sanitizeAccountName(e.target.value))}

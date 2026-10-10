@@ -1917,6 +1917,11 @@ const zhTW: Record<string, string> = {
   'credentials.newAccountPlaceholder': '例如 backup',
   'credentials.newAccountHint': '留空則更新使用中的帳號。新名稱會新增帳號，既有名稱會被覆寫。只能使用英數字與 . _ @ -。',
   'credentials.showAccounts': '顯示 {source} 的帳號',
+  'credentials.accountsOf': '{source} 的帳號',
+  'credentials.accountCount': '{count} 個帳號',
+  'credentials.addAccountTo': '新增帳號到 {source}',
+  'credentials.existingSiteHint':
+    '{source} 已經設定過。填入帳號名稱可再新增一個；名稱留空則更新使用中的帳號（{account}）。',
   'credentials.flowUnavailable': '此登入方式尚未提供。',
   'credentials.showValue': '顯示內容',
   'credentials.hideValue': '隱藏內容',

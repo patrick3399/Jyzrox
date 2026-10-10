@@ -1417,6 +1417,11 @@ const ko: Record<string, string> = {
   'credentials.newAccountHint':
     '비워 두면 사용 중인 계정을 업데이트합니다. 새 이름은 계정을 추가하고, 기존 이름은 덮어씁니다. 영문, 숫자와 . _ @ - 만 사용할 수 있습니다.',
   'credentials.showAccounts': '{source}의 계정 표시',
+  'credentials.accountsOf': '{source} 계정',
+  'credentials.accountCount': '계정 {count}개',
+  'credentials.addAccountTo': '{source}에 계정 추가',
+  'credentials.existingSiteHint':
+    '{source}은(는) 이미 설정되어 있습니다. 계정 이름을 입력하면 새로 추가되고, 비워 두면 사용 중인 계정({account})을 업데이트합니다.',
   'credentials.flowUnavailable': '이 로그인 방식은 아직 사용할 수 없습니다.',
   'credentials.showValue': '값 표시',
   'credentials.hideValue': '값 숨기기',

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CredentialAccount, CredentialFlow, PluginInfo } from '@/lib/types'
 
@@ -242,5 +242,61 @@ describe('CredentialsPage accounts', () => {
 
     await waitFor(() => expect(mockSetPixivToken).toHaveBeenCalledWith('refresh-token', 'alt'))
     expect(screen.queryByText('pixiv-user')).not.toBeInTheDocument()
+  })
+
+  describe('configured sites list', () => {
+    const twitterAccounts: CredentialAccount[] = [
+      { account: 'main', credential_type: 'cookies', is_active: true },
+      { account: 'backup', credential_type: 'cookies', is_active: false },
+    ]
+
+    async function openSiteList() {
+      mockGetCredentials.mockResolvedValue({
+        twitter: { configured: true, account: 'main', accounts: 2 },
+        weibo: { configured: true, account: 'default', accounts: 1 },
+      })
+      mockListAccounts.mockResolvedValue({ source: 'twitter', accounts: twitterAccounts })
+      render(<CredentialsPage />)
+      await userEvent.click(
+        await screen.findByRole('button', { name: /credentials\.genericCookies/ }),
+      )
+    }
+
+    it('shows the active account and the account count on each site row', async () => {
+      await openSiteList()
+
+      const toggle = await screen.findByRole('button', { name: 'credentials.showAccounts twitter' })
+      expect(within(toggle).getByText('main')).toBeInTheDocument()
+      expect(within(toggle).getByText('credentials.accountCount 2')).toBeInTheDocument()
+    })
+
+    it('names the site on the expanded account panel and keeps it inside that site card', async () => {
+      await openSiteList()
+
+      const toggle = await screen.findByRole('button', { name: 'credentials.showAccounts twitter' })
+      await userEvent.click(toggle)
+
+      const panel = await screen.findByRole('region', { name: 'credentials.accountsOf twitter' })
+      expect(within(panel).getByText('credentials.accountsOf twitter')).toBeInTheDocument()
+      expect(await within(panel).findByText('backup')).toBeInTheDocument()
+      // Same card as the row that opened it, and not the neighbouring site's.
+      expect(panel.closest('[data-site]')).toHaveAttribute('data-site', 'twitter')
+      expect(toggle.closest('[data-site]')).toBe(panel.closest('[data-site]'))
+    })
+
+    it('points the add form at the site when adding an account from its panel', async () => {
+      await openSiteList()
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'credentials.showAccounts twitter' }),
+      )
+
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'credentials.addAccountTo twitter' }),
+      )
+
+      expect(screen.getByPlaceholderText('credentials.siteNamePlaceholder')).toHaveValue('twitter')
+      expect(screen.getByLabelText('credentials.newAccountName')).toHaveFocus()
+      expect(screen.getByText('credentials.existingSiteHint twitter main')).toBeInTheDocument()
+    })
   })
 })

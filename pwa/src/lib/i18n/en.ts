@@ -1337,6 +1337,11 @@ const en: Record<string, string> = {
   'credentials.newAccountHint':
     'Leave empty to update the active account. A new name adds an account; an existing name is overwritten. Letters, digits and . _ @ - only.',
   'credentials.showAccounts': 'Show accounts for {source}',
+  'credentials.accountsOf': '{source} accounts',
+  'credentials.accountCount': '{count} accounts',
+  'credentials.addAccountTo': 'Add an account to {source}',
+  'credentials.existingSiteHint':
+    '{source} is already configured. Name an account to add another one; leave the name empty to update the active account ({account}).',
   'credentials.flowUnavailable': 'This login method is not available yet.',
   'credentials.showValue': 'Show value',
   'credentials.hideValue': 'Hide value',

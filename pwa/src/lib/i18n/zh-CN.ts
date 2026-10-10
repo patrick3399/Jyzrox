@@ -1874,6 +1874,11 @@ const zhCN: Record<string, string> = {
   'credentials.newAccountPlaceholder': '例如 backup',
   'credentials.newAccountHint': '留空则更新使用中的账号。新名称会新增账号，已有名称会被覆盖。只能使用字母、数字和 . _ @ -。',
   'credentials.showAccounts': '显示 {source} 的账号',
+  'credentials.accountsOf': '{source} 的账号',
+  'credentials.accountCount': '{count} 个账号',
+  'credentials.addAccountTo': '添加账号到 {source}',
+  'credentials.existingSiteHint':
+    '{source} 已经配置过。填写账号名称可再添加一个；名称留空则更新使用中的账号（{account}）。',
   'credentials.flowUnavailable': '此登录方式尚未提供。',
   'credentials.showValue': '显示内容',
   'credentials.hideValue': '隐藏内容',
