@@ -37,6 +37,7 @@ import {
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateGalleryThumbRowHeight } from '@/lib/gridRowHeight'
 
 function getSourceLink(sourceUrl: string, source: string): { href: string; external: boolean } {
   if (source === 'ehentai') {
@@ -1302,7 +1303,8 @@ export default function GalleryDetailPage() {
               items={images}
               columns={{ base: 4, sm: 6, md: 8, lg: 10 }}
               gap={8}
-              estimateHeight={180}
+              estimateHeight={estimateGalleryThumbRowHeight}
+              measureRows={false}
               overscan={4}
               onLoadMore={loadMoreImages}
               hasMore={!imagesReachingEnd}
@@ -1328,7 +1330,7 @@ export default function GalleryDetailPage() {
                         selectLpTargetRef.current = idx
                         selLpCtx(e)
                       }}
-                      className={`relative group rounded border-2 transition-colors select-none [-webkit-touch-callout:none] ${
+                      className={`relative group block w-full rounded border-2 transition-colors select-none [-webkit-touch-callout:none] ${
                         isSelected
                           ? 'border-red-500 ring-2 ring-red-500/30'
                           : 'border-vault-border hover:border-vault-border-hover'

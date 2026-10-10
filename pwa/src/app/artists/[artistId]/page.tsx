@@ -9,6 +9,7 @@ import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { Pagination } from '@/components/Pagination'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateArtistGalleryRowHeight } from '@/lib/gridRowHeight'
 import { AppImage } from '@/components/AppImage'
 import { t } from '@/lib/i18n'
 import { galleryHref } from '@/lib/galleryRoutes'
@@ -246,7 +247,8 @@ export default function ArtistDetailPage() {
               items={galleries}
               columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
               gap={6}
-              estimateHeight={180}
+              estimateHeight={estimateArtistGalleryRowHeight}
+              measureRows={false}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onLoadMore={loadMoreGalleries}

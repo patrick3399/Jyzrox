@@ -12,33 +12,22 @@
  *  overlapping. List mode has no entry here: its tag chips wrap, so those rows
  *  have no width-derived height and stay measured. */
 
-type RowHeightContext = { colCount: number; containerWidth: number; gap: number }
+import { gridCardWidth, rootFontSize, type RowHeightContext } from '@/lib/gridRowHeight'
 
 // `text-[10px]` sets only the font size; the line inherits the unitless 1.5
 // line-height, which resolves against those 10px rather than the root size.
 const STATS_LINE_PX = 15
 
-function rootFontSize(): number {
-  if (typeof window === 'undefined') return 16
-  const size = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize)
-  return Number.isFinite(size) && size > 0 ? size : 16
-}
-
-function cardWidth({ colCount, containerWidth, gap }: RowHeightContext): number {
-  const columns = Math.max(colCount, 1)
-  return Math.max(0, containerWidth - gap * (columns - 1)) / columns
-}
-
 /** `IllustCard` in grid mode: square cover, then `mt-1.5` + a `text-sm` title
  *  line (1.25rem) + a `text-xs` artist line (1rem) + `mt-0.5` + the stats line. */
 export function estimatePixivIllustRowHeight(layout: RowHeightContext) {
-  return Math.ceil(cardWidth(layout) + 2.75 * rootFontSize() + STATS_LINE_PX)
+  return Math.ceil(gridCardWidth(layout) + 2.75 * rootFontSize() + STATS_LINE_PX)
 }
 
 /** `RankingCard`: square cover, then `mt-1.5` + a `text-sm` title line + a
  *  `text-xs` artist line. */
 export function estimatePixivRankingRowHeight(layout: RowHeightContext) {
-  return Math.ceil(cardWidth(layout) + 2.625 * rootFontSize())
+  return Math.ceil(gridCardWidth(layout) + 2.625 * rootFontSize())
 }
 
 /** `UserPreviewCard`: a 1px border around a strip a third of the inner width
@@ -47,6 +36,6 @@ export function estimatePixivRankingRowHeight(layout: RowHeightContext) {
  *  placeholder is the taller of the two by 4/3 px, so that is what is reserved. */
 export function estimatePixivUserRowHeight(layout: RowHeightContext) {
   const border = 2
-  const innerWidth = Math.max(0, cardWidth(layout) - border)
+  const innerWidth = Math.max(0, gridCardWidth(layout) - border)
   return Math.ceil(innerWidth / 3 + 2.75 * rootFontSize() + border)
 }

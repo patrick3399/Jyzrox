@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Users, RefreshCw } from 'lucide-react'
 import { useInfiniteArtists } from '@/hooks/useArtists'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateArtistRowHeight } from '@/lib/gridRowHeight'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
@@ -215,7 +216,8 @@ function ArtistsPageInner() {
               items={artists}
               columns={{ base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }}
               gap={8}
-              estimateHeight={210}
+              estimateHeight={estimateArtistRowHeight}
+              measureRows={false}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onLoadMore={loadMoreArtists}
@@ -259,7 +261,7 @@ function ArtistsPageInner() {
                     <p className="font-medium text-sm text-vault-text truncate">
                       {a.artist_name || a.artist_id}
                     </p>
-                    <p className="text-xs text-vault-text-secondary">
+                    <p className="text-xs text-vault-text-secondary truncate">
                       {t('artists.galleryCount', { count: String(a.gallery_count) })}
                       {' · '}
                       {t('artists.totalPages', { count: String(a.total_pages) })}
@@ -286,7 +288,8 @@ function ArtistsPageInner() {
               items={followedArtists}
               columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
               gap={16}
-              estimateHeight={250}
+              estimateHeight={estimateArtistRowHeight}
+              measureRows={false}
               onLoadMore={loadMoreFollowed}
               hasMore={!followedReachingEnd}
               isLoading={followedLoadingMore}

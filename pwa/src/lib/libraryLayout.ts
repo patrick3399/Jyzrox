@@ -1,13 +1,17 @@
 import type { ColumnConfig } from '@/components/VirtualGrid'
 import type { GridDensityPreference } from '@/lib/uiPreferences'
+import { rootFontSize } from '@/lib/gridRowHeight'
 
-// Height reserved below the cover for a LibraryGalleryCard's info block:
-// p-2.5 (20) + 2-line line-clamp title text-sm/leading-snug (~39) + gap-1.5 (6)
-// + rating/pages row pt-1 + text-base (~20) + card border (2) ≈ 87px.
+// Height reserved below the cover for a LibraryGalleryCard's info block. The
+// padding and text are rem-based and grow with the root font size: p-2.5 (20px)
+// + 2-line line-clamp title text-sm/leading-snug (~39) + gap-1.5 (6) + rating/
+// pages row pt-1 + text-base (~21) = 5.375rem (86px at a 16px root). Only the
+// card border is fixed px (2px, added on top).
 // This MUST NOT underestimate the real info height: `measureRows={false}` places
 // the next row at `rowHeight + gap`, so a too-small reserve makes the next row
 // overlap and cover the previous card's bottom edge — including its focus ring.
-const LIBRARY_CARD_INFO_HEIGHT = 88
+const LIBRARY_CARD_INFO_REM = 5.375
+const LIBRARY_CARD_BORDER_PX = 2
 
 const AUTO_COLUMNS: Record<GridDensityPreference, ColumnConfig> = {
   spacious: { base: 2, sm: 3, md: 4, lg: 5, xl: 6, xxl: 7 },
@@ -53,5 +57,5 @@ export function estimateLibraryGridRowHeight({
 
   // No upper clamp: truncating tall (wide-card) rows would underestimate the
   // real card height and reintroduce the next-row overlap described above.
-  return Math.ceil(Math.max(188, coverHeight + LIBRARY_CARD_INFO_HEIGHT))
+  return Math.ceil(Math.max(188, coverHeight + LIBRARY_CARD_INFO_REM * rootFontSize() + LIBRARY_CARD_BORDER_PX))
 }

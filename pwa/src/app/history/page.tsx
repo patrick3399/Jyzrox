@@ -7,6 +7,7 @@ import { galleryHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateHistoryRowHeight } from '@/lib/gridRowHeight'
 import { AppImage } from '@/components/AppImage'
 import { toast } from 'sonner'
 import { X, Trash2, Clock } from 'lucide-react'
@@ -76,9 +77,11 @@ function HistoryCard({
           <p className="text-xs text-vault-text line-clamp-2 leading-snug font-medium">
             {item.title}
           </p>
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[10px] text-vault-text-muted">{sourceLabel(item.source)}</span>
-            <span className="text-[10px] text-vault-text-muted">
+          <div className="flex items-center justify-between gap-1 mt-1.5">
+            <span className="min-w-0 truncate text-[10px] text-vault-text-muted">
+              {sourceLabel(item.source)}
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-[10px] text-vault-text-muted">
               {formatRelativeTime(item.viewed_at)}
             </span>
           </div>
@@ -216,7 +219,8 @@ export default function HistoryPage() {
           items={items}
           columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 12, xxl: 15 }}
           gap={12}
-          estimateHeight={250}
+          estimateHeight={estimateHistoryRowHeight}
+          measureRows={false}
           renderItem={(item) => (
             <HistoryCard
               key={item.id}
