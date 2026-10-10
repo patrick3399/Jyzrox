@@ -247,6 +247,22 @@ def _conflict_set_sql(stmt) -> str:
     return compiled.split("ON CONFLICT", 1)[1]
 
 
+class TestCreateSubscriptionDefaults:
+    """Adding a subscription must not opt into auto-download unless asked."""
+
+    def test_create_request_defaults_auto_download_to_false(self):
+        from routers.subscriptions import CreateSubscriptionRequest
+
+        req = CreateSubscriptionRequest(url="https://example.com/artist/1")
+        assert req.auto_download is False
+
+    def test_create_request_explicit_auto_download_true_is_kept(self):
+        from routers.subscriptions import CreateSubscriptionRequest
+
+        req = CreateSubscriptionRequest(url="https://example.com/artist/1", auto_download=True)
+        assert req.auto_download is True
+
+
 class TestSubscriptionUpsertRefreshesSchedule:
     """Regression: re-subscribing (on-conflict) must refresh next_check_at and
     source, not just cron_expr.
@@ -452,6 +468,63 @@ class TestUpdateSubscription:
 
         resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"cron_expr": "0 6 * * 1"})
         assert resp.status_code == 200
+
+    async def test_update_subscription_cron_change_recomputes_next_check_at(self, client, db_session):
+        """Changing cron_expr via PATCH must move next_check_at onto the new schedule.
+
+        Regression: PATCH only wrote cron_expr, so an ungrouped subscription kept
+        its old next_check_at and the new interval did not apply until after the
+        next check. next_check_at must come from the new cron, relative to now.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy import select
+
+        from db.models import Subscription
+
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, name="Cron Reschedule", cron_expr="0 */2 * * *")
+        await db_session.execute(
+            text("UPDATE subscriptions SET next_check_at = :ts WHERE id = :id"),
+            {"ts": "2000-01-01 00:00:00", "id": sub_id},
+        )
+        await db_session.commit()
+
+        before = datetime.now(UTC)
+        resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"cron_expr": "0 6 * * 1"})
+        assert resp.status_code == 200
+
+        next_check = (
+            await db_session.execute(select(Subscription.next_check_at).where(Subscription.id == sub_id))
+        ).scalar_one()
+        if next_check.tzinfo is None:  # SQLite returns naive datetimes
+            next_check = next_check.replace(tzinfo=UTC)
+        assert next_check > before, "next_check_at still on the old schedule after cron_expr PATCH"
+        # Mondays 06:00 are at most 7 days away.
+        assert next_check <= before + timedelta(days=7, minutes=1)
+        assert next_check.weekday() == 0 and next_check.hour == 6 and next_check.minute == 0
+
+    async def test_update_subscription_without_cron_keeps_next_check_at(self, client, db_session):
+        """PATCHing unrelated fields must not reschedule the subscription."""
+        from sqlalchemy import select
+
+        from db.models import Subscription
+
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, name="No Reschedule")
+        await db_session.execute(
+            text("UPDATE subscriptions SET next_check_at = :ts WHERE id = :id"),
+            {"ts": "2031-05-05 05:05:05", "id": sub_id},
+        )
+        await db_session.commit()
+
+        resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"name": "Renamed"})
+        assert resp.status_code == 200
+
+        next_check = (
+            await db_session.execute(select(Subscription.next_check_at).where(Subscription.id == sub_id))
+        ).scalar_one()
+        assert (next_check.year, next_check.month, next_check.day) == (2031, 5, 5)
 
     async def test_update_subscription_no_fields_returns_400(self, client, db_session):
         """Sending an empty patch body → 400 (no fields to update)."""

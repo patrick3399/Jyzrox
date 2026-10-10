@@ -1,8 +1,9 @@
 """Subscription management endpoints."""
 
 import logging
-from datetime import UTC
+from datetime import UTC, datetime
 
+from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import delete, select, update
@@ -78,7 +79,9 @@ class CreateSubscriptionRequest(BaseModel):
     url: str
     name: str | None = None
     cron_expr: str | None = None
-    auto_download: bool = True
+    # Opt-in: a new subscription only tracks new works until the user turns
+    # auto-download on (per card, or via the create form).
+    auto_download: bool = False
     group_id: int | None = None
     download_options: dict | None = None
 
@@ -228,10 +231,6 @@ async def create_subscription(
         download_options = normalize_source_options(source, download_options)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
-    from datetime import datetime
-
-    from croniter import croniter
-
     next_check = croniter(cron_expr, datetime.now(UTC)).get_next(datetime)
 
     async with async_session() as session:
@@ -371,6 +370,11 @@ async def update_subscription(
     if req.cron_expr is not None:
         validate_cron(req.cron_expr)
         updates["cron_expr"] = req.cron_expr
+        # Reschedule from the new cron right away. Leaving next_check_at on the
+        # old schedule would keep the previous interval active until the next
+        # check completed. Grouped subs ignore it, but it is what takes effect
+        # once such a sub is moved back out of its group.
+        updates["next_check_at"] = croniter(req.cron_expr, datetime.now(UTC)).get_next(datetime)
     if req.group_id is not None:
         updates["group_id"] = req.group_id
     if req.download_options is not None:
