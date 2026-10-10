@@ -81,12 +81,21 @@ export function VirtualGrid<T>({
   const [scrollMargin, setScrollMargin] = useState(0)
   const prevScrollMarginRef = useRef(0)
   const [hasMeasuredLayout, setHasMeasuredLayout] = useState(false)
-  const [materializedRestore, setMaterializedRestore] = useState<string | null>(null)
   const registeredElementsRef = useRef(new Map<number, HTMLElement>())
-  const restoreRequestRef = useRef(restoreRequest)
-  useEffect(() => {
-    restoreRequestRef.current = restoreRequest
-  }, [restoreRequest])
+  // Whether the restore anchor's cell is in the DOM as of the last commit. Read
+  // off the registry after every commit instead of latched when the cell
+  // mounts: the anchor can be on screen before the restore is able to run (the
+  // column count is still the window-width guess), drop out once the layout is
+  // measured, and come back only after the grid scrolls to its row. A latch set
+  // by the first appearance does not change on the second, so the restore
+  // effect never re-ran and the landing waited for an unrelated re-render —
+  // typically the next append — then yanked the viewport mid-scroll.
+  const [restoreAnchorRegistered, setRestoreAnchorRegistered] = useState(false)
+  useIsomorphicLayoutEffect(() => {
+    setRestoreAnchorRegistered(
+      restoreRequest !== undefined && registeredElementsRef.current.has(restoreRequest.index),
+    )
+  })
   const [colCount, setColCount] = useState<number>(() => {
     if (typeof window === 'undefined') return columns.base
     return getColumnCount(window.innerWidth, columns)
@@ -268,7 +277,7 @@ export function VirtualGrid<T>({
     // offset is recomputed. Retarget it at the landing so the restore has one
     // owner and ends here.
     virtualizerRef.current.scrollToOffset(window.scrollY)
-  }, [colCount, hasMeasuredLayout, items.length, materializedRestore, onRestoreApplied, restoreRequest])
+  }, [colCount, hasMeasuredLayout, items.length, onRestoreApplied, restoreAnchorRegistered, restoreRequest])
 
   // Keep a ref to onLoadMore so the effect never needs it as a dependency
   const onLoadMoreRef = useRef(onLoadMore)
@@ -384,10 +393,6 @@ export function VirtualGrid<T>({
                       ref={(el) => {
                         if (el) registeredElementsRef.current.set(globalIndex, el)
                         else registeredElementsRef.current.delete(globalIndex)
-                        const pendingRestore = restoreRequestRef.current
-                        if (el && pendingRestore?.index === globalIndex) {
-                          setMaterializedRestore(`${pendingRestore.key}:${pendingRestore.index}`)
-                        }
                         onRegisterElement?.(globalIndex, el)
                       }}
                       data-grid-index={globalIndex}

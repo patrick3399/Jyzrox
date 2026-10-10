@@ -195,6 +195,46 @@ describe('VirtualGrid restore hand-off', () => {
     expect(window.scrollY).toBe(landing)
   })
 
+  it('lands the restore when the anchor was rendered under the pre-measurement column guess and only comes back after the scroll', () => {
+    // Columns are first guessed from the window width; a sidebar makes the
+    // real container narrower, so the first measurement drops a breakpoint
+    // (10 -> 8 here). An anchor in the last guessed row is on screen before the
+    // layout is known, falls out of the rendered range once it is, and is
+    // rendered again only after the grid scrolls to its row. The landing has to
+    // follow that second appearance, not be spent on the first.
+    Object.defineProperty(window, 'innerWidth', { value: 1463, configurable: true })
+    const libraryItems: Item[] = Array.from({ length: 216 }, (_, id) => ({ id }))
+    const restoreRequest = { key: 'library:restore:1', index: 80 }
+    let container: HTMLElement | null = null
+    const onRestoreApplied = vi.fn(() => {
+      if (!container) return
+      window.scrollTo(0, rowTop(container, 10) + 1932)
+    })
+    const props = {
+      items: libraryItems,
+      columns: { base: 4, lg: 8, xl: 10 },
+      gap: 12,
+      estimateHeight: 268,
+      measureRows: false,
+      overscan: 6,
+      onRestoreApplied,
+    }
+    const view = render(grid(props))
+    container = view.container.firstElementChild as HTMLElement
+    // The restore request arrives from the hydrated snapshot while the grid is
+    // still on its guessed layout, and the page keeps re-rendering meanwhile.
+    view.rerender(grid({ ...props, restoreRequest }))
+    view.rerender(grid({ ...props, restoreRequest }))
+    expect(container.querySelector('[data-grid-index="80"]')).not.toBeNull()
+
+    setOffsetTop(container, 268)
+    resizeContainer(container, 1160)
+    frames(8)
+
+    expect(onRestoreApplied).toHaveBeenCalledTimes(1)
+    expect(window.scrollY).toBe(268 + 10 * 280 + 1932)
+  })
+
   it('repositions fixed-height rows when the row height changes without a column or margin change', () => {
     const view = render(
       grid({
