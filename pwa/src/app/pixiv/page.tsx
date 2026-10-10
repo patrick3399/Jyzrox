@@ -15,6 +15,11 @@ import useSWR from 'swr'
 import { CredentialBanner } from '@/components/CredentialBanner'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import {
+  estimatePixivIllustRowHeight,
+  estimatePixivRankingRowHeight,
+  estimatePixivUserRowHeight,
+} from '@/lib/pixivLayout'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useIllustActions } from '@/hooks/useIllustActions'
 import { usePixivBrowseSession } from '@/hooks/usePixivBrowseSession'
@@ -276,7 +281,9 @@ function UserPreviewCard({
                 alt=""
                 className="aspect-square h-full w-full bg-vault-input object-cover"
                 onError={(event) => {
-                  event.currentTarget.style.display = 'none'
+                  // Hide, don't remove: the grid lays this card out at a fixed
+                  // height, so a failed image must keep its box.
+                  event.currentTarget.style.visibility = 'hidden'
                 }}
               />
             ))}
@@ -293,7 +300,7 @@ function UserPreviewCard({
               alt={preview.user.name}
               className="h-7 w-7 shrink-0 rounded-full bg-vault-input object-cover"
               onError={(event) => {
-                event.currentTarget.style.display = 'none'
+                event.currentTarget.style.visibility = 'hidden'
               }}
             />
           ) : (
@@ -765,6 +772,19 @@ function PixivPageInner() {
   const isSessionLoading = state.status === 'loading'
   const initialLoading = isSessionLoading && state.items.length === 0
   const showCredentialGate = credentialsMissing && isPrivateSurface
+  // The card a row holds decides its height, so read the kind off the buffer
+  // rather than the identity: during a surface switch the buffer still belongs
+  // to the previous surface for a render. List rows wrap their tag chips and
+  // have no width-derived height, so they stay measured.
+  const cardKind = state.items[0]?.kind
+  const fixedRowHeight =
+    cardKind === 'user'
+      ? estimatePixivUserRowHeight
+      : cardKind === 'ranking'
+        ? estimatePixivRankingRowHeight
+        : cardKind === 'illust' && viewMode !== 'list'
+          ? estimatePixivIllustRowHeight
+          : undefined
   const gridColumns =
     identity.surface === 'following'
       ? { base: 2, sm: 3, md: 4, lg: 5 }
@@ -1016,7 +1036,8 @@ function PixivPageInner() {
           columns={gridColumns}
           getItemKey={pixivItemKey}
           gap={viewMode === 'list' ? 8 : identity.surface === 'ranking' ? 8 : 12}
-          estimateHeight={viewMode === 'list' ? 100 : identity.surface === 'following' ? 180 : 200}
+          estimateHeight={fixedRowHeight ?? 100}
+          measureRows={fixedRowHeight === undefined}
           focusedIndex={focusedIndex}
           onColCountChange={setColCount}
           onRegisterElement={handleRegisterElement}
