@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, act } from '@testing-library/react'
+import { render, act, fireEvent } from '@testing-library/react'
 import VideoPlayer from '../../components/Reader/VideoPlayer'
 import type { ReaderImage } from '../../components/Reader/types'
 import { THUMB_STRIP_HEIGHT } from '../../components/Reader/layout'
@@ -128,13 +128,42 @@ describe('VideoPlayer', () => {
 
   // Regression: the controls were anchored 80px up, but the thumbnail strip is
   // taller than that, so the strip covered the bottom of the play/mute buttons.
-  it('should lift the controls clear of the thumbnail strip while the overlay is visible', () => {
+  // Lifting them further instead left a band of bare video between the two
+  // dark surfaces, so they sit exactly on the strip's top edge.
+  it('should rest the controls flush on the thumbnail strip while the overlay is visible', () => {
     const { getByLabelText } = render(<VideoPlayer image={video} overlayVisible />)
 
     const controls = getByLabelText('Seek').parentElement as HTMLElement
     const lift = parseFloat(/(\d+(?:\.\d+)?)px/.exec(controls.style.bottom)?.[1] ?? '0')
 
-    expect(lift).toBeGreaterThan(THUMB_STRIP_HEIGHT)
+    expect(lift).toBe(THUMB_STRIP_HEIGHT)
     expect(controls.style.bottom).toContain('env(safe-area-inset-bottom)')
+  })
+
+  it('should keep play, time, the seek bar and mute on a single row', () => {
+    const { getByLabelText, getByText } = render(<VideoPlayer image={video} overlayVisible />)
+
+    const row = getByLabelText('Seek').parentElement as HTMLElement
+    expect(getByLabelText('Play').parentElement).toBe(row)
+    expect(getByText('0:00 / 0:12').parentElement).toBe(row)
+    expect(getByLabelText('Unmute').parentElement).toBe(row)
+    expect(row.style.flexDirection).not.toBe('column')
+    expect(Array.from(row.children).map((child) => child.tagName)).toEqual([
+      'BUTTON',
+      'SPAN',
+      'INPUT',
+      'BUTTON',
+    ])
+  })
+
+  it('should start muted and unmute when the mute button is tapped', () => {
+    const { getByLabelText, container } = render(<VideoPlayer image={video} overlayVisible />)
+    const element = container.querySelector('video') as HTMLVideoElement
+    expect(element.muted).toBe(true)
+
+    fireEvent.click(getByLabelText('Unmute'))
+
+    expect(element.muted).toBe(false)
+    expect(getByLabelText('Mute')).toBeTruthy()
   })
 })
