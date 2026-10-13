@@ -167,6 +167,10 @@ def parse_gallery_dl_import(
                 posted_at = datetime.fromtimestamp(raw_date, tz=UTC)
             else:
                 posted_at = datetime.fromisoformat(str(raw_date))
+                # gallery-dl dates are naive UTC; left naive, asyncpg would
+                # read them as the container's local time.
+                if posted_at.tzinfo is None:
+                    posted_at = posted_at.replace(tzinfo=UTC)
         except ValueError, TypeError, OverflowError:
             pass
 

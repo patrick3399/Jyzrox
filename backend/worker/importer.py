@@ -443,6 +443,10 @@ def _build_gallery(
                 posted_at = datetime.fromtimestamp(raw_date, tz=UTC)
             else:
                 posted_at = datetime.fromisoformat(str(raw_date))
+                # Sidecar dates are naive UTC; left naive, asyncpg would read
+                # them as the container's local time.
+                if posted_at.tzinfo is None:
+                    posted_at = posted_at.replace(tzinfo=UTC)
         except (ValueError, TypeError, OverflowError) as exc:
             logger.warning("[import] failed to parse date %r: %s", raw_date, exc)
 

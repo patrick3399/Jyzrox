@@ -636,3 +636,37 @@ class TestResolveSourceIdDotNotation:
         data = parse_gallery_dl_import(tmp_path, meta)
         # Falls through to dest_dir name
         assert data.source_id == tmp_path.name
+
+
+# ---------------------------------------------------------------------------
+# parse_gallery_dl_import — posted_at time zone
+# ---------------------------------------------------------------------------
+
+
+def test_gallery_dl_date_without_offset_is_utc_not_container_local_time(tmp_path):
+    """gallery-dl serialises ``date`` as naive UTC.
+
+    asyncpg encodes a naive datetime for a timestamptz column as local time,
+    and the containers run with TZ=Asia/Taipei: a naive value was stored eight
+    hours early.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+    data = parse_gallery_dl_import(tmp_path, {"category": "xiuren7", "gallery_id": 1, "date": "2026-03-19 02:39:43"})
+
+    assert data.posted_at.utcoffset() == timedelta(0)
+    assert data.posted_at == datetime(2026, 3, 19, 2, 39, 43, tzinfo=UTC)
+
+
+def test_gallery_dl_date_with_explicit_offset_keeps_its_instant(tmp_path):
+    from datetime import UTC, datetime
+
+    from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+    data = parse_gallery_dl_import(
+        tmp_path, {"category": "xiuren7", "gallery_id": 1, "date": "2026-03-19T11:39:43+09:00"}
+    )
+
+    assert data.posted_at == datetime(2026, 3, 19, 2, 39, 43, tzinfo=UTC)

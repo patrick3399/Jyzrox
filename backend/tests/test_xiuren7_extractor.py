@@ -4,7 +4,7 @@ import importlib.util
 import re
 import sys
 import types
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -229,7 +229,7 @@ def test_sidecar_metadata_imports_title_tags_date_and_model_as_artist(tmp_path):
     assert data.title == "[Studio] 2026.02.02 No.1 Model"
     assert data.tags == ["Model"]
     assert data.artist_id == "xiuren7:Model"
-    assert data.posted_at == datetime(2026, 3, 19, 2, 39, 43)
+    assert data.posted_at == datetime(2026, 3, 19, 2, 39, 43, tzinfo=UTC)
 
 
 def test_bundled_extractor_category_without_registered_archive_table_is_rejected():
