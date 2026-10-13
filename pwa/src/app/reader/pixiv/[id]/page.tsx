@@ -6,6 +6,7 @@ import useSWR from 'swr'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ReaderFallbackScreen } from '@/components/Reader/ReaderFallbackScreen'
 import { useLocale } from '@/components/LocaleProvider'
 import { t } from '@/lib/i18n'
 import type { GalleryImage } from '@/lib/types'
@@ -34,20 +35,20 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
 
   if (isAuthorCollection) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   if (isNaN(illustId)) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{t('common.invalidId')}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
@@ -55,25 +56,25 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
 
   if (error) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">
             {error instanceof Error ? error.message : t('common.failedToLoad')}
           </p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   if (!pagesData) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">{t('pixiv.loading')}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 

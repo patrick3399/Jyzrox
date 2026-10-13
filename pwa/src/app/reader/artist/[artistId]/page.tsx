@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ReaderFallbackScreen } from '@/components/Reader/ReaderFallbackScreen'
 import { t } from '@/lib/i18n'
 import type { ArtistImageItem, GalleryImage } from '@/lib/types'
 
@@ -91,18 +92,18 @@ export default function ArtistReaderPage() {
 
   if (error) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   if (!images) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">
@@ -111,7 +112,7 @@ export default function ArtistReaderPage() {
               : t('reader.loadingImages')}
           </p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 

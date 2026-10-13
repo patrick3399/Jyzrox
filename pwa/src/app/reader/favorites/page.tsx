@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ReaderFallbackScreen } from '@/components/Reader/ReaderFallbackScreen'
 import { t } from '@/lib/i18n'
 import type { BrowseImage, GalleryImage } from '@/lib/types'
 
@@ -45,6 +46,8 @@ function FavoriteReaderInner() {
   const searchParams = useSearchParams()
   const startParam = Number(searchParams.get('start')) || 1
   const imageIdParam = Number(searchParams.get('image_id')) || null
+  const sourceParam = searchParams.get('source') || undefined
+  const categoryParam = searchParams.get('category') || undefined
 
   const [images, setImages] = useState<FavoriteReaderImage[] | null>(null)
   const originalImageByPageRef = useRef<Map<number, BrowseImage>>(new Map())
@@ -63,6 +66,8 @@ function FavoriteReaderInner() {
         while (hasNext) {
           const resp = await api.library.browseImages({
             favorited: true,
+            source: sourceParam,
+            category: categoryParam,
             limit: 100,
             cursor,
           })
@@ -92,7 +97,7 @@ function FavoriteReaderInner() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [sourceParam, categoryParam])
 
   const handleHideImage = useCallback(async (reindexedPageNum: number) => {
     const original = originalImageByPageRef.current.get(reindexedPageNum)
@@ -104,31 +109,31 @@ function FavoriteReaderInner() {
 
   if (error) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   if (!images) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">{t('reader.loadingFavoriteImages', { loaded })}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   if (images.length === 0) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <p className="text-sm opacity-60">{t('reader.noFavoriteImages')}</p>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 

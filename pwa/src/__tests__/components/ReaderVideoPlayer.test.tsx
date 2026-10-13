@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
 import VideoPlayer from '../../components/Reader/VideoPlayer'
 import type { ReaderImage } from '../../components/Reader/types'
+import { THUMB_STRIP_HEIGHT } from '../../components/Reader/layout'
 
 // ── IntersectionObserver stub ─────────────────────────────────────────
 
@@ -123,5 +124,17 @@ describe('VideoPlayer', () => {
     })
 
     expect(play).toHaveBeenCalled()
+  })
+
+  // Regression: the controls were anchored 80px up, but the thumbnail strip is
+  // taller than that, so the strip covered the bottom of the play/mute buttons.
+  it('should lift the controls clear of the thumbnail strip while the overlay is visible', () => {
+    const { getByLabelText } = render(<VideoPlayer image={video} overlayVisible />)
+
+    const controls = getByLabelText('Seek').parentElement as HTMLElement
+    const lift = parseFloat(/(\d+(?:\.\d+)?)px/.exec(controls.style.bottom)?.[1] ?? '0')
+
+    expect(lift).toBeGreaterThan(THUMB_STRIP_HEIGHT)
+    expect(controls.style.bottom).toContain('env(safe-area-inset-bottom)')
   })
 })

@@ -154,7 +154,14 @@ function ImageBrowserInner() {
     (img: BrowseImage) => {
       if (favoritedFilter) {
         const idx = images.findIndex((item) => item.id === img.id)
-        router.push(`/reader/favorites?image_id=${img.id}&start=${idx >= 0 ? idx + 1 : 1}`)
+        const params = new URLSearchParams({
+          image_id: String(img.id),
+          start: String(idx >= 0 ? idx + 1 : 1),
+        })
+        // The reader refetches the favourites itself, so it needs the same filters as the grid.
+        if (sourceFilter) params.set('source', sourceFilter)
+        if (categoryFilter) params.set('category', categoryFilter)
+        router.push(`/reader/favorites?${params.toString()}`)
         return
       }
       if (img.source && img.source_id) {
@@ -163,7 +170,7 @@ function ImageBrowserInner() {
         )
       }
     },
-    [favoritedFilter, images, router],
+    [favoritedFilter, sourceFilter, categoryFilter, images, router],
   )
 
   const handleTimelineJump = useCallback((timestamp: string) => {

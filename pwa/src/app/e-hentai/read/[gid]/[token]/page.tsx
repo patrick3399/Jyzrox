@@ -5,6 +5,7 @@ import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { useEhGallery, useEhGalleryImagesPaginated } from '@/hooks/useGalleries'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ReaderFallbackScreen } from '@/components/Reader/ReaderFallbackScreen'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import type { GalleryImage } from '@/lib/types'
@@ -87,18 +88,18 @@ function EhProxyReaderPage() {
 
   if (isNaN(gid)) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{t('common.invalidId')}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   if (error) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error.message}</p>
@@ -109,14 +110,14 @@ function EhProxyReaderPage() {
             {t('common.goBack')}
           </button>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   // Wait for gallery metadata + first batch of tokens before showing Reader.
   if (!gallery || !hasInitialTokens) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+      <ReaderFallbackScreen>
         <div className="text-center">
           <LoadingSpinner />
           <p className="mt-3 text-sm opacity-50">
@@ -143,7 +144,7 @@ function EhProxyReaderPage() {
             </div>
           )}
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 

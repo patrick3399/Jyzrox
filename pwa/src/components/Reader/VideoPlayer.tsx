@@ -3,6 +3,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '@/lib/i18n'
 import type { ReaderImage } from './types'
+import { THUMB_STRIP_HEIGHT } from './layout'
+
+// With the overlay up the thumbnail strip covers the bottom of the screen; the
+// controls rest a little above it instead of tucking underneath.
+const CONTROLS_STRIP_GAP = 12
+const CONTROLS_BOTTOM_ABOVE_STRIP = `calc(${THUMB_STRIP_HEIGHT + CONTROLS_STRIP_GAP}px + env(safe-area-inset-bottom))`
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -150,7 +156,7 @@ export default function VideoPlayer({
       <div
         style={{
           position: 'absolute',
-          bottom: overlayVisible ? 'calc(80px + env(safe-area-inset-bottom))' : '0px',
+          bottom: overlayVisible ? CONTROLS_BOTTOM_ABOVE_STRIP : '0px',
           left: 0,
           right: 0,
           zIndex: 2,

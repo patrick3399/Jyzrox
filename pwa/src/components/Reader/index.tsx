@@ -1,5 +1,15 @@
 'use client'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import type { Gallery, GalleryImage } from '@/lib/types'
 import type { ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings } from './types'
@@ -20,6 +30,7 @@ import {
   saveReaderSettings,
 } from './hooks'
 import VideoPlayer from './VideoPlayer'
+import { THUMB_STRIP_CELL_HEIGHT, THUMB_STRIP_PADDING_Y } from './layout'
 import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
@@ -90,6 +101,13 @@ function getScaleImageClass(scaleMode: ScaleMode): string {
   }
 }
 
+// ── Retry layer ───────────────────────────────────────────────────────
+// The paged views stack their tap zones over the page, and the image scale
+// classes switch pointer events off, so a Retry button rendered inside the page
+// can never take a tap. Those views expose a layer above the zones and a failed
+// page renders its notice there. With no layer (webtoon) the notice stays inline.
+const RetryLayerContext = createContext<HTMLElement | null>(null)
+
 // ── ReaderImg (load-error handling + auto-retry) ─────────────────────
 
 interface ReaderImgProps {
@@ -141,26 +159,34 @@ export function ReaderImg({
   // Cancel any pending auto-retry on unmount.
   useEffect(() => () => clearTimeout(retryTimerRef.current), [])
 
+  const retryLayer = useContext(RetryLayerContext)
+
   if (failed) {
-    return (
-      <div
-        className={`flex flex-col items-center justify-center gap-2 bg-black/50 ${className ?? ''}`}
-        style={{ minHeight: '200px', minWidth: '200px', ...style }}
-      >
+    const notice = (
+      <div className="flex flex-col items-center gap-2">
         <span className="text-3xl text-white/40" aria-hidden>
           ⚠
         </span>
         <p className="text-xs text-white/60">{t('reader.imageLoadFailed')}</p>
         <button
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation()
             setFailed(false)
             setAutoRetriesUsed(0)
             setAttempt((a) => a + 1)
           }}
-          className="rounded bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/20"
+          className="pointer-events-auto rounded bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/20"
         >
           {t('reader.retry')}
         </button>
+      </div>
+    )
+    return (
+      <div
+        className={`flex flex-col items-center justify-center bg-black/50 ${className ?? ''}`}
+        style={{ minHeight: '200px', minWidth: '200px', ...style }}
+      >
+        {retryLayer ? createPortal(notice, retryLayer) : notice}
       </div>
     )
   }
@@ -449,7 +475,11 @@ function SinglePageView({
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
-  const isVideo = image.mediaType === 'video'
+  // A mounted player takes the centre tap itself and shows its controls with
+  // the overlay, so the edge zones only have to step aside while those are up
+  // (FE-T8). A video with no file yet mounts no player and is tapped like an image.
+  const playerMounted = image.mediaType === 'video' && image.url != null
+  const edgeZones = !isZoomed && (!playerMounted || !showOverlay)
 
   // Pages whose bytes are known to be local: loaded here as a slot, or reported
   // by the prefetcher. Only these are retained, so keeping a neighbour mounted
@@ -467,6 +497,7 @@ function SinglePageView({
   const slots = [prevImage, image, nextImage].filter(
     (slot): slot is ReaderImage => slot === image || retainable(slot),
   )
+  const [retryLayer, setRetryLayer] = useState<HTMLDivElement | null>(null)
 
   return (
     <div
@@ -487,17 +518,20 @@ function SinglePageView({
         className="w-full h-full flex items-center justify-center"
       >
         {slots.map((slot) => (
-          <PageSlot
-            key={slot.pageNum}
-            image={slot}
-            isCurrent={slot === image}
-            className={getScaleImageClass(scaleMode)}
-            onCurrentLoaded={onImageLoaded}
-            onCurrentError={onImageError}
-            onSlotLoaded={markSlotLoaded}
-            onToggleOverlay={onToggleOverlay}
-            overlayVisible={showOverlay}
-          />
+          // Only the page on screen may put its notice in the layer; a retained
+          // neighbour is hidden and keeps its own inside its hidden box.
+          <RetryLayerContext.Provider key={slot.pageNum} value={slot === image ? retryLayer : null}>
+            <PageSlot
+              image={slot}
+              isCurrent={slot === image}
+              className={getScaleImageClass(scaleMode)}
+              onCurrentLoaded={onImageLoaded}
+              onCurrentError={onImageError}
+              onSlotLoaded={markSlotLoaded}
+              onToggleOverlay={onToggleOverlay}
+              overlayVisible={showOverlay}
+            />
+          </RetryLayerContext.Provider>
         ))}
       </div>
       {isLoading && (
@@ -508,7 +542,7 @@ function SinglePageView({
           <Spinner />
         </div>
       )}
-      {!isVideo && (
+      {!playerMounted && (
         <>
           {/* Center zone — always visible (even when zoomed) for overlay toggle */}
           <div
@@ -524,8 +558,12 @@ function SinglePageView({
             }}
             aria-label={t('reader.toggleControls')}
           />
+        </>
+      )}
+      {edgeZones && (
+        <>
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
-          {!isZoomed && readingDirection === 'vertical' && (
+          {readingDirection === 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -553,7 +591,7 @@ function SinglePageView({
               />
             </>
           )}
-          {!isZoomed && readingDirection !== 'vertical' && (
+          {readingDirection !== 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -587,6 +625,11 @@ function SinglePageView({
           )}
         </>
       )}
+      {/* Above the tap zones: see RetryLayerContext. */}
+      <div
+        ref={setRetryLayer}
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      />
     </div>
   )
 }
@@ -819,7 +862,13 @@ function DoublePageView({
   const secondImage = readingDirection === 'rtl' ? leftImage : rightImage
 
   const imgClass = getScaleImageClass(scaleMode === 'fit-both' ? 'fit-both' : scaleMode)
-  const hasVideo = leftImage?.mediaType === 'video' || rightImage?.mediaType === 'video'
+  const [firstRetryLayer, setFirstRetryLayer] = useState<HTMLDivElement | null>(null)
+  const [secondRetryLayer, setSecondRetryLayer] = useState<HTMLDivElement | null>(null)
+  // Same rule as SinglePageView: edge zones yield only to visible player controls.
+  const playerMounted = [leftImage, rightImage].some(
+    (candidate) => candidate?.mediaType === 'video' && candidate.url != null,
+  )
+  const edgeZones = !isZoomed && (!playerMounted || !showOverlay)
 
   return (
     <div
@@ -850,15 +899,17 @@ function DoublePageView({
                   onTouchEnd={lp?.onTouchEnd}
                   onContextMenu={lp?.onContextMenu}
                 >
-                  <MediaElement
-                    image={firstImage}
-                    className={imgClass}
-                    draggable={false}
-                    onLoad={onImageLoaded}
-                    onError={onImageError}
-                    onToggleOverlay={onToggleOverlay}
-                    overlayVisible={showOverlay}
-                  />
+                  <RetryLayerContext.Provider value={firstRetryLayer}>
+                    <MediaElement
+                      image={firstImage}
+                      className={imgClass}
+                      draggable={false}
+                      onLoad={onImageLoaded}
+                      onError={onImageError}
+                      onToggleOverlay={onToggleOverlay}
+                      overlayVisible={showOverlay}
+                    />
+                  </RetryLayerContext.Provider>
                 </div>
               )
             })()
@@ -881,15 +932,17 @@ function DoublePageView({
                   onTouchEnd={lp?.onTouchEnd}
                   onContextMenu={lp?.onContextMenu}
                 >
-                  <MediaElement
-                    image={secondImage}
-                    className={imgClass}
-                    draggable={false}
-                    onLoad={onImageLoaded}
-                    onError={onImageError}
-                    onToggleOverlay={onToggleOverlay}
-                    overlayVisible={showOverlay}
-                  />
+                  <RetryLayerContext.Provider value={secondRetryLayer}>
+                    <MediaElement
+                      image={secondImage}
+                      className={imgClass}
+                      draggable={false}
+                      onLoad={onImageLoaded}
+                      onError={onImageError}
+                      onToggleOverlay={onToggleOverlay}
+                      overlayVisible={showOverlay}
+                    />
+                  </RetryLayerContext.Provider>
                 </div>
               )
             })()
@@ -903,7 +956,7 @@ function DoublePageView({
           <Spinner />
         </div>
       )}
-      {!hasVideo && (
+      {!playerMounted && (
         <>
           {/* Center zone — always visible (even when zoomed) for overlay toggle */}
           <div
@@ -919,8 +972,12 @@ function DoublePageView({
             }}
             aria-label={t('reader.toggleControls')}
           />
+        </>
+      )}
+      {edgeZones && (
+        <>
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
-          {!isZoomed && readingDirection === 'vertical' && (
+          {readingDirection === 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -948,7 +1005,7 @@ function DoublePageView({
               />
             </>
           )}
-          {!isZoomed && readingDirection !== 'vertical' && (
+          {readingDirection !== 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -982,6 +1039,11 @@ function DoublePageView({
           )}
         </>
       )}
+      {/* Above the tap zones, one half per page: see RetryLayerContext. */}
+      <div className="pointer-events-none absolute inset-0 flex flex-row">
+        <div ref={setFirstRetryLayer} className="flex h-full w-1/2 items-center justify-center" />
+        <div ref={setSecondRetryLayer} className="flex h-full w-1/2 items-center justify-center" />
+      </div>
     </div>
   )
 }
@@ -1427,14 +1489,17 @@ function ThumbnailStrip({
       )}
       <div
         ref={stripRef}
-        className="reader-thumb-strip flex bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
-        style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}
+        className="reader-thumb-strip flex bg-black/70 px-2 backdrop-blur-sm overflow-x-auto"
+        style={{
+          paddingTop: THUMB_STRIP_PADDING_Y,
+          paddingBottom: `calc(${THUMB_STRIP_PADDING_Y}px + env(safe-area-inset-bottom))`,
+        }}
       >
         <div
           style={{
             width: displayImages.length * THUMB_TOTAL_W,
             position: 'relative',
-            height: 80,
+            height: THUMB_STRIP_CELL_HEIGHT,
             flexShrink: 0,
           }}
         >
@@ -1443,7 +1508,7 @@ function ThumbnailStrip({
             const isActive = img.pageNum === currentPage
             const previewRaw = previews?.[String(img.pageNum)]
             const thumbW = 60
-            const thumbH = 80
+            const thumbH = THUMB_STRIP_CELL_HEIGHT
 
             return (
               <div
