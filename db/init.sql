@@ -894,6 +894,15 @@ CREATE TABLE IF NOT EXISTS weibo (
 );
 CREATE INDEX IF NOT EXISTS idx_weibo_unlinked ON weibo (job_id) WHERE gallery_id IS NULL;
 
+-- Bundled custom extractor (backend/plugins/builtin/gallery_dl/extractors/xiuren7_gallery.py)
+CREATE TABLE IF NOT EXISTS xiuren7 (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_xiuren7_unlinked ON xiuren7 (job_id) WHERE gallery_id IS NULL;
+
 -- ── Performance indexes (benchmark-driven) ─────────────────────────────
 
 -- Image composite: serves browse_images ORDER BY added_at DESC when filtered by gallery_id

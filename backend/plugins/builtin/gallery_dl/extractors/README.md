@@ -85,7 +85,7 @@ class ExampleGalleryExtractor(GalleryExtractor):
     example = "https://example.com/g/12345"   # --list-extractors reads this
     directory_fmt = ("{category}", "{gallery_id} {title}")
     filename_fmt = "{num:>03}.{extension}"
-    archive_fmt = "{gallery_id}_{num}"
+    archive_fmt = "gallery={gallery_id}_{num}"
 
     def metadata(self, page):
         """Return a dict of gallery-level metadata."""
@@ -170,14 +170,25 @@ the category.** `_link_archive_entries()` resolves the table as
 `_DEFAULT_CONFIG` — i.e. it looks for a table literally named `gallery_dl`
 (BE-T3). Registering with `extractor=` set is what keeps the two in step.
 
-**3. Choose a stable gallery identity deliberately.** Metadata imports resolve
-`source_id` from the registered site's `source_id_fields`, then the extractor's
-`directory_fmt`, then `gallery_id` / `id`. Make sure one of those yields the
-remote gallery's stable unique ID, or refreshes create duplicates and distinct
-remote galleries collide (HR-018). Never use a username (BE-T1).
-`url_path_id_index` applies only to the no-metadata URL fallback in
-`ProgressiveImporter.ensure_gallery_from_url()`; set it too if the extractor can
-finish without emitting a metadata sidecar.
+**3. Know what the gallery identity will be.** For jobs handled by the
+gallery-dl plugin the download URL alone decides `(source, source_id)`
+(ADR 0016): `{subcategory}={pattern groups joined by "/"}`, e.g.
+`gallery=12345`. Capture the remote gallery's stable unique ID in the pattern —
+never a username or a title (BE-T1, HR-018). `source_id_fields`,
+`directory_fmt` and `url_path_id_index` only matter on the fallback paths taken
+when in-process URL matching fails, so a failed in-process load shows up as a
+second gallery with a different `source_id`.
+
+Title and tags are taken from the metadata sidecar only when the registered
+site `category` is `gallery` or `manga`; on any other category the title is the
+identity string and no tags are written.
+
+**Start `archive_fmt` with that identity**, e.g.
+`archive_fmt = "gallery={gallery_id}_{num}"`. `_link_archive_entries()` first
+links the entries whose key starts with the gallery's `source_id`. Entries that
+do not match fall back to "every unlinked entry written while this job ran",
+which hands entries to the wrong gallery when two downloads of the same site
+overlap.
 
 **4. Check `_METADATA_INCLUDE` in `..source`.** The metadata postprocessor drops
 any field not on that allowlist. Either emit the existing field names or extend

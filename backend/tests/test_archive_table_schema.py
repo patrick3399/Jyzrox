@@ -41,7 +41,7 @@ def test_init_sql_archive_table_without_job_id_is_rejected():
 
 def test_migration_0028_adds_job_id_to_every_init_sql_archive_table_idempotently():
     module = _load_migration()
-    assert set(_archive_tables()) <= set(module.ARCHIVE_TABLES) | {"exhentai", "pixiv", "twitter", "weibo"}
+    assert set(_archive_tables()) <= set(module.ARCHIVE_TABLES) | {"exhentai", "pixiv", "twitter", "weibo", "xiuren7"}
 
     executed: list[str] = []
     module.op = type("Op", (), {"execute": staticmethod(executed.append)})

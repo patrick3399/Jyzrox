@@ -420,6 +420,16 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         has_tags=True,
         artist_from="tag",
     ),
+    # Bundled extractor: extractors/xiuren7_gallery.py
+    GdlSiteConfig(
+        domain="xiuren7.com",
+        source_id="xiuren7",
+        name="XiuRen7",
+        category="gallery",
+        has_tags=True,
+        artist_fields=("artist",),
+        source_id_fields=("gallery_id",),
+    ),
     GdlSiteConfig(
         domain="kemono.cr",
         source_id="kemono",
