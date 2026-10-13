@@ -870,8 +870,10 @@ class GalleryDlPlugin(SourcePlugin):
             str(dest_dir),
             "--Print",
             "after:JYZROX_FILE\t{_path}\t{sha256}",
+            # The format needs a field: gallery-dl reads one with no "{" and no
+            # space as a field *name* and prints that field's value instead.
             "--Print",
-            "skip:JYZROX_SKIP",
+            f"skip:{_PRINT_SKIP_PREFIX}\t{{filename}}",
             # prepare event fires before each download — gives UI the file
             # name and page number while bytes are streaming in.
             "--Print",

@@ -470,6 +470,50 @@ class TestGalleryDlDownloadErrors:
         assert captured_cmd[idx2 + 1] == "60"
         assert captured_kwargs["start_new_session"] is True
 
+    async def test_print_format_without_brace_or_space_is_rejected_as_a_field_name(self, tmp_path):
+        """gallery-dl's --Print reads a format with no "{" and no space as a
+        metadata field name. "skip:JYZROX_SKIP" therefore printed the value of
+        a field called JYZROX_SKIP ("None") instead of the marker, so skipped
+        files were never counted and an all-archived re-download ended as 0/0.
+        """
+        from plugins.builtin.gallery_dl.source import (
+            _PRINT_SKIP_PREFIX,
+            GalleryDlPlugin,
+            _DownloadState,
+            _read_stdout,
+        )
+
+        proc = _make_fake_process([], returncode=0)
+        captured_cmd = []
+
+        async def _capture_exec(*cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return proc
+
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_capture_exec),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
+            patch("pathlib.Path.mkdir"),
+        ):
+            await GalleryDlPlugin().download(url="https://example.com/x", dest_dir=tmp_path, credentials={})
+
+        formats = [captured_cmd[i + 1] for i, arg in enumerate(captured_cmd) if arg == "--Print"]
+        by_event = dict(fmt.split(":", 1) for fmt in formats)
+        assert set(by_event) == {"after", "skip", "prepare"}
+        for event, fmt in by_event.items():
+            assert "{" in fmt or " " in fmt, f"{event}: gallery-dl would print the field named {fmt!r}"
+        assert by_event["skip"].startswith(_PRINT_SKIP_PREFIX)
+
+        # The line gallery-dl prints for that format still counts as a skip.
+        state = _DownloadState()
+        rendered = by_event["skip"].replace("{filename}", "001").encode() + b"\n"
+        await _read_stdout(_make_fake_process([rendered], returncode=0), state, on_file=None, on_progress=None)
+        assert state.skipped_count == 1
+
 
 # ---------------------------------------------------------------------------
 # GalleryDlPlugin.parse_metadata
