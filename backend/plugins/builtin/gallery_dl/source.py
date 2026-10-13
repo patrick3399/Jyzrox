@@ -19,6 +19,7 @@ from pathlib import Path
 from core.config import settings
 from core.version import __version__
 from plugins.base import SourcePlugin
+from plugins.builtin.gallery_dl._archive import archive_dsn_for_job
 from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
 from plugins.builtin.gallery_dl._metadata import _resolve_source_id
 from plugins.models import (
@@ -166,8 +167,9 @@ async def _build_gallery_dl_config(
         "extractor": {
             "base-directory": settings.data_gallery_path,
             "directory": [],
-            # N1: PostgreSQL archive — tables pre-created in init.sql
-            "archive": settings.gdl_archive_dsn,
+            # N1: PostgreSQL archive — tables pre-created in init.sql. The job id
+            # rides on the connection so each row is stamped with its writer.
+            "archive": archive_dsn_for_job(settings.gdl_archive_dsn, config_id),
             "archive-table": "{category}",
             # N3: native rate limiting (offloaded from adaptive engine).
             # exp:BASE:START:MAX=VALUE -> sleep(n) = min(START + VALUE*BASE^(n-1), MAX)

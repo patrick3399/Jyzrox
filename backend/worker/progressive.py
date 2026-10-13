@@ -180,7 +180,6 @@ class ProgressiveImporter:
         self.existing_page_nums: set[int] = set()
         self.source_url: str | None = None
         self._sem = asyncio.Semaphore(2 if page_num_from_filename else 1)
-        self._job_started_at = datetime.now(UTC)
         self._tasks: list[asyncio.Task] = []
         self._page_num_from_filename = page_num_from_filename
         self._excluded_set: set[str] = set()
@@ -930,8 +929,16 @@ class ProgressiveImporter:
     async def _link_archive_entries(self, session) -> None:
         """Link gallery-dl archive entries to this gallery via gallery_id FK.
 
-        Strategy 1: LIKE by source_id prefix (E-Hentai, Pixiv, booru).
-        Strategy 2: job_id + time window (Twitter, etc.).
+        Two independent rules; neither looks at when a row was written, because
+        another download of the same site shares the table and overlaps in time.
+
+        - Rows this job wrote. gallery-dl's connection carries the job id and
+          the ``job_id`` column default stamps it on insert, so a retry (same
+          job id) also collects what its earlier attempts archived.
+        - Rows whose key names this gallery: ``source_id`` followed by the end
+          of the key or a non-alphanumeric character, so ``gallery=12345``
+          matches ``gallery=12345_1`` and not ``gallery=123456_1``. Only an
+          extractor whose ``archive_fmt`` starts with the URL identity matches.
         """
         if not (self.gallery_id and self.source):
             return
@@ -953,34 +960,30 @@ class ProgressiveImporter:
                 if not exists:
                     return
 
-                # Strategy 1: LIKE match by source_id prefix
-                if self.source_id:
-                    prefix = f"{self.source_id}%"
-                    result = await session.execute(
-                        text(f'UPDATE "{table}" SET gallery_id = :gid WHERE gallery_id IS NULL AND entry LIKE :prefix'),
-                        {"gid": self.gallery_id, "prefix": prefix},
-                    )
-                    if result.rowcount:
-                        logger.info("[progressive] linked %d archive entries (prefix)", result.rowcount)
-                        return
-
-                # Strategy 2: time window + job_id exclusion
                 if self.db_job_id:
                     result = await session.execute(
                         text(
-                            f'UPDATE "{table}" SET gallery_id = :gid, job_id = :jid '
-                            f"WHERE gallery_id IS NULL AND job_id IS NULL "
-                            f"AND created_at BETWEEN :start AND :end"
+                            f'UPDATE "{table}" SET gallery_id = :gid '
+                            f"WHERE gallery_id IS NULL AND job_id = CAST(:jid AS uuid)"
                         ),
-                        {
-                            "gid": self.gallery_id,
-                            "jid": self.db_job_id,
-                            "start": self._job_started_at,
-                            "end": datetime.now(UTC),
-                        },
+                        {"gid": self.gallery_id, "jid": str(self.db_job_id)},
                     )
                     if result.rowcount:
                         logger.info("[progressive] linked %d archive entries (job_id)", result.rowcount)
+
+                if self.source_id:
+                    # starts_with, not LIKE: "_" and "%" are legal in a source_id.
+                    # The colons are escaped so text() does not read a bind name.
+                    result = await session.execute(
+                        text(
+                            f'UPDATE "{table}" SET gallery_id = :gid '
+                            f"WHERE gallery_id IS NULL AND starts_with(entry, CAST(:sid AS text)) "
+                            f"AND substr(entry, char_length(CAST(:sid AS text)) + 1, 1) !~ '[[\\:alnum\\:]]'"
+                        ),
+                        {"gid": self.gallery_id, "sid": self.source_id},
+                    )
+                    if result.rowcount:
+                        logger.info("[progressive] linked %d archive entries (prefix)", result.rowcount)
 
         except Exception as exc:
             logger.warning("[progressive] failed to link archive entries: %s", exc)

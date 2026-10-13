@@ -147,14 +147,16 @@ the `gallery_id` FK Jyzrox needs — and the failure is close to invisible:
 - a later re-download is skipped as "already archived" and finishes with
   **0 images**
 
-Follow the existing pattern in the `gallery-dl archive tables` section. Both
-linking strategies need `job_id` and `created_at`:
+Follow the existing pattern in the `gallery-dl archive tables` section. The
+`job_id` default is what ties a row to its download: gallery-dl inserts `entry`
+only, each job connects with its id as the session setting
+`jyzrox.archive_job_id`, and the default copies it onto the row.
 
 ```sql
 CREATE TABLE IF NOT EXISTS examplesite (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_examplesite_unlinked ON examplesite (job_id) WHERE gallery_id IS NULL;
@@ -184,11 +186,12 @@ site `category` is `gallery` or `manga`; on any other category the title is the
 identity string and no tags are written.
 
 **Start `archive_fmt` with that identity**, e.g.
-`archive_fmt = "gallery={gallery_id}_{num}"`. `_link_archive_entries()` first
-links the entries whose key starts with the gallery's `source_id`. Entries that
-do not match fall back to "every unlinked entry written while this job ran",
-which hands entries to the wrong gallery when two downloads of the same site
-overlap.
+`archive_fmt = "gallery={gallery_id}_{num}"`. `_link_archive_entries()` links
+the entries the finishing job wrote (by `job_id`) and, in addition, any unlinked
+entry whose key is the gallery's `source_id` followed by the end of the key or a
+non-alphanumeric character. The second rule is what recovers entries left
+behind by a download that died before linking, and it can only work when the
+key names the gallery.
 
 **4. Check `_METADATA_INCLUDE` in `..source`.** The metadata postprocessor drops
 any field not on that allowlist. Either emit the existing field names or extend

@@ -798,11 +798,13 @@ CREATE TABLE IF NOT EXISTS site_configs (
 -- gallery-dl only reads/writes the 'entry' column.
 -- Jyzrox adds gallery_id FK for CASCADE lifecycle management.
 -- Tables are named by gallery-dl category (archive-table: "{category}").
+-- job_id is filled by its default: each download connects with its job id as
+-- the session setting jyzrox.archive_job_id, so a row records which job wrote it.
 
 CREATE TABLE IF NOT EXISTS exhentai (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_exhentai_unlinked ON exhentai (job_id) WHERE gallery_id IS NULL;
@@ -810,7 +812,7 @@ CREATE INDEX IF NOT EXISTS idx_exhentai_unlinked ON exhentai (job_id) WHERE gall
 CREATE TABLE IF NOT EXISTS pixiv (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_pixiv_unlinked ON pixiv (job_id) WHERE gallery_id IS NULL;
@@ -818,7 +820,7 @@ CREATE INDEX IF NOT EXISTS idx_pixiv_unlinked ON pixiv (job_id) WHERE gallery_id
 CREATE TABLE IF NOT EXISTS twitter (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_twitter_unlinked ON twitter (job_id) WHERE gallery_id IS NULL;
@@ -826,70 +828,70 @@ CREATE INDEX IF NOT EXISTS idx_twitter_unlinked ON twitter (job_id) WHERE galler
 CREATE TABLE IF NOT EXISTS instagram (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS danbooru (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS gelbooru (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS newgrounds (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS nijie (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS kemono (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS nhentai (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS hitomi (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS rule34 (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS weibo (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_weibo_unlinked ON weibo (job_id) WHERE gallery_id IS NULL;
@@ -898,7 +900,7 @@ CREATE INDEX IF NOT EXISTS idx_weibo_unlinked ON weibo (job_id) WHERE gallery_id
 CREATE TABLE IF NOT EXISTS xiuren7 (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_xiuren7_unlinked ON xiuren7 (job_id) WHERE gallery_id IS NULL;
