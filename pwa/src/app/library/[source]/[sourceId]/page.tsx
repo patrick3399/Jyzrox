@@ -62,13 +62,9 @@ function getArtistDisplayName(gallery: {
   return separatorIndex >= 0 ? artistId.slice(separatorIndex + 1) : artistId
 }
 
-function formatSearchFilterValue(value: string): string {
-  const escaped = value.replace(/"/g, '\\"')
-  return /\s/.test(escaped) ? `"${escaped}"` : escaped
-}
-
-function artistSearchHref(artistId: string): string {
-  return `/library?q=${encodeURIComponent(`artist_id:${formatSearchFilterValue(artistId)}`)}`
+// The artist page lists the same galleries and offers the read-everything entry point.
+function artistPageHref(artistId: string): string {
+  return `/artists/${encodeURIComponent(artistId)}`
 }
 const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: string }> = {
   complete: {
@@ -944,7 +940,7 @@ export default function GalleryDetailPage() {
                 <span className="text-vault-text-muted">{t('library.artistFilter')}: </span>
                 {gallery.artist_id && artistDisplayName ? (
                   <Link
-                    href={artistSearchHref(gallery.artist_id)}
+                    href={artistPageHref(gallery.artist_id)}
                     className="text-vault-text hover:text-vault-accent hover:underline transition-colors"
                   >
                     {artistDisplayName}
@@ -982,7 +978,7 @@ export default function GalleryDetailPage() {
               </Link>
               {gallery.artist_id && (
                 <Link
-                  href={artistSearchHref(gallery.artist_id)}
+                  href={artistPageHref(gallery.artist_id)}
                   className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
                 >
                   {t('library.viewAllByArtist')}
