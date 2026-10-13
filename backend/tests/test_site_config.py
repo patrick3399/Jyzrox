@@ -146,6 +146,29 @@ async def test_update_rejects_invalid_concurrency():
         await svc.update("ehentai", {"download": {"concurrency": 25}})
 
 
+# ── Proxy URL validation ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_site_config_rejects_socks5_proxy_url_without_socks_support():
+    """A socks5:// proxy must be refused at write time.
+
+    gallery-dl is the only consumer of proxy_url and its isolated venv ships
+    without PySocks, so an accepted SOCKS proxy fails every download for the
+    site with "Missing dependencies for SOCKS support".
+    """
+    svc = SiteConfigService()
+
+    with pytest.raises(ValueError, match="SOCKS proxies are not supported"):
+        await svc.update("ehentai", {"download": {"proxy_url": "socks5://127.0.0.1:1080"}})
+
+
+@pytest.mark.parametrize("proxy_url", ["http://proxy.local:8080", "https://proxy.local:8443", None])
+def test_site_config_accepts_http_and_https_proxy_url(proxy_url):
+    """Rejecting SOCKS must not take the supported schemes (or a null reset) with it."""
+    SiteConfigService._validate_overrides({"download": {"proxy_url": proxy_url}})
+
+
 # ── Batch load ───────────────────────────────────────────────────────
 
 

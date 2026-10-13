@@ -69,6 +69,21 @@ async def test_update_rejects_invalid_concurrency(client):
 
 
 @pytest.mark.asyncio
+async def test_update_site_rejects_socks5_proxy_url_with_400_and_does_not_persist(client):
+    """PUT with a socks5:// proxy_url returns 400 instead of storing a proxy no download can use."""
+    resp = await client.put(
+        "/api/admin/sites/twitter",
+        json={"download": {"proxy_url": "socks5://127.0.0.1:1080", "retries": 9}},
+    )
+    assert resp.status_code == 400
+    assert "SOCKS proxies are not supported" in resp.json()["detail"]
+
+    # The whole update is refused, so the valid field next to it is not stored either.
+    resp2 = await client.get("/api/admin/sites/twitter")
+    assert resp2.json()["download"]["retries"] != 9
+
+
+@pytest.mark.asyncio
 async def test_reset_field_reverts_to_default(client):
     """POST /reset removes specific override, reverting to _sites.py default."""
     # Set an override first

@@ -380,8 +380,10 @@ class SiteConfigService:
                 raise ValueError("browser_profile must be 'chrome', 'firefox', or null")
         if "proxy_url" in dl:
             pu = dl["proxy_url"]
-            if pu is not None and not pu.startswith(("http://", "https://", "socks5://")):
-                raise ValueError("proxy_url must start with http://, https://, or socks5://")
+            # No SOCKS: gallery-dl is the only consumer and its isolated venv has
+            # no PySocks, so a socks5:// proxy would fail every download.
+            if pu is not None and not pu.startswith(("http://", "https://")):
+                raise ValueError("proxy_url must start with http:// or https:// (SOCKS proxies are not supported)")
 
         fm = overrides.get("field_mapping", {})
         if fm:
