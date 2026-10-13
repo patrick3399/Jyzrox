@@ -524,3 +524,39 @@ async def test_metadata_include_keeps_the_fields_artist_extraction_reads(mock_co
     config = json.loads(mock_config_path.read_text())
     include = next(pp for pp in config["extractor"]["postprocessors"] if pp["name"] == "metadata")["include"]
     assert {"author", "username", "user_id", "user", "content"} <= set(include)
+
+
+# ── archive rows record their job ──
+
+
+@pytest.mark.asyncio
+async def test_archive_dsn_without_job_id_would_leave_rows_ownerless(mock_config_path, tmp_path):
+    """Each job's archive connection carries its id; the column default reads it."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    job_id = "0199e0a1-7c3e-7b1a-9d2f-3c5b8a4e6f70"
+    path = await _build_gallery_dl_config({}, config_id=job_id)
+    archive = json.loads(path.read_text())["extractor"]["archive"]
+
+    assert archive == (f"postgresql://test:test@localhost:5432/test?options=-c%20jyzrox.archive_job_id%3D{job_id}")
+
+
+def test_archive_dsn_keeps_existing_query_parameters_and_options():
+    from plugins.builtin.gallery_dl._archive import archive_dsn_for_job
+
+    job_id = "0199e0a1-7c3e-7b1a-9d2f-3c5b8a4e6f70"
+    dsn = archive_dsn_for_job("postgresql://u:p%40ss@db:5432/jyzrox?sslmode=require&options=-c%20a.b%3D1", job_id)
+
+    assert dsn == (
+        "postgresql://u:p%40ss@db:5432/jyzrox?sslmode=require"
+        f"&options=-c%20a.b%3D1%20-c%20jyzrox.archive_job_id%3D{job_id}"
+    )
+
+
+@pytest.mark.parametrize("job_id", [None, "", "local_test", "1; DROP TABLE twitter"])
+def test_archive_dsn_is_unchanged_when_job_id_is_not_a_uuid(job_id):
+    """A value the uuid cast rejects would fail every archive insert of the run."""
+    from plugins.builtin.gallery_dl._archive import archive_dsn_for_job
+
+    dsn = "postgresql://test:test@localhost:5432/test"
+    assert archive_dsn_for_job(dsn, job_id) == dsn

@@ -162,6 +162,7 @@ async def _ensure_archive_table_schema() -> None:
     from sqlalchemy import text
 
     from core.database import AsyncSessionLocal
+    from plugins.builtin.gallery_dl._archive import ARCHIVE_JOB_ID_DEFAULT
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -193,7 +194,7 @@ async def _ensure_archive_table_schema() -> None:
                 text(f'''
                 ALTER TABLE "{table}"
                 ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-                ADD COLUMN IF NOT EXISTS job_id UUID,
+                ADD COLUMN IF NOT EXISTS job_id UUID DEFAULT {ARCHIVE_JOB_ID_DEFAULT},
                 ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()
             ''')
             )

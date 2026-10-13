@@ -269,7 +269,13 @@ def test_migration_0031_creates_the_same_archive_table_as_init_sql_idempotently(
     create = next(sql for sql in executed if "CREATE TABLE" in sql)
     name, body = re.fullmatch(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*)\)", create.strip(), re.DOTALL).groups()
     assert name == "xiuren7"
-    assert _columns(body) == _columns(_archive_tables()["xiuren7"])
+    # init.sql is HEAD: migration 0032 later gave job_id its default.
+    from plugins.builtin.gallery_dl._archive import ARCHIVE_JOB_ID_DEFAULT
+
+    head_columns = [
+        column.removesuffix(f" DEFAULT {ARCHIVE_JOB_ID_DEFAULT}") for column in _columns(_archive_tables()["xiuren7"])
+    ]
+    assert _columns(body) == head_columns
     index = next(sql for sql in executed if "CREATE INDEX" in sql)
     assert "CREATE INDEX IF NOT EXISTS idx_xiuren7_unlinked ON xiuren7 (job_id) WHERE gallery_id IS NULL" in index
 
