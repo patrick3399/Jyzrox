@@ -93,6 +93,7 @@ function LibraryContent() {
     parsed,
     setFilter,
     commitSearch,
+    clearSearch,
     handleInputChange,
     selectMode,
     setSelectMode,
@@ -511,16 +512,29 @@ function LibraryContent() {
             <div className="px-4 pb-4 space-y-4 border-t border-vault-border pt-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => handleInputChange(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') commitSearch(inputValue)
-                    }}
-                    placeholder={t('library.searchPlaceholder')}
-                    className="flex-1 bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
-                  />
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={inputValue}
+                      onChange={(e) => handleInputChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitSearch(inputValue)
+                      }}
+                      placeholder={t('library.searchPlaceholder')}
+                      className="w-full bg-vault-input border border-vault-border rounded-lg pl-3 pr-10 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
+                    />
+                    {inputValue && (
+                      <button
+                        type="button"
+                        onClick={clearSearch}
+                        className="absolute right-0 top-0 h-full w-10 flex items-center justify-center text-vault-text-muted hover:text-vault-text transition-colors"
+                        aria-label={t('browse.clearSearch')}
+                        title={t('browse.clearSearch')}
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
                   <button
                     onClick={() => setSyntaxHelpOpen((v) => !v)}
                     className="shrink-0 p-2 text-vault-text-muted hover:text-vault-accent transition-colors"

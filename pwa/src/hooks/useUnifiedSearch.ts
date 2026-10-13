@@ -72,6 +72,14 @@ export function useUnifiedSearch() {
     setRawQuery(value)
   }, [])
 
+  // One-tap reset: drops the typed text along with any debounce still holding it.
+  const clearSearch = useCallback(() => {
+    if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
+    hasOutboundIntentRef.current = true
+    setInputValue('')
+    setRawQuery('')
+  }, [])
+
   // Input change handler. Debounced commit keeps clearing/searching responsive
   // without requiring Enter after every edit.
   const handleInputChange = useCallback((value: string) => {
@@ -99,6 +107,7 @@ export function useUnifiedSearch() {
     parsed,
     setFilter,
     commitSearch,
+    clearSearch,
     handleInputChange,
     selectMode,
     setSelectMode,
