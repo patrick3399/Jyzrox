@@ -7,6 +7,7 @@ Covers:
 - Auth requirements for all endpoints
 """
 
+from fnmatch import fnmatchcase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1426,6 +1427,141 @@ class TestPixivFollowOps:
         """Unauthenticated request should return 401."""
         resp = await unauthed_client.post("/api/pixiv/user/555/follow")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Account-scoped list caches are dropped when the account changes them
+# ---------------------------------------------------------------------------
+
+
+class _KeyspaceRedis:
+    """Just enough Redis to cache a page and find it again by glob."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    async def setex(self, key: str, ttl: int, value: str) -> bool:
+        self.store[key] = value
+        return True
+
+    async def delete(self, *keys: str) -> int:
+        return sum(1 for key in keys if self.store.pop(key, None) is not None)
+
+    async def scan(self, cursor: int = 0, match: str = "*", count: int = 10):
+        return 0, [key for key in self.store if fnmatchcase(key, match)]
+
+    async def scan_iter(self, match: str = "*", count: int | None = None):
+        for key in [key for key in self.store if fnmatchcase(key, match)]:
+            yield key
+
+
+class TestPixivAccountCacheInvalidation:
+    """Bookmark and follow writes must drop the list pages they just made stale.
+
+    Regression: the bookmark endpoints scanned `my_bookmarks:*`, but the pages
+    are written as `pixiv:search:my_bookmarks:*`, so nothing was ever deleted and
+    the list stayed stale for the full five-minute TTL. The follow endpoints did
+    not invalidate the following list or feed at all.
+    """
+
+    @staticmethod
+    async def _call(client, method: str, path: str, redis: _KeyspaceRedis):
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+        with (
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("core.redis_client.get_redis", return_value=redis),
+            patch("services.cache.get_redis", return_value=redis),
+        ):
+            return await client.request(method, path)
+
+    @staticmethod
+    async def _cache_pages(redis: _KeyspaceRedis, *keys: str) -> None:
+        from services import cache
+
+        with patch("services.cache.get_redis", return_value=redis):
+            for key in keys:
+                await cache.set_pixiv_search_cache(key, {"illusts": [{"id": 1}], "next_url": None})
+
+    @staticmethod
+    async def _cached(redis: _KeyspaceRedis, key: str) -> dict | None:
+        from services import cache
+
+        with patch("services.cache.get_redis", return_value=redis):
+            return await cache.get_pixiv_search_cache(key)
+
+    async def test_add_bookmark_invalidates_cached_bookmark_pages_under_the_real_key(self, client):
+        redis = _KeyspaceRedis()
+        await self._cache_pages(redis, "my_bookmarks:public:0", "my_bookmarks:private:30")
+
+        resp = await self._call(client, "POST", "/api/pixiv/illust/777/bookmark", redis)
+
+        assert resp.status_code == 200
+        assert await self._cached(redis, "my_bookmarks:public:0") is None
+        assert await self._cached(redis, "my_bookmarks:private:30") is None
+
+    async def test_remove_bookmark_invalidates_cached_bookmark_pages_under_the_real_key(self, client):
+        redis = _KeyspaceRedis()
+        await self._cache_pages(redis, "my_bookmarks:public:0", "my_bookmarks:private:30")
+
+        resp = await self._call(client, "DELETE", "/api/pixiv/illust/777/bookmark", redis)
+
+        assert resp.status_code == 200
+        assert await self._cached(redis, "my_bookmarks:public:0") is None
+        assert await self._cached(redis, "my_bookmarks:private:30") is None
+
+    async def test_add_bookmark_leaves_unrelated_cached_pages_alone(self, client):
+        redis = _KeyspaceRedis()
+        await self._cache_pages(redis, "my_bookmarks:public:0", "user_bookmarks:555:public:0", "my_following:public:0")
+
+        await self._call(client, "POST", "/api/pixiv/illust/777/bookmark", redis)
+
+        assert await self._cached(redis, "user_bookmarks:555:public:0") is not None
+        assert await self._cached(redis, "my_following:public:0") is not None
+
+    @pytest.mark.parametrize(
+        "stale_page", ["my_following:public:0", "my_following:private:30", "following_feed:public:0"]
+    )
+    async def test_follow_user_invalidates_cached_following_pages(self, client, stale_page):
+        redis = _KeyspaceRedis()
+        await self._cache_pages(redis, stale_page)
+
+        resp = await self._call(client, "POST", "/api/pixiv/user/555/follow", redis)
+
+        assert resp.status_code == 200
+        assert await self._cached(redis, stale_page) is None
+
+    @pytest.mark.parametrize(
+        "stale_page", ["my_following:public:0", "my_following:private:30", "following_feed:public:0"]
+    )
+    async def test_unfollow_user_invalidates_cached_following_pages(self, client, stale_page):
+        redis = _KeyspaceRedis()
+        await self._cache_pages(redis, stale_page)
+
+        resp = await self._call(client, "DELETE", "/api/pixiv/user/555/follow", redis)
+
+        assert resp.status_code == 200
+        assert await self._cached(redis, stale_page) is None
+
+    async def test_invalidation_that_hits_a_redis_error_does_not_raise(self):
+        from redis.exceptions import RedisError
+
+        from services import cache
+
+        redis = AsyncMock()
+        redis.scan = AsyncMock(side_effect=RedisError("OOM command not allowed"))
+
+        with patch("services.cache.get_redis", return_value=redis):
+            await cache.invalidate_pixiv_search_cache("my_bookmarks")
 
 
 # ---------------------------------------------------------------------------

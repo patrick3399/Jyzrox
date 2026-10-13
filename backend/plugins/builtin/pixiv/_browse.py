@@ -1081,10 +1081,8 @@ async def add_illust_bookmark(
     # Invalidate illust cache + all my_bookmarks pages
     from core.redis_client import get_redis
 
-    redis = get_redis()
-    await redis.delete(f"pixiv:illust:{illust_id}")
-    async for key in redis.scan_iter("my_bookmarks:*"):
-        await redis.delete(key)
+    await get_redis().delete(f"pixiv:illust:{illust_id}")
+    await cache.invalidate_pixiv_search_cache("my_bookmarks")
     return {"ok": True}
 
 
@@ -1105,10 +1103,8 @@ async def delete_illust_bookmark(
     # Invalidate illust cache + all my_bookmarks pages
     from core.redis_client import get_redis
 
-    redis = get_redis()
-    await redis.delete(f"pixiv:illust:{illust_id}")
-    async for key in redis.scan_iter("my_bookmarks:*"):
-        await redis.delete(key)
+    await get_redis().delete(f"pixiv:illust:{illust_id}")
+    await cache.invalidate_pixiv_search_cache("my_bookmarks")
     return {"ok": True}
 
 
@@ -1130,10 +1126,11 @@ async def follow_user(
             raise api_error(401, "pixiv_token_invalid")
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e))
-    # Invalidate user cache so is_followed refreshes
+    # Invalidate user cache so is_followed refreshes + all following list/feed pages
     from core.redis_client import get_redis
 
     await get_redis().delete(f"pixiv:user:{user_id}")
+    await cache.invalidate_pixiv_search_cache("my_following", "following_feed")
     return {"ok": True}
 
 
@@ -1151,9 +1148,11 @@ async def unfollow_user(
             raise api_error(401, "pixiv_token_invalid")
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e))
+    # Invalidate user cache so is_followed refreshes + all following list/feed pages
     from core.redis_client import get_redis
 
     await get_redis().delete(f"pixiv:user:{user_id}")
+    await cache.invalidate_pixiv_search_cache("my_following", "following_feed")
     return {"ok": True}
 
 

@@ -116,13 +116,36 @@ _TTL_PIXIV_ILLUST = 3600  # 1h
 _TTL_PIXIV_USER = 1800  # 30min
 _TTL_PIXIV_IMAGE = 86400  # 24h
 
+_PIXIV_SEARCH_PREFIX = "pixiv:search:"
+
 
 async def get_pixiv_search_cache(key: str) -> dict | None:
-    return await get_json(f"pixiv:search:{key}")
+    return await get_json(f"{_PIXIV_SEARCH_PREFIX}{key}")
 
 
 async def set_pixiv_search_cache(key: str, data: dict) -> None:
-    await set_json(f"pixiv:search:{key}", data, _TTL_PIXIV_SEARCH)
+    await set_json(f"{_PIXIV_SEARCH_PREFIX}{key}", data, _TTL_PIXIV_SEARCH)
+
+
+async def invalidate_pixiv_search_cache(*scopes: str) -> None:
+    """Drop every cached page of the given lists, e.g. "my_bookmarks".
+
+    A scope is the leading segment of the key handed to set_pixiv_search_cache.
+    Best-effort: the pages expire on their own, so a failed purge must not fail
+    the write that made them stale.
+    """
+    try:
+        redis = get_redis()
+        for scope in scopes:
+            cursor = 0
+            while True:
+                cursor, keys = await redis.scan(cursor, match=f"{_PIXIV_SEARCH_PREFIX}{scope}:*", count=200)
+                if keys:
+                    await redis.delete(*keys)
+                if cursor == 0:
+                    break
+    except RedisError as exc:
+        logger.warning("Pixiv cache invalidation skipped for %s: %s", ", ".join(scopes), exc)
 
 
 async def get_pixiv_illust_cache(illust_id: int) -> dict | None:
