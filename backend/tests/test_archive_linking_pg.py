@@ -418,3 +418,23 @@ async def test_source_naming_a_non_archive_table_never_updates_it(db, pg_dsn):
 
     async with db() as session:
         assert (await session.execute(text("SELECT gallery_id FROM notes"))).scalar() is None
+
+
+async def test_eh_rows_written_to_the_exhentai_table_are_linked_and_cascade(db, archive_dsn_for):
+    """Regression: an "ehentai" gallery looked for an "ehentai" table, which does not exist.
+
+    gallery-dl runs e-hentai.org and exhentai.org under one category, "exhentai",
+    so the rows land in that table and were never linked. They outlived the
+    gallery and a re-download skipped those files as already archived.
+    """
+    job = str(uuid.uuid4())
+    await _add_galleries(db, 1)
+    gdl = await _GalleryDl.start(await archive_dsn_for(job), "exhentai")
+    await gdl.archive("exhentai1234567_1", "exhentai1234567_2")
+    await gdl.exit()
+
+    await _link(db, _importer(job, 1, "ehentai", "1234567"))
+    assert await _owners(db, "exhentai") == {"exhentai1234567_1": 1, "exhentai1234567_2": 1}
+
+    await _delete_gallery(db, 1)
+    assert await _owners(db, "exhentai") == {}
