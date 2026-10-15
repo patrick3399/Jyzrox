@@ -944,20 +944,27 @@ class ProgressiveImporter:
             return
         from sqlalchemy import text
 
-        from plugins.builtin.gallery_dl._sites import get_site_config
+        from plugins.builtin.gallery_dl._sites import gdl_extractor_name
 
-        cfg = get_site_config(self.source)
-        table = cfg.extractor or cfg.source_id
+        # gallery-dl names the table after the category ("archive-table":
+        # "{category}"); an unregistered source is that category itself.
+        table = gdl_extractor_name(self.source)
 
         try:
             async with session.begin_nested():  # SAVEPOINT: failure rolls back only this block
-                exists = (
+                # The name comes from the gallery's source, so only a table with
+                # the archive shape qualifies — never one of Jyzrox's own tables.
+                is_archive = (
                     await session.execute(
-                        text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = :t)"),
+                        text(
+                            "SELECT count(DISTINCT column_name) = 3 FROM information_schema.columns "
+                            "WHERE table_schema = current_schema() AND table_name = :t "
+                            "AND column_name IN ('entry', 'gallery_id', 'job_id')"
+                        ),
                         {"t": table},
                     )
                 ).scalar()
-                if not exists:
+                if not is_archive:
                     return
 
                 if self.db_job_id:

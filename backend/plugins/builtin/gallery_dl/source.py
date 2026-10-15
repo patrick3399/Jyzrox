@@ -106,10 +106,9 @@ def _build_supported_sites() -> list[SiteInfo]:
 
 def _source_to_extractor(source: str) -> str:
     """Map our source name to gallery-dl extractor name."""
-    from plugins.builtin.gallery_dl._sites import get_site_config
+    from plugins.builtin.gallery_dl._sites import gdl_extractor_name
 
-    cfg = get_site_config(source)
-    return cfg.extractor or cfg.source_id
+    return gdl_extractor_name(source)
 
 
 FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
@@ -161,7 +160,7 @@ async def _build_gallery_dl_config(
     Returns:
         Path to the config file written.
     """
-    from plugins.builtin.gallery_dl._sites import GDL_SITES, cookie_writeback_path, get_site_config
+    from plugins.builtin.gallery_dl._sites import GDL_SITES, cookie_writeback_path, gdl_extractor_name, get_site_config
 
     config: dict = {
         "extractor": {
@@ -277,7 +276,7 @@ async def _build_gallery_dl_config(
         if not cred_val:
             continue
         cfg = get_site_config(src)
-        ext = cfg.extractor or cfg.source_id
+        ext = gdl_extractor_name(src)
 
         cookies_applied = False
         fragment = _try_parse_fragment(cred_val)
