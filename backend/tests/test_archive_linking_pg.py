@@ -418,3 +418,130 @@ async def test_source_naming_a_non_archive_table_never_updates_it(db, pg_dsn):
 
     async with db() as session:
         assert (await session.execute(text("SELECT gallery_id FROM notes"))).scalar() is None
+
+
+# ── Per-job archive table ensure (drop-in extractors need no init.sql entry) ──
+
+
+async def _ensure(db, category: str) -> str:
+    from plugins.builtin.gallery_dl._archive import ensure_archive_table
+
+    async with db() as session:
+        action = await ensure_archive_table(session, category)
+        await session.commit()
+    return action
+
+
+async def _columns(db, table: str) -> set[str]:
+    from sqlalchemy import text
+
+    async with db() as session:
+        rows = await session.execute(
+            text("SELECT column_name FROM information_schema.columns WHERE table_name = :t"), {"t": table}
+        )
+        return {name for (name,) in rows}
+
+
+async def _indexes(db, table: str) -> set[str]:
+    from sqlalchemy import text
+
+    async with db() as session:
+        rows = await session.execute(text("SELECT indexname FROM pg_indexes WHERE tablename = :t"), {"t": table})
+        return {name for (name,) in rows}
+
+
+async def test_category_without_a_table_gets_the_full_archive_shape_before_gallery_dl_runs(db, archive_dsn_for):
+    """Regression: a new category's rows went unlinked until the next worker start."""
+    assert await _ensure(db, "dropin-site") == "created"
+    assert await _columns(db, "dropin-site") == {"entry", "gallery_id", "job_id", "created_at"}
+    assert "idx_dropin-site_unlinked" in await _indexes(db, "dropin-site")
+
+    job = str(uuid.uuid4())
+    await _add_galleries(db, 1)
+    gdl = await _GalleryDl.start(await archive_dsn_for(job), "dropin-site")
+    # gallery_dl.archive.DownloadArchivePostgresql.__init__ runs this on every start.
+    await gdl._conn.execute('CREATE TABLE IF NOT EXISTS "dropin-site" (entry TEXT PRIMARY KEY)')
+    await gdl.archive("gallery=9_1", "gallery=9_2")
+    await gdl.exit()
+
+    await _link(db, _importer(job, 1, "dropin-site", "gallery=9"))
+    assert await _owners(db, "dropin-site") == {"gallery=9_1": 1, "gallery=9_2": 1}
+    await _delete_gallery(db, 1)
+    assert await _owners(db, "dropin-site") == {}
+
+
+async def test_bare_table_gallery_dl_created_is_upgraded_by_the_next_job(db, archive_dsn_for):
+    from sqlalchemy import text
+
+    async with db() as session:
+        await session.execute(text("CREATE TABLE newsite (entry TEXT PRIMARY KEY)"))
+        await session.execute(text("INSERT INTO newsite (entry) VALUES ('before')"))
+        await session.commit()
+
+    assert await _ensure(db, "newsite") == "upgraded"
+    assert await _columns(db, "newsite") == {"entry", "gallery_id", "job_id", "created_at"}
+    assert "idx_newsite_unlinked" in await _indexes(db, "newsite")
+
+    job = str(uuid.uuid4())
+    gdl = await _GalleryDl.start(await archive_dsn_for(job), "newsite")
+    await gdl.archive("after")
+    await gdl.exit()
+    async with db() as session:
+        rows = dict((await session.execute(text("SELECT entry, job_id::text FROM newsite"))).all())
+    assert rows == {"before": None, "after": job}
+
+
+async def test_init_sql_archive_table_is_left_exactly_as_declared(db):
+    """No index or column is added to a table init.sql declares (BE-T15 drift)."""
+    before = (await _columns(db, "instagram"), await _indexes(db, "instagram"))
+    assert await _ensure(db, "instagram") == "ok"
+    assert (await _columns(db, "instagram"), await _indexes(db, "instagram")) == before
+
+
+@pytest.mark.parametrize(
+    "ddl",
+    [
+        "CREATE TABLE notes (id INT PRIMARY KEY, body TEXT)",
+        "CREATE TABLE notes (entry TEXT PRIMARY KEY, body TEXT)",
+        "CREATE VIEW notes AS SELECT 'x'::text AS entry",
+    ],
+    ids=["no-entry-column", "foreign-columns", "view"],
+)
+async def test_category_naming_a_non_archive_relation_is_refused_and_left_untouched(db, ddl):
+    from sqlalchemy import text
+
+    from plugins.builtin.gallery_dl._archive import ArchiveTableConflict
+
+    async with db() as session:
+        await session.execute(text(ddl))
+        await session.commit()
+    before = await _columns(db, "notes")
+
+    with pytest.raises(ArchiveTableConflict, match="notes"):
+        await _ensure(db, "notes")
+    assert await _columns(db, "notes") == before
+
+
+async def test_category_naming_a_jyzrox_table_is_refused(db):
+    from plugins.builtin.gallery_dl._archive import ArchiveTableConflict
+
+    with pytest.raises(ArchiveTableConflict):
+        await _ensure(db, "galleries")
+    assert await _columns(db, "galleries") == {"id"}
+
+
+async def test_two_jobs_of_a_new_category_starting_together_both_get_the_table(db):
+    import asyncio
+
+    assert sorted(await asyncio.gather(*(_ensure(db, "racesite") for _ in range(4)))) == [
+        "created",
+        "ok",
+        "ok",
+        "ok",
+    ]
+
+
+async def test_category_with_a_quote_uses_the_table_name_gallery_dl_writes(db):
+    """gallery_dl.archive.sanitize replaces '"' with '_'."""
+    assert await _ensure(db, 'odd"site') == "created"
+    assert await _columns(db, "odd_site") == {"entry", "gallery_id", "job_id", "created_at"}

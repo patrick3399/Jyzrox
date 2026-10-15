@@ -19,7 +19,7 @@ from pathlib import Path
 from core.config import settings
 from core.version import __version__
 from plugins.base import SourcePlugin
-from plugins.builtin.gallery_dl._archive import archive_dsn_for_job
+from plugins.builtin.gallery_dl._archive import ArchiveTableConflict, archive_dsn_for_job, ensure_archive_table
 from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
 from plugins.builtin.gallery_dl._metadata import _resolve_source_id
 from plugins.models import (
@@ -109,6 +109,36 @@ def _source_to_extractor(source: str) -> str:
     from plugins.builtin.gallery_dl._sites import gdl_extractor_name
 
     return gdl_extractor_name(source)
+
+
+async def _ensure_job_archive_table(url: str) -> str | None:
+    """Create or upgrade the archive table this download writes to.
+
+    gallery-dl would otherwise create a bare ``(entry)`` table for a category
+    db/init.sql does not list, and its rows would stay unlinked until the next
+    worker start upgraded the table. Returns an error when the category names a
+    table that is not an archive; any other failure only logs, leaving the
+    download as it was before this step existed.
+    """
+    from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+    identity = resolve_url_identity(url)
+    if identity is None:
+        return None
+    try:
+        from core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            action = await ensure_archive_table(session, identity.category)
+            await session.commit()
+    except ArchiveTableConflict as exc:
+        return str(exc)
+    except Exception as exc:
+        logger.warning("[gallery_dl] could not prepare archive table for %r: %s", identity.category, exc)
+        return None
+    if action != "ok":
+        logger.info("[gallery_dl] archive table for %r %s", identity.category, action)
+    return None
 
 
 FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
@@ -848,6 +878,12 @@ class GalleryDlPlugin(SourcePlugin):
 
         _domain = _urlparse(url).netloc.removeprefix("www.")
         _site_cfg = get_site_by_domain(_domain)
+
+        # A force-full-scan run has no archive (see _build_gallery_dl_config).
+        if not (options or {}).get("force_full_scan"):
+            if archive_error := await _ensure_job_archive_table(url):
+                logger.error("[gallery_dl] refusing download of %s: %s", url, archive_error)
+                return DownloadResult(status="failed", downloaded=0, total=0, error=archive_error)
 
         config_path = await _build_gallery_dl_config(
             credentials,
