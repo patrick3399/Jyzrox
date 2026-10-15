@@ -47,6 +47,15 @@ _SYNC_MARKER_NAME = ".synced_image_version"
 # (downloads active / lifecycle lock busy).
 IMAGE_SYNC_RETRY_INTERVAL = 300.0
 
+# Budget for ``pip install`` from PyPI. The install pulls gallery-dl plus
+# psycopg[binary]; on this host it took ~80s on a good run and ran past the old
+# 120s limit on a bad one. The offline (baked wheels) install touches no network.
+PIP_INSTALL_TIMEOUT = 600.0
+PIP_INSTALL_TIMEOUT_OFFLINE = 120.0
+VENV_CREATE_TIMEOUT = 30.0
+
+_UPGRADE_LOCK_NAME = ".upgrade.lock"
+
 _VERSION_DIR_RE = re.compile(r"^v\d+$")
 
 _gdl_bin_cache: str | None = None
@@ -261,6 +270,33 @@ async def _exclusive_venv_lock(timeout: float | None = None):
         lock_file.close()
 
 
+class UpgradeInProgress(RuntimeError):
+    """Another upgrade or rollback already owns the venv directory."""
+
+
+@asynccontextmanager
+async def _single_flight_guard():
+    """Allow one upgrade/rollback at a time across worker processes.
+
+    ``_exclusive_venv_lock`` only covers the swap, so two upgrades could build
+    side by side: each picks its own ``v{N}``, and the later swap's
+    ``_cleanup_old_versions`` would keep the other run's half-built directory as
+    the "previous" version (a rollback target with no gallery-dl in it). This
+    lock is held for the whole build and is never waited on — a second caller is
+    told one is already running instead of queueing behind a multi-minute pip.
+    """
+    VENV_BASE.mkdir(parents=True, exist_ok=True)
+    lock_file = (VENV_BASE / _UPGRADE_LOCK_NAME).open("a+b")
+    try:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise UpgradeInProgress("another gallery-dl upgrade or rollback is already in progress") from None
+        yield
+    finally:
+        lock_file.close()  # closing the descriptor releases the flock
+
+
 async def _check_active_downloads() -> int:
     """Return count of jobs that can use or start the active gallery-dl venv."""
     from sqlalchemy import func, select
@@ -427,6 +463,15 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
 
 
 async def _upgrade(version: str | None, *, offline: bool = False, quiet: bool = False) -> dict:
+    """Build a fresh venv and swap it in; one upgrade/rollback runs at a time."""
+    try:
+        async with _single_flight_guard():
+            return await _upgrade_locked(version, offline=offline, quiet=quiet)
+    except UpgradeInProgress as exc:
+        return await _fail("rejected", str(exc), version, quiet=quiet)
+
+
+async def _upgrade_locked(version: str | None, *, offline: bool = False, quiet: bool = False) -> dict:
     """Build a fresh venv and swap it in, guarded against active downloads.
 
     ``offline`` installs from the image's baked wheels instead of PyPI;
@@ -460,8 +505,9 @@ async def _upgrade(version: str | None, *, offline: bool = False, quiet: bool = 
     new_dir = _next_version_dir()
     logger.info("[gallery-dl venv] Upgrading: creating %s", new_dir)
 
+    step = "venv creation"
     try:
-        rc, _, stderr = await _run(_venv_create_cmd(new_dir), timeout=30)
+        rc, _, stderr = await _run(_venv_create_cmd(new_dir), timeout=VENV_CREATE_TIMEOUT)
         if rc != 0:
             await _cleanup_new_dir(new_dir)
             return await _fail("failed", f"venv creation failed: {stderr}", version, quiet=quiet)
@@ -471,17 +517,26 @@ async def _upgrade(version: str | None, *, offline: bool = False, quiet: bool = 
         py_bin = str(new_dir / "bin" / "python")
         pkg = f"gallery-dl=={version}" if version else "gallery-dl"
         logger.info("[gallery-dl venv] Installing %s", pkg)
-        rc, _, stderr = await _run(_pip_install_cmd(py_bin, pkg, offline=offline), timeout=120)
+        step = "pip install"
+        pip_timeout = PIP_INSTALL_TIMEOUT_OFFLINE if offline else PIP_INSTALL_TIMEOUT
+        rc, _, stderr = await _run(_pip_install_cmd(py_bin, pkg, offline=offline), timeout=pip_timeout)
         if rc != 0:
             await _cleanup_new_dir(new_dir)
             return await _fail("failed", f"pip install failed: {stderr}", version, quiet=quiet)
 
         # 4. Verify
         new_bin = str(new_dir / "bin" / "gallery-dl")
+        step = "version check"
         new_version = await _get_version(new_bin)
         if not new_version:
             await _cleanup_new_dir(new_dir)
             return await _fail("failed", "gallery-dl --version failed after install", version, quiet=quiet)
+    except TimeoutError:
+        # ``_run`` re-raises after killing the child. Report it like any other
+        # failed build — left to propagate it kills the SAQ job with a traceback
+        # and no failure event, so the admin never learns the upgrade failed.
+        await _cleanup_new_dir(new_dir)
+        return await _fail("failed", f"{step} timed out", version, quiet=quiet)
     except Exception:
         await _cleanup_new_dir(new_dir)
         raise
@@ -530,7 +585,7 @@ async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
     from core.events import EventType, emit_safe
 
     try:
-        async with _exclusive_venv_lock():
+        async with _single_flight_guard(), _exclusive_venv_lock():
             active = await _check_active_downloads()
             if active > 0:
                 return await _fail("rejected", f"{active} download(s) queued, paused, or running")
@@ -553,7 +608,7 @@ async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
             # from the version being removed.
             if current_dir and current_dir != prev_dir:
                 await asyncio.to_thread(shutil.rmtree, current_dir, True)
-    except VenvLockBusy as exc:
+    except (UpgradeInProgress, VenvLockBusy) as exc:
         return await _fail("rejected", str(exc))
 
     invalidate_gdl_bin_cache()

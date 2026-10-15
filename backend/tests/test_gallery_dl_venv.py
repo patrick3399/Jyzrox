@@ -424,6 +424,189 @@ async def test_upgrade_rechecks_active_downloads_before_swap(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_upgrade_pip_timeout_emits_failure_event_and_removes_new_dir(tmp_path):
+    """A pip install that runs out of time must be reported, not escape as a traceback.
+
+    Regression: ``_run`` re-raises TimeoutError, which used to propagate out of
+    ``_upgrade`` — the SAQ job died with a stack trace and no
+    SYSTEM_GDL_UPGRADE_FAILED event, so the admin UI never learned the upgrade
+    had failed (the 2026-10-15 upgrade that timed out after 120s).
+    """
+    from core.events import EventType
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.16")
+            return (0, "", "")
+        if "install" in cmd:
+            raise TimeoutError
+        return (0, "", "")
+
+    emit = AsyncMock()
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", emit),
+    ):
+        result = await venv_mod.upgrade_job({}, version="1.32.16")
+
+    assert result["status"] == "failed"
+    assert "timed out" in result["error"]
+    assert emit.await_count == 1
+    assert emit.await_args.args[0] == EventType.SYSTEM_GDL_UPGRADE_FAILED
+    assert emit.await_args.kwargs["status"] == "failed"
+    assert fake_active.resolve() == fake_base / "v1"
+    assert not (fake_base / "v2").exists()
+
+
+@pytest.mark.asyncio
+async def test_upgrade_online_pip_install_is_given_more_than_two_minutes(tmp_path):
+    """The PyPI install budget must outlast a slow-egress install.
+
+    Regression: the budget was 120s and a real install on this host took
+    ~80s on a good run and >120s on a bad one, so upgrades failed at random.
+    The offline (baked wheels) install keeps the short budget.
+    """
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+    install_timeouts: list[float] = []
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.16")
+            return (0, "", "")
+        if "install" in cmd:
+            install_timeouts.append(timeout)
+            return (0, "", "")
+        if "--version" in cmd:
+            return (0, "1.32.16\n", "")
+        return (0, "", "")
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ):
+        await venv_mod.upgrade_job({}, version="1.32.16")
+
+    assert install_timeouts and install_timeouts[0] > 120
+
+
+@pytest.mark.asyncio
+async def test_concurrent_upgrade_is_rejected_while_another_upgrade_is_building(tmp_path):
+    """Only one upgrade may build a venv at a time.
+
+    Regression: two admin clicks started two ``_upgrade`` runs at once. Each
+    built its own v{N} and the later swap's ``_cleanup_old_versions`` keeps the
+    newest non-current directory — which could be the other run's half-built
+    venv, leaving rollback pointing at a tree with no gallery-dl in it.
+    """
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+    installing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.16")
+            return (0, "", "")
+        if "install" in cmd:
+            installing.set()
+            await release.wait()
+            return (0, "", "")
+        if "--version" in cmd:
+            return (0, "1.32.16\n", "")
+        return (0, "", "")
+
+    emit = AsyncMock()
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", emit),
+    ):
+        first = asyncio.create_task(venv_mod.upgrade_job({}, version="1.32.16"))
+        await asyncio.wait_for(installing.wait(), timeout=2)
+
+        second = await asyncio.wait_for(venv_mod.upgrade_job({}, version="1.32.16"), timeout=2)
+        assert second["status"] == "rejected"
+        assert "in progress" in second["error"]
+        # The rejected run must not have started a second build.
+        assert not (fake_base / "v3").exists()
+        assert (fake_base / "v2").exists()
+
+        release.set()
+        first_result = await asyncio.wait_for(first, timeout=2)
+
+    assert first_result["status"] == "ok"
+    assert fake_active.resolve() == fake_base / "v2"
+
+
+@pytest.mark.asyncio
+async def test_rollback_is_rejected_while_an_upgrade_is_building(tmp_path):
+    """Rollback must not swap/delete versions underneath a running upgrade."""
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    _make_fake_venv(fake_base / "v2", "1.32.8")
+    fake_active.symlink_to("v2")
+    installing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.16")
+            return (0, "", "")
+        if "install" in cmd:
+            installing.set()
+            await release.wait()
+            return (0, "", "")
+        if "--version" in cmd:
+            return (0, "1.32.16\n", "")
+        return (0, "", "")
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ):
+        upgrade = asyncio.create_task(venv_mod.upgrade_job({}, version="1.32.16"))
+        await asyncio.wait_for(installing.wait(), timeout=2)
+
+        rollback = await asyncio.wait_for(venv_mod.rollback_job({}), timeout=2)
+        assert rollback["status"] == "rejected"
+        assert "in progress" in rollback["error"]
+        assert fake_active.resolve() == fake_base / "v2"
+        assert (fake_base / "v1").exists()
+
+        release.set()
+        await asyncio.wait_for(upgrade, timeout=2)
+
+
+@pytest.mark.asyncio
 async def test_rollback_waits_for_gallery_dl_process_before_deleting_venv(tmp_path):
     """A process starting before rollback must retain its venv until exit."""
     from worker import gallery_dl_venv as venv_mod
