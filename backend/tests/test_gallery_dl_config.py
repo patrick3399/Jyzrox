@@ -560,3 +560,65 @@ def test_archive_dsn_is_unchanged_when_job_id_is_not_a_uuid(job_id):
 
     dsn = "postgresql://test:test@localhost:5432/test"
     assert archive_dsn_for_job(dsn, job_id) == dsn
+
+
+# ── Unregistered gallery-dl categories ──
+#
+# Regression: a credential saved for a category that is not in GDL_SITES
+# resolved through get_site_config() to _DEFAULT_CONFIG and was written under
+# config["extractor"]["gallery_dl"], a section gallery-dl never reads. The
+# cookies never reached the site, every such category shared (and overwrote)
+# that one section, and the cookies-update export landed there too, so the
+# worker's _writeback_cookies() never received refreshed cookies.
+
+
+@pytest.mark.asyncio
+async def test_unregistered_category_cookies_are_keyed_by_the_raw_category_not_gallery_dl(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    path = await _build_gallery_dl_config({"newsite": '{"sessionid": "abc"}'}, config_id="job-789")
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["newsite"]["cookies"] == {"sessionid": "abc"}
+    assert config["extractor"]["newsite"]["cookies-update"] == "/tmp/gdl-cookies-job-789-newsite.txt"
+    assert "gallery_dl" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_unregistered_category_login_fragment_is_keyed_by_the_raw_category_not_gallery_dl(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({"newsite": '{"username": "user1", "password": "pass1"}'})
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["newsite"]["username"] == "user1"
+    assert config["extractor"]["newsite"]["password"] == "pass1"
+    assert "gallery_dl" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_two_unregistered_categories_do_not_overwrite_each_others_credentials(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({"newsite": '{"sid": "a"}', "othersite": '{"sid": "b"}'})
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["newsite"]["cookies"] == {"sid": "a"}
+    assert config["extractor"]["othersite"]["cookies"] == {"sid": "b"}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("newsite", "newsite"),  # unregistered: its own gallery-dl category
+        ("e-hentai", "e-hentai"),  # unregistered alias spelling stays raw
+        ("ehentai", "ehentai"),
+        ("exhentai", "ehentai"),  # _ALIASES
+        ("pixiv", "pixiv"),
+        ("sankaku", "sankakucomplex"),  # explicit extractor override
+    ],
+)
+def test_gdl_extractor_name_returns_raw_category_only_when_unregistered(source, expected):
+    from plugins.builtin.gallery_dl._sites import gdl_extractor_name
+
+    assert gdl_extractor_name(source) == expected

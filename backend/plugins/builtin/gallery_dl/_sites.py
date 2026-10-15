@@ -501,6 +501,19 @@ def get_site_config(source: str) -> GdlSiteConfig:
     return _BY_SOURCE.get(resolved, _DEFAULT_CONFIG)
 
 
+def gdl_extractor_name(source: str) -> str:
+    """gallery-dl category whose config section and archive table belong to ``source``.
+
+    A source outside GDL_SITES is already a raw gallery-dl category, so it names
+    itself. Going through ``_DEFAULT_CONFIG`` instead would file its credentials
+    and archive rows under "gallery_dl", which gallery-dl never reads.
+    """
+    cfg = get_site_config(source)
+    if cfg is _DEFAULT_CONFIG:
+        return source
+    return cfg.extractor or cfg.source_id
+
+
 def get_site_by_domain(domain: str) -> GdlSiteConfig:
     """Look up site config by domain. Unknown domains → _DEFAULT_CONFIG."""
     return _BY_DOMAIN.get(domain, _DEFAULT_CONFIG)

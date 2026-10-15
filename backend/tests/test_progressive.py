@@ -2027,3 +2027,42 @@ class TestProgressiveImporterMidDownloadProgress:
             await self._import_one(importer, db_session, db_session_factory, tmp_path, "a.jpg", "h1" + "0" * 62)
 
         assert await self._pages(db_session, importer.gallery_id) == 7
+
+
+class TestLinkArchiveEntriesTable:
+    """Regression: an unregistered gallery-dl category resolved its archive
+    table through _DEFAULT_CONFIG to "gallery_dl". gallery-dl writes to
+    archive-table "{category}", so the rows were never linked to the gallery,
+    survived its deletion, and a re-download skipped every file as archived.
+    """
+
+    @staticmethod
+    async def _looked_up_table(source: str) -> str:
+        from worker.progressive import ProgressiveImporter
+
+        session = MagicMock()
+
+        @asynccontextmanager
+        async def _nested():
+            yield
+
+        session.begin_nested = _nested
+        missing = MagicMock()
+        missing.scalar.return_value = False
+        session.execute = AsyncMock(return_value=missing)
+
+        importer = ProgressiveImporter("00000000-0000-0000-0000-000000000001", None)
+        importer.gallery_id = 1
+        importer.source = source
+        importer.source_id = "gallery=1"
+        await importer._link_archive_entries(session)
+
+        session.execute.assert_awaited_once()
+        return session.execute.await_args.args[1]["t"]
+
+    async def test_unregistered_category_links_its_own_table_not_gallery_dl(self):
+        assert await self._looked_up_table("newsite") == "newsite"
+
+    async def test_registered_site_keeps_its_configured_table(self):
+        assert await self._looked_up_table("twitter") == "twitter"
+        assert await self._looked_up_table("sankaku") == "sankakucomplex"

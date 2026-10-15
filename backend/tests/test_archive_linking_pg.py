@@ -113,7 +113,7 @@ class _GalleryDl:
         await self._conn.close()
 
 
-def _importer(job_id: str | None, gallery_id: int, source: str, source_id: str):
+def _importer(job_id: str | None, gallery_id: int, source: str, source_id: str | None):
     from worker.progressive import ProgressiveImporter
 
     importer = ProgressiveImporter(job_id, None)
@@ -375,3 +375,46 @@ async def test_table_gallery_dl_created_itself_is_stamped_once_the_worker_upgrad
     async with db() as session:
         rows = dict((await session.execute(text("SELECT entry, job_id::text FROM newsite"))).all())
     assert rows == {"before-upgrade": None, "after-upgrade": job}
+
+
+async def test_unregistered_category_rows_are_linked_and_cascade_with_the_gallery(db, pg_dsn, archive_dsn_for):
+    """Regression: the table resolved to "gallery_dl" for a category outside GDL_SITES."""
+    from sqlalchemy import text
+
+    import worker
+
+    async with db() as session:
+        await session.execute(text("CREATE TABLE newsite (entry TEXT PRIMARY KEY)"))
+        await session.commit()
+    with patch("core.database.AsyncSessionLocal", db):
+        await worker._ensure_archive_table_schema()
+
+    job = str(uuid.uuid4())
+    await _add_galleries(db, 1)
+    gdl = await _GalleryDl.start(await archive_dsn_for(job), "newsite")
+    await gdl.archive("gallery=42_1", "gallery=42_2")
+    await gdl.exit()
+
+    await _link(db, _importer(job, 1, "newsite", "gallery=42"))
+    assert await _owners(db, "newsite") == {"gallery=42_1": 1, "gallery=42_2": 1}
+
+    await _delete_gallery(db, 1)
+    assert await _owners(db, "newsite") == {}
+
+
+async def test_source_naming_a_non_archive_table_never_updates_it(db, pg_dsn):
+    """The table name now comes from the gallery's source: only archive tables qualify."""
+    from sqlalchemy import text
+
+    job = str(uuid.uuid4())
+    await _add_galleries(db, 1)
+    async with db() as session:
+        await session.execute(text("CREATE TABLE notes (id INT PRIMARY KEY, gallery_id BIGINT, job_id UUID)"))
+        await session.execute(text("INSERT INTO notes VALUES (1, NULL, CAST(:j AS uuid))"), {"j": job})
+        await session.commit()
+
+    # No source_id: only the job_id statement runs, which such a table satisfies.
+    await _link(db, _importer(job, 1, "notes", None))
+
+    async with db() as session:
+        assert (await session.execute(text("SELECT gallery_id FROM notes"))).scalar() is None
