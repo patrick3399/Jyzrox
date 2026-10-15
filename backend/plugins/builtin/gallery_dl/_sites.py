@@ -89,6 +89,9 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         category="gallery",
         has_tags=True,
         artist_from="tag",
+        # gallery-dl runs both EH domains under one category; its config section
+        # and archive table are "exhentai", not this source_id.
+        extractor="exhentai",
         credential_type="cookies",
         extra_extractors=("exhentai", "e-hentai"),
         credential_requirement="recommended",
@@ -110,6 +113,9 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         category="gallery",
         has_tags=True,
         artist_from="tag",
+        # gallery-dl runs both EH domains under one category; its config section
+        # and archive table are "exhentai", not this source_id.
+        extractor="exhentai",
         credential_type="cookies",
         extra_extractors=("exhentai", "e-hentai"),
         credential_requirement="recommended",

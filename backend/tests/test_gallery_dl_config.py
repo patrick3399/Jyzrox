@@ -91,10 +91,10 @@ async def test_legacy_cookie_format(mock_config_path):
     await _build_gallery_dl_config(credentials)
 
     config = json.loads(mock_config_path.read_text())
-    assert config["extractor"]["ehentai"]["cookies"] == {"ipb_member_id": "1", "ipb_pass_hash": "x"}
-    # Should propagate to extra extractors
     assert config["extractor"]["exhentai"]["cookies"] == {"ipb_member_id": "1", "ipb_pass_hash": "x"}
     assert config["extractor"]["e-hentai"]["cookies"] == {"ipb_member_id": "1", "ipb_pass_hash": "x"}
+    # The source id is not a gallery-dl category; nothing reads a section by that name.
+    assert "ehentai" not in config["extractor"]
 
 
 @pytest.mark.asyncio
@@ -209,6 +209,27 @@ async def test_v3_eh_has_conservative_backoff_override(mock_config_path):
     for cat in ("exhentai", "e-hentai"):
         assert config["extractor"][cat]["sleep-429"] == "exp:2:0:600=60"
         assert config["extractor"][cat]["sleep-retries"] == "exp:2:0:300=10"
+
+
+@pytest.mark.asyncio
+async def test_eh_site_settings_reach_the_category_gallery_dl_reads(mock_config_path, mock_site_config_service):
+    """EH request pacing and proxy went to an "ehentai" section, which gallery-dl never reads."""
+    from core.site_config import DownloadParams
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    mock_site_config_service.get_all_download_params.return_value = {
+        "ehentai": DownloadParams(sleep_request=(2.0, 4.0), proxy_url="http://proxy:3128"),
+    }
+    await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1"}'})
+    config = json.loads(mock_config_path.read_text())
+
+    eh = config["extractor"]["exhentai"]
+    assert eh["sleep-request"] == [2.0, 4.0]
+    assert eh["proxy"] == "http://proxy:3128"
+    # Merged into the backoff and cookies set for the same category, not replacing them.
+    assert eh["sleep-429"] == "exp:2:0:600=60"
+    assert eh["cookies"] == {"ipb_member_id": "1"}
+    assert "ehentai" not in config["extractor"]
 
 
 @pytest.mark.asyncio
@@ -345,9 +366,7 @@ async def test_v3_cookie_update_is_writeback_path_not_true(mock_config_path):
     )
     config = json.loads(path.read_text())
     expected = "/tmp/gdl-cookies-job-123-ehentai.txt"
-    assert config["extractor"]["ehentai"]["cookies-update"] == expected
-    # EH downloads run under the exhentai/e-hentai extractor categories,
-    # so the export path must be set there too.
+    # EH downloads run under the exhentai category ('e-hentai' kept in sync).
     assert config["extractor"]["exhentai"]["cookies-update"] == expected
     assert config["extractor"]["e-hentai"]["cookies-update"] == expected
 
@@ -369,7 +388,8 @@ async def test_v3_cookie_update_omitted_without_config_id(mock_config_path):
 
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
-    assert "cookies-update" not in config["extractor"]["ehentai"]
+    assert "cookies-update" not in config["extractor"]["exhentai"]
+    assert "cookies-update" not in config["extractor"]["e-hentai"]
 
 
 @pytest.mark.asyncio
@@ -484,10 +504,10 @@ async def test_v3_full_config_integration(mock_config_path):
     assert "ugoira" in pp_names
 
     # N8: cookies-update for EH (cookie-based auth) — job-scoped writeback path
-    assert config["extractor"]["ehentai"].get("cookies-update") == "/tmp/gdl-cookies-test-job-123-ehentai.txt"
+    assert config["extractor"]["exhentai"].get("cookies-update") == "/tmp/gdl-cookies-test-job-123-ehentai.txt"
 
     # Credentials merged correctly
-    assert config["extractor"]["ehentai"]["cookies"] == {"ipb_member_id": "1"}
+    assert config["extractor"]["exhentai"]["cookies"] == {"ipb_member_id": "1"}
     assert config["extractor"]["pixiv"]["refresh-token"] == "refresh_token_123"
 
 
@@ -612,8 +632,8 @@ async def test_two_unregistered_categories_do_not_overwrite_each_others_credenti
     [
         ("newsite", "newsite"),  # unregistered: its own gallery-dl category
         ("e-hentai", "e-hentai"),  # unregistered alias spelling stays raw
-        ("ehentai", "ehentai"),
-        ("exhentai", "ehentai"),  # _ALIASES
+        ("ehentai", "exhentai"),  # both EH domains run as gallery-dl's "exhentai"
+        ("exhentai", "exhentai"),  # _ALIASES
         ("pixiv", "pixiv"),
         ("sankaku", "sankakucomplex"),  # explicit extractor override
     ],

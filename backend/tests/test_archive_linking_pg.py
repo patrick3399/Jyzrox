@@ -545,3 +545,23 @@ async def test_category_with_a_quote_uses_the_table_name_gallery_dl_writes(db):
     """gallery_dl.archive.sanitize replaces '"' with '_'."""
     assert await _ensure(db, 'odd"site') == "created"
     assert await _columns(db, "odd_site") == {"entry", "gallery_id", "job_id", "created_at"}
+
+
+async def test_eh_rows_written_to_the_exhentai_table_are_linked_and_cascade(db, archive_dsn_for):
+    """Regression: an "ehentai" gallery looked for an "ehentai" table, which does not exist.
+
+    gallery-dl runs e-hentai.org and exhentai.org under one category, "exhentai",
+    so the rows land in that table and were never linked. They outlived the
+    gallery and a re-download skipped those files as already archived.
+    """
+    job = str(uuid.uuid4())
+    await _add_galleries(db, 1)
+    gdl = await _GalleryDl.start(await archive_dsn_for(job), "exhentai")
+    await gdl.archive("exhentai1234567_1", "exhentai1234567_2")
+    await gdl.exit()
+
+    await _link(db, _importer(job, 1, "ehentai", "1234567"))
+    assert await _owners(db, "exhentai") == {"exhentai1234567_1": 1, "exhentai1234567_2": 1}
+
+    await _delete_gallery(db, 1)
+    assert await _owners(db, "exhentai") == {}
