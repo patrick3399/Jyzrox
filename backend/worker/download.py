@@ -48,6 +48,50 @@ def _import_outcome(importer) -> tuple[tuple[dict[str, str], ...], int]:
     return failures, success_count
 
 
+async def _link_already_saved_gallery(db_job_id: str | None, url: str, source_id: str) -> dict | None:
+    """Find the live gallery a fully archive-skipped run belongs to.
+
+    A run that downloads nothing never reaches the importer, so the job would
+    carry no gallery link. Resolve the URL identity read-only and attach the
+    existing gallery to the job so the queue can point at it. Trashed
+    galleries are not linked (BE-T17). Returns ``{"gallery_id", "title",
+    "pages"}`` or ``None``; never raises.
+    """
+    if source_id != "gallery_dl":
+        return None
+    try:
+        from sqlalchemy import select as sa_select
+
+        from core.database import AsyncSessionLocal
+        from db.models import DownloadJob, Gallery
+        from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+        identity = resolve_url_identity(url)
+        if identity is None or identity.is_account:
+            return None
+        async with AsyncSessionLocal() as session:
+            gallery = (
+                await session.execute(
+                    sa_select(Gallery.id, Gallery.title, Gallery.pages).where(
+                        Gallery.source == identity.source,
+                        Gallery.source_id == identity.source_id,
+                        Gallery.deleted_at.is_(None),
+                    )
+                )
+            ).one_or_none()
+            if gallery is None:
+                return None
+            if db_job_id:
+                job = await session.get(DownloadJob, uuid.UUID(db_job_id))
+                if job is not None and job.gallery_id is None:
+                    job.gallery_id = gallery.id
+                    await session.commit()
+            return {"gallery_id": gallery.id, "title": gallery.title, "pages": gallery.pages}
+    except Exception as exc:
+        logger.warning("[download] could not link already-saved gallery for %s: %s", url, exc)
+        return None
+
+
 async def _is_job_cancelled_in_db(db_job_id: str | None) -> bool:
     """Read the authoritative DB status for a DownloadJob.
 
@@ -784,6 +828,10 @@ async def _run_download_job(
             final_status_text = f"Complete — {result.downloaded} new, {skipped_total} already saved"
         else:
             final_status_text = "Complete"
+        already_saved = result.downloaded == 0 and skipped_total > 0 and not all_failed
+        saved_gallery = None
+        if already_saved and not importer.gallery_id:
+            saved_gallery = await _link_already_saved_gallery(db_job_id, url, plugin.meta.source_id)
         final_progress = {
             **_base_progress,
             "total": result.total or result.downloaded,
@@ -808,6 +856,14 @@ async def _run_download_job(
             final_progress["title"] = importer.title
         if importer.gallery_id:
             final_progress["gallery_id"] = importer.gallery_id
+        if already_saved:
+            # Nothing new was fetched: tell the UI this run only confirmed what
+            # is already stored, instead of leaving it to guess from counters.
+            final_progress["outcome"] = "already_saved"
+            if saved_gallery:
+                final_progress["gallery_id"] = saved_gallery["gallery_id"]
+                final_progress["title"] = saved_gallery["title"]
+                final_progress["existing_pages"] = saved_gallery["pages"]
         if all_failed:
             final_progress["failed_pages"] = all_failed
         await _set_job_progress(db_job_id, final_progress)

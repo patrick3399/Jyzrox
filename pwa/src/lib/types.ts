@@ -253,6 +253,8 @@ export interface DownloadJob {
     downloaded?: number
     total?: number
     skipped?: number
+    outcome?: 'already_saved'
+    existing_pages?: number | null
     status_text?: string
     speed?: number
     started_at?: string

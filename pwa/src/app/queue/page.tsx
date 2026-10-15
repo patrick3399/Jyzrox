@@ -44,10 +44,12 @@ const STATUS_STYLES: Record<string, string> = {
   partial: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, alreadySaved }: { status: string; alreadySaved?: boolean }) {
+  // A "done" run that fetched nothing new only confirmed what is stored.
+  const shown = status === 'done' && alreadySaved ? 'cancelled' : status
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[status] ?? STATUS_STYLES.cancelled}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[shown] ?? STATUS_STYLES.cancelled}`}
     >
       {status === 'running' && (
         <span className="flex gap-0.5">
@@ -56,7 +58,7 @@ function StatusBadge({ status }: { status: string }) {
           <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce [animation-delay:300ms]" />
         </span>
       )}
-      {status}
+      {status === 'done' && alreadySaved ? t('queue.statusAlreadySaved') : status}
     </span>
   )
 }
@@ -87,6 +89,8 @@ function JobDetailPanel({ job }: { job: DownloadJob }) {
   const currentFile = typeof p.current_file === 'string' ? p.current_file : null
   const currentPage = typeof p.current_file_page === 'number' ? p.current_file_page : null
   const skipped = typeof p.skipped === 'number' ? p.skipped : 0
+  const alreadySaved = p.outcome === 'already_saved'
+  const existingPages = typeof p.existing_pages === 'number' ? p.existing_pages : null
   const importSkipped = p.import_skipped
   const recentLog = Array.isArray(p.recent_log) ? p.recent_log : null
 
@@ -130,7 +134,14 @@ function JobDetailPanel({ job }: { job: DownloadJob }) {
           </span>
         </div>
       )}
-      {skipped > 0 && (
+      {alreadySaved && (
+        <div className="text-vault-text-muted">
+          {existingPages !== null
+            ? t('queue.alreadySavedNote', { pages: String(existingPages) })
+            : t('queue.alreadySavedNoteNoPages')}
+        </div>
+      )}
+      {!alreadySaved && skipped > 0 && (
         <div className="text-vault-text-muted">
           <span className="font-medium">{t('queue.jobSkipped')}:</span> {skipped}
         </div>
@@ -345,7 +356,10 @@ function JobRow({
         </div>
 
         <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <StatusBadge status={job.status} />
+          <StatusBadge
+            status={job.status}
+            alreadySaved={job.progress?.outcome === 'already_saved'}
+          />
           {job.status === 'running' && (
             <button
               onClick={() => onPause(job.id, 'pause')}
@@ -462,7 +476,9 @@ export default function QueuePage() {
   const [sitesOpen, setSitesOpen] = useState(false)
   const [debouncedUrl, setDebouncedUrl] = useState('')
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
-  const [fanboxContent, setFanboxContent] = useState<'free_only' | 'accessible' | 'paid_only' | 'price_range'>('accessible')
+  const [fanboxContent, setFanboxContent] = useState<
+    'free_only' | 'accessible' | 'paid_only' | 'price_range'
+  >('accessible')
   const [fanboxFeeMin, setFanboxFeeMin] = useState('')
   const [fanboxFeeMax, setFanboxFeeMax] = useState('')
   const isFanboxUrl = /fanbox\.cc\/(?:@[^/]+\/)?posts\/\d+/i.test(urlInput)
@@ -501,15 +517,17 @@ export default function QueuePage() {
     try {
       const result = await enqueue({
         url,
-        ...(isFanboxUrl ? {
-          options: {
-            fanbox: {
-              content: fanboxContent,
-              ...(fanboxFeeMin ? { fee_min: Number(fanboxFeeMin) } : {}),
-              ...(fanboxFeeMax ? { fee_max: Number(fanboxFeeMax) } : {}),
-            },
-          },
-        } : {}),
+        ...(isFanboxUrl
+          ? {
+              options: {
+                fanbox: {
+                  content: fanboxContent,
+                  ...(fanboxFeeMin ? { fee_min: Number(fanboxFeeMin) } : {}),
+                  ...(fanboxFeeMax ? { fee_max: Number(fanboxFeeMax) } : {}),
+                },
+              },
+            }
+          : {}),
       })
       toast.success(t('queue.queuedSuccessWithJob', { id: result.job_id }))
       setUrlInput('')
@@ -628,7 +646,11 @@ export default function QueuePage() {
             <span>{t('fanbox.contentPolicy')}</span>
             <select
               value={fanboxContent}
-              onChange={(e) => setFanboxContent(e.target.value as 'free_only' | 'accessible' | 'paid_only' | 'price_range')}
+              onChange={(e) =>
+                setFanboxContent(
+                  e.target.value as 'free_only' | 'accessible' | 'paid_only' | 'price_range',
+                )
+              }
               className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text"
             >
               <option value="free_only">{t('fanbox.freeOnly')}</option>
@@ -638,8 +660,22 @@ export default function QueuePage() {
             </select>
             {fanboxContent === 'price_range' && (
               <>
-                <input type="number" min="0" value={fanboxFeeMin} onChange={(e) => setFanboxFeeMin(e.target.value)} placeholder={t('fanbox.feeMin')} className="w-24 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text" />
-                <input type="number" min="0" value={fanboxFeeMax} onChange={(e) => setFanboxFeeMax(e.target.value)} placeholder={t('fanbox.feeMax')} className="w-24 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text" />
+                <input
+                  type="number"
+                  min="0"
+                  value={fanboxFeeMin}
+                  onChange={(e) => setFanboxFeeMin(e.target.value)}
+                  placeholder={t('fanbox.feeMin')}
+                  className="w-24 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  value={fanboxFeeMax}
+                  onChange={(e) => setFanboxFeeMax(e.target.value)}
+                  placeholder={t('fanbox.feeMax')}
+                  className="w-24 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text"
+                />
               </>
             )}
           </div>
