@@ -88,9 +88,16 @@ _METADATA_INCLUDE = (
 )
 
 
+def _metadata_include() -> list[str]:
+    """_METADATA_INCLUDE plus the fields drop-in extractors declared (JYZROX_SITE)."""
+    from plugins.builtin.gallery_dl._sites import extra_metadata_fields
+
+    return list(dict.fromkeys([*_METADATA_INCLUDE, *extra_metadata_fields()]))
+
+
 def _build_supported_sites() -> list[SiteInfo]:
     """Generate SiteInfo list from unified site registry."""
-    from plugins.builtin.gallery_dl._sites import GDL_SITES
+    from plugins.builtin.gallery_dl._sites import all_sites
 
     return [
         SiteInfo(
@@ -100,7 +107,7 @@ def _build_supported_sites() -> list[SiteInfo]:
             category=s.category,
             has_tags=s.has_tags,
         )
-        for s in GDL_SITES
+        for s in all_sites()
     ]
 
 
@@ -190,13 +197,14 @@ async def _build_gallery_dl_config(
     Returns:
         Path to the config file written.
     """
-    from plugins.builtin.gallery_dl._sites import GDL_SITES, cookie_writeback_path, gdl_extractor_name, get_site_config
+    from plugins.builtin.gallery_dl._sites import all_sites, cookie_writeback_path, gdl_extractor_name, get_site_config
 
     config: dict = {
         "extractor": {
             "base-directory": settings.data_gallery_path,
             "directory": [],
-            # N1: PostgreSQL archive — tables pre-created in init.sql. The job id
+            # N1: PostgreSQL archive — the table is prepared per job by
+            # _ensure_job_archive_table() (init.sql lists the built-in ones). The job id
             # rides on the connection so each row is stamped with its writer.
             "archive": archive_dsn_for_job(settings.gdl_archive_dsn, config_id),
             "archive-table": "{category}",
@@ -219,7 +227,7 @@ async def _build_gallery_dl_config(
                 # N5: mtime PP — preserves original upload timestamp
                 {"name": "mtime"},
                 # N10d: metadata PP with include filter (replaces --write-metadata --write-tags)
-                {"name": "metadata", "mode": "json", "include": list(_METADATA_INCLUDE)},
+                {"name": "metadata", "mode": "json", "include": _metadata_include()},
             ],
         },
         "downloader": {
@@ -276,7 +284,7 @@ async def _build_gallery_dl_config(
     from core.site_config import site_config_service
 
     all_params = await site_config_service.get_all_download_params()
-    for site_cfg in GDL_SITES:
+    for site_cfg in all_sites():
         params = all_params.get(site_cfg.source_id)
         if not params:
             continue
@@ -841,6 +849,11 @@ class GalleryDlPlugin(SourcePlugin):
         semaphore_key="gallery_dl",
         needs_all_credentials=True,
     )
+
+    def __init__(self) -> None:
+        # The class attribute was built when this module was imported, which is
+        # before init_plugins() registers the sites drop-in extractors declare.
+        self.meta = self.meta.model_copy(update={"supported_sites": _build_supported_sites()})
 
     async def can_handle(self, url: str) -> bool:
         """Always returns True — gallery-dl is the universal fallback."""
