@@ -157,12 +157,15 @@ async def _ensure_archive_table_schema() -> None:
     """Ensure all gallery-dl archive tables have the gallery_id FK column.
 
     Called at worker startup. Finds tables that gallery-dl auto-created
-    without the Jyzrox extensions and ALTERs them to add gallery_id + created_at.
+    without the Jyzrox extensions and upgrades them. Downloads also do this
+    for their own category right before gallery-dl starts
+    (``GalleryDlPlugin.download``); this pass covers categories reached only
+    through another extractor.
     """
     from sqlalchemy import text
 
     from core.database import AsyncSessionLocal
-    from plugins.builtin.gallery_dl._archive import ARCHIVE_JOB_ID_DEFAULT
+    from plugins.builtin.gallery_dl._archive import ArchiveTableConflict, ensure_archive_table
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -179,26 +182,11 @@ async def _ensure_archive_table_schema() -> None:
         )
         tables = [row[0] for row in result]
         for table in tables:
-            col_count = (
-                await session.execute(
-                    text(
-                        "SELECT COUNT(*) FROM information_schema.columns "
-                        "WHERE table_name = :t AND table_schema = 'public'"
-                    ),
-                    {"t": table},
-                )
-            ).scalar()
-            if col_count != 1:
-                continue  # not a gallery-dl archive table (has more than just 'entry')
-            await session.execute(
-                text(f'''
-                ALTER TABLE "{table}"
-                ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-                ADD COLUMN IF NOT EXISTS job_id UUID DEFAULT {ARCHIVE_JOB_ID_DEFAULT},
-                ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()
-            ''')
-            )
-            logger.info("[archive] upgraded table '%s' with gallery_id FK", table)
+            try:
+                if await ensure_archive_table(session, table) == "upgraded":
+                    logger.info("[archive] upgraded table '%s' with gallery_id FK", table)
+            except ArchiveTableConflict:
+                continue  # not a gallery-dl archive table (has more than the archive columns)
         await session.commit()
 
 

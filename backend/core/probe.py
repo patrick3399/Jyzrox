@@ -457,7 +457,7 @@ def _score_mappings(fields: list[ProbeField], _items: list[dict]) -> list[FieldM
 
 
 def _detect_source(raw: list[dict]) -> str | None:
-    """Detect the gallery-dl source_id by matching 'category' in GDL_SITES."""
+    """Detect the gallery-dl source_id by matching 'category' in the site registry."""
     if not raw:
         return None
 
@@ -465,10 +465,10 @@ def _detect_source(raw: list[dict]) -> str | None:
     if not gdl_category:
         return None
 
-    from plugins.builtin.gallery_dl._sites import GDL_SITES
+    from plugins.builtin.gallery_dl._sites import all_sites
 
     gdl_category_lower = str(gdl_category).lower()
-    for site in GDL_SITES:
+    for site in all_sites():
         # gallery-dl 'category' field typically matches the extractor name.
         extractor_name = site.extractor or site.source_id
         if extractor_name.lower() == gdl_category_lower or site.source_id.lower() == gdl_category_lower:

@@ -743,3 +743,86 @@ class TestProcessLifecycle:
         assert result.status == "done"
         assert result.downloaded == 1
         assert result.total == 3  # 1 downloaded + 2 skipped
+
+
+# ---------------------------------------------------------------------------
+# GalleryDlPlugin.download — archive table prepared before gallery-dl starts
+# ---------------------------------------------------------------------------
+
+
+class TestGalleryDlDownloadArchiveTable:
+    """A drop-in extractor's category gets its archive table without init.sql."""
+
+    @staticmethod
+    def _identity(category: str):
+        from plugins.builtin.gallery_dl._identity import UrlIdentity
+
+        return UrlIdentity(category, "gallery=1", False, category)
+
+    @staticmethod
+    def _session_factory():
+        session = AsyncMock()
+        factory = MagicMock()
+        factory.return_value.__aenter__.return_value = session
+        return factory, session
+
+    async def _download(self, tmp_path, ensure, *, options=None, category="newsite"):
+        factory, session = self._session_factory()
+        calls: list[str] = []
+
+        async def _ensure(sess, cat):
+            calls.append(f"ensure:{cat}")
+            return await ensure(sess, cat)
+
+        async def _exec(*args, **kwargs):
+            calls.append("exec")
+            return _make_fake_process([], returncode=0)
+
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_exec) as exec_mock,
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ) as build_mock,
+            patch("plugins.builtin.gallery_dl._identity.resolve_url_identity", return_value=self._identity(category)),
+            patch("plugins.builtin.gallery_dl.source.ensure_archive_table", side_effect=_ensure),
+            patch("core.database.AsyncSessionLocal", factory),
+            patch("pathlib.Path.mkdir"),
+        ):
+            from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+            result = await GalleryDlPlugin().download(
+                url="https://newsite.example/g/1", dest_dir=tmp_path, credentials={}, options=options
+            )
+        return result, calls, exec_mock, build_mock, session
+
+    async def test_archive_table_is_created_for_the_url_category_before_gallery_dl_starts(self, tmp_path):
+        result, calls, _, _, session = await self._download(tmp_path, AsyncMock(return_value="created"))
+
+        assert calls == ["ensure:newsite", "exec"]
+        session.commit.assert_awaited_once()
+        assert result.status == "done"
+
+    async def test_category_naming_a_non_archive_table_fails_without_starting_gallery_dl(self, tmp_path):
+        from plugins.builtin.gallery_dl._archive import ArchiveTableConflict
+
+        conflict = AsyncMock(side_effect=ArchiveTableConflict("'galleries' is not an archive table"))
+        result, calls, exec_mock, build_mock, session = await self._download(tmp_path, conflict, category="galleries")
+
+        assert result.status == "failed"
+        assert "galleries" in result.error
+        exec_mock.assert_not_called()
+        build_mock.assert_not_awaited()
+        session.commit.assert_not_awaited()
+
+    async def test_archive_table_database_error_still_downloads(self, tmp_path):
+        result, calls, _, _, _ = await self._download(tmp_path, AsyncMock(side_effect=OSError("db down")))
+
+        assert calls == ["ensure:newsite", "exec"]
+
+    async def test_force_full_scan_has_no_archive_so_its_table_is_not_touched(self, tmp_path):
+        ensure = AsyncMock(return_value="created")
+        _, calls, _, _, _ = await self._download(tmp_path, ensure, options={"force_full_scan": True})
+
+        assert calls == ["exec"]

@@ -108,6 +108,9 @@ services:
       - app_data:/data
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - gallery_dl_venv:/opt/gallery-dl:ro
+      # Custom gallery-dl extractors: drop a .py file in, restart api + worker,
+      # reload nginx. Overrides the copy baked into the image (see its README.md).
+      - ./backend/plugins/builtin/gallery_dl/extractors:/app/plugins/builtin/gallery_dl/extractors:ro
       # host: generate secrets/novel_deploy_key + novel_known_hosts before up
       # (see docs/superpowers/plans/2026-07-05-novel-module-phase0.md Task 0)
       - ${JYZROX_DATA_ROOT}/novel:/data/novel
@@ -167,6 +170,9 @@ services:
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - gallery_dl_venv:/opt/gallery-dl
+      # Same directory as api: downloads (worker) and URL detection (api) must
+      # see the same extractors.
+      - ./backend/plugins/builtin/gallery_dl/extractors:/app/plugins/builtin/gallery_dl/extractors:ro
       - ${JYZROX_DATA_ROOT}/novel:/data/novel
       - ./secrets/novel_deploy_key:/run/secrets/novel_deploy_key:ro
       - ./secrets/novel_known_hosts:/run/secrets/novel_known_hosts:ro

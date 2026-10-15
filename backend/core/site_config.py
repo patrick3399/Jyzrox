@@ -197,7 +197,7 @@ class SiteConfigService:
 
         Also populates the batch params cache (same as get_all_download_params).
         """
-        from plugins.builtin.gallery_dl._sites import GDL_SITES
+        from plugins.builtin.gallery_dl._sites import all_sites
 
         db_rows: dict[str, SiteConfig] = {}
         async with AsyncSessionLocal() as session:
@@ -209,7 +209,7 @@ class SiteConfigService:
         seen: set[str] = set()
         output: list[tuple[str, DownloadParams, SiteConfig | None]] = []
         params_cache: dict[str, DownloadParams] = {}
-        for site in GDL_SITES:
+        for site in all_sites():
             if site.source_id in seen:
                 continue
             seen.add(site.source_id)
@@ -232,7 +232,7 @@ class SiteConfigService:
             if time.time() - ts < self._ttl:
                 return output
 
-        from plugins.builtin.gallery_dl._sites import GDL_SITES
+        from plugins.builtin.gallery_dl._sites import all_sites
 
         # Batch-load all DB rows in one query
         db_rows: dict[str, SiteConfig] = {}
@@ -244,7 +244,7 @@ class SiteConfigService:
         # Merge for each unique source
         seen: set[str] = set()
         output: dict[str, DownloadParams] = {}
-        for site in GDL_SITES:
+        for site in all_sites():
             if site.source_id in seen:
                 continue
             seen.add(site.source_id)

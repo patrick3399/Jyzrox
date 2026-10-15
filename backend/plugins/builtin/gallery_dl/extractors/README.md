@@ -1,9 +1,19 @@
 # Bundled custom gallery-dl extractors
 
 Drop a `.py` file here to teach gallery-dl about a site it does not support.
-Files are discovered automatically — nothing to register. An empty directory is
-a no-op: the generated gallery-dl config omits `module-sources` entirely, so
-behaviour is unchanged until the first extractor lands here.
+Files are discovered automatically, and the file itself carries everything
+Jyzrox needs to know about the site (`JYZROX_SITE`, below) — no `_sites.py`
+entry, no `db/init.sql` table, no migration and no image rebuild. An empty
+directory is a no-op: the generated gallery-dl config omits `module-sources`
+entirely, so behaviour is unchanged until the first extractor lands here.
+
+The whole workflow:
+
+1. Write `<site>_gallery.py` with an extractor class and a `JYZROX_SITE` dict.
+2. Verify it with the gallery-dl CLI ([Local development](#local-development)).
+3. Put it in this directory — it is bind-mounted into `api` and `worker`.
+4. `docker compose restart api worker`, then reload nginx
+   ([Deploying](#deploying)).
 
 Three consumers load these files, and all three read this same directory:
 
@@ -77,6 +87,9 @@ asset support. Implement `metadata()` and `images()` instead:
 ```python
 from gallery_dl.extractor.common import GalleryExtractor
 
+# Read by Jyzrox only; see "JYZROX_SITE" below.
+JYZROX_SITE = {"domain": "example.com", "name": "Example", "category": "gallery", "has_tags": True}
+
 
 class ExampleGalleryExtractor(GalleryExtractor):
     category = "examplesite"                  # becomes the gallery `source`
@@ -118,7 +131,9 @@ probe run the upgradable venv at `/opt/gallery-dl`; in-process detection imports
 the copy baked into the image, which only changes on an image rebuild and can
 therefore be an older release. Stick to API surface that is stable across
 versions, or the extractor works for downloads while URL detection silently
-falls through.
+falls through. The in-process import is also what reads `JYZROX_SITE` and
+names the archive table a download prepares, so a file that only the venv can
+import downloads with no title, no tags and unlinked archive entries.
 
 **A broken file does not break startup.** `load_inprocess()` logs and skips it —
 so an import error surfaces as "site not detected", not a crash. Grep the
@@ -128,62 +143,79 @@ before debugging anything else. Success logs `loaded custom extractors: <name>`.
 
 **Extractors must not live in `/opt/gallery-dl`.** That volume holds the
 independently upgradable venv and is replaced on upgrade/rollback (HR-015).
-This directory ships in the image at
-`/app/plugins/builtin/gallery_dl/extractors/` instead.
+This directory is bind-mounted from the host checkout into both containers at
+`/app/plugins/builtin/gallery_dl/extractors/` (read-only; see
+`docker-compose.yml`). The image still carries a copy, so an image run without
+the mount keeps the bundled extractors.
 
 ## Wiring the site into Jyzrox
 
-### Required for correctness
+### `JYZROX_SITE`
 
-**1. Add the archive table to `db/init.sql`.** The generated config sets
-`archive-table: "{category}"`, so every category needs its own table. If it is
-missing, gallery-dl creates one itself as `(entry TEXT PRIMARY KEY)` — without
-the `gallery_id` FK Jyzrox needs — and the failure is close to invisible:
+Declare the site in the extractor file. gallery-dl ignores the dict;
+`.._extractors.load_inprocess()` validates it at api/worker startup and
+registers it next to `.._sites.GDL_SITES`, so URL detection, the supported-site
+list, site settings, credentials and metadata parsing all see it:
 
-- `ProgressiveImporter._link_archive_entries()` fails inside a savepoint and
-  only emits `failed to link archive entries`; the download and import look fine
-- archive entries stay unlinked, so trashing or deleting the gallery never
-  cascades them away
-- a later re-download is skipped as "already archived" and finishes with
-  **0 images**
-
-Follow the existing pattern in the `gallery-dl archive tables` section. The
-`job_id` default is what ties a row to its download: gallery-dl inserts `entry`
-only, each job connects with its id as the session setting
-`jyzrox.archive_job_id`, and the default copies it onto the row.
-
-```sql
-CREATE TABLE IF NOT EXISTS examplesite (
-    entry       TEXT PRIMARY KEY,
-    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
-    created_at  TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_examplesite_unlinked ON examplesite (job_id) WHERE gallery_id IS NULL;
+```python
+JYZROX_SITE = {
+    "domain": "example.com",       # bare host; a leading "www." is dropped
+    "name": "Example",             # display name
+    "category": "gallery",         # gallery | manga | art | social | booru | filehost | other
+    "has_tags": True,
+    "title_fields": ("title",),    # dotted metadata paths, first non-empty wins
+    "artist_fields": ("artist",),
+    "source_id_fields": ("gallery_id",),
+    "metadata_include": ("studio",),  # extra fields to keep, see below
+}
 ```
 
-`db/init.sql` must stay equal to the HEAD schema (BE-T15), so add a migration
-with the same idempotent DDL. Changing `db/init.sql` also requires
-`docker compose build migrate` — editing the file alone does not reach the image.
+- `source_id` defaults to the extractor's `category` and, when given, must be
+  one of the module's extractor categories. A module with several categories
+  can declare a list of dicts, one per category.
+- Any other `GdlSiteConfig` field may be set (`credential_type`, `retries`,
+  `sleep_request`, `subscribe_url_tpl`, …) except `extractor`,
+  `feature_toggle_key`/`feature_toggle_attr` and `credential_warning_code`,
+  which need code changes elsewhere.
+- **`category` decides title and tags.** They are taken from the metadata
+  sidecar only for `gallery` and `manga`; on any other category — and for a
+  file without `JYZROX_SITE` — the gallery title is the identity string
+  (`gallery=12345`) and no tags are written.
+- **A built-in site always wins.** A `source_id` or `domain` already in
+  `GDL_SITES` (or declared by an earlier file) keeps its owner; the declaration
+  is ignored with a warning.
+- **A bad declaration does not stop the extractor.** It loads and downloads,
+  the site just behaves as unregistered. Look for
+  `ignoring JYZROX_SITE in custom extractor` in the logs; success logs
+  `registered site <source_id> (<domain>)`.
 
-**2. Register the site in `.._sites.GDL_SITES` if the table name differs from
-the category.** `_link_archive_entries()` resolves the table as
-`cfg.extractor or cfg.source_id`, and an unregistered category falls through to
-`_DEFAULT_CONFIG` — i.e. it looks for a table literally named `gallery_dl`
-(BE-T3). Registering with `extractor=` set is what keeps the two in step.
+The metadata postprocessor drops every field `_METADATA_INCLUDE` in `..source`
+does not list. The top-level key of each `title_fields`, `artist_fields` and
+`source_id_fields` path is kept automatically; list anything else you need in
+`metadata_include`. `--dump-json` shows what the extractor actually produces.
 
-**3. Know what the gallery identity will be.** For jobs handled by the
-gallery-dl plugin the download URL alone decides `(source, source_id)`
-(ADR 0016): `{subcategory}={pattern groups joined by "/"}`, e.g.
-`gallery=12345`. Capture the remote gallery's stable unique ID in the pattern —
-never a username or a title (BE-T1, HR-018). `source_id_fields`,
+### Archive table — automatic
+
+The generated config sets `archive-table: "{category}"`. Before gallery-dl
+starts, the download creates that table with Jyzrox's columns (`entry`,
+`gallery_id` FK with `ON DELETE CASCADE`, the `job_id` that records the writing
+job, `created_at`) or upgrades the bare `(entry)` table gallery-dl made earlier.
+That is what lets `ProgressiveImporter._link_archive_entries()` link entries to
+their gallery, so deleting the gallery frees its files for a re-download.
+
+A category whose name is already taken by a table that is not an archive
+(e.g. `galleries`) fails the download before gallery-dl runs. Pick another
+category.
+
+### Gallery identity
+
+For jobs handled by the gallery-dl plugin the download URL alone decides
+`(source, source_id)` (ADR 0016): `{subcategory}={pattern groups joined by "/"}`,
+e.g. `gallery=12345`. Capture the remote gallery's stable unique ID in the
+pattern — never a username or a title (BE-T1, HR-018). `source_id_fields`,
 `directory_fmt` and `url_path_id_index` only matter on the fallback paths taken
 when in-process URL matching fails, so a failed in-process load shows up as a
 second gallery with a different `source_id`.
-
-Title and tags are taken from the metadata sidecar only when the registered
-site `category` is `gallery` or `manga`; on any other category the title is the
-identity string and no tags are written.
 
 **Start `archive_fmt` with that identity**, e.g.
 `archive_fmt = "gallery={gallery_id}_{num}"`. `_link_archive_entries()` links
@@ -193,28 +225,33 @@ non-alphanumeric character. The second rule is what recovers entries left
 behind by a download that died before linking, and it can only work when the
 key names the gallery.
 
-**4. Check `_METADATA_INCLUDE` in `..source`.** The metadata postprocessor drops
-any field not on that allowlist. Either emit the existing field names or extend
-it — `--dump-json` above shows what your extractor actually produces.
+### When to edit `_sites.py` instead
 
-### Optional
-
-Unknown categories are preserved as the gallery `source` (they are not collapsed
-into `gallery_dl`), so registration is not needed just to avoid "Unknown Site".
-Beyond the table-name case above, register when the site needs a canonical
-source ID, display metadata, credentials, download tuning, subscriptions, or
-non-default metadata rules.
+Only to change a built-in site, or for the fields a drop-in file cannot set
+(see above). Unknown categories are already preserved as the gallery `source`
+rather than collapsed into `gallery_dl`.
 
 ## Deploying
 
-Adding or changing an extractor needs an image rebuild — the directory is baked
-in, not bind-mounted. Use the `/deploy` skill, which builds, restarts, reloads
-nginx and verifies the endpoints. Both `api` and `worker` need the file: `worker`
-runs downloads, `api` handles URL detection and site probing.
+Both `api` and `worker` read this directory: `worker` runs downloads, `api`
+handles URL detection and site probing. Extractors and `JYZROX_SITE` are loaded
+once at process start, so after adding or changing a file:
+
+```bash
+docker compose restart api worker
+# A restarted container gets a new IP; until nginx re-resolves, every /api/*
+# request answers 502.
+docker compose exec nginx nginx -s reload
+```
 
 Confirm it landed:
 
 ```bash
-docker compose logs api worker | grep 'loaded custom extractors'
+docker compose logs api worker | grep -E 'loaded custom extractors|registered site|JYZROX_SITE'
 docker compose exec worker /opt/gallery-dl/active/bin/gallery-dl --list-extractors | grep -i <category>
+# Through nginx: 401 without a session cookie is healthy, 502 means step 2 was skipped.
+curl -s -o /dev/null -w '%{http_code}\n' "http://localhost:${HTTP_PORT:-35689}/api/settings/features"
 ```
+
+No image rebuild is needed: the directory is bind-mounted. A rebuild only
+refreshes the fallback copy inside the image.

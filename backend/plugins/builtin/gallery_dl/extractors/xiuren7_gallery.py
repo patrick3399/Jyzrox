@@ -12,6 +12,20 @@ from datetime import datetime
 
 from gallery_dl.extractor.common import GalleryExtractor
 
+# Read by Jyzrox only (plugins.builtin.gallery_dl._sites): registers the site
+# without an entry in GDL_SITES. source_id defaults to the category below.
+JYZROX_SITE = {
+    "domain": "xiuren7.com",
+    "name": "XiuRen7",
+    # Title and tags come from the metadata only for gallery/manga sites.
+    "category": "gallery",
+    "has_tags": True,
+    # Every post carries the model's name as its only tag; _post_metadata
+    # copies it to "artist".
+    "artist_fields": ("artist",),
+    "source_id_fields": ("gallery_id",),
+}
+
 _IMG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 _SRC_RE = re.compile(r'\s(data-src|src)="([^"]+)"', re.IGNORECASE)
 

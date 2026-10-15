@@ -88,13 +88,42 @@ async def test_archive_table_created_by_gallery_dl_gets_the_job_id_default_at_st
     from plugins.builtin.gallery_dl._archive import ARCHIVE_JOB_ID_DEFAULT
 
     session = AsyncMock()
-    session.execute.side_effect = [[("newsite",)], MagicMock(scalar=MagicMock(return_value=1)), MagicMock()]
+    session.execute.side_effect = [
+        [("newsite",)],  # tables with entry but no gallery_id
+        None,  # advisory lock
+        MagicMock(first=MagicMock(return_value=("r", ["entry"]))),
+        None,  # lock_timeout
+        None,  # ALTER TABLE
+        None,  # CREATE INDEX
+    ]
     factory = MagicMock()
     factory.return_value.__aenter__.return_value = session
 
     with patch("core.database.AsyncSessionLocal", factory):
         await worker._ensure_archive_table_schema()
 
-    alter = str(session.execute.await_args_list[2].args[0])
+    alter = str(session.execute.await_args_list[4].args[0])
     assert 'ALTER TABLE "newsite"' in alter
     assert f"ADD COLUMN IF NOT EXISTS job_id UUID DEFAULT {ARCHIVE_JOB_ID_DEFAULT}" in alter
+    session.commit.assert_awaited_once()
+
+
+async def test_startup_skips_a_table_with_an_entry_column_that_is_not_an_archive():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import worker
+
+    session = AsyncMock()
+    session.execute.side_effect = [
+        [("notes",)],
+        None,  # advisory lock
+        MagicMock(first=MagicMock(return_value=("r", ["entry", "body"]))),
+    ]
+    factory = MagicMock()
+    factory.return_value.__aenter__.return_value = session
+
+    with patch("core.database.AsyncSessionLocal", factory):
+        await worker._ensure_archive_table_schema()
+
+    assert not any("ALTER TABLE" in str(c.args[0]) for c in session.execute.await_args_list)
+    session.commit.assert_awaited_once()

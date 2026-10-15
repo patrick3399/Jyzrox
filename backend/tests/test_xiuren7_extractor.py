@@ -14,7 +14,6 @@ _EXTRACTOR_DIR = _BACKEND_DIR / "plugins" / "builtin" / "gallery_dl" / "extracto
 _INIT_SQL = (_BACKEND_DIR.parent / "db" / "init.sql").read_text(encoding="utf-8")
 _MIGRATION = _BACKEND_DIR / "migrations" / "versions" / "0031_xiuren7_archive_table.py"
 
-_CATEGORY_RE = re.compile(r'^\s+category = "(\w+)"', re.MULTILINE)
 
 _POST = {
     "id": 463684,
@@ -62,6 +61,22 @@ def xiuren7(monkeypatch):
     return module
 
 
+@pytest.fixture
+def xiuren7_site(xiuren7, monkeypatch):
+    """Register the module's JYZROX_SITE the way load_inprocess() does, in an isolated registry."""
+    from plugins.builtin.gallery_dl import _sites
+
+    monkeypatch.setattr(_sites, "_BY_SOURCE", dict(_sites._BY_SOURCE))
+    monkeypatch.setattr(_sites, "_BY_DOMAIN", dict(_sites._BY_DOMAIN))
+    monkeypatch.setattr(_sites, "_EXTRA_SITES", [])
+    monkeypatch.setattr(_sites, "_EXTRA_METADATA_FIELDS", [])
+    config, fields = _sites.site_config_from_declaration(
+        xiuren7.JYZROX_SITE, {xiuren7.Xiuren7GalleryExtractor.category}
+    )
+    assert _sites.register_site(config, fields) is None
+    return config
+
+
 def _archive_tables() -> dict[str, str]:
     return {
         name: body
@@ -72,12 +87,6 @@ def _archive_tables() -> dict[str, str]:
 
 def _columns(body: str) -> list[str]:
     return [" ".join(line.split()).rstrip(",") for line in body.strip().splitlines() if line.strip()]
-
-
-def _bundled_categories() -> list[str]:
-    return sorted(
-        {c for path in _EXTRACTOR_DIR.glob("*.py") for c in _CATEGORY_RE.findall(path.read_text(encoding="utf-8"))}
-    )
 
 
 # ── URL matching ──
@@ -178,13 +187,20 @@ def test_extractor_images_come_from_the_json_parsed_in_metadata(xiuren7):
 # ── Jyzrox wiring ──
 
 
-def test_site_is_registered_so_archive_linking_does_not_fall_back_to_gallery_dl_table():
-    from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG, get_site_by_domain, get_site_config
+def test_declared_site_keeps_archive_linking_on_the_xiuren7_table(xiuren7_site):
+    from plugins.builtin.gallery_dl._sites import (
+        _DEFAULT_CONFIG,
+        gdl_extractor_name,
+        get_site_by_domain,
+        get_site_config,
+    )
 
     cfg = get_site_config("xiuren7")
+    assert cfg is xiuren7_site
     assert cfg is not _DEFAULT_CONFIG
     assert cfg.source_id == "xiuren7"
     assert get_site_by_domain("xiuren7.com") is cfg
+    assert gdl_extractor_name("xiuren7") == "xiuren7"
     # Title and tags are read from metadata only for gallery/manga sites.
     assert cfg.category == "gallery"
     assert cfg.source_id_fields == ("gallery_id",)
@@ -208,7 +224,7 @@ def test_archive_entries_start_with_the_url_identity_so_they_link_by_prefix(xiur
     assert entry.startswith(f"{identity.source_id}_")
 
 
-def test_sidecar_metadata_imports_title_tags_date_and_model_as_artist(tmp_path):
+def test_sidecar_metadata_imports_title_tags_date_and_model_as_artist(tmp_path, xiuren7_site):
     from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
 
     data = parse_gallery_dl_import(
@@ -230,29 +246,6 @@ def test_sidecar_metadata_imports_title_tags_date_and_model_as_artist(tmp_path):
     assert data.tags == ["Model"]
     assert data.artist_id == "xiuren7:Model"
     assert data.posted_at == datetime(2026, 3, 19, 2, 39, 43, tzinfo=UTC)
-
-
-def test_bundled_extractor_category_without_registered_archive_table_is_rejected():
-    """Every bundled extractor needs a pre-created archive table Jyzrox can link.
-
-    gallery-dl creates a missing table as ``(entry TEXT PRIMARY KEY)``, and an
-    unregistered category resolves to a table named ``gallery_dl``; either way
-    entries never link to a gallery and a re-download finishes with 0 images.
-    """
-    from plugins.builtin.gallery_dl._sites import get_site_config
-
-    categories = _bundled_categories()
-    assert "xiuren7" in categories
-    tables = _archive_tables()
-    for category in categories:
-        cfg = get_site_config(category)
-        assert (cfg.extractor or cfg.source_id) == category
-        assert category in tables
-        assert re.search(
-            r"^\s*gallery_id\s+BIGINT REFERENCES galleries\(id\) ON DELETE CASCADE", tables[category], re.M
-        )
-        assert re.search(r"^\s*job_id\s+UUID", tables[category], re.M)
-        assert f"idx_{category}_unlinked ON {category} (job_id) WHERE gallery_id IS NULL" in _INIT_SQL
 
 
 def test_migration_0031_creates_the_same_archive_table_as_init_sql_idempotently():
