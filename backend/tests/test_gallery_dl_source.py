@@ -8,6 +8,7 @@ partial success, can_handle, resolve_output_dir, parse_metadata.
 
 import asyncio
 import json
+import os
 import signal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -253,6 +254,28 @@ class TestGalleryDlDownloadHappyPath:
 
         assert result.status == "done"
         assert result.downloaded == 2
+
+    async def test_download_subprocess_env_loads_happy_eyeballs(self, tmp_path):
+        """gallery-dl must start with the Happy Eyeballs sitecustomize on PYTHONPATH."""
+        from plugins.builtin.gallery_dl._subprocess_env import SITE_DIR
+
+        proc = _make_fake_process([b"JYZROX_FILE\t/data/x.jpg\tabc123\n"], returncode=0)
+        with (
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc) as create_proc,
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
+            patch("pathlib.Path.mkdir"),
+        ):
+            from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+            await GalleryDlPlugin().download(url="https://example.com/gallery/1", dest_dir=tmp_path, credentials={})
+
+        env = create_proc.call_args.kwargs["env"]
+        assert env["PYTHONPATH"].split(os.pathsep)[0] == str(SITE_DIR)
+        assert env["PYTHONUNBUFFERED"] == "1"
 
     async def test_download_calls_pid_callback(self, tmp_path):
         """When pid_callback is provided, it should be called with the process PID."""

@@ -211,6 +211,28 @@ async def _run_startup(redis, session, mock_enqueue=None, mock_emit=None):
 # ---------------------------------------------------------------------------
 
 
+class TestStartupBackgroundChecks:
+    async def test_startup_schedules_egress_self_check_without_awaiting_it(self):
+        """The IPv6 / Happy Eyeballs self-check runs in the background, never blocking startup."""
+        redis = _make_redis(strategy_running="keep_paused", strategy_paused="keep_paused")
+        session = _make_session(running_jobs=[])
+        scheduled = []
+
+        def _record(coro):
+            scheduled.append(coro.__qualname__)
+            coro.close()
+            return MagicMock()
+
+        with _startup_patches(redis, session), patch("worker.asyncio.ensure_future", side_effect=_record):
+            from worker import startup
+
+            mock_worker = MagicMock()
+            mock_worker.queue = AsyncMock()
+            await startup({"redis": redis, "worker": mock_worker})
+
+        assert "run_startup_checks" in scheduled
+
+
 class TestStartupMarkFailedStrategy:
     """When setting:recovery_running = mark_failed, running jobs are failed."""
 

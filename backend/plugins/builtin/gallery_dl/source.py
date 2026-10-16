@@ -22,6 +22,7 @@ from plugins.base import SourcePlugin
 from plugins.builtin.gallery_dl._archive import ArchiveTableConflict, archive_dsn_for_job, ensure_archive_table
 from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
 from plugins.builtin.gallery_dl._metadata import _resolve_source_id
+from plugins.builtin.gallery_dl._subprocess_env import gdl_subprocess_env
 from plugins.models import (
     CredentialFlow,
     CredentialStatus,
@@ -964,7 +965,8 @@ class GalleryDlPlugin(SourcePlugin):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                # PYTHONPATH carries the Happy Eyeballs sitecustomize (_subprocess_env).
+                env=gdl_subprocess_env(PYTHONUNBUFFERED="1"),
                 # HR-011: start a new session so proc.pid == its process
                 # group id. This lets every kill path below terminate the
                 # whole descendant tree (ffmpeg, etc.) via os.killpg instead

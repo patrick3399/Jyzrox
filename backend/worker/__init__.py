@@ -306,6 +306,11 @@ async def startup(ctx: dict) -> None:
     # If the image ships a newer gallery-dl than the venv, sync it once downloads
     # are idle (guarded like an admin upgrade; never blocks startup).
     ctx["_gdl_image_sync_task"] = asyncio.ensure_future(image_sync_loop())
+    # Log a black-holed IPv6 upstream or an inactive Happy Eyeballs patch
+    # (both slow downloads silently); background, never blocks startup.
+    from worker.egress_check import run_startup_checks
+
+    ctx["_egress_check_task"] = asyncio.ensure_future(run_startup_checks())
     # Auto-upgrade archive tables created by gallery-dl without Jyzrox columns
     try:
         await _ensure_archive_table_schema()
@@ -585,6 +590,13 @@ async def shutdown(ctx: dict) -> None:
         gdl_sync_task.cancel()
         try:
             await gdl_sync_task
+        except asyncio.CancelledError:
+            pass
+    egress_task = ctx.get("_egress_check_task")
+    if egress_task is not None and not egress_task.done():
+        egress_task.cancel()
+        try:
+            await egress_task
         except asyncio.CancelledError:
             pass
     # Cancel log level subscriber
