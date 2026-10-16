@@ -47,9 +47,29 @@ http {
     proxy_cache_path /var/cache/nginx/auth_cache levels=1:2 keys_zone=auth_cache:1m
                      max_size=10m inactive=5m use_temp_path=off;
 
+    # Upstream containers get a new IP whenever they are stopped/started or
+    # recreated. A plain `server api:8000;` is resolved once at startup, so
+    # nginx kept dialing the dead address and every /api/* request returned
+    # 502 until `nginx -s reload`. `resolve` re-queries Docker's embedded DNS
+    # every `valid` interval instead, so a restarted upstream is picked up
+    # within ~10s with no reload. `resolve` needs a shared-memory `zone`;
+    # ipv6=off because the frontend network is IPv4-only.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
     upstream api {
-        server api:8000;
+        zone api 64k;
+        server api:8000 resolve;
         keepalive 32;
+    }
+
+    upstream pwa {
+        zone pwa 64k;
+        server pwa:3000 resolve;
+    }
+
+    upstream imgproxy {
+        zone imgproxy 64k;
+        server imgproxy:8080 resolve;
     }
 
     server {
@@ -136,7 +156,7 @@ http {
 
         location /media/image/ {
             auth_request /_auth_media;
-            proxy_pass http://imgproxy:8080/;
+            proxy_pass http://imgproxy/;
             proxy_cache image_cache;
             proxy_cache_key $uri;
             proxy_cache_valid 200 30d;
@@ -301,7 +321,7 @@ http {
 
         # ── Frontend PWA ──────────────────────────────────────────
         location / {
-            proxy_pass http://pwa:3000;
+            proxy_pass http://pwa;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
