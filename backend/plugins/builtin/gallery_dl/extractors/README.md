@@ -12,8 +12,7 @@ The whole workflow:
 1. Write `<site>_gallery.py` with an extractor class and a `JYZROX_SITE` dict.
 2. Verify it with the gallery-dl CLI ([Local development](#local-development)).
 3. Put it in this directory — it is bind-mounted into `api` and `worker`.
-4. `docker compose restart api worker`, then reload nginx
-   ([Deploying](#deploying)).
+4. `docker compose restart api worker` ([Deploying](#deploying)).
 
 Three consumers load these files, and all three read this same directory:
 
@@ -239,9 +238,8 @@ once at process start, so after adding or changing a file:
 
 ```bash
 docker compose restart api worker
-# A restarted container gets a new IP; until nginx re-resolves, every /api/*
-# request answers 502.
-docker compose exec nginx nginx -s reload
+# nginx re-resolves the api container's IP every 10s, so no reload is needed;
+# /api/* may answer 502 for a few seconds while api boots.
 ```
 
 Confirm it landed:
