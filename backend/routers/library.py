@@ -1295,43 +1295,23 @@ async def batch_galleries(
     elif body.action == "add_to_collection":
         if body.collection_id is None:
             raise HTTPException(status_code=400, detail="collection_id required for add_to_collection")
-        from db.models import Collection, CollectionGallery
+        from core.events import EventType, emit_safe
+        from db.models import Collection
+        from services.collection_membership import add_galleries_to_collection
 
         collection = await db.get(Collection, body.collection_id)
         if not collection or collection.user_id != auth["user_id"]:
             raise HTTPException(status_code=404, detail="Collection not found")
 
-        max_pos_result = (
-            await db.execute(
-                select(func.coalesce(func.max(CollectionGallery.position), -1)).where(
-                    CollectionGallery.collection_id == body.collection_id
-                )
-            )
-        ).scalar_one()
-
-        added = 0
-        for i, gid in enumerate(gallery_ids):
-            existing = (
-                await db.execute(
-                    select(CollectionGallery).where(
-                        CollectionGallery.collection_id == body.collection_id,
-                        CollectionGallery.gallery_id == gid,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing:
-                continue
-            cg = CollectionGallery(
-                collection_id=body.collection_id,
-                gallery_id=gid,
-                position=max_pos_result + 1 + i,
-            )
-            db.add(cg)
-            added += 1
-
-        collection.updated_at = datetime.now(UTC)
+        added, denied = await add_galleries_to_collection(db, collection, gallery_ids, auth)
         await db.commit()
-        return {"status": "ok", "affected": added}
+        await emit_safe(
+            EventType.COLLECTION_UPDATED,
+            actor_user_id=auth["user_id"],
+            resource_type="collection",
+            resource_id=body.collection_id,
+        )
+        return {"status": "ok", "affected": added, "denied": denied}
 
     elif body.action == "add_tags":
         if not body.tags:

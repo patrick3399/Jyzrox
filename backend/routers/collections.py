@@ -14,6 +14,7 @@ from core.database import get_db
 from core.gallery_helpers import build_cover_sha_map
 from db.models import Collection, CollectionGallery, Gallery
 from services.cas import thumb_url as cas_thumb_url
+from services.collection_membership import add_galleries_to_collection as add_galleries_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["collections"])
@@ -36,66 +37,120 @@ class AddGalleries(BaseModel):
 
 @router.get("/")
 async def list_collections(
+    gallery_id: int | None = Query(default=None),
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all collections with gallery count and cover thumbnail."""
-    stmt = (
-        select(
-            Collection,
-            func.count(CollectionGallery.gallery_id).label("gallery_count"),
+    """List all collections with gallery count and cover thumbnail.
+
+    Counts and covers only consider galleries visible to the caller. When
+    ``gallery_id`` is given, each entry gets ``contains_gallery`` (membership flag).
+    """
+    collections = (
+        (
+            await db.execute(
+                select(Collection).where(Collection.user_id == auth["user_id"]).order_by(Collection.updated_at.desc())
+            )
         )
-        .where(Collection.user_id == auth["user_id"])
-        .outerjoin(CollectionGallery, Collection.id == CollectionGallery.collection_id)
-        .group_by(Collection.id)
-        .order_by(Collection.updated_at.desc())
+        .scalars()
+        .all()
     )
-    rows = (await db.execute(stmt)).all()
+    collection_ids = [c.id for c in collections]
+
+    # Visible gallery count per collection (same access filter as get_collection)
+    counts: dict[int, int] = {}
+    # First visible gallery per collection (fallback cover), by position then added_at
+    first_visible: dict[int, int] = {}
+    if collection_ids:
+        counts = {
+            cid: n
+            for cid, n in (
+                await db.execute(
+                    select(CollectionGallery.collection_id, func.count())
+                    .join(Gallery, CollectionGallery.gallery_id == Gallery.id)
+                    .where(CollectionGallery.collection_id.in_(collection_ids), gallery_access_filter(auth))
+                    .group_by(CollectionGallery.collection_id)
+                )
+            ).all()
+        }
+        ranked = (
+            select(
+                CollectionGallery.collection_id.label("collection_id"),
+                CollectionGallery.gallery_id.label("gallery_id"),
+                func.row_number()
+                .over(
+                    partition_by=CollectionGallery.collection_id,
+                    order_by=(CollectionGallery.position, CollectionGallery.added_at),
+                )
+                .label("rn"),
+            )
+            .join(Gallery, CollectionGallery.gallery_id == Gallery.id)
+            .where(CollectionGallery.collection_id.in_(collection_ids), gallery_access_filter(auth))
+            .subquery()
+        )
+        first_visible = {
+            cid: gid
+            for cid, gid in (
+                await db.execute(select(ranked.c.collection_id, ranked.c.gallery_id).where(ranked.c.rn == 1))
+            )
+            .tuples()
+            .all()
+        }
+
+    # Explicit covers only count if the gallery is still visible to the caller
+    explicit_ids = {c.cover_gallery_id for c in collections if c.cover_gallery_id}
+    visible_explicit: set[int] = set()
+    if explicit_ids:
+        visible_explicit = set(
+            (await db.execute(select(Gallery.id).where(Gallery.id.in_(explicit_ids), gallery_access_filter(auth))))
+            .scalars()
+            .all()
+        )
+
+    cover_gid_by_collection: dict[int, int] = {}
+    for collection in collections:
+        if collection.cover_gallery_id and collection.cover_gallery_id in visible_explicit:
+            cover_gid_by_collection[collection.id] = collection.cover_gallery_id
+        elif collection.id in first_visible:
+            cover_gid_by_collection[collection.id] = first_visible[collection.id]
+
+    cover_gids = list(set(cover_gid_by_collection.values()))
+    cover_sha: dict[int, str] = {}
+    if cover_gids:
+        source_rows = (await db.execute(select(Gallery.id, Gallery.source).where(Gallery.id.in_(cover_gids)))).all()
+        cover_sha = await build_cover_sha_map(db, cover_gids, {gid: src or "" for gid, src in source_rows})
+
+    member_of: set[int] = set()
+    if gallery_id is not None and collection_ids:
+        member_of = set(
+            (
+                await db.execute(
+                    select(CollectionGallery.collection_id).where(
+                        CollectionGallery.collection_id.in_(collection_ids),
+                        CollectionGallery.gallery_id == gallery_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     result = []
-    for collection, gallery_count in rows:
-        # Get cover thumbnail
-        cover_thumb = None
-        cover_gid = collection.cover_gallery_id
-        if not cover_gid:
-            # Use the first gallery's cover if no explicit cover set
-            first_cg = (
-                await db.execute(
-                    select(CollectionGallery.gallery_id)
-                    .where(CollectionGallery.collection_id == collection.id)
-                    .order_by(CollectionGallery.position, CollectionGallery.added_at)
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if first_cg:
-                cover_gid = first_cg
-
-        if cover_gid:
-            cover_gallery = await db.get(Gallery, cover_gid)
-            cover_row = None
-            if cover_gallery:
-                cover_row = (
-                    await build_cover_sha_map(
-                        db,
-                        [cover_gid],
-                        {cover_gid: cover_gallery.source or ""},
-                    )
-                ).get(cover_gid)
-            if cover_row:
-                cover_thumb = cas_thumb_url(cover_row)
-
-        result.append(
-            {
-                "id": collection.id,
-                "name": collection.name,
-                "description": collection.description,
-                "cover_gallery_id": collection.cover_gallery_id,
-                "gallery_count": gallery_count,
-                "cover_thumb": cover_thumb,
-                "created_at": collection.created_at.isoformat() if collection.created_at else None,
-                "updated_at": collection.updated_at.isoformat() if collection.updated_at else None,
-            }
-        )
+    for collection in collections:
+        sha = cover_sha.get(cover_gid_by_collection.get(collection.id, -1))
+        entry = {
+            "id": collection.id,
+            "name": collection.name,
+            "description": collection.description,
+            "cover_gallery_id": collection.cover_gallery_id,
+            "gallery_count": counts.get(collection.id, 0),
+            "cover_thumb": cas_thumb_url(sha) if sha else None,
+            "created_at": collection.created_at.isoformat() if collection.created_at else None,
+            "updated_at": collection.updated_at.isoformat() if collection.updated_at else None,
+        }
+        if gallery_id is not None:
+            entry["contains_gallery"] = collection.id in member_of
+        result.append(entry)
 
     return {"collections": result}
 
@@ -285,53 +340,7 @@ async def add_galleries_to_collection(
     if not collection or collection.user_id != auth["user_id"]:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # Get current max position
-    max_pos_result = (
-        await db.execute(
-            select(func.coalesce(func.max(CollectionGallery.position), -1)).where(
-                CollectionGallery.collection_id == collection_id
-            )
-        )
-    ).scalar_one()
-
-    added = 0
-    denied: list[int] = []
-    position_offset = 0
-    for gid in body.gallery_ids:
-        # Check if already in collection
-        existing = (
-            await db.execute(
-                select(CollectionGallery).where(
-                    CollectionGallery.collection_id == collection_id,
-                    CollectionGallery.gallery_id == gid,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing:
-            continue
-        # Verify the gallery is visible to this user
-        gallery = await db.get(Gallery, gid)
-        if not gallery:
-            denied.append(gid)
-            continue
-        if auth.get("role") != "admin":
-            if (
-                gallery.created_by_user_id is not None
-                and gallery.created_by_user_id != auth["user_id"]
-                and gallery.visibility != "public"
-            ):
-                denied.append(gid)
-                continue
-        cg = CollectionGallery(
-            collection_id=collection_id,
-            gallery_id=gid,
-            position=max_pos_result + 1 + position_offset,
-        )
-        db.add(cg)
-        added += 1
-        position_offset += 1
-
-    collection.updated_at = datetime.now(UTC)
+    added, denied = await add_galleries_service(db, collection, body.gallery_ids, auth)
     await db.commit()
     from core.events import EventType, emit_safe
 
@@ -367,4 +376,12 @@ async def remove_gallery_from_collection(
 
     collection.updated_at = datetime.now(UTC)
     await db.commit()
+    from core.events import EventType, emit_safe
+
+    await emit_safe(
+        EventType.COLLECTION_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="collection",
+        resource_id=collection_id,
+    )
     return {"status": "ok"}

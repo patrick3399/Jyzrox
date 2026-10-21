@@ -1152,3 +1152,216 @@ class TestGetCollectionExcludesTrashedGalleries:
         returned_ids = [g["id"] for g in data["galleries"]]
         assert gid_live in returned_ids
         assert gid_trash not in returned_ids
+
+
+# ---------------------------------------------------------------------------
+# Shared membership service: visibility, trash, collaborators, events, positions
+# ---------------------------------------------------------------------------
+
+
+async def _insert_member(db_session, user_id: int) -> None:
+    await db_session.execute(
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'member')"),
+        {"id": user_id, "u": f"svc_member_{user_id}"},
+    )
+    await db_session.commit()
+
+
+async def _insert_collection(db_session, user_id: int, name: str = "Svc Col") -> int:
+    res = await db_session.execute(
+        text("INSERT INTO collections (user_id, name) VALUES (:u, :n) RETURNING id"), {"u": user_id, "n": name}
+    )
+    await db_session.commit()
+    return res.scalar_one()
+
+
+async def _set_gallery(db_session, gid: int, **cols) -> None:
+    sets = ", ".join(f"{k} = :{k}" for k in cols)
+    await db_session.execute(text(f"UPDATE galleries SET {sets} WHERE id = :gid"), {**cols, "gid": gid})
+    await db_session.commit()
+
+
+async def _link(db_session, col_id: int, gid: int, position: int = 0) -> None:
+    await db_session.execute(
+        text("INSERT INTO collection_galleries (collection_id, gallery_id, position) VALUES (:c, :g, :p)"),
+        {"c": col_id, "g": gid, "p": position},
+    )
+    await db_session.commit()
+
+
+async def _gallery_with_image(db_session, source_id: str, sha: str, user_id: int = 1) -> int:
+    gid = await _insert_gallery(db_session, source_id=source_id, user_id=user_id)
+    await db_session.execute(
+        text("INSERT OR IGNORE INTO blobs (sha256, file_size, extension) VALUES (:s, 1024, 'jpg')"), {"s": sha}
+    )
+    await db_session.execute(
+        text("INSERT INTO images (gallery_id, page_num, blob_sha256) VALUES (:g, 1, :s)"), {"g": gid, "s": sha}
+    )
+    await db_session.commit()
+    return gid
+
+
+class TestAddGalleriesServiceBehaviour:
+    """POST /api/collections/{id}/galleries — trash, collaborator, positions, dedupe."""
+
+    async def test_add_trashed_gallery_is_denied(self, client, db_session):
+        """A soft-deleted gallery must be denied, even for the admin."""
+        await _ensure_user(db_session)
+        col = await _create_collection(client, "Trash Add")
+        gid = await _insert_gallery(db_session, source_id="svc_trash1")
+        await _set_gallery(db_session, gid, deleted_at="2024-01-01 00:00:00")
+
+        resp = await client.post(f"/api/collections/{col['id']}/galleries", json={"gallery_ids": [gid]})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "added": 0, "denied": [gid]}
+
+    async def test_add_private_gallery_with_permission_row_is_accepted(self, make_client, db_session):
+        """A read-only GalleryPermission collaborator can see the gallery and may add it."""
+        await _ensure_user(db_session)
+        await _insert_member(db_session, 51)
+        gid = await _insert_gallery(db_session, source_id="svc_perm1", user_id=1)
+        await _set_gallery(db_session, gid, visibility="private")
+        await db_session.execute(
+            text("INSERT INTO gallery_permissions (gallery_id, user_id, can_edit) VALUES (:g, 51, 0)"), {"g": gid}
+        )
+        await db_session.commit()
+        col_id = await _insert_collection(db_session, 51)
+
+        async with make_client(user_id=51, role="member") as mc:
+            resp = await mc.post(f"/api/collections/{col_id}/galleries", json={"gallery_ids": [gid]})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "added": 1, "denied": []}
+
+    async def test_add_with_skipped_existing_member_keeps_positions_contiguous(self, client, db_session):
+        """Existing members are skipped silently and new rows get contiguous positions."""
+        await _ensure_user(db_session)
+        col_id = await _insert_collection(db_session, 1)
+        g1 = await _insert_gallery(db_session, source_id="svc_pos1")
+        g2 = await _insert_gallery(db_session, source_id="svc_pos2")
+        g3 = await _insert_gallery(db_session, source_id="svc_pos3")
+        await _link(db_session, col_id, g1, 0)
+
+        resp = await client.post(f"/api/collections/{col_id}/galleries", json={"gallery_ids": [g1, g2, g3]})
+        assert resp.json() == {"status": "ok", "added": 2, "denied": []}
+        rows = await db_session.execute(
+            text("SELECT gallery_id, position FROM collection_galleries WHERE collection_id = :c ORDER BY position"),
+            {"c": col_id},
+        )
+        assert [tuple(r) for r in rows.all()] == [(g1, 0), (g2, 1), (g3, 2)]
+
+    async def test_add_duplicate_ids_in_request_are_inserted_once(self, client, db_session):
+        """Duplicate ids inside one request are deduped (no PK violation, one row)."""
+        await _ensure_user(db_session)
+        col_id = await _insert_collection(db_session, 1)
+        gid = await _insert_gallery(db_session, source_id="svc_dupreq1")
+
+        resp = await client.post(f"/api/collections/{col_id}/galleries", json={"gallery_ids": [gid, gid]})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "added": 1, "denied": []}
+
+
+class TestCollectionEvents:
+    """remove_gallery_from_collection must emit COLLECTION_UPDATED."""
+
+    async def test_remove_gallery_emits_collection_updated_event(self, client, db_session):
+        from unittest.mock import AsyncMock, patch
+
+        from core.events import EventType
+
+        await _ensure_user(db_session)
+        col_id = await _insert_collection(db_session, 1)
+        gid = await _insert_gallery(db_session, source_id="svc_evt_rm1")
+        await _link(db_session, col_id, gid)
+
+        with patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit:
+            resp = await client.delete(f"/api/collections/{col_id}/galleries/{gid}")
+        assert resp.status_code == 200
+        mock_emit.assert_awaited_once()
+        assert mock_emit.await_args.args[0] == EventType.COLLECTION_UPDATED
+        assert mock_emit.await_args.kwargs["resource_type"] == "collection"
+        assert mock_emit.await_args.kwargs["resource_id"] == col_id
+
+
+class TestListCollectionsVisibility:
+    """list_collections must apply gallery_access_filter to cover and gallery_count."""
+
+    async def test_list_does_not_expose_cover_thumb_of_invisible_explicit_cover(self, make_client, db_session):
+        """A pre-existing explicit cover pointing at another user's private gallery must not leak its thumb."""
+        await _ensure_user(db_session)
+        await _insert_member(db_session, 61)
+        private_gid = await _gallery_with_image(db_session, "svc_cov_priv1", "ab" * 32, user_id=1)
+        await _set_gallery(db_session, private_gid, visibility="private")
+        col_id = await _insert_collection(db_session, 61)
+        await _link(db_session, col_id, private_gid)
+        await db_session.execute(
+            text("UPDATE collections SET cover_gallery_id = :g WHERE id = :c"), {"g": private_gid, "c": col_id}
+        )
+        await db_session.commit()
+
+        async with make_client(user_id=61, role="member") as mc:
+            resp = await mc.get("/api/collections/")
+        match = next(c for c in resp.json()["collections"] if c["id"] == col_id)
+        assert match["cover_thumb"] is None
+        assert match["gallery_count"] == 0
+
+    async def test_list_does_not_expose_cover_thumb_of_invisible_first_gallery(self, make_client, db_session):
+        """Fallback cover skips invisible galleries and picks the first visible one."""
+        await _ensure_user(db_session)
+        await _insert_member(db_session, 62)
+        private_gid = await _gallery_with_image(db_session, "svc_cov_priv2", "cd" * 32, user_id=1)
+        await _set_gallery(db_session, private_gid, visibility="private")
+        public_gid = await _gallery_with_image(db_session, "svc_cov_pub2", "ef" * 32, user_id=1)
+        await _set_gallery(db_session, public_gid, visibility="public")
+        col_id = await _insert_collection(db_session, 62)
+        await _link(db_session, col_id, private_gid, 0)
+        await _link(db_session, col_id, public_gid, 1)
+
+        async with make_client(user_id=62, role="member") as mc:
+            resp = await mc.get("/api/collections/")
+        match = next(c for c in resp.json()["collections"] if c["id"] == col_id)
+        assert match["gallery_count"] == 1
+        assert match["cover_thumb"] is not None
+        assert ("ef" * 32)[:2] in match["cover_thumb"]
+        assert ("cd" * 32) not in match["cover_thumb"]
+
+    async def test_list_explicit_cover_trashed_falls_back_to_first_visible(self, client, db_session):
+        """If the explicit cover became trashed, the first visible gallery is used."""
+        await _ensure_user(db_session)
+        trashed = await _gallery_with_image(db_session, "svc_cov_tr1", "12" * 32)
+        live = await _gallery_with_image(db_session, "svc_cov_live1", "34" * 32)
+        col_id = await _insert_collection(db_session, 1)
+        await _link(db_session, col_id, trashed, 0)
+        await _link(db_session, col_id, live, 1)
+        await db_session.execute(
+            text("UPDATE collections SET cover_gallery_id = :g WHERE id = :c"), {"g": trashed, "c": col_id}
+        )
+        await _set_gallery(db_session, trashed, deleted_at="2024-01-01 00:00:00")
+
+        resp = await client.get("/api/collections/")
+        match = next(c for c in resp.json()["collections"] if c["id"] == col_id)
+        assert match["gallery_count"] == 1
+        assert match["cover_thumb"] is not None
+        assert ("34" * 32) in match["cover_thumb"]
+
+
+class TestListCollectionsContainsGallery:
+    """GET /api/collections/?gallery_id= adds a contains_gallery flag."""
+
+    async def test_contains_gallery_flag_true_only_for_member_collection(self, client, db_session):
+        await _ensure_user(db_session)
+        gid = await _insert_gallery(db_session, source_id="svc_has1")
+        with_g = await _insert_collection(db_session, 1, "With")
+        without_g = await _insert_collection(db_session, 1, "Without")
+        await _link(db_session, with_g, gid)
+
+        resp = await client.get("/api/collections/", params={"gallery_id": gid})
+        by_id = {c["id"]: c for c in resp.json()["collections"]}
+        assert by_id[with_g]["contains_gallery"] is True
+        assert by_id[without_g]["contains_gallery"] is False
+
+    async def test_contains_gallery_key_omitted_without_gallery_id_param(self, client, db_session):
+        await _ensure_user(db_session)
+        await _insert_collection(db_session, 1)
+
+        resp = await client.get("/api/collections/")
+        assert all("contains_gallery" not in c for c in resp.json()["collections"])

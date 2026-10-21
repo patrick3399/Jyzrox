@@ -3658,6 +3658,166 @@ class TestBatchAddToCollection:
         )
         assert resp.status_code == 404
 
+    async def _setup_member_collection(self, make_client, db_session, user_id: int) -> int:
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'member')"),
+            {"id": user_id, "u": f"batch_member_{user_id}"},
+        )
+        result = await db_session.execute(
+            text("INSERT INTO collections (user_id, name) VALUES (:uid, 'Batch Col') RETURNING id"),
+            {"uid": user_id},
+        )
+        await db_session.commit()
+        return result.scalar_one()
+
+    async def _owned_gallery(self, db_session, source_id: str, owner: int | None, visibility: str = "public") -> int:
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        gid = await _insert_gallery(db_session, source_id=source_id)
+        await db_session.execute(
+            text("UPDATE galleries SET created_by_user_id = :o, visibility = :v WHERE id = :g"),
+            {"o": owner, "v": visibility, "g": gid},
+        )
+        await db_session.commit()
+        return gid
+
+    async def _member_rows(self, db_session, col_id: int) -> list[tuple[int, int]]:
+        rows = await db_session.execute(
+            text("SELECT gallery_id, position FROM collection_galleries WHERE collection_id = :c ORDER BY position"),
+            {"c": col_id},
+        )
+        return [(r[0], r[1]) for r in rows.all()]
+
+    async def test_batch_add_to_collection_private_gallery_of_other_user_is_denied(self, make_client, db_session):
+        """A member must not be able to add another user's private gallery via the batch path."""
+        col_id = await self._setup_member_collection(make_client, db_session, 31)
+        private_gid = await self._owned_gallery(db_session, "coll_priv01", owner=1, visibility="private")
+        public_gid = await self._owned_gallery(db_session, "coll_pub01", owner=1, visibility="public")
+
+        async with make_client(user_id=31, role="member") as mc:
+            resp = await mc.post(
+                "/api/library/galleries/batch",
+                json={"action": "add_to_collection", "gallery_ids": [private_gid, public_gid], "collection_id": col_id},
+            )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["affected"] == 1
+        assert data["denied"] == [private_gid]
+        assert [g for g, _ in await self._member_rows(db_session, col_id)] == [public_gid]
+
+    async def test_batch_add_to_collection_nonexistent_gallery_id_is_denied_not_500(self, client, db_session):
+        """A nonexistent gallery id must be reported in denied while the other ids are still added."""
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        gid = await _insert_gallery(db_session, source_id="coll_ghost01")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_collection", "gallery_ids": [gid, 888888], "collection_id": col_id},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["affected"] == 1
+        assert data["denied"] == [888888]
+        assert [g for g, _ in await self._member_rows(db_session, col_id)] == [gid]
+
+    async def test_batch_add_to_collection_trashed_gallery_is_denied(self, client, db_session):
+        """A soft-deleted (trashed) gallery must be denied by the batch path."""
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        gid = await _insert_gallery(db_session, source_id="coll_trash01")
+        await db_session.execute(text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :g"), {"g": gid})
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_collection", "gallery_ids": [gid], "collection_id": col_id},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["affected"] == 0
+        assert resp.json()["denied"] == [gid]
+        assert await self._member_rows(db_session, col_id) == []
+
+    async def test_batch_add_to_collection_permission_collaborator_can_add_private_gallery(
+        self, make_client, db_session
+    ):
+        """A GalleryPermission collaborator can see the gallery, so the batch path must accept it."""
+        col_id = await self._setup_member_collection(make_client, db_session, 32)
+        gid = await self._owned_gallery(db_session, "coll_perm01", owner=1, visibility="private")
+        await db_session.execute(
+            text("INSERT INTO gallery_permissions (gallery_id, user_id, can_edit) VALUES (:g, 32, 0)"), {"g": gid}
+        )
+        await db_session.commit()
+
+        async with make_client(user_id=32, role="member") as mc:
+            resp = await mc.post(
+                "/api/library/galleries/batch",
+                json={"action": "add_to_collection", "gallery_ids": [gid], "collection_id": col_id},
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["affected"] == 1
+        assert resp.json()["denied"] == []
+
+    async def test_batch_add_to_collection_skipped_existing_member_keeps_positions_contiguous(self, client, db_session):
+        """Positions follow the count of rows actually added; skipped existing ids leave no gap."""
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        g1 = await _insert_gallery(db_session, source_id="coll_pos01")
+        g2 = await _insert_gallery(db_session, source_id="coll_pos02")
+        g3 = await _insert_gallery(db_session, source_id="coll_pos03")
+        await db_session.execute(
+            text("INSERT INTO collection_galleries (collection_id, gallery_id, position) VALUES (:c, :g, 0)"),
+            {"c": col_id, "g": g1},
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_collection", "gallery_ids": [g1, g2, g3], "collection_id": col_id},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["affected"] == 2
+        assert resp.json()["denied"] == []
+        assert await self._member_rows(db_session, col_id) == [(g1, 0), (g2, 1), (g3, 2)]
+
+    async def test_batch_add_to_collection_emits_collection_updated_event(self, client, db_session):
+        """A successful batch add must emit COLLECTION_UPDATED for the collection."""
+        from unittest.mock import AsyncMock
+
+        from core.events import EventType
+
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        gid = await _insert_gallery(db_session, source_id="coll_evt01")
+
+        with patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit:
+            resp = await client.post(
+                "/api/library/galleries/batch",
+                json={"action": "add_to_collection", "gallery_ids": [gid], "collection_id": col_id},
+            )
+        assert resp.status_code == 200, resp.text
+        mock_emit.assert_awaited_once()
+        assert mock_emit.await_args.args[0] == EventType.COLLECTION_UPDATED
+        assert mock_emit.await_args.kwargs["resource_type"] == "collection"
+        assert mock_emit.await_args.kwargs["resource_id"] == col_id
+
     async def test_batch_empty_gallery_ids_returns_400(self, client):
         """Empty gallery_ids should return 400."""
         resp = await client.post(
