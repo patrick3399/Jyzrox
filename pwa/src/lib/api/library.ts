@@ -95,7 +95,7 @@ export const library = {
     },
     init?: RequestInit,
   ) =>
-    apiFetch<{ status: string; affected: number; deleted_dirs?: number }>(
+    apiFetch<{ status: string; affected: number; deleted_dirs?: number; denied?: number[] }>(
       '/api/library/galleries/batch',
       {
         method: 'POST',

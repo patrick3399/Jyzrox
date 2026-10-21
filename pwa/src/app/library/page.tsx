@@ -32,6 +32,7 @@ import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
+import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { t, formatNumber } from '@/lib/i18n'
@@ -983,41 +984,15 @@ function LibraryContent() {
                 </option>
               ))}
             </select>
-            {collectionsData && collectionsData.collections.length > 0 && (
-              <select
-                defaultValue=""
-                onChange={async (e) => {
-                  const collectionId = Number(e.target.value)
-                  if (!collectionId) return
-                  try {
-                    const res = await api.library.batchGalleries({
-                      action: 'add_to_collection',
-                      gallery_ids: [...selectedIds],
-                      collection_id: collectionId,
-                    })
-                    toast.success(
-                      t('collections.addedToCollection', { count: String(res.affected) }),
-                    )
-                    await refresh()
-                    setSelectedIds(new Set())
-                    setSelectMode(false)
-                  } catch {
-                    toast.error(t('collections.addFailed'))
-                  }
-                  e.target.value = ''
-                }}
-                className="px-2 py-1.5 bg-vault-input border border-vault-border rounded text-vault-text text-sm"
-              >
-                <option value="" disabled>
-                  {t('collections.addToCollection')}
-                </option>
-                {collectionsData.collections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
+            <AddToCollectionMenu
+              galleryIds={[...selectedIds]}
+              onChanged={async () => {
+                await refresh()
+                setSelectedIds(new Set())
+                setSelectMode(false)
+              }}
+              className="px-3 py-1.5 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors flex items-center gap-1.5"
+            />
             {datasetsData && datasetsData.datasets.length > 0 && (
               <select
                 defaultValue=""

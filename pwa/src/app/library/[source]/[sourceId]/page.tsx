@@ -17,6 +17,7 @@ import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import { galleryStatusAction } from '@/lib/galleryUtils'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
 import { ThumbPlaceholder } from '@/components/library/ThumbPlaceholder'
+import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
 import { AppImage } from '@/components/AppImage'
 import type { GalleryImage } from '@/lib/types'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
@@ -1010,6 +1011,10 @@ export default function GalleryDetailPage() {
               >
                 {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
               </button>
+              <AddToCollectionMenu
+                galleryId={gallery.id}
+                className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors flex items-center gap-1.5"
+              />
               <button
                 onClick={async () => {
                   try {

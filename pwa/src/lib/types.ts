@@ -567,6 +567,8 @@ export interface Collection {
   cover_gallery_id: number | null
   gallery_count: number
   cover_thumb: string | null
+  /** Present only when the list was requested with `gallery_id`. */
+  contains_gallery?: boolean
   created_at: string | null
   updated_at: string | null
 }

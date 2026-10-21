@@ -153,6 +153,15 @@ const en: Record<string, string> = {
   'collections.galleryRemoved': 'Gallery removed from collection',
   'collections.galleryCount': '{count} galleries',
   'collections.empty': 'This collection is empty.',
+  'collections.newCollection': 'New collection…',
+  'collections.createAndAdd': 'Create & add',
+  'collections.createFailed': 'Failed to create collection',
+  'collections.removeFailed': 'Failed to remove from collection',
+  'collections.galleryAddedTo': 'Added to "{name}"',
+  'collections.addDenied': '{count} galleries could not be added (no access)',
+  'collections.inCollection': 'In this collection',
+  'collections.emptyHint': 'Add galleries from a gallery\'s page ("Add to Collection"), or select galleries in the library and use "Add to Collection".',
+  'collections.browseLibrary': 'Browse library',
   'collections.coverGallery': 'Cover Gallery',
 
   // ── Queue ──

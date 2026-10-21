@@ -5,7 +5,10 @@ import type { Collection, Gallery } from '../types'
 // ── Collections ──────────────────────────────────────────────────────
 
 export const collections = {
-  list: () => apiFetch<{ collections: Collection[] }>('/api/collections/'),
+  list: (params: { gallery_id?: number } = {}) =>
+    apiFetch<{ collections: Collection[] }>(
+      `/api/collections/${qs(params as Record<string, unknown>)}`,
+    ),
 
   get: (id: number, params: { page?: number; limit?: number } = {}) =>
     apiFetch<{
@@ -42,7 +45,7 @@ export const collections = {
     }),
 
   addGalleries: (id: number, gallery_ids: number[]) =>
-    apiFetch<{ status: string; added: number }>(`/api/collections/${id}/galleries`, {
+    apiFetch<{ status: string; added: number; denied: number[] }>(`/api/collections/${id}/galleries`, {
       method: 'POST',
       body: JSON.stringify({ gallery_ids }),
     }),
