@@ -1314,6 +1314,8 @@ const ja: Record<string, string> = {
     'このURLはすでに存在します — サブスクリプション設定を更新しました',
   'subscriptions.searchPlaceholder': 'サブスクリプションを検索...',
   'subscriptions.noResults': '検索に一致するサブスクリプションがありません',
+  'subscriptions.filterDownloading': 'ダウンロード中 ({count})',
+  'subscriptions.noDownloading': '現在ダウンロード中のサブスクリプションはありません',
   'subscriptions.groups': 'グループ',
   'subscriptions.groupDefault': 'デフォルト',
   'subscriptions.groupNew': '新しいグループ',

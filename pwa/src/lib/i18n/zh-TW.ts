@@ -1502,6 +1502,8 @@ const zhTW: Record<string, string> = {
   'subscriptions.noSubscriptions': '尚無訂閱。',
   'subscriptions.noSubscriptionsHint': '新增 Pixiv 使用者或 Twitter 帳號 URL 以監控新作品。',
   'subscriptions.noResults': '沒有訂閱符合您的搜尋',
+  'subscriptions.filterDownloading': '下載中 ({count})',
+  'subscriptions.noDownloading': '目前沒有訂閱正在下載',
   'subscriptions.queued': '已排入佇列',
   'subscriptions.viewGallery': '顯示圖庫',
   'subscriptions.downloadNow': '立即下載',

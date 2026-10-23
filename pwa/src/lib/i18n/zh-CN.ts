@@ -1677,6 +1677,8 @@ const zhCN: Record<string, string> = {
   'subscriptions.noSubscriptions': '暂无订阅。',
   'subscriptions.noSubscriptionsHint': '添加 Pixiv 用户或 Twitter 账号 URL 以监控新作品。',
   'subscriptions.noResults': '无匹配的订阅',
+  'subscriptions.filterDownloading': '下载中 ({count})',
+  'subscriptions.noDownloading': '当前没有订阅正在下载',
   'subscriptions.noGroup': '无分组',
   'subscriptions.queued': '已排队',
   'subscriptions.viewGallery': '显示图库',

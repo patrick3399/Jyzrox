@@ -1123,6 +1123,8 @@ const en: Record<string, string> = {
   'subscriptions.duplicateUpdated': 'This URL already exists — subscription settings updated',
   'subscriptions.searchPlaceholder': 'Search subscriptions...',
   'subscriptions.noResults': 'No subscriptions match your search',
+  'subscriptions.filterDownloading': 'Downloading ({count})',
+  'subscriptions.noDownloading': 'No subscriptions are downloading right now',
   'subscriptions.groups': 'Groups',
   'subscriptions.groupDefault': 'Default',
   'subscriptions.groupNew': 'New Group',

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
-import { Rss, Plus, X, Trash2, List, Search, FolderOpen } from 'lucide-react'
+import { Rss, Plus, X, Trash2, List, Search, FolderOpen, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
@@ -26,9 +26,11 @@ import {
   useResumeGroup,
   useBulkMove,
 } from '@/hooks/useSubscriptionGroups'
+import { useDownloadJobs } from '@/hooks/useDownloadQueue'
+import { activeSubscriptionIds, sortActiveFirst } from '@/lib/downloadJobFilters'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { api } from '@/lib/api'
-import type { Subscription, SubscriptionGroup, DownloadJob } from '@/lib/types'
+import type { Subscription, SubscriptionGroup, DownloadJob, JobListParams } from '@/lib/types'
 import useSWR from 'swr'
 import { GroupCard } from '@/components/subscriptions/GroupCard'
 import { CRON_PRESETS, DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
@@ -39,6 +41,14 @@ const GroupModal = dynamic(
 )
 
 // ── Constants ────────────────────────────────────────────────────────
+
+// Module-level so the SWR key stays referentially stable across renders.
+// Shares its cache entry with the queue page's subscription-active section.
+const SUBSCRIPTION_ACTIVE_PARAMS: JobListParams = {
+  subscription_only: true,
+  active_only: true,
+  limit: 100,
+}
 
 export default function SubscriptionsPage() {
   useLocale()
@@ -153,11 +163,30 @@ export default function SubscriptionsPage() {
     )
   }, [data?.subscriptions, debouncedSearch])
 
-  // Group subscriptions by group_id
+  // Subscriptions that currently have an active download job
+  const { data: activeJobsData } = useDownloadJobs(SUBSCRIPTION_ACTIVE_PARAMS)
+  const activeIds = useMemo(
+    () => activeSubscriptionIds(activeJobsData?.jobs ?? []),
+    [activeJobsData?.jobs],
+  )
+  const activeCount = activeIds.size
+  const [downloadingOnly, setDownloadingOnly] = useState(false)
+
+  // Nothing is downloading any more: drop the filter so the list does not look empty.
+  useEffect(() => {
+    if (activeCount === 0) setDownloadingOnly(false)
+  }, [activeCount])
+
+  const showDownloadingOnly = downloadingOnly && activeCount > 0
+
+  // Group subscriptions by group_id (active downloads first inside every group)
   const groupedSubs = useMemo(() => {
     const byGroup: Record<number, Subscription[]> = {}
     const ungrouped: Subscription[] = []
-    for (const sub of filteredSubscriptions) {
+    const visible = showDownloadingOnly
+      ? filteredSubscriptions.filter((s) => activeIds.has(s.id))
+      : filteredSubscriptions
+    for (const sub of visible) {
       if (sub.group_id !== null && sub.group_id !== undefined) {
         if (!byGroup[sub.group_id]) byGroup[sub.group_id] = []
         byGroup[sub.group_id].push(sub)
@@ -165,8 +194,14 @@ export default function SubscriptionsPage() {
         ungrouped.push(sub)
       }
     }
-    return { byGroup, ungrouped }
-  }, [filteredSubscriptions])
+    for (const key of Object.keys(byGroup)) {
+      byGroup[Number(key)] = sortActiveFirst(byGroup[Number(key)], activeIds)
+    }
+    return { byGroup, ungrouped: sortActiveFirst(ungrouped, activeIds) }
+  }, [filteredSubscriptions, activeIds, showDownloadingOnly])
+
+  const hasVisibleSubs =
+    groupedSubs.ungrouped.length > 0 || Object.values(groupedSubs.byGroup).some((l) => l.length > 0)
 
   // Forms state
   const [showAdd, setShowAdd] = useState(false)
@@ -767,29 +802,46 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
-      {/* Search */}
+      {/* Search + downloading filter */}
       {(data?.subscriptions?.length ?? 0) > 0 && (
-        <div className="relative mb-4">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-vault-text-muted"
-          />
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder={t('subscriptions.searchPlaceholder')}
-            className="w-full pl-9 pr-8 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder-vault-text-muted"
-          />
-          {searchInput && (
+        <div className="flex items-center gap-2 mb-4">
+          <div className="relative flex-1 min-w-0">
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-vault-text-muted"
+            />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={t('subscriptions.searchPlaceholder')}
+              className="w-full pl-9 pr-8 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder-vault-text-muted"
+            />
+            {searchInput && (
+              <button
+                onClick={() => {
+                  setSearchInput('')
+                  setDebouncedSearch('')
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          {(activeCount > 0 || downloadingOnly) && (
             <button
-              onClick={() => {
-                setSearchInput('')
-                setDebouncedSearch('')
-              }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text"
+              type="button"
+              onClick={() => setDownloadingOnly((on) => !on)}
+              aria-pressed={showDownloadingOnly}
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                showDownloadingOnly
+                  ? 'bg-vault-accent/20 border-vault-accent/40 text-vault-accent'
+                  : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
+              }`}
             >
-              <X size={14} />
+              <Download size={14} />
+              {t('subscriptions.filterDownloading', { count: activeCount })}
             </button>
           )}
         </div>
@@ -813,32 +865,41 @@ export default function SubscriptionsPage() {
           <Search size={40} className="mx-auto text-vault-text-muted mb-3" />
           <p className="text-sm text-vault-text-muted">{t('subscriptions.noResults')}</p>
         </div>
+      ) : showDownloadingOnly && !hasVisibleSubs ? (
+        <div className="text-center py-12">
+          <Download size={40} className="mx-auto text-vault-text-muted mb-3" />
+          <p className="text-sm text-vault-text-muted">{t('subscriptions.noDownloading')}</p>
+        </div>
       ) : (
         <div className="space-y-3">
-          {/* Named groups */}
-          {groups.map((group) => (
-            <GroupCard
-              key={group.id}
-              group={group}
-              subs={groupedSubs.byGroup[group.id] ?? []}
-              jobsData={jobsData ?? {}}
-              groups={groups}
-              onEdit={openEditGroup}
-              onRun={handleGroupRun}
-              onPauseResume={handleGroupPauseResume}
-              onDelete={handleGroupDelete}
-              onToggleSub={handleToggle}
-              onCheckSub={handleCheck}
-              onBackfillSub={handleBackfill}
-              onDeleteSub={handleDelete}
-              onAutoDownloadToggle={handleAutoDownloadToggle}
-              onMoveToGroup={handleMoveToGroup}
-              onRenameSub={handleRename}
-              onCronChangeSub={handleCronChange}
-              checkingId={checkingId}
-              defaultExpanded={true}
-            />
-          ))}
+          {/* Named groups (empty ones are hidden while filtering to active downloads) */}
+          {groups
+            .filter(
+              (group) => !showDownloadingOnly || (groupedSubs.byGroup[group.id]?.length ?? 0) > 0,
+            )
+            .map((group) => (
+              <GroupCard
+                key={group.id}
+                group={group}
+                subs={groupedSubs.byGroup[group.id] ?? []}
+                jobsData={jobsData ?? {}}
+                groups={groups}
+                onEdit={openEditGroup}
+                onRun={handleGroupRun}
+                onPauseResume={handleGroupPauseResume}
+                onDelete={handleGroupDelete}
+                onToggleSub={handleToggle}
+                onCheckSub={handleCheck}
+                onBackfillSub={handleBackfill}
+                onDeleteSub={handleDelete}
+                onAutoDownloadToggle={handleAutoDownloadToggle}
+                onMoveToGroup={handleMoveToGroup}
+                onRenameSub={handleRename}
+                onCronChangeSub={handleCronChange}
+                checkingId={checkingId}
+                defaultExpanded={true}
+              />
+            ))}
 
           {/* Ungrouped section — only show when there are ungrouped subs */}
           {groupedSubs.ungrouped.length > 0 && (

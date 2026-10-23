@@ -1660,6 +1660,8 @@ const ko: Record<string, string> = {
   'subscriptions.duplicateUpdated': '이 URL이 이미 존재합니다 — 구독 설정이 업데이트되었습니다',
   'subscriptions.searchPlaceholder': '구독 검색...',
   'subscriptions.noResults': '검색어와 일치하는 구독이 없습니다',
+  'subscriptions.filterDownloading': '다운로드 중 ({count})',
+  'subscriptions.noDownloading': '현재 다운로드 중인 구독이 없습니다',
   'subscriptions.groups': '그룹',
   'subscriptions.groupDefault': '기본',
   'subscriptions.groupNew': '새 그룹',
