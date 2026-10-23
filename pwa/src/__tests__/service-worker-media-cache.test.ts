@@ -13,6 +13,8 @@ interface Stats {
   cacheKeys: number
   cachePut: number
   cacheDeletes: number
+  /** `clone()` calls on responses the fake network handed the worker. */
+  responseClones: number
 }
 
 interface Harness {
@@ -37,6 +39,8 @@ interface Harness {
   /** Simulate loss of connectivity: uncached `fetch()` calls reject. */
   setOffline: (offline: boolean) => void
   setStorageUsage: (bytes: number) => void
+  /** Make the network report this Content-Length for a URL. */
+  setResponseBytes: (url: string, bytes: number) => void
   /** Let fire-and-forget work (cache writes, eviction sweeps) settle. */
   settle: () => Promise<void>
 }
@@ -48,13 +52,14 @@ interface Harness {
  * behavioral regressions like "how many cache reads does one image cost".
  */
 function loadServiceWorker(): Harness {
-  const stats: Stats = { network: 0, cacheMatch: 0, cacheKeys: 0, cachePut: 0, cacheDeletes: 0 }
+  const stats: Stats = { network: 0, cacheMatch: 0, cacheKeys: 0, cachePut: 0, cacheDeletes: 0, responseClones: 0 }
   const listeners = new Map<string, (event: unknown) => void>()
   const caches_ = new Map<string, FakeCache>()
   const httpCache = new Map<string, Response>()
   const pendingWork: Promise<unknown>[] = []
   let storageUsage = 0
   let offline = false
+  const responseBytes = new Map<string, number>()
 
   const keyOf = (req: Request | string) => (typeof req === 'string' ? req : req.url)
 
@@ -117,13 +122,19 @@ function loadServiceWorker(): Harness {
       const res = new Response('imagebytes', {
         status: 200,
         headers: {
-          'Content-Length': '10000',
+          'Content-Length': String(responseBytes.get(url) ?? 10000),
           'Content-Type': 'image/webp',
           'Cache-Control': 'private, immutable',
         },
       })
       httpCache.set(url, res.clone())
-      return res.clone()
+      const handed = res.clone()
+      const clone = handed.clone.bind(handed)
+      handed.clone = () => {
+        stats.responseClones++
+        return clone()
+      }
+      return handed
     },
     indexedDB: { open: () => ({}) },
     navigator: { storage: { estimate: async () => ({ usage: storageUsage, quota: 10 * 1024 ** 3 }) } },
@@ -189,6 +200,9 @@ function loadServiceWorker(): Harness {
     },
     setStorageUsage(bytes: number) {
       storageUsage = bytes
+    },
+    setResponseBytes(url: string, bytes: number) {
+      responseBytes.set(url, bytes)
     },
     async settle() {
       await Promise.allSettled(pendingWork.splice(0))
@@ -320,5 +334,45 @@ describe('service worker media cache performance', () => {
 
     expect(responded).toBeDefined()
     expect(sw.stats.cachePut).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not copy an oversized library original into the media cache', async () => {
+    // Regression (Reader freeze after leaving a huge gallery): path-addressed
+    // originals went through `response.clone()` + `cache.put()` under
+    // waitUntil. The tee'd branch kept reading the whole body after the page
+    // dropped the <img>, so backing out of a gallery of ~40 MB JPEGs left
+    // hundreds of MB still downloading and buffered in the worker, and the next
+    // screen's requests stalled behind them on iOS Safari.
+    const original = `${ORIGIN}/media/libraries/ssd-data/images/Cosplay/a/GalleryEpic.top_03.jpg`
+    sw.setResponseBytes(original, 42_674_088)
+
+    const res = await sw.request(original)
+    await sw.settle()
+
+    expect(res.status).toBe(200)
+    expect(sw.stats.responseClones).toBe(0)
+    expect(sw.stats.cachePut).toBe(0)
+  })
+
+  it('does not copy an oversized content-addressed original into the media cache', async () => {
+    const original = `${ORIGIN}/media/cas/aa/bb/aabb.jpg`
+    sw.setResponseBytes(original, 42_674_088)
+
+    const res = await sw.request(original)
+    await sw.settle()
+
+    expect(res.status).toBe(200)
+    expect(sw.stats.responseClones).toBe(0)
+    expect(sw.stats.cachePut).toBe(0)
+  })
+
+  it('still caches ordinary-sized library images for offline use', async () => {
+    const page = `${ORIGIN}/media/libraries/ssd-data/images/Cosplay/a/027.jpg`
+    sw.setResponseBytes(page, 789_628)
+
+    await sw.request(page)
+    await sw.settle()
+
+    expect(sw.stats.cachePut).toBe(1)
   })
 })

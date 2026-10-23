@@ -10,6 +10,18 @@ const CONTENT_ADDRESSED_MEDIA = /^\/media\/(cas|thumbs|image)\//;
 // Video containers the backend stores (services/media_formats.py VIDEO_EXTENSIONS).
 const VIDEO_MEDIA = /\.(mp4|webm|mov)$/i;
 const MEDIA_CACHE_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+// Responses larger than this are handed straight to the page, never tee'd into
+// CacheStorage. `response.clone()` makes the worker read the full body for the
+// cache write even after the page drops the <img>, so leaving a gallery of
+// ~40 MB originals kept hundreds of MB downloading and buffered in the worker
+// and stalled the next screen on iOS Safari. Normal pages are well under this.
+const MAX_CACHEABLE_MEDIA_BYTES = 8 * 1024 * 1024;
+
+function isCacheableMediaResponse(response) {
+  if (response.status < 200 || response.status >= 300) return false;
+  const length = Number(response.headers.get('Content-Length'));
+  return !(length > MAX_CACHEABLE_MEDIA_BYTES);
+}
 
 // ── Cache Config (overridable via postMessage) ──
 let cacheConfig = {
@@ -314,7 +326,7 @@ self.addEventListener('fetch', (event) => {
     let backgroundMediaWork = Promise.resolve();
     const mediaResponse = fetch(event.request)
       .then((response) => {
-        if (response.status >= 200 && response.status < 300) {
+        if (isCacheableMediaResponse(response)) {
           // Clone in the same tick the network settles, before the page starts
           // consuming the body; the actual CacheStorage write runs off the hot
           // path under waitUntil.
@@ -347,7 +359,7 @@ self.addEventListener('fetch', (event) => {
     const mediaResponse = caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
       try {
         const response = await fetch(event.request, { cache: 'no-cache' });
-        if (response.status >= 200 && response.status < 300) {
+        if (isCacheableMediaResponse(response)) {
           const stamped = wrapResponseWithTimestamp(response.clone());
           backgroundMediaWork = cache
             .put(event.request, stamped)

@@ -7,7 +7,8 @@
  *     Page turns keep in-flight prefetches inside a window ahead of the current
  *     page ([currentPage, currentPage + PREFETCH_KEEP_AHEAD]) instead of aborting
  *     everything, so fast flipping can build a buffer.
- *   - Local mode: fire up to 3 concurrent requests per page change
+ *   - Local mode: LOCAL_PREFETCH_CONCURRENCY (2) slots over a window of 5 ahead +
+ *     2 behind, shrunk by a decoded-pixel budget for huge originals
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -19,6 +20,8 @@ import type { ReaderImage } from '../components/Reader/types'
 
 interface FakeImage {
   src: string
+  /** Every non-empty URL ever assigned, kept after cleanup resets `src`. */
+  requested: string[]
   onload: (() => void) | null
   onerror: (() => void) | null
   triggerLoad: () => void
@@ -32,7 +35,17 @@ function makeFakeImageClass(): {
   const instances: FakeImage[] = []
 
   class FakeImage {
-    src = ''
+    private currentSrc = ''
+    requested: string[] = []
+
+    get src() {
+      return this.currentSrc
+    }
+
+    set src(value: string) {
+      if (value) this.requested.push(value)
+      this.currentSrc = value
+    }
     onload: (() => void) | null = null
     onerror: (() => void) | null = null
 
@@ -61,6 +74,22 @@ function makeImages(count: number, startPage = 1): ReaderImage[] {
     isLocal: false,
     mediaType: 'image' as const,
   }))
+}
+
+/** Every URL any FakeImage was pointed at, in request order */
+function requestedSrcs(instances: FakeImage[]): string[] {
+  return instances.flatMap((i) => i.requested)
+}
+
+/** Settle in-flight requests one at a time, letting each settle top the window up */
+async function settleInFlight(instances: FakeImage[], max = 20): Promise<void> {
+  for (let i = 0; i < max; i++) {
+    const pending = instances.find((img) => img.src !== '' && img.onload)
+    if (!pending) return
+    await act(async () => {
+      pending.triggerLoad()
+    })
+  }
 }
 
 /** Get all non-empty src values from FakeImage instances */
@@ -198,33 +227,29 @@ describe('useSequentialPrefetch', () => {
 
   // ── Local mode ───────────────────────────────────────────────────
 
-  describe('local mode (concurrent)', () => {
-    it('should fire up to 5 concurrent forward Image requests on initial render', () => {
+  describe('local mode (capped)', () => {
+    it('should start only LOCAL_PREFETCH_CONCURRENCY (2) requests on initial render', () => {
       const images = makeImages(10)
 
       renderHook(() => useSequentialPrefetch(images, 1, false))
 
-      // 5 forward (pages 2-6) + 0 backward (page 0 and below are out of bounds)
-      expect(instances).toHaveLength(5)
-      const srcs = instances.map((i) => i.src)
-      expect(srcs).toContain('http://proxy/page/2')
-      expect(srcs).toContain('http://proxy/page/3')
-      expect(srcs).toContain('http://proxy/page/4')
-      expect(srcs).toContain('http://proxy/page/5')
-      expect(srcs).toContain('http://proxy/page/6')
+      expect(activeSrcs(instances)).toEqual(['http://proxy/page/2', 'http://proxy/page/3'])
     })
 
-    it('should NOT wait for earlier requests to complete before firing all requests', () => {
+    it('should top up the window as earlier requests settle until 5 ahead are covered', async () => {
       const images = makeImages(10)
 
       renderHook(() => useSequentialPrefetch(images, 1, false))
 
-      const initialCount = instances.length
-      act(() => {
-        instances[0].triggerLoad()
-      })
-      // Local mode is fire-and-forget: no new requests from onload
-      expect(instances).toHaveLength(initialCount)
+      await settleInFlight(instances)
+
+      expect(requestedSrcs(instances)).toEqual([
+        'http://proxy/page/2',
+        'http://proxy/page/3',
+        'http://proxy/page/4',
+        'http://proxy/page/5',
+        'http://proxy/page/6',
+      ])
     })
 
     it('should fire new requests when currentPage advances', async () => {
@@ -238,24 +263,39 @@ describe('useSequentialPrefetch', () => {
         rerender()
       })
 
-      const srcs = instances.map((i) => i.src)
-      expect(srcs).toContain('http://proxy/page/5')
-      expect(srcs).toContain('http://proxy/page/6')
-      expect(srcs).toContain('http://proxy/page/7')
+      // Pages 2 and 3 fell behind the new window and were aborted, freeing
+      // both slots for the pages right after the new current page.
+      expect(activeSrcs(instances)).toEqual(['http://proxy/page/5', 'http://proxy/page/6'])
     })
 
-    it('should prefetch available pages ahead and behind when near the end', () => {
+    it('should prefetch available pages ahead and behind when near the end', async () => {
       const images = makeImages(9)
-      const currentPage = 8
 
-      renderHook(() => useSequentialPrefetch(images, currentPage, false))
+      renderHook(() => useSequentialPrefetch(images, 8, false))
 
-      // Forward: only page 9 (1 page)
-      // Backward: pages 7 and 6 (2 pages)
-      // Total: 3 instances
-      expect(instances).toHaveLength(3)
-      const srcs = instances.map((i) => i.src)
-      expect(srcs).toContain('http://proxy/page/9')
+      await settleInFlight(instances)
+
+      // Forward: only page 9; backward: pages 7 and 6.
+      expect(requestedSrcs(instances)).toEqual([
+        'http://proxy/page/9',
+        'http://proxy/page/7',
+        'http://proxy/page/6',
+      ])
+    })
+
+    it('should prefetch only the next page when original images exceed the pixel budget', async () => {
+      // Regression (Reader freeze after leaving a huge gallery): local mode
+      // fired 5 forward + 2 backward original-resolution requests at once with
+      // no cap. A 5336x8000 (~40 MB) gallery put ~7 such files in flight per
+      // page turn on iOS Safari, starving the network and memory badly enough
+      // that the next screen never rendered after the user backed out.
+      const images = makeImages(10).map((img) => ({ ...img, width: 5336, height: 8000 }))
+
+      renderHook(() => useSequentialPrefetch(images, 3, false))
+
+      await settleInFlight(instances)
+
+      expect(requestedSrcs(instances)).toEqual(['http://proxy/page/4'])
     })
 
     it('should handle onerror without throwing and still mark page as prefetched', async () => {
@@ -317,13 +357,15 @@ describe('useSequentialPrefetch', () => {
       expect(instances.map((i) => i.src)).not.toContain('http://proxy/page/3.mp4')
     })
 
-    it('should keep prefetching later image pages when a video page is skipped', () => {
+    it('should keep prefetching later image pages when a video page is skipped', async () => {
       const images = makeImages(6)
       images[1] = { ...images[1], mediaType: 'video', url: 'http://proxy/page/2.mp4' }
 
       renderHook(() => useSequentialPrefetch(images, 1, false))
+      await settleInFlight(instances)
 
-      const srcs = instances.map((i) => i.src)
+      const srcs = requestedSrcs(instances)
+      expect(srcs).not.toContain('http://proxy/page/2.mp4')
       expect(srcs).toContain('http://proxy/page/3')
       expect(srcs).toContain('http://proxy/page/6')
     })
@@ -356,7 +398,7 @@ describe('useSequentialPrefetch', () => {
       const { rerender } = renderHook(() => useSequentialPrefetch(images, 1, false))
 
       const initialCount = instances.length
-      expect(initialCount).toBe(5)
+      expect(initialCount).toBe(2)
 
       // Same pages, new array identity — exactly what a Reader re-render produces.
       images = makeImages(10)
@@ -383,6 +425,9 @@ describe('useSequentialPrefetch', () => {
       await act(async () => {
         rerender()
       })
+
+      // Pages 3 and 4 hold both local slots; page 2 starts as soon as one frees.
+      await settleInFlight(instances, 1)
 
       expect(activeSrcs(instances)).toContain('http://proxy/page/2')
     })
