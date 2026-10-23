@@ -54,7 +54,15 @@ http {
     # every `valid` interval instead, so a restarted upstream is picked up
     # within ~10s with no reload. `resolve` needs a shared-memory `zone`;
     # ipv6=off because the frontend network is IPv4-only.
+    #
+    # `valid` only paces re-resolution after a successful answer. After a
+    # failed one -- Docker DNS answers SERVFAIL while a recreated container is
+    # gone, e.g. while `migrate` runs during a deploy -- nginx keeps the old
+    # address and retries only every `resolver_timeout` (default 30s), so /api
+    # kept dialing the dead IP for up to 30s after the new api was healthy.
+    # The embedded DNS answers in milliseconds, so 5s costs nothing.
     resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
 
     upstream api {
         zone api 64k;
