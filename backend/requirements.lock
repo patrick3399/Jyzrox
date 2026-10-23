@@ -21,7 +21,7 @@ bcrypt==5.0.0
     # via -r requirements.txt
 beautifulsoup4==4.14.3
     # via -r requirements.txt
-certifi==2026.2.25
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
@@ -79,7 +79,7 @@ opencc-python-reimplemented==0.1.7
     # via -r requirements.txt
 opencv-python-headless==4.13.0.92
     # via -r requirements.txt
-pillow==12.3.0
+pillow==13.0.0
     # via
     #   -r requirements.txt
     #   imagehash

@@ -25,7 +25,7 @@ beautifulsoup4==4.14.3
     # via -r requirements.txt
 build==1.4.0
     # via pip-tools
-certifi==2026.2.25
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
@@ -96,7 +96,7 @@ packaging==26.0
     #   build
     #   pytest
     #   wheel
-pillow==12.3.0
+pillow==13.0.0
     # via
     #   -r requirements.txt
     #   imagehash
