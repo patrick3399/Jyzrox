@@ -152,6 +152,8 @@ services:
         APP_VERSION: ${APP_VERSION:-dev}
         GDL_VERSION: ${GDL_VERSION:-}
     command: python -m worker
+    # PID 1 reaper: git (GIT_SSH_COMMAND via sh) leaves orphaned sh that python-as-PID1 never waits on
+    init: true
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 55s
     environment:
@@ -167,7 +169,7 @@ services:
     env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - app_data:/data
-      # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
+      # host: owned by PUID:PGID (entrypoint re-owns it when PUID != 1042); chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - gallery_dl_venv:/opt/gallery-dl
       # Same directory as api: downloads (worker) and URL detection (api) must

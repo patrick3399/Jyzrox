@@ -1,6 +1,6 @@
 #!/bin/sh
 # Entrypoint: ensure data directories are writable by appuser, then exec as appuser.
-# PUID/PGID env vars allow dev override (default: 1042:1042 matching appuser in image).
+# PUID/PGID env vars set the runtime identity (default: 1042:1042 matching appuser in image).
 set -e
 
 # Warn about insecure .env permissions
@@ -11,10 +11,12 @@ fi
 PUID="${PUID:-1042}"
 PGID="${PGID:-1042}"
 
-# Adjust appuser UID/GID if the caller requested a different identity (dev mode).
+# Adjust appuser UID/GID if PUID/PGID request a different identity.
 if [ "$(id -u appuser)" != "$PUID" ] || [ "$(id -g appgroup)" != "$PGID" ]; then
     groupmod -g "$PGID" appgroup
     usermod  -u "$PUID" -g "$PGID" appuser
+    # Image files were baked as 1042:1042; re-own them so the new UID can read /app.
+    chown -R "$PUID:$PGID" /app /home/appuser 2>/dev/null || true
 fi
 
 # Create and fix ownership of bind-mounted data directories.
