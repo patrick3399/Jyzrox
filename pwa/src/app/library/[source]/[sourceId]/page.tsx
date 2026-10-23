@@ -18,6 +18,8 @@ import { galleryStatusAction } from '@/lib/galleryUtils'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
 import { ThumbPlaceholder } from '@/components/library/ThumbPlaceholder'
 import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
+import { GalleryActionsSheet, type GalleryAction } from '@/components/library/GalleryActionsSheet'
+import { useProfile } from '@/hooks/useProfile'
 import { AppImage } from '@/components/AppImage'
 import type { GalleryImage } from '@/lib/types'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
@@ -34,6 +36,13 @@ import {
   Share2,
   GitMerge,
   History,
+  Star,
+  FolderHeart,
+  MoreHorizontal,
+  ChevronDown,
+  ExternalLink,
+  Users,
+  Trash2,
 } from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
@@ -67,6 +76,9 @@ function getArtistDisplayName(gallery: {
 function artistPageHref(artistId: string): string {
   return `/artists/${encodeURIComponent(artistId)}`
 }
+const ACTION_BUTTON_CLASS =
+  'flex items-center justify-center gap-1.5 h-10 min-w-10 px-2.5 md:px-4 rounded border text-sm font-medium transition-colors disabled:opacity-50'
+
 const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: string }> = {
   complete: {
     labelKey: 'library.statusComplete',
@@ -97,6 +109,13 @@ export default function GalleryDetailPage() {
   const sourceId = decodeRouteSegment(params?.sourceId)
   const { connected } = useWsConnection()
   const { lastJobUpdate } = useWsJobs()
+  // Every write on this page is member-only on the backend. Until the profile
+  // loads, treat the viewer as read-only rather than flashing write actions.
+  const { data: profile } = useProfile()
+  const canEdit = profile?.role === 'member' || profile?.role === 'admin'
+  const [moreOpen, setMoreOpen] = useState(false)
+  const closeMoreSheet = useCallback(() => setMoreOpen(false), [])
+  const [infoOpen, setInfoOpen] = useState(false)
 
   const {
     data: gallery,
@@ -335,7 +354,7 @@ export default function GalleryDetailPage() {
         e.target instanceof HTMLSelectElement
       )
         return
-      if (selectMode) return
+      if (selectMode || moreOpen) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         if (gallery?.source && gallery?.source_id) {
@@ -353,7 +372,7 @@ export default function GalleryDetailPage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [gallery?.source, gallery?.source_id, router, selectMode])
+  }, [gallery?.source, gallery?.source_id, router, selectMode, moreOpen])
 
   // `importing` (link pages registered, hash pass running) is in progress too.
   const isDownloading =
@@ -483,6 +502,92 @@ export default function GalleryDetailPage() {
       if (updated) mutateGallery(updated, false)
     } catch {
       toast.error(t('library.ratingError'))
+    }
+  }
+
+  const handleReadingListToggle = async () => {
+    if (!gallery || !source || !sourceId) return
+    try {
+      const updated = await api.library.updateGallery(source, sourceId, {
+        in_reading_list: !gallery.in_reading_list,
+      })
+      mutateGallery(updated, false)
+      toast.success(
+        gallery.in_reading_list
+          ? t('contextMenu.removeFromReadingList')
+          : t('contextMenu.addToReadingList'),
+      )
+    } catch {
+      toast.error(t('common.failedToLoad'))
+    }
+  }
+
+  const handleShare = async () => {
+    if (!gallery) return
+    try {
+      const result = await api.galleryManagement.createShare(gallery.id, 168, true)
+      const absolute = `${window.location.origin}${result.url}`
+      await navigator.clipboard.writeText(absolute)
+      toast.success(t('library.shareCopied'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const handleManageAccess = async () => {
+    if (!gallery) return
+    try {
+      const sharing = await api.galleryManagement.sharing(gallery.id)
+      const raw = window.prompt(
+        t('library.accessUserIds'),
+        sharing.permissions.map((item) => item.user_id).join(','),
+      )
+      if (raw === null) return
+      const permissions = raw
+        .split(',')
+        .map((value) => Number(value.trim()))
+        .filter(Number.isInteger)
+        .map((user_id) => ({ user_id, can_edit: false }))
+      const visibility = window.confirm(t('library.privateVisibilityConfirm'))
+        ? 'private'
+        : 'public'
+      await api.galleryManagement.updateSharing(gallery.id, { visibility, permissions })
+      toast.success(t('library.accessUpdated'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const handleLinkVersion = async () => {
+    if (!gallery) return
+    const value = window.prompt(t('library.linkVersionPrompt'))
+    const linkedId = Number(value)
+    if (!value || !Number.isInteger(linkedId)) return
+    try {
+      await api.galleryManagement.linkVersion(gallery.id, linkedId)
+      await mutateVersions()
+      toast.success(t('library.versionLinked'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const handleMerge = async () => {
+    if (!gallery) return
+    const value = window.prompt(t('library.mergeGalleryPrompt'))
+    const sourceGalleryId = Number(value)
+    if (
+      !value ||
+      !Number.isInteger(sourceGalleryId) ||
+      !window.confirm(t('library.mergeGalleryConfirm'))
+    )
+      return
+    try {
+      await api.galleryManagement.merge(gallery.id, sourceGalleryId)
+      await Promise.all([mutateGallery(), mutateImages()])
+      toast.success(t('library.galleryMerged'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -765,38 +870,98 @@ export default function GalleryDetailPage() {
   })
   const artistDisplayName = getArtistDisplayName(gallery)
   const pageCount = gallery.pages ?? images.length
+  const favoriteLabel = gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')
+  const readingListLabel = gallery.in_reading_list
+    ? t('library.inReadingList')
+    : t('library.readLater')
+  const sourceLink = gallery.source_url ? getSourceLink(gallery.source_url, gallery.source) : null
+  const moreActionGroups: GalleryAction[][] = [
+    sourceLink
+      ? [
+          {
+            id: 'source',
+            label: t('library.viewSource'),
+            icon: ExternalLink,
+            href: sourceLink.href,
+            external: sourceLink.external,
+          },
+        ]
+      : [],
+    canEdit
+      ? [
+          { id: 'share', label: t('library.share'), icon: Share2, onSelect: handleShare },
+          {
+            id: 'access',
+            label: t('library.manageAccess'),
+            icon: Users,
+            onSelect: handleManageAccess,
+          },
+          {
+            id: 'versions',
+            label: t('library.versions'),
+            icon: History,
+            onSelect: () => setVersionsOpen(true),
+          },
+        ]
+      : [],
+    canEdit
+      ? [
+          {
+            id: 'merge',
+            label: t('library.merge'),
+            icon: GitMerge,
+            danger: true,
+            onSelect: handleMerge,
+          },
+          {
+            id: 'delete',
+            label: isDeleting
+              ? t('library.deleting')
+              : gallery.import_mode === 'link'
+                ? t('library.delete.link.button')
+                : t('library.delete'),
+            icon: Trash2,
+            danger: true,
+            disabled: isDeleting,
+            onSelect: handleDelete,
+          },
+        ]
+      : [],
+  ]
+  const hasMoreActions = moreActionGroups.some((group) => group.length > 0)
 
   return (
     <div>
       {/* Back */}
       <BackButton fallback="/library" />
 
-      {/* Header */}
-      <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-        <div className="flex flex-col md:flex-row gap-5">
+      {/* Header — compact on phones: small cover beside the title, one action
+          row, the rest of the metadata behind "More info". */}
+      <div className="bg-vault-card border border-vault-border rounded-xl p-4 md:p-5 mb-5">
+        <div className="grid grid-cols-[5rem_minmax(0,1fr)] md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 md:gap-x-5 gap-y-3">
           {/* Thumbnail preview from first image */}
-          <div className="shrink-0">
+          <div className="md:row-span-3">
             {images[0]?.thumb_path ? (
               <AppImage
                 src={images[0].thumb_path}
                 alt={gallery.title}
-                className="w-40 h-56 object-cover rounded"
-                sizes="160px"
+                className="w-20 h-28 md:w-40 md:h-56 object-cover rounded"
+                sizes="(min-width: 768px) 160px, 80px"
               />
             ) : (
               <ThumbPlaceholder
                 category={gallery.category}
                 categories={categoryRegistry?.categories}
-                className="w-40 h-56 rounded"
+                className="w-20 h-28 md:w-40 md:h-56 rounded"
               >
                 {t('library.noCover')}
               </ThumbPlaceholder>
             )}
           </div>
 
-          {/* Meta */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2 mb-1">
+          {/* Title, artist, rating */}
+          <div className="min-w-0">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1.5 md:gap-2">
               {editingTitle ? (
                 <input
                   autoFocus
@@ -810,56 +975,54 @@ export default function GalleryDetailPage() {
                     if (e.key === 'Enter') e.currentTarget.blur()
                     if (e.key === 'Escape') setEditingTitle(false)
                   }}
-                  className="text-xl font-bold text-vault-text leading-tight bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
+                  className="text-base md:text-xl font-bold text-vault-text leading-tight bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
                 />
               ) : (
                 <h1
-                  onClick={() => {
-                    setEditTitleValue(gallery.title)
-                    setEditingTitle(true)
-                  }}
-                  className="text-xl font-bold text-vault-text leading-tight cursor-pointer hover:text-vault-accent transition-colors"
-                  title={t('library.editTitle')}
+                  onClick={
+                    canEdit
+                      ? () => {
+                          setEditTitleValue(gallery.title)
+                          setEditingTitle(true)
+                        }
+                      : undefined
+                  }
+                  className={`text-base md:text-xl font-bold text-vault-text leading-tight break-words md:line-clamp-none ${
+                    infoOpen ? '' : 'line-clamp-4'
+                  } ${canEdit ? 'cursor-pointer hover:text-vault-accent transition-colors' : ''}`}
+                  title={canEdit ? t('library.editTitle') : undefined}
                 >
                   {gallery.title}
                 </h1>
               )}
-              {statusAction.kind !== 'none' ? (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {statusAction.kind === 'outdated' ? (
-                    <span className="px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
-                      {t('library.statusOutdated')}
-                    </span>
-                  ) : (
-                    <span
-                      className={`px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
-                    >
-                      {t(statusInfo.labelKey)}
-                    </span>
-                  )}
-                  {statusAction.canEnqueue && (
-                    <button
-                      onClick={handleEnqueueUpdate}
-                      disabled={isEnqueueingUpdate || !!activeJobId}
-                      className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isEnqueueingUpdate
-                        ? '...'
-                        : t(
-                            statusAction.kind === 'repair'
-                              ? 'library.repairNow'
-                              : 'library.updateNow',
-                          )}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <span
-                  className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
-                >
-                  {t(statusInfo.labelKey)}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {statusAction.kind === 'outdated' ? (
+                  <span className="px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
+                    {t('library.statusOutdated')}
+                  </span>
+                ) : (
+                  <span
+                    className={`px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
+                  >
+                    {t(statusInfo.labelKey)}
+                  </span>
+                )}
+                {statusAction.canEnqueue && canEdit && (
+                  <button
+                    onClick={handleEnqueueUpdate}
+                    disabled={isEnqueueingUpdate || !!activeJobId}
+                    className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isEnqueueingUpdate
+                      ? '...'
+                      : t(
+                          statusAction.kind === 'repair'
+                            ? 'library.repairNow'
+                            : 'library.updateNow',
+                        )}
+                  </button>
+                )}
+              </div>
             </div>
             {(gallery.title_jpn || editingTitleJpn) &&
               (editingTitleJpn ? (
@@ -875,23 +1038,137 @@ export default function GalleryDetailPage() {
                     if (e.key === 'Enter') e.currentTarget.blur()
                     if (e.key === 'Escape') setEditingTitleJpn(false)
                   }}
-                  className="text-sm text-vault-text-secondary mb-3 bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
+                  className="mt-1 text-sm text-vault-text-secondary bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
                 />
               ) : (
                 <p
-                  onClick={() => {
-                    setEditTitleJpnValue(gallery.title_jpn ?? '')
-                    setEditingTitleJpn(true)
-                  }}
-                  className="text-sm text-vault-text-secondary mb-3 cursor-pointer hover:text-vault-accent transition-colors"
-                  title={t('library.editTitle')}
+                  onClick={
+                    canEdit
+                      ? () => {
+                          setEditTitleJpnValue(gallery.title_jpn ?? '')
+                          setEditingTitleJpn(true)
+                        }
+                      : undefined
+                  }
+                  className={`${infoOpen ? 'block' : 'hidden'} md:block mt-1 text-sm text-vault-text-secondary break-words ${
+                    canEdit ? 'cursor-pointer hover:text-vault-accent transition-colors' : ''
+                  }`}
+                  title={canEdit ? t('library.editTitle') : undefined}
                 >
                   {gallery.title_jpn}
                 </p>
               ))}
+            {/* Artist and uploader have distinct meanings on E-Hentai. */}
+            {gallery.artist_id && artistDisplayName && (
+              <Link
+                href={artistPageHref(gallery.artist_id)}
+                className="mt-1 block truncate text-sm text-vault-text-secondary hover:text-vault-accent hover:underline transition-colors"
+              >
+                {artistDisplayName}
+              </Link>
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <span className="hidden md:inline text-sm text-vault-text-muted">
+                {t('library.metaRating')}
+              </span>
+              <RatingStars
+                rating={gallery.my_rating ?? 0}
+                readonly={isUpdating || !canEdit}
+                onChange={handleRatingChange}
+              />
+              <span className="text-xs md:text-sm text-vault-text-secondary">
+                {(gallery.my_rating ?? 0).toFixed(1)}
+              </span>
+            </div>
+          </div>
 
-            {/* Meta grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mb-4">
+          {/* Action row — labels collapse to icons on phones */}
+          <div className="col-span-2 md:col-span-1 md:col-start-2 flex items-center gap-2">
+            <Link
+              href={readerHref(gallery.source, gallery.source_id)}
+              className="flex-1 md:flex-none flex items-center justify-center h-10 px-4 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
+            >
+              {t('browse.read')}
+            </Link>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={handleFavoriteToggle}
+                disabled={isUpdating}
+                aria-label={favoriteLabel}
+                aria-pressed={!!gallery.is_favorited}
+                title={favoriteLabel}
+                className={`${ACTION_BUTTON_CLASS} ${
+                  gallery.is_favorited
+                    ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
+                }`}
+              >
+                <Star
+                  size={16}
+                  className={`md:hidden ${gallery.is_favorited ? 'fill-current' : ''}`}
+                />
+                <span className="hidden md:inline">{favoriteLabel}</span>
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={handleReadingListToggle}
+                disabled={isUpdating}
+                aria-label={readingListLabel}
+                aria-pressed={!!gallery.in_reading_list}
+                title={readingListLabel}
+                className={`${ACTION_BUTTON_CLASS} ${
+                  gallery.in_reading_list
+                    ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
+                }`}
+              >
+                {gallery.in_reading_list ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+                <span className="hidden md:inline">{readingListLabel}</span>
+              </button>
+            )}
+            <AddToCollectionMenu
+              galleryId={gallery.id}
+              ariaLabel={t('collections.addToCollection')}
+              className={`${ACTION_BUTTON_CLASS} bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent`}
+            >
+              <FolderHeart size={16} />
+              <span className="hidden md:inline">{t('collections.addToCollection')}</span>
+            </AddToCollectionMenu>
+            {hasMoreActions && (
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-label={t('library.moreActions')}
+                aria-haspopup="dialog"
+                title={t('library.moreActions')}
+                className={`${ACTION_BUTTON_CLASS} bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent`}
+              >
+                <MoreHorizontal size={16} />
+                <span className="hidden md:inline">{t('common.more')}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Secondary metadata — always shown from md, behind a toggle on phones */}
+          <div className="col-span-2 md:col-span-1 md:col-start-2">
+            <button
+              type="button"
+              onClick={() => setInfoOpen((open) => !open)}
+              aria-expanded={infoOpen}
+              className="md:hidden flex items-center gap-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${infoOpen ? 'rotate-180' : ''}`}
+              />
+              {infoOpen ? t('library.lessInfo') : t('library.moreInfo')}
+            </button>
+            <div
+              className={`${infoOpen ? 'grid' : 'hidden'} md:grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mt-2 md:mt-0`}
+            >
               {[
                 { labelKey: 'library.metaSource', value: gallery.source },
                 { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
@@ -909,265 +1186,76 @@ export default function GalleryDetailPage() {
                 ...(gallery.posted_at
                   ? [{ labelKey: 'library.metaPosted', value: formatDate(gallery.posted_at) }]
                   : []),
+                { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
               ].map(({ labelKey, value }) => (
-                <div key={labelKey}>
+                <div key={labelKey} className="min-w-0 truncate">
                   <span className="text-vault-text-muted">{t(labelKey)}: </span>
                   <span className="text-vault-text">{value}</span>
                 </div>
               ))}
-              {/* Category — inline select */}
-              <div>
+              {/* Category — inline select for members */}
+              <div className="col-span-2 md:col-span-1">
                 <span className="text-vault-text-muted">{t('library.metaCategory')}: </span>
-                <select
-                  value={gallery.category ?? ''}
-                  onChange={(e) => handleCategoryChange(e.target.value)}
-                  className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
-                >
-                  <option value="">{t('library.categoryUncategorized')}</option>
-                  {categoryOptions.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-                {gallery.source === 'local' && (
+                {canEdit ? (
+                  <select
+                    value={gallery.category ?? ''}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                    className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
+                  >
+                    <option value="">{t('library.categoryUncategorized')}</option>
+                    {categoryOptions.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-vault-text">
+                    {gallery.category || t('library.categoryUncategorized')}
+                  </span>
+                )}
+                {canEdit && gallery.source === 'local' && (
                   <p className="mt-1 text-xs text-vault-text-muted">
                     {t('categories.localFolderNote')}
                   </p>
                 )}
               </div>
-              {/* Artist and uploader have distinct meanings on E-Hentai. */}
-              <div>
-                <span className="text-vault-text-muted">{t('library.artistFilter')}: </span>
-                {gallery.artist_id && artistDisplayName ? (
-                  <Link
-                    href={artistPageHref(gallery.artist_id)}
-                    className="text-vault-text hover:text-vault-accent hover:underline transition-colors"
-                  >
-                    {artistDisplayName}
-                  </Link>
-                ) : (
-                  <span className="text-vault-text">N/A</span>
-                )}
-              </div>
-              <div>
-                <span className="text-vault-text-muted">{t('library.metaUploader')}: </span>
-                <span className="text-vault-text">{gallery.uploader || 'N/A'}</span>
-              </div>
             </div>
-
-            {/* Rating */}
-            <div className="flex items-center gap-3 mb-4">
-              <span className="text-sm text-vault-text-muted">{t('library.metaRating')}</span>
-              <RatingStars
-                rating={gallery.my_rating ?? 0}
-                readonly={isUpdating}
-                onChange={handleRatingChange}
-              />
-              <span className="text-sm text-vault-text-secondary">
-                {(gallery.my_rating ?? 0).toFixed(1)}
-              </span>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={readerHref(gallery.source, gallery.source_id)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
-              >
-                {t('browse.read')}
-              </Link>
-              {gallery.artist_id && (
-                <Link
-                  href={artistPageHref(gallery.artist_id)}
-                  className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
-                >
-                  {t('library.viewAllByArtist')}
-                </Link>
-              )}
-              {gallery.source_url &&
-                (() => {
-                  const { href, external } = getSourceLink(gallery.source_url, gallery.source)
-                  const btnClass =
-                    'px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors'
-                  return external ? (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className={btnClass}>
-                      {t('library.viewSource')}
-                    </a>
-                  ) : (
-                    <Link href={href} className={btnClass}>
-                      {t('library.viewSource')}
-                    </Link>
-                  )
-                })()}
-              <button
-                onClick={handleFavoriteToggle}
-                disabled={isUpdating}
-                className={`px-4 py-2 rounded text-sm font-medium border transition-colors ${
-                  gallery.is_favorited
-                    ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
-                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
-                }`}
-              >
-                {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
-              </button>
-              <AddToCollectionMenu
-                galleryId={gallery.id}
-                className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors flex items-center gap-1.5"
-              />
-              <button
-                onClick={async () => {
-                  try {
-                    const updated = await api.library.updateGallery(source!, sourceId!, {
-                      in_reading_list: !gallery.in_reading_list,
-                    })
-                    mutateGallery(updated, false)
-                    toast.success(
-                      gallery.in_reading_list
-                        ? t('contextMenu.removeFromReadingList')
-                        : t('contextMenu.addToReadingList'),
-                    )
-                  } catch {
-                    toast.error(t('common.failedToLoad'))
-                  }
-                }}
-                disabled={isUpdating}
-                title={
-                  gallery.in_reading_list ? t('library.inReadingList') : t('library.readLater')
-                }
-                className={`px-4 py-2 rounded text-sm font-medium border transition-colors flex items-center gap-1.5 ${
-                  gallery.in_reading_list
-                    ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
-                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
-                }`}
-              >
-                {gallery.in_reading_list ? (
-                  <>
-                    <BookmarkCheck size={16} />
-                    {t('library.inReadingList')}
-                  </>
-                ) : (
-                  <>
-                    <Bookmark size={16} />
-                    {t('library.readLater')}
-                  </>
-                )}
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
-              >
-                {isDeleting
-                  ? t('library.deleting')
-                  : gallery.import_mode === 'link'
-                    ? t('library.delete.link.button')
-                    : t('library.delete')}
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                onClick={async () => {
-                  if (!gallery) return
-                  try {
-                    const result = await api.galleryManagement.createShare(gallery.id, 168, true)
-                    const absolute = `${window.location.origin}${result.url}`
-                    await navigator.clipboard.writeText(absolute)
-                    toast.success(t('library.shareCopied'))
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : String(error))
-                  }
-                }}
-              >
-                <Share2 size={16} /> {t('library.share')}
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                onClick={async () => {
-                  if (!gallery) return
-                  const sharing = await api.galleryManagement.sharing(gallery.id)
-                  const raw = window.prompt(
-                    t('library.accessUserIds'),
-                    sharing.permissions.map((item) => item.user_id).join(','),
-                  )
-                  if (raw === null) return
-                  const permissions = raw
-                    .split(',')
-                    .map((value) => Number(value.trim()))
-                    .filter(Number.isInteger)
-                    .map((user_id) => ({ user_id, can_edit: false }))
-                  const visibility = window.confirm(t('library.privateVisibilityConfirm'))
-                    ? 'private'
-                    : 'public'
-                  await api.galleryManagement.updateSharing(gallery.id, { visibility, permissions })
-                  toast.success(t('library.accessUpdated'))
-                }}
-              >
-                {t('library.manageAccess')}
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                onClick={() => setVersionsOpen((open) => !open)}
-              >
-                <History size={16} /> {t('library.versions')}
-              </button>
-              {versionsOpen && (
-                <button
-                  type="button"
-                  className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                  onClick={async () => {
-                    if (!gallery) return
-                    const value = window.prompt(t('library.linkVersionPrompt'))
-                    const linkedId = Number(value)
-                    if (!Number.isInteger(linkedId)) return
-                    await api.galleryManagement.linkVersion(gallery.id, linkedId)
-                    await mutateVersions()
-                    toast.success(t('library.versionLinked'))
-                  }}
-                >
-                  <History size={16} /> {t('library.linkVersion')}
-                </button>
-              )}
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-300 hover:bg-red-900/40"
-                onClick={async () => {
-                  if (!gallery) return
-                  const value = window.prompt(t('library.mergeGalleryPrompt'))
-                  const sourceGalleryId = Number(value)
-                  if (
-                    !Number.isInteger(sourceGalleryId) ||
-                    !window.confirm(t('library.mergeGalleryConfirm'))
-                  )
-                    return
-                  await api.galleryManagement.merge(gallery.id, sourceGalleryId)
-                  await Promise.all([mutateGallery(), mutateImages()])
-                  toast.success(t('library.galleryMerged'))
-                }}
-              >
-                <GitMerge size={16} /> {t('library.merge')}
-              </button>
-            </div>
-            {versionsOpen && versionData?.versions && versionData.versions.length > 1 && (
+            {versionsOpen && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-vault-text-muted">{t('library.versions')}:</span>
-                {versionData.versions.map((version) => (
-                  <Link
-                    key={version.id}
-                    href={`/library/${encodeURIComponent(version.source)}/${encodeURIComponent(version.source_id)}`}
-                    className={`rounded border px-2 py-1 ${version.id === gallery.id ? 'border-vault-accent text-vault-accent' : 'border-vault-border text-vault-text-secondary'}`}
-                  >
-                    {version.title || `#${version.id}`}
-                  </Link>
-                ))}
+                {(versionData?.versions ?? []).length > 1 &&
+                  versionData?.versions.map((version) => (
+                    <Link
+                      key={version.id}
+                      href={`/library/${encodeURIComponent(version.source)}/${encodeURIComponent(version.source_id)}`}
+                      className={`rounded border px-2 py-1 ${version.id === gallery.id ? 'border-vault-accent text-vault-accent' : 'border-vault-border text-vault-text-secondary'}`}
+                    >
+                      {version.title || `#${version.id}`}
+                    </Link>
+                  ))}
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-2 py-1 text-vault-text-secondary hover:border-vault-accent"
+                  onClick={handleLinkVersion}
+                >
+                  <History size={14} /> {t('library.linkVersion')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVersionsOpen(false)}
+                  aria-label={t('common.close')}
+                  className="p-1 text-vault-text-muted hover:text-vault-text"
+                >
+                  <X size={14} />
+                </button>
               </div>
             )}
           </div>
         </div>
       </div>
 
+      <GalleryActionsSheet open={moreOpen} onClose={closeMoreSheet} groups={moreActionGroups} />
 
       {isCheckingUpdate && (
         <p className="text-xs text-vault-text-muted animate-pulse mb-2">
@@ -1203,6 +1291,7 @@ export default function GalleryDetailPage() {
         translations={tagTranslations}
         tagData={tagData}
         onUpdateTag={handleUpdateTag}
+        canEdit={canEdit}
       />
 
       {/* Image Thumbnails */}
@@ -1267,7 +1356,7 @@ export default function GalleryDetailPage() {
               </>
             ) : (
               <>
-                {images.length > 0 && (
+                {canEdit && images.length > 0 && (
                   <button
                     onClick={() => setSelectMode(true)}
                     className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
@@ -1275,7 +1364,7 @@ export default function GalleryDetailPage() {
                     {t('library.selectImages')}
                   </button>
                 )}
-                {(hiddenImages.length > 0 || excludedBlobs.length > 0) && (
+                {canEdit && (hiddenImages.length > 0 || excludedBlobs.length > 0) && (
                   <button
                     onClick={() => setShowExcluded(!showExcluded)}
                     className="px-3 py-1 rounded text-xs font-medium border bg-yellow-900/30 border-yellow-700/50 text-yellow-400 hover:bg-yellow-900/50 transition-colors"

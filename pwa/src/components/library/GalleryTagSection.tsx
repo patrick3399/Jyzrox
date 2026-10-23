@@ -16,6 +16,8 @@ type GalleryTagSectionProps = {
   translations?: Record<string, string>
   tagData: TagPrediction[]
   onUpdateTag: (tag: string, action: 'add' | 'remove') => void
+  /** Tag edits are member-only; viewers get the read-only list. */
+  canEdit?: boolean
 }
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
@@ -52,6 +54,7 @@ export function GalleryTagSection({
   translations: tagTranslations,
   tagData,
   onUpdateTag,
+  canEdit = true,
 }: GalleryTagSectionProps) {
   const router = useRouter()
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
@@ -81,19 +84,21 @@ export function GalleryTagSection({
         <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
           {t('common.tags')}
         </h2>
-        <button
-          onClick={() => setEditingTags(!editingTags)}
-          className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
-            editingTags
-              ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
-              : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
-          }`}
-        >
-          <Pencil size={12} />
-          {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setEditingTags(!editingTags)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+              editingTags
+                ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
+                : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
+            }`}
+          >
+            <Pencil size={12} />
+            {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
+          </button>
+        )}
       </div>
-      {editingTags && (
+      {canEdit && editingTags && (
         <div className="mb-3">
           <TagAutocomplete
             onSelect={(tag) => onUpdateTag(tag, 'add')}

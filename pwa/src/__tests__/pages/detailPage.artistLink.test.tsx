@@ -1,9 +1,10 @@
 /**
  * Library gallery detail page — where the artist links lead.
  *
- * They used to open /library with an `artist_id:` search. The artist page
- * lists the same galleries and adds the read-everything entry point, so both
- * links go there instead.
+ * It used to open /library with an `artist_id:` search. The artist page
+ * lists the same galleries and adds the read-everything entry point, so the
+ * link goes there instead. (The separate "View all by this artist" button was
+ * dropped as a duplicate of this link.)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -88,13 +89,6 @@ describe('gallery detail page artist links', () => {
     render(<GalleryDetailPage />)
 
     const link = screen.getByText('some artist/α').closest('a')
-    expect(link).toHaveAttribute('href', ARTIST_HREF)
-  })
-
-  it('links the view-all-by-artist button to the artist page', () => {
-    render(<GalleryDetailPage />)
-
-    const link = screen.getByText('View all by this artist').closest('a')
     expect(link).toHaveAttribute('href', ARTIST_HREF)
   })
 })

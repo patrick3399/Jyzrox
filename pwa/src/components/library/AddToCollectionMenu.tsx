@@ -26,6 +26,8 @@ interface AddToCollectionMenuProps {
   className?: string
   /** Trigger button content; defaults to icon + "Add to Collection". */
   children?: ReactNode
+  /** Accessible name for an icon-only trigger. */
+  ariaLabel?: string
   disabled?: boolean
 }
 
@@ -40,6 +42,7 @@ export function AddToCollectionMenu({
   onChanged,
   className,
   children,
+  ariaLabel,
   disabled,
 }: AddToCollectionMenuProps) {
   const singleMode = galleryId !== undefined
@@ -256,6 +259,8 @@ export function AddToCollectionMenu({
         type="button"
         onClick={() => setOpen(true)}
         disabled={disabled}
+        aria-label={ariaLabel}
+        title={ariaLabel}
         className={className}
       >
         {children ?? (
