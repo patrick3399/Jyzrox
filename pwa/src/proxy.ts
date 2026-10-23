@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const PUBLIC_PATHS = ['/login', '/setup']
+import { isAuthPath, isPublicPath } from '@/lib/publicPaths'
 
 export function proxy(request: NextRequest) {
   const session = request.cookies.get('vault_session')
   const { pathname } = request.nextUrl
 
-  // No cookie → redirect to login (except public paths)
-  if (!session && !PUBLIC_PATHS.includes(pathname)) {
+  // No cookie → redirect to login (except login/setup and share links)
+  if (!session && !isAuthPath(pathname) && !isPublicPath(pathname)) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
   // Don't redirect /login→/ based on cookie alone — the session may be
