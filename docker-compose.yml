@@ -35,6 +35,8 @@ services:
       - "${HTTP_PORT:-35689}:80"
     environment:
       - NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-100m}
+      # 05-data-group.sh adds the nginx worker to this group so it can read a 770 data volume
+      - PGID=${PGID:-1042}
     volumes:
       - app_data:/data:ro
     depends_on:
@@ -65,6 +67,8 @@ services:
 
   imgproxy:
     image: darthsim/imgproxy:v3.31
+    # same identity as api/worker so a 770 data volume stays readable
+    user: "${PUID:-1042}:${PGID:-1042}"
     environment:
       IMGPROXY_LOCAL_FILESYSTEM_ROOT: /data
       IMGPROXY_MAX_SRC_RESOLUTION: ${IMGPROXY_MAX_SRC_RESOLUTION:-100}

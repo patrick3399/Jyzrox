@@ -7,4 +7,6 @@ ENV NGINX_ENVSUBST_FILTER=NGINX_CLIENT_MAX_BODY_SIZE
 
 ENV NGINX_CLIENT_MAX_BODY_SIZE=100m
 
+COPY docker-entrypoint.d/05-data-group.sh /docker-entrypoint.d/05-data-group.sh
+
 RUN mkdir -p /var/cache/nginx/thumb_cache /var/cache/nginx/auth_cache
