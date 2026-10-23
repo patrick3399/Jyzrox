@@ -32,6 +32,9 @@ router = APIRouter(tags=["download"])
 _member = require_role("member")
 _admin = require_role("admin")
 
+# Job statuses that count as "active" (not yet terminal)
+ACTIVE_JOB_STATUSES = ("queued", "running", "paused")
+
 
 class DownloadRequest(BaseModel):
     url: str
@@ -289,13 +292,24 @@ async def list_jobs(
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     exclude_subscription: bool = Query(default=False),
+    subscription_only: bool = Query(default=False),
+    active_only: bool = Query(default=False),
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    if subscription_only and exclude_subscription:
+        raise HTTPException(
+            status_code=422,
+            detail="subscription_only and exclude_subscription are mutually exclusive",
+        )
     is_admin = auth["role"] == "admin"
     base_filter = [] if is_admin else [DownloadJob.user_id == auth["user_id"]]
     if exclude_subscription:
         base_filter.append(DownloadJob.subscription_id.is_(None))
+    if subscription_only:
+        base_filter.append(DownloadJob.subscription_id.is_not(None))
+    if active_only:
+        base_filter.append(DownloadJob.status.in_(ACTIVE_JOB_STATUSES))
 
     if status:
         conditions = [DownloadJob.status == status] + base_filter
@@ -369,9 +383,7 @@ async def get_stats(
     if exclude_subscription:
         user_filter.append(DownloadJob.subscription_id.is_(None))
     running_count = (
-        await db.execute(
-            select(func.count()).where(DownloadJob.status.in_(["queued", "running", "paused"]), *user_filter)
-        )
+        await db.execute(select(func.count()).where(DownloadJob.status.in_(ACTIVE_JOB_STATUSES), *user_filter))
     ).scalar_one()
     finished_count = (
         await db.execute(

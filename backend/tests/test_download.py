@@ -28,6 +28,7 @@ async def _insert_job(
     retry_count: int = 0,
     max_retries: int = 3,
     next_retry_at: str | None = None,
+    subscription_id: int | None = None,
 ):
     """Insert a download job directly via raw SQL (SQLite-compatible)."""
     from core.utils import normalize_download_url
@@ -35,8 +36,8 @@ async def _insert_job(
     job_id = str(uuid.uuid4())
     await db_session.execute(
         text(
-            "INSERT INTO download_jobs (id, url, canonical_url, source, status, progress, user_id, gallery_id, retry_count, max_retries, next_retry_at) "
-            "VALUES (:id, :url, :canonical_url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at)"
+            "INSERT INTO download_jobs (id, url, canonical_url, source, status, progress, user_id, gallery_id, retry_count, max_retries, next_retry_at, subscription_id) "
+            "VALUES (:id, :url, :canonical_url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at, :subscription_id)"
         ),
         {
             "id": job_id,
@@ -50,10 +51,21 @@ async def _insert_job(
             "retry_count": retry_count,
             "max_retries": max_retries,
             "next_retry_at": next_retry_at,
+            "subscription_id": subscription_id,
         },
     )
     await db_session.commit()
     return job_id
+
+
+async def _insert_subscription(db_session, *, user_id: int = 1, url: str = "https://example.com/artist") -> int:
+    """Insert a subscription row and return its id."""
+    await db_session.execute(
+        text("INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"),
+        {"uid": user_id, "url": url},
+    )
+    await db_session.commit()
+    return (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
 
 
 async def _insert_gallery(db_session, *, source_id: str = "12345", download_status: str = "downloading"):
@@ -912,6 +924,133 @@ class TestListJobsExcludeSubscription:
         data = resp.json()
         assert data["total"] == 1
         assert data["jobs"][0]["status"] == "running"
+
+
+# ---------------------------------------------------------------------------
+# Jobs listing — subscription_only / active_only filters
+# ---------------------------------------------------------------------------
+
+
+class TestListJobsSubscriptionActiveFilters:
+    """GET /api/download/jobs?subscription_only=&active_only="""
+
+    async def test_list_jobs_subscription_only_excludes_manual_jobs(self, client, db_session):
+        """subscription_only=true returns only jobs with a subscription_id, never manual ones."""
+        sub_id = await _insert_subscription(db_session, user_id=1)
+        manual_id = await _insert_job(db_session, status="running", user_id=1, url="https://e-hentai.org/g/801/aa/")
+        sub_job_id = await _insert_job(
+            db_session, status="running", user_id=1, url="https://e-hentai.org/g/802/bb/", subscription_id=sub_id
+        )
+        sub_done_id = await _insert_job(
+            db_session, status="done", user_id=1, url="https://e-hentai.org/g/803/cc/", subscription_id=sub_id
+        )
+
+        resp = await client.get("/api/download/jobs", params={"subscription_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        returned = {j["id"] for j in data["jobs"]}
+        assert returned == {sub_job_id, sub_done_id}
+        assert manual_id not in returned
+        assert data["total"] == 2
+
+    async def test_list_jobs_active_only_excludes_finished_jobs(self, client, db_session):
+        """active_only=true keeps queued/running/paused and drops done/failed/partial/cancelled."""
+        active_ids = {
+            await _insert_job(db_session, status="queued", user_id=1, url="https://e-hentai.org/g/811/aa/"),
+            await _insert_job(db_session, status="running", user_id=1, url="https://e-hentai.org/g/812/bb/"),
+            await _insert_job(db_session, status="paused", user_id=1, url="https://e-hentai.org/g/813/cc/"),
+        }
+        finished_ids = {
+            await _insert_job(db_session, status="done", user_id=1, url="https://e-hentai.org/g/814/dd/"),
+            await _insert_job(db_session, status="failed", user_id=1, url="https://e-hentai.org/g/815/ee/"),
+            await _insert_job(db_session, status="partial", user_id=1, url="https://e-hentai.org/g/816/ff/"),
+            await _insert_job(db_session, status="cancelled", user_id=1, url="https://e-hentai.org/g/817/gg/"),
+        }
+
+        resp = await client.get("/api/download/jobs", params={"active_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        returned = {j["id"] for j in data["jobs"]}
+        assert returned == active_ids
+        assert returned.isdisjoint(finished_ids)
+        assert {j["status"] for j in data["jobs"]} == {"queued", "running", "paused"}
+        assert data["total"] == 3
+
+    async def test_list_jobs_subscription_only_and_active_only_total_counts_filtered(self, client, db_session):
+        """total reflects the filtered row count, not the number of all rows in the table."""
+        sub_id = await _insert_subscription(db_session, user_id=1)
+        wanted = {
+            await _insert_job(
+                db_session, status="running", user_id=1, url="https://e-hentai.org/g/821/aa/", subscription_id=sub_id
+            ),
+            await _insert_job(
+                db_session, status="paused", user_id=1, url="https://e-hentai.org/g/822/bb/", subscription_id=sub_id
+            ),
+        }
+        # Rows that must not be counted
+        await _insert_job(
+            db_session, status="done", user_id=1, url="https://e-hentai.org/g/823/cc/", subscription_id=sub_id
+        )
+        await _insert_job(
+            db_session, status="failed", user_id=1, url="https://e-hentai.org/g/824/dd/", subscription_id=sub_id
+        )
+        await _insert_job(db_session, status="running", user_id=1, url="https://e-hentai.org/g/825/ee/")
+        await _insert_job(db_session, status="queued", user_id=1, url="https://e-hentai.org/g/826/ff/")
+
+        resp = await client.get("/api/download/jobs", params={"subscription_only": "true", "active_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert {j["id"] for j in data["jobs"]} == wanted
+
+        # Pagination must not change total: limit=1 returns one job but total stays 2
+        resp = await client.get(
+            "/api/download/jobs", params={"subscription_only": "true", "active_only": "true", "limit": 1}
+        )
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["jobs"]) == 1
+        assert data["jobs"][0]["id"] in wanted
+
+    async def test_list_jobs_subscription_only_with_exclude_subscription_returns_422(self, client, db_session):
+        """The two subscription filters are contradictory and must be rejected."""
+        sub_id = await _insert_subscription(db_session, user_id=1)
+        await _insert_job(
+            db_session, status="running", user_id=1, url="https://e-hentai.org/g/831/aa/", subscription_id=sub_id
+        )
+
+        resp = await client.get(
+            "/api/download/jobs", params={"subscription_only": "true", "exclude_subscription": "true"}
+        )
+
+        assert resp.status_code == 422
+        assert "mutually exclusive" in resp.json()["detail"]
+
+    async def test_list_jobs_subscription_only_non_admin_sees_only_own_jobs(self, make_client, db_session):
+        """A member never sees another user's subscription jobs, even with subscription_only."""
+        own_sub = await _insert_subscription(db_session, user_id=2, url="https://example.com/own")
+        other_sub = await _insert_subscription(db_session, user_id=1, url="https://example.com/other")
+        own_job = await _insert_job(
+            db_session, status="running", user_id=2, url="https://e-hentai.org/g/841/aa/", subscription_id=own_sub
+        )
+        other_job = await _insert_job(
+            db_session, status="running", user_id=1, url="https://e-hentai.org/g/842/bb/", subscription_id=other_sub
+        )
+        own_manual = await _insert_job(db_session, status="running", user_id=2, url="https://e-hentai.org/g/843/cc/")
+
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get("/api/download/jobs", params={"subscription_only": "true", "active_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        returned = {j["id"] for j in data["jobs"]}
+        assert returned == {own_job}
+        assert other_job not in returned
+        assert own_manual not in returned
+        assert data["total"] == 1
 
 
 # ---------------------------------------------------------------------------
