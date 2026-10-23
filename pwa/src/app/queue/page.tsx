@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   Download,
   X,
@@ -31,8 +31,25 @@ import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
+import { SUBSCRIPTION_ACTIVE_ANCHOR, isActiveJob } from '@/lib/downloadJobFilters'
 import { useWsConnection } from '@/lib/ws'
-import type { DownloadJob, DownloadPreview } from '@/lib/types'
+import type { DownloadJob, DownloadPreview, JobListParams } from '@/lib/types'
+
+// Module-level so the SWR key stays referentially stable across renders.
+const MANUAL_JOBS_PARAMS: JobListParams = { exclude_subscription: true }
+const SUBSCRIPTION_ACTIVE_PARAMS: JobListParams = {
+  subscription_only: true,
+  active_only: true,
+  limit: 100,
+}
+
+const STATUS_ORDER: Record<string, number> = { running: 0, paused: 1, queued: 2 }
+
+function compareActiveJobs(a: DownloadJob, b: DownloadJob): number {
+  const orderDiff = (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3)
+  if (orderDiff !== 0) return orderDiff
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+}
 
 const STATUS_STYLES: Record<string, string> = {
   queued: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
@@ -492,7 +509,10 @@ export default function QueuePage() {
   const { data: sitesData } = useSupportedSites()
   const { data: downloadPreview, isLoading: previewLoading } = useDownloadPreview(debouncedUrl)
 
-  const { data, isLoading, error, mutate } = useDownloadJobs({ exclude_subscription: true })
+  const { data, isLoading, error, mutate: mutateManual } = useDownloadJobs(MANUAL_JOBS_PARAMS)
+  const { data: subActiveData, mutate: mutateSubActive } = useDownloadJobs(
+    SUBSCRIPTION_ACTIVE_PARAMS,
+  )
   const { trigger: enqueue, isMutating: isEnqueuing } = useEnqueueDownload()
   const { trigger: cancelJob } = useCancelJob()
   const { trigger: clearJobs, isMutating: isClearing } = useClearFinishedJobs()
@@ -510,6 +530,12 @@ export default function QueuePage() {
     const timer = setTimeout(() => setShowFallbackWarning(true), 6000)
     return () => clearTimeout(timer)
   }, [connected])
+
+  // Cancel / pause / retry / clear can move a job between the two lists.
+  const mutate = useCallback(
+    () => Promise.all([mutateManual(), mutateSubActive()]),
+    [mutateManual, mutateSubActive],
+  )
 
   const handleEnqueue = useCallback(async () => {
     const url = urlInput.trim()
@@ -604,15 +630,31 @@ export default function QueuePage() {
       j.status === 'partial',
   )
 
-  const statusOrder: Record<string, number> = { running: 0, paused: 1, queued: 2 }
-  const sortedActive = [...activeJobs].sort((a, b) => {
-    const orderDiff = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3)
-    if (orderDiff !== 0) return orderDiff
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  })
+  const sortedActive = [...activeJobs].sort(compareActiveJobs)
   const sortedCompleted = [...completedJobs].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )
+
+  // The server only returns active jobs, but a cached list can still hold a job that has just
+  // finished; drop those client-side and keep `total` consistent with what is rendered.
+  const subActiveRaw = subActiveData?.jobs ?? []
+  const subActiveJobs = subActiveRaw.filter(isActiveJob).sort(compareActiveJobs)
+  const subActiveTotal = Math.max(
+    subActiveJobs.length,
+    (subActiveData?.total ?? 0) - (subActiveRaw.length - subActiveJobs.length),
+  )
+  const subActiveVisible = !isLoading && subActiveJobs.length > 0
+
+  // Scroll to the subscription section once when arriving via /queue#subscription-active.
+  const hashScrolledRef = useRef(false)
+  useEffect(() => {
+    if (!subActiveVisible || hashScrolledRef.current) return
+    if (window.location.hash !== `#${SUBSCRIPTION_ACTIVE_ANCHOR}`) return
+    const el = document.getElementById(SUBSCRIPTION_ACTIVE_ANCHOR)
+    if (!el) return
+    hashScrolledRef.current = true
+    el.scrollIntoView({ block: 'start' })
+  }, [subActiveVisible])
 
   return (
     <div>
@@ -801,6 +843,40 @@ export default function QueuePage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Subscription Active Jobs */}
+      {subActiveVisible && (
+        <div id={SUBSCRIPTION_ACTIVE_ANCHOR} className="mb-6 scroll-mt-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+              {t('queue.subscriptionActive')} ({subActiveTotal})
+            </h2>
+            {subActiveTotal > subActiveJobs.length && (
+              <span className="text-xs text-vault-text-muted">
+                {t('queue.subscriptionActiveTruncated', {
+                  shown: String(subActiveJobs.length),
+                  total: String(subActiveTotal),
+                })}
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {subActiveJobs.map((job) => (
+              <JobRow
+                key={job.id}
+                job={job}
+                onCancel={handleCancel}
+                onPause={handlePause}
+                onRetry={handleRetry}
+                isCancelling={false}
+                expandedJobId={expandedJobId}
+                onToggleExpand={(id) => setExpandedJobId((prev) => (prev === id ? null : id))}
+              />
+            ))}
+          </div>
         </div>
       )}
 

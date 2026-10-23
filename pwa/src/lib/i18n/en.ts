@@ -699,6 +699,8 @@ const en: Record<string, string> = {
   'queue.categoryOther': 'Other',
   'queue.downloading': 'Downloading...',
   'queue.subscription': 'Subscription',
+  'queue.subscriptionActive': 'Subscription downloads',
+  'queue.subscriptionActiveTruncated': 'Showing {shown} of {total}',
   'queue.retryCount': 'Retry {count}/{max}',
   'queue.failedPages': '{count} pages failed',
   'queue.permanentlyFailed': 'Permanently failed — max retries reached',

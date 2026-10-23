@@ -1058,6 +1058,8 @@ export interface JobListParams {
   page?: number
   limit?: number
   exclude_subscription?: boolean
+  subscription_only?: boolean
+  active_only?: boolean
 }
 
 // ── Download Preview ──────────────────────────────────────────────────

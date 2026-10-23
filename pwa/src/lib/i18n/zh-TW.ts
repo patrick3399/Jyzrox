@@ -406,6 +406,8 @@ const zhTW: Record<string, string> = {
   'queue.downloading': '下載中...',
   'queue.permanentlyFailed': '永久失敗 — 已達重試上限',
   'queue.subscription': '訂閱',
+  'queue.subscriptionActive': '訂閱下載中',
+  'queue.subscriptionActiveTruncated': '顯示 {shown} / {total} 筆',
   'queue.categoryGallery': '圖庫',
   'queue.categoryManga': '漫畫',
   'queue.categorySocial': '社群',

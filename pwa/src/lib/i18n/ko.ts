@@ -449,6 +449,8 @@ const ko: Record<string, string> = {
   'queue.categoryOther': '기타',
   'queue.downloading': '다운로드 중...',
   'queue.subscription': '구독',
+  'queue.subscriptionActive': '구독 다운로드',
+  'queue.subscriptionActiveTruncated': '{total}개 중 {shown}개 표시',
   'queue.retryCount': '재시도 {count}/{max}',
   'queue.failedPages': '{count}페이지 실패',
   'queue.permanentlyFailed': '영구 실패 — 최대 재시도 횟수 초과',

@@ -903,6 +903,8 @@ const zhCN: Record<string, string> = {
   'queue.categoryOther': '其他',
   'queue.downloading': '下载中...',
   'queue.subscription': '订阅',
+  'queue.subscriptionActive': '订阅下载中',
+  'queue.subscriptionActiveTruncated': '显示 {shown} / {total} 条',
   'queue.permanentlyFailed': '永久失败 — 已达最大重试次数',
   'queue.retry': '重试',
   'queue.retryQueued': '任务已加入重试队列',

@@ -818,6 +818,8 @@ const ja: Record<string, string> = {
   'queue.categoryOther': 'その他',
   'queue.downloading': 'ダウンロード中...',
   'queue.subscription': 'サブスクリプション',
+  'queue.subscriptionActive': 'サブスクリプションのダウンロード',
+  'queue.subscriptionActiveTruncated': '{total} 件中 {shown} 件を表示',
   'queue.retryCount': 'リトライ {count}/{max}',
   'queue.failedPages': '{count}ページ失敗',
   'queue.permanentlyFailed': '永続的に失敗 — 最大リトライ回数に達しました',
