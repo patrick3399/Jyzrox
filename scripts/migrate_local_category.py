@@ -21,11 +21,11 @@ the host):
 
     # 1. host: preview
     backend/.venv/bin/python scripts/migrate_local_category.py plan \\
-        --mapping scripts/category-map.tsv --root /mnt/ssd-data/images
+        --mapping scripts/category-map.tsv --root /mnt/jyzrox/images
 
     # 2. host: rename the source tree
     backend/.venv/bin/python scripts/migrate_local_category.py move-source \\
-        --mapping scripts/category-map.tsv --root /mnt/ssd-data/images
+        --mapping scripts/category-map.tsv --root /mnt/jyzrox/images
 
     # 3. container: rewrite the database and rebuild the library tree
     #    Do NOT pass --entrypoint: entrypoint.sh ends in `exec gosu appuser
@@ -34,12 +34,12 @@ the host):
     #    1042) can no longer write to.
     docker compose run --rm --no-deps -v "$PWD/scripts:/opsscripts:ro" \\
         worker python /opsscripts/migrate_local_category.py commit \\
-        --mapping /opsscripts/category-map.tsv --root /mnt/ssd-data/images
+        --mapping /opsscripts/category-map.tsv --root /mnt/jyzrox/images
 
     # 4. container: verify
     docker compose run --rm --no-deps -v "$PWD/scripts:/opsscripts:ro" \\
         worker python /opsscripts/migrate_local_category.py verify \\
-        --mapping /opsscripts/category-map.tsv --root /mnt/ssd-data/images
+        --mapping /opsscripts/category-map.tsv --root /mnt/jyzrox/images
 
     # 5. host: bring the writers back, then RELOAD NGINX, then unfreeze
     #    Restarting api/worker gives them new container IPs. nginx resolves
@@ -78,7 +78,7 @@ the library tree needs to be repaired to match the database:
 
     docker compose run --rm --no-deps --entrypoint python worker \\
         /opsscripts/migrate_local_category.py rebuild-tree \\
-        --root /mnt/ssd-data/images [--max-stale N]
+        --root /mnt/jyzrox/images [--max-stale N]
 
 Round 2 -- ``recategorize-source`` / ``recategorize-commit`` move an artist
 from one already-present category to another (fixing a wrong first-round
@@ -91,12 +91,12 @@ reused as-is:
 
     # 1. host: move the artist directory to its new category directory
     backend/.venv/bin/python scripts/migrate_local_category.py recategorize-source \\
-        --mapping scripts/recategorize-map.tsv --root /mnt/ssd-data/images
+        --mapping scripts/recategorize-map.tsv --root /mnt/jyzrox/images
 
     # 2. container: rewrite the database and rebuild the library tree
     docker compose run --rm --no-deps -v "$PWD/scripts:/opsscripts:ro" \\
         --entrypoint python worker /opsscripts/migrate_local_category.py recategorize-commit \\
-        --mapping /opsscripts/recategorize-map.tsv --root /mnt/ssd-data/images
+        --mapping /opsscripts/recategorize-map.tsv --root /mnt/jyzrox/images
 
     # 3. container: verify (reuses the round-1 ``verify`` command)
 """
@@ -729,7 +729,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="artist<TAB>category TSV (required for plan/move-source/commit/recategorize-source/recategorize-commit)",
     )
-    parser.add_argument("--root", required=True, help="library root, e.g. /mnt/ssd-data/images")
+    parser.add_argument("--root", required=True, help="library root, e.g. /mnt/jyzrox/images")
     parser.add_argument("--pattern", default="{category}/{artist}/{_}/{title}")
     parser.add_argument("--reverse", action="store_true", help="move-source only: undo the move")
     parser.add_argument(

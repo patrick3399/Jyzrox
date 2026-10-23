@@ -105,6 +105,6 @@ describe('ImportPage', () => {
     // The example must be built from the host's own mount points; a hardcoded
     // path would name a directory that exists on one developer's machine only.
     expect(screen.getByText('/mnt/media/{artist}/{_}/{title}')).toBeInTheDocument()
-    expect(screen.queryByText(/ssd-data/)).toBeNull()
+    expect(screen.queryByText(/jyzrox/)).toBeNull()
   })
 })

@@ -39,7 +39,7 @@ async def _seed(
     source_id: str,
     status: str = "importing",
     pages=None,
-    source_path: str | None = "/mnt/ssd-data/images/omochi/x",
+    source_path: str | None = "/mnt/jyzrox/images/omochi/x",
     deleted_at=None,
 ) -> int:
     await db_session.execute(
@@ -88,7 +88,7 @@ class TestRequeueOrphanedImports:
         job_name, kwargs = enqueued[0]
         assert job_name == "local_import_job"
         assert kwargs["gallery_id"] == gallery_id
-        assert kwargs["source_dir"] == "/mnt/ssd-data/images/omochi/x"
+        assert kwargs["source_dir"] == "/mnt/jyzrox/images/omochi/x"
         assert kwargs["mode"] == "link"
         # Shared-wrapper timeout, matching every other local_import_job enqueue.
         assert kwargs["_timeout"] == 3600

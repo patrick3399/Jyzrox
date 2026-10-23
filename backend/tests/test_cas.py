@@ -115,7 +115,7 @@ class TestLibraryUrl:
         loads otherwise — ~half the shamakho library filenames carry a '#')."""
         from services.cas import library_url
 
-        ext_path = "/mnt/ssd-data/images/shamakho/2023-05-26-#健全彼女（線ラフver）.jpeg"
+        ext_path = "/mnt/jyzrox/images/shamakho/2023-05-26-#健全彼女（線ラフver）.jpeg"
         url = library_url(ext_path)
 
         assert "#" not in url
@@ -125,7 +125,7 @@ class TestLibraryUrl:
         """A '?' would otherwise be parsed as the query delimiter."""
         from services.cas import library_url
 
-        url = library_url("/mnt/ssd-data/images/foo/what?.jpeg")
+        url = library_url("/mnt/jyzrox/images/foo/what?.jpeg")
 
         assert "?" not in url
         assert "%3F" in url
@@ -134,9 +134,9 @@ class TestLibraryUrl:
         """The /media/libraries/ prefix and path separators stay literal."""
         from services.cas import library_url
 
-        url = library_url("/mnt/ssd-data/images/foo/bar.jpg")
+        url = library_url("/mnt/jyzrox/images/foo/bar.jpg")
 
-        assert url == "/media/libraries/ssd-data/images/foo/bar.jpg"
+        assert url == "/media/libraries/jyzrox/images/foo/bar.jpg"
 
     def test_encoded_url_round_trips_through_unquote_to_media_path(self):
         """media_authz unquotes X-Original-URI and nginx alias decodes for the
@@ -146,10 +146,10 @@ class TestLibraryUrl:
 
         from services.cas import library_url
 
-        ext_path = "/mnt/ssd-data/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
+        ext_path = "/mnt/jyzrox/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
         url = library_url(ext_path)
 
-        assert unquote(url) == "/media/libraries/ssd-data/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
+        assert unquote(url) == "/media/libraries/jyzrox/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
 
 
 # ---------------------------------------------------------------------------

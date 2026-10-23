@@ -343,7 +343,7 @@ describe('service worker media cache performance', () => {
     // dropped the <img>, so backing out of a gallery of ~40 MB JPEGs left
     // hundreds of MB still downloading and buffered in the worker, and the next
     // screen's requests stalled behind them on iOS Safari.
-    const original = `${ORIGIN}/media/libraries/ssd-data/images/Cosplay/a/GalleryEpic.top_03.jpg`
+    const original = `${ORIGIN}/media/libraries/jyzrox/images/Cosplay/a/GalleryEpic.top_03.jpg`
     sw.setResponseBytes(original, 42_674_088)
 
     const res = await sw.request(original)
@@ -367,7 +367,7 @@ describe('service worker media cache performance', () => {
   })
 
   it('still caches ordinary-sized library images for offline use', async () => {
-    const page = `${ORIGIN}/media/libraries/ssd-data/images/Cosplay/a/027.jpg`
+    const page = `${ORIGIN}/media/libraries/jyzrox/images/Cosplay/a/027.jpg`
     sw.setResponseBytes(page, 789_628)
 
     await sw.request(page)
