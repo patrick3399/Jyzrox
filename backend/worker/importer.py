@@ -45,8 +45,13 @@ _NATURAL_SORT_RE = re.compile(r"(\d+)")
 def _subscription_artist_id(source: str, source_id: str, artist_id: str | None, source_url: str | None) -> str | None:
     if artist_id:
         return artist_id
+    # Only an account URL makes the gallery its own artist (ADR 0016); any
+    # other gallery without metadata artist has none, not its own id.
     if source_url and source and source_id:
-        return f"{source}:{source_id}"
+        from plugins.builtin.gallery_dl._identity import is_account_url
+
+        if is_account_url(source_url):
+            return f"{source}:{source_id}"
     return None
 
 
@@ -197,7 +202,8 @@ async def import_job(
                     "download_status": "importing",
                     "metadata_updated_at": func.now(),
                     "pages": Gallery.pages,
-                    "artist_id": pg_insert(Gallery).excluded.artist_id,
+                    # NULL (no artist in metadata) keeps the stored value (BR-007).
+                    "artist_id": func.coalesce(pg_insert(Gallery).excluded.artist_id, Gallery.artist_id),
                     "source_url": pg_insert(Gallery).excluded.source_url,
                 },
                 where=Gallery.deleted_at.is_(None),

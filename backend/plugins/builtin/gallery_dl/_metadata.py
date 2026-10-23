@@ -286,9 +286,11 @@ def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
         if uploader:
             return f"pixiv:{uploader}"
     elif strategy == "tag":
-        for tag in tags:
-            if tag.startswith("artist:"):
-                return f"{source}:{tag[7:]}"
+        # Cosplay galleries carry only a cosplayer tag.
+        for prefix in ("artist:", "cosplayer:"):
+            for tag in tags:
+                if tag.startswith(prefix) and len(tag) > len(prefix):
+                    return f"{source}:{tag[len(prefix) :]}"
     elif strategy == "uploader":
         uploader = meta.get("uploader") or meta.get("username") or ""
         if uploader:

@@ -76,3 +76,9 @@ def resolve_url_identity(url: str) -> UrlIdentity | None:
     # "=" rather than ":" — Windows rejects colons in names.
     source_id = f"{subcategory}={parts}" if parts else subcategory
     return UrlIdentity(source, _bounded(_folder_safe(source_id)), False, category)
+
+
+def is_account_url(url: str) -> bool:
+    """True when ``url`` names an account, i.e. the gallery *is* its artist."""
+    identity = resolve_url_identity(url)
+    return identity is not None and identity.is_account

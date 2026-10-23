@@ -23,11 +23,12 @@ def parse_eh_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImpo
 
     tags = _extract_tags(dest_dir, meta)
 
-    # Artist extraction from tags
+    # Artist from tags; cosplay galleries carry only a cosplayer tag.
     artist_id: str | None = None
-    for tag in tags:
-        if tag.startswith("artist:"):
-            artist_id = f"ehentai:{tag[7:]}"
+    for prefix in ("artist:", "cosplayer:"):
+        name = next((tag[len(prefix) :] for tag in tags if tag.startswith(prefix)), None)
+        if name:
+            artist_id = f"ehentai:{name}"
             break
 
     posted_at: datetime | None = None

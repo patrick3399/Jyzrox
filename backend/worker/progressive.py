@@ -82,8 +82,13 @@ def _is_url_source_id_candidate(candidate: str) -> bool:
 def _subscription_artist_id(data: GalleryImportData, source_url: str | None) -> str | None:
     if data.artist_id:
         return data.artist_id
+    # Only an account URL makes the gallery its own artist (ADR 0016); any
+    # other gallery without metadata artist has none, not its own id.
     if source_url and data.source and data.source_id:
-        return f"{data.source}:{data.source_id}"
+        from plugins.builtin.gallery_dl._identity import is_account_url
+
+        if is_account_url(source_url):
+            return f"{data.source}:{data.source_id}"
     return None
 
 
