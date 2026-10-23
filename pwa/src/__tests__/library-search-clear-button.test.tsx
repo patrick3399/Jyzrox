@@ -1,11 +1,14 @@
 /**
- * Library search bar — one-tap clear.
+ * Library search bar — one-tap clear, and always reachable.
  *
  * Clearing a search used to mean selecting and deleting the text by hand. The
  * bar now carries its own clear button whenever it holds a query.
+ *
+ * The bar also used to live inside the collapsible filter panel, which starts
+ * collapsed on mobile, so searching took an extra tap to open the panel first.
  */
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const search = vi.hoisted(() => ({ inputValue: '', clearSearch: vi.fn() }))
 
@@ -108,5 +111,32 @@ describe('Library search clear button', () => {
     render(<LibraryPage />)
 
     expect(screen.queryByRole('button', { name: 'browse.clearSearch' })).toBeNull()
+  })
+})
+
+describe('Library search bar placement', () => {
+  let originalInnerWidth: number
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    search.inputValue = ''
+    originalInnerWidth = window.innerWidth
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
+  })
+
+  it('keeps the search bar outside the filter panel that starts collapsed on mobile', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
+    render(<LibraryPage />)
+
+    const toggle = screen.getByRole('button', { name: 'library.showFilters' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
+    expect(panel).not.toBeNull()
+
+    const searchBox = screen.getByPlaceholderText('library.searchPlaceholder')
+    expect(panel).not.toContainElement(searchBox)
   })
 })

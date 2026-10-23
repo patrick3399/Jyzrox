@@ -488,13 +488,66 @@ function LibraryContent() {
     <div>
       <h1 className="text-2xl font-bold mb-6">{t('library.title')}</h1>
 
-      {/* Filter Panel with collapsible toggle */}
+      {/* Search + filter panel: the search bar stays usable; only the filters collapse */}
       <div className="bg-vault-card border border-vault-border rounded-lg mb-6">
+        <div className="p-4">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitSearch(inputValue)
+                }}
+                placeholder={t('library.searchPlaceholder')}
+                className="w-full bg-vault-input border border-vault-border rounded-lg pl-3 pr-10 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
+              />
+              {inputValue && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="absolute right-0 top-0 h-full w-10 flex items-center justify-center text-vault-text-muted hover:text-vault-text transition-colors"
+                  aria-label={t('browse.clearSearch')}
+                  title={t('browse.clearSearch')}
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setSyntaxHelpOpen((v) => !v)}
+              className="shrink-0 p-2 text-vault-text-muted hover:text-vault-accent transition-colors"
+              title={t('library.syntaxHelp')}
+            >
+              <HelpCircle size={16} />
+            </button>
+          </div>
+          {syntaxHelpOpen && (
+            <div className="mt-2 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
+              <p>character:rem — {t('library.syntaxTagSearch')}</p>
+              <p>rem — {t('library.syntaxNameOnly')}</p>
+              <p>-general:sketch — {t('library.syntaxExclude')}</p>
+              <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
+              <p>source:ehentai — {t('library.syntaxSource')}</p>
+              <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
+              <p>favorited:true — {t('library.syntaxFavorited')}</p>
+              <p>sort:rating — {t('library.syntaxSort')}</p>
+              <p>collection:5 — {t('library.syntaxCollection')}</p>
+              <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
+              <p>category:doujinshi — {t('library.syntaxCategory')}</p>
+              <p>import:link — {t('library.syntaxImportMode')}</p>
+              <p>rl:true — {t('library.syntaxReadingList')}</p>
+            </div>
+          )}
+        </div>
+
         {/* Toggle button — always visible */}
         <button
           onClick={() => setFiltersOpen((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-vault-text-secondary hover:text-vault-text transition-colors lg:cursor-default"
+          className="w-full flex items-center justify-between px-4 py-3 border-t border-vault-border text-sm font-medium text-vault-text-secondary hover:text-vault-text transition-colors lg:cursor-default"
           aria-expanded={filtersOpen}
+          aria-controls="library-filter-panel"
         >
           <span>{filtersOpen ? t('library.hideFilters') : t('library.showFilters')}</span>
           <ChevronDown
@@ -505,65 +558,13 @@ function LibraryContent() {
 
         {/* Collapsible content — CSS transition via grid-rows */}
         <div
+          id="library-filter-panel"
           className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
             filtersOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
           }`}
         >
           <div className="overflow-hidden">
-            <div className="px-4 pb-4 space-y-4 border-t border-vault-border pt-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      value={inputValue}
-                      onChange={(e) => handleInputChange(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitSearch(inputValue)
-                      }}
-                      placeholder={t('library.searchPlaceholder')}
-                      className="w-full bg-vault-input border border-vault-border rounded-lg pl-3 pr-10 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
-                    />
-                    {inputValue && (
-                      <button
-                        type="button"
-                        onClick={clearSearch}
-                        className="absolute right-0 top-0 h-full w-10 flex items-center justify-center text-vault-text-muted hover:text-vault-text transition-colors"
-                        aria-label={t('browse.clearSearch')}
-                        title={t('browse.clearSearch')}
-                      >
-                        <X size={16} />
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setSyntaxHelpOpen((v) => !v)}
-                    className="shrink-0 p-2 text-vault-text-muted hover:text-vault-accent transition-colors"
-                    title={t('library.syntaxHelp')}
-                  >
-                    <HelpCircle size={16} />
-                  </button>
-                </div>
-                {syntaxHelpOpen && (
-                  <div className="mt-2 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
-                    <p>character:rem — {t('library.syntaxTagSearch')}</p>
-                    <p>rem — {t('library.syntaxNameOnly')}</p>
-                    <p>-general:sketch — {t('library.syntaxExclude')}</p>
-                    <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
-                    <p>source:ehentai — {t('library.syntaxSource')}</p>
-                    <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
-                    <p>favorited:true — {t('library.syntaxFavorited')}</p>
-                    <p>sort:rating — {t('library.syntaxSort')}</p>
-                    <p>collection:5 — {t('library.syntaxCollection')}</p>
-                    <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
-                    <p>category:doujinshi — {t('library.syntaxCategory')}</p>
-                    <p>import:link — {t('library.syntaxImportMode')}</p>
-                    <p>rl:true — {t('library.syntaxReadingList')}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Additional Filters */}
+            <div className="px-4 pb-4 border-t border-vault-border pt-4">
               <div className="flex flex-wrap gap-4 items-center">
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-vault-text-muted uppercase tracking-wide">
