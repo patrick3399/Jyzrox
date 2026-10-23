@@ -6,7 +6,7 @@ alembic==1.18.4
 redis[hiredis]==6.4.0
 saq[redis]>=0.22,<1.0
 httpx==0.28.1
-pillow==12.3.0
+pillow==13.0.0
 pillow-heif==1.8.0
 thumbhash==0.1.2
 cryptography==50.0.0
