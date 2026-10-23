@@ -509,3 +509,66 @@ class TestRunGroup:
         await _ensure_user(db_session)
         resp = await client.post("/api/subscription-groups/99999/run")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Migration 0034: drop the seeded Default group
+# ---------------------------------------------------------------------------
+
+
+def _load_migration_0034():
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parent.parent / "migrations" / "versions" / "0034_drop_default_subscription_group.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_0034", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+async def _run_upgrade_0034(db_session) -> None:
+    module = _load_migration_0034()
+    statements: list[str] = []
+    module.op = type("Op", (), {"execute": staticmethod(statements.append)})
+    module.upgrade()
+    for statement in statements:
+        await db_session.execute(text(statement))
+    await db_session.commit()
+
+
+async def _group_names(db_session) -> set[str]:
+    rows = await db_session.execute(text("SELECT name FROM subscription_groups"))
+    return {r[0] for r in rows}
+
+
+def test_init_sql_no_longer_seeds_default_subscription_group():
+    from pathlib import Path
+
+    init_sql = (Path(__file__).resolve().parent.parent.parent / "db" / "init.sql").read_text(encoding="utf-8")
+    assert "INSERT INTO subscription_groups" not in init_sql
+
+
+async def test_migration_0034_drops_empty_system_default_but_keeps_user_groups(db_session):
+    await _insert_group(db_session, name="Default", is_system=True)
+    await _insert_group(db_session, name="Best")
+    # A user-created group that happens to be called Default is not the seed.
+    await _insert_group(db_session, name="Default", is_system=False)
+
+    await _run_upgrade_0034(db_session)
+    await _run_upgrade_0034(db_session)  # idempotent on a database built from current init.sql
+
+    rows = await db_session.execute(text("SELECT name, is_system FROM subscription_groups ORDER BY name"))
+    assert [(r[0], bool(r[1])) for r in rows] == [("Best", False), ("Default", False)]
+
+
+async def test_migration_0034_keeps_system_default_that_still_holds_subscriptions(db_session):
+    await _ensure_user(db_session)
+    group_id = await _insert_group(db_session, name="Default", is_system=True)
+    await _insert_subscription(db_session, group_id=group_id)
+
+    await _run_upgrade_0034(db_session)
+
+    assert await _group_names(db_session) == {"Default"}

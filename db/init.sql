@@ -499,11 +499,6 @@ CREATE TABLE IF NOT EXISTS subscription_groups (
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- Seed Default group
-INSERT INTO subscription_groups (name, schedule, concurrency, priority, is_system)
-SELECT 'Default', '0 */2 * * *', 2, 3, true
-WHERE NOT EXISTS (SELECT 1 FROM subscription_groups WHERE is_system = true AND name = 'Default');
-
 -- ── Subscriptions (replaces followed_artists) ──────────────────────
 
 CREATE TABLE IF NOT EXISTS subscriptions (
