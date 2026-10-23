@@ -1109,6 +1109,7 @@ async def unauthed_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
+        patch("core.auth.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
     ):

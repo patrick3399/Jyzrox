@@ -21,13 +21,23 @@ http {
     gzip_min_length 1000;
     gzip_vary on;
 
-    # Rate limits
+    # Client address. External requests all arrive from the outer reverse
+    # proxy (measured 2026-10-23: one LAN address for every external request),
+    # so without this each limit_req zone below was a single bucket shared by
+    # the whole internet -- any one client could spend the login limit for
+    # everyone. Trust X-Forwarded-For hops from the same private ranges as the
+    # backend (core/config.py trusted_proxies); recursion skips every trusted
+    # hop and lands on the first untrusted one, the client. LAN clients that
+    # connect directly keep their own address.
+    set_real_ip_from 172.16.0.0/12;
+    set_real_ip_from 10.0.0.0/8;
+    set_real_ip_from 192.168.0.0/16;
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
+    # Rate limits, keyed per client (see real_ip above).
     # eh_proxy runs before require_auth, so it is the only gate against an
-    # unauthenticated flood reaching API workers -- keep the zone even though
-    # its per-key granularity is coarse. No real_ip_header is configured, so
-    # $binary_remote_addr resolves to the outer reverse proxy's address, not
-    # the end client's; this is a shared bucket across all external clients,
-    # not a per-user limit.
+    # unauthenticated flood reaching API workers.
     limit_req_zone $binary_remote_addr zone=eh_proxy:10m rate=30r/s;
     limit_req_zone $binary_remote_addr zone=pixiv_proxy:10m rate=20r/s;
     limit_req_zone $binary_remote_addr zone=auth_zone:10m rate=5r/m;
@@ -100,6 +110,9 @@ http {
             proxy_set_header Cookie $http_cookie;
             proxy_set_header X-Original-URI $request_uri;
             proxy_set_header Authorization $http_authorization;
+            # Basic credentials ride along here (OPDS readers); the backend
+            # budgets their failures per client, which needs the client address.
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 
             # Cache auth results per cookie+authorization value. 200 is kept
             # short: it bounds how long a revoked session (logout, role change,
@@ -131,6 +144,7 @@ http {
             proxy_set_header Cookie $http_cookie;
             proxy_set_header X-Original-URI $request_uri;
             proxy_set_header Authorization $http_authorization;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 
             proxy_cache auth_cache;
             proxy_cache_key $http_cookie$http_authorization$request_uri;
@@ -192,6 +206,23 @@ http {
             expires 1d;
             add_header Cache-Control "private";
             add_header X-Content-Type-Options "nosniff" always;
+        }
+
+        # ── Session check from the browser: cookie only ───────────
+        # The PWA login page calls this with its cookie. Basic credentials are
+        # dropped so the internet cannot use it as a password oracle; Basic
+        # auth stays available through /opds/ and the /media/* auth_request,
+        # where the backend budgets failures per client. X-Original-URI is
+        # nginx's own subrequest header, never the client's.
+        location = /api/auth/check {
+            limit_req zone=api_zone burst=60 nodelay;
+            proxy_pass http://api;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Authorization "";
+            proxy_set_header X-Original-URI "";
         }
 
         # ── Auth endpoints: rate limited ──────────────────────────

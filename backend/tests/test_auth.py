@@ -28,6 +28,48 @@ async def _create_user(db_session, username="admin", password="testpass123", rol
     return result.scalar()
 
 
+def _basic(username: str, password: str) -> dict:
+    import base64
+
+    return {"Authorization": "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()}
+
+
+class _CounterRedis:
+    """Minimal Redis stand-in for the failed-attempt counters in core.rate_limit."""
+
+    def __init__(self):
+        self.values: dict[str, int] = {}
+
+    async def get(self, key):
+        value = self.values.get(key)
+        return None if value is None else str(value).encode()
+
+    async def incr(self, key):
+        self.values[key] = self.values.get(key, 0) + 1
+        return self.values[key]
+
+    async def expire(self, key, seconds):
+        return True
+
+    async def ttl(self, key):
+        return 300
+
+
+@pytest.fixture
+def basic_auth_budget(monkeypatch):
+    """Enable rate limiting with a 3-failure budget backed by a counting fake Redis.
+
+    Request it after the client fixture so it overrides that fixture's mock Redis.
+    """
+    from core.config import settings
+
+    redis = _CounterRedis()
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "rate_limit_login", 3)
+    monkeypatch.setattr("core.rate_limit.get_redis", lambda: redis)
+    return redis
+
+
 # ---------------------------------------------------------------------------
 # Setup flow
 # ---------------------------------------------------------------------------
@@ -311,6 +353,49 @@ class TestCheckAuthBasic:
             headers={"Authorization": f"Basic {creds}"},
         )
         assert resp.status_code == 401
+
+    async def test_check_basic_auth_unknown_user_still_runs_bcrypt(self, unauthed_client):
+        """An unknown username must cost the same bcrypt check as a known one.
+
+        Skipping it answered in ~3ms instead of ~180ms, telling an unauthenticated
+        caller which usernames exist.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        checkpw = AsyncMock(return_value=False)
+        with patch("core.auth._checkpw_async", checkpw), patch("routers.auth._checkpw_async", checkpw):
+            resp = await unauthed_client.get("/api/auth/check", headers=_basic("nobody", "whatever"))
+
+        assert resp.status_code == 401
+        checkpw.assert_awaited_once()
+
+    async def test_check_basic_auth_rejects_correct_password_after_failure_budget_spent(
+        self, unauthed_client, db_session, basic_auth_budget
+    ):
+        """Once a client spends its failed-attempt budget, even the right password is refused.
+
+        /api/auth/check is reached by every /media/* auth_request, which forwards the
+        Authorization header, so without a budget it is an unlimited password oracle.
+        """
+        await _create_user(db_session, "budgetuser", "rightpass")
+        for _ in range(3):
+            resp = await unauthed_client.get("/api/auth/check", headers=_basic("budgetuser", "wrong"))
+            assert resp.status_code == 401
+
+        resp = await unauthed_client.get("/api/auth/check", headers=_basic("budgetuser", "rightpass"))
+
+        # 401, not 429: nginx auth_request turns any other status into a 500.
+        assert resp.status_code == 401
+
+    async def test_check_basic_auth_success_does_not_spend_failure_budget(
+        self, unauthed_client, db_session, basic_auth_budget
+    ):
+        """OPDS clients resend credentials on every request; successes must not count."""
+        await _create_user(db_session, "readeruser", "rightpass")
+        for _ in range(5):
+            resp = await unauthed_client.get("/api/auth/check", headers=_basic("readeruser", "rightpass"))
+            assert resp.status_code == 200
+        assert not basic_auth_budget.values
 
 
 # ---------------------------------------------------------------------------
@@ -918,6 +1003,25 @@ class TestRequireOpdsAuth:
             headers={"Authorization": f"Basic {creds}"},
         )
         assert resp.status_code == 401
+
+    async def test_opds_rejects_correct_password_after_failure_budget_spent(
+        self, unauthed_opds_client, db_session, basic_auth_budget
+    ):
+        """OPDS Basic auth gets the login form's failure budget instead of unlimited guesses."""
+        from unittest.mock import patch
+
+        await _create_user(db_session, "opdsbudget", "rightpass")
+        for _ in range(3):
+            resp = await unauthed_opds_client.get("/opds/", headers=_basic("opdsbudget", "wrong"))
+            assert resp.status_code == 401
+
+        with patch("core.auth._checkpw_async") as checkpw:
+            resp = await unauthed_opds_client.get("/opds/", headers=_basic("opdsbudget", "rightpass"))
+
+        assert resp.status_code == 429
+        assert "Retry-After" in resp.headers
+        # Refused before bcrypt, so a locked-out client cannot keep the CPU busy either.
+        checkpw.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

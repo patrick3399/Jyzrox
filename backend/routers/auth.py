@@ -17,7 +17,15 @@ from sqlalchemy import select, text, update
 from starlette import status
 
 from core.audit import log_audit
-from core.auth import _DUMMY_HASH, _checkpw_async, _hashpw_async, _sign_session, _verify_session, require_auth
+from core.auth import (
+    _DUMMY_HASH,
+    _checkpw_async,
+    _hashpw_async,
+    _sign_session,
+    _verify_session,
+    require_auth,
+    verify_basic_credentials,
+)
 from core.config import settings
 from core.database import advisory_xact_lock, async_session
 from core.errors import api_error, parse_accept_language
@@ -326,25 +334,17 @@ async def check_auth(
     if authorization and authorization.lower().startswith("basic "):
         import base64
 
-        user = None
-        valid = False
         try:
             decoded = base64.b64decode(authorization[6:]).decode("utf-8")
             username, password = decoded.split(":", 1)
-            async with async_session() as session:
-                result = await session.execute(
-                    text("SELECT id, password_hash, role FROM users WHERE username = :uname"),
-                    {"uname": username},
-                )
-                user = result.fetchone()
-            hash_to_check = user.password_hash if user else _DUMMY_HASH
-            valid = bool(user) and await _checkpw_async(password.encode("utf-8"), hash_to_check.encode("utf-8"))
+            basic_auth = await verify_basic_credentials(username, password, get_client_ip(request))
         except Exception:
-            valid = False
+            # Includes BasicAuthLockedOut: nginx auth_request turns any status
+            # other than 2xx/401/403 into a 500, so a lockout is a plain 401.
+            basic_auth = None
 
-        if valid:
+        if basic_auth is not None:
             if original_uri.startswith(_MEDIA_URI_AUTHZ_PREFIXES):
-                basic_auth = {"user_id": user.id, "role": user.role or "viewer"}
                 if not await authorize_media_uri(basic_auth, original_uri):
                     raise HTTPException(status_code=403, detail="Forbidden")
             return {"status": "ok"}
