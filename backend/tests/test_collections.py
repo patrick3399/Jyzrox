@@ -803,6 +803,21 @@ class TestGetCollectionWithGalleries:
         assert g["id"] == gid
         assert g["title"] == "Shape Gallery"
 
+    async def test_get_collection_galleries_include_source_id_for_detail_link(self, client, db_session):
+        """The PWA builds /library/{source}/{source_id} from each entry; a missing
+        source_id produced /library/<source>/undefined links."""
+        await _ensure_user(db_session)
+        col = await _create_collection(client, "Detail Links")
+        gid = await _insert_gallery(db_session, source="pixiv", source_id="link-src-42")
+
+        await client.post(f"/api/collections/{col['id']}/galleries", json={"gallery_ids": [gid]})
+
+        resp = await client.get(f"/api/collections/{col['id']}")
+        assert resp.status_code == 200
+        g = resp.json()["galleries"][0]
+        assert g["source"] == "pixiv"
+        assert g["source_id"] == "link-src-42"
+
     async def test_get_collection_gallery_cover_thumb_with_image(self, client, db_session):
         """Gallery with an image must have non-null cover_thumb in collection detail."""
         await _ensure_user(db_session)

@@ -233,6 +233,7 @@ async def get_collection(
             {
                 "id": g.id,
                 "source": g.source,
+                "source_id": g.source_id,
                 "title": g.title,
                 "title_jpn": g.title_jpn,
                 "category": g.category,
