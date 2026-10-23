@@ -1817,6 +1817,57 @@ async def test_web_clip_imports_browser_authenticated_image(client, db_session, 
     assert tuple(gallery) == ("webclip", "https://example.test/post/1", "private")
 
 
+async def test_web_clip_upload_filename_with_path_is_reduced_to_its_basename(client, db_session, tmp_path):
+    """The multipart filename is client-controlled and Starlette passes it through
+    verbatim. Only its last component may name the image and its library link, so
+    the DB row and the link agree and the link stays inside the gallery's dir."""
+    from db.models import Blob
+
+    await db_session.execute(
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'owner', 'x', 'admin')")
+    )
+    await db_session.commit()
+    image = io.BytesIO()
+    PILImage.new("RGB", (8, 8), "red").save(image, format="PNG")
+
+    async def fake_store(path, sha256, session):
+        blob = Blob(
+            sha256=sha256,
+            file_size=path.stat().st_size,
+            extension=".png",
+            media_type="image",
+            storage="external",
+            external_path=str(path),
+            ref_count=0,
+        )
+        session.add(blob)
+        await session.flush()
+        return blob
+
+    symlink = AsyncMock()
+    with (
+        patch("routers.import_router.settings.data_training_path", str(tmp_path)),
+        patch("routers.import_router.store_blob", side_effect=fake_store),
+        patch("routers.import_router.create_library_symlink", symlink),
+        patch("routers.import_router.emit_safe", new_callable=AsyncMock),
+    ):
+        response = await client.post(
+            "/api/import/web-clip",
+            data={"source_url": "https://example.test/post/2"},
+            files={"file": ("../../../escape.png", image.getvalue(), "image/png")},
+        )
+
+    assert response.status_code == 201, response.text
+    stored = (
+        await db_session.execute(
+            text("SELECT filename FROM images WHERE gallery_id=:id"),
+            {"id": response.json()["gallery_id"]},
+        )
+    ).scalar_one()
+    assert stored == "escape.png"
+    assert symlink.await_args.args[2] == "escape.png"
+
+
 class TestImportConflictOptions:
     """Overwrite cannot be honored (it only appends), so the option is removed."""
 

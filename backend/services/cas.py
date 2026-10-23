@@ -326,6 +326,10 @@ async def create_library_symlink(
     external_path: str | None = None,
 ) -> None:
     """Create a symlink in /data/library/{source}/{safe_source_id}/ pointing to the blob's actual file."""
+    # One path component only: the existing file at the link's path is unlinked
+    # below, so a '../' name would delete and replace a file outside the dir.
+    if not filename or filename in (".", "..") or Path(filename).name != filename:
+        raise ValueError(f"library link name must be a single path component: {filename!r}")
     try:
         link_dir = ensure_library_dir(source, source_id)
     except LibraryDirCollisionError as exc:

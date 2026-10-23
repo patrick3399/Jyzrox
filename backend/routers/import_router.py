@@ -78,7 +78,10 @@ async def import_web_clip(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    suffix = Path(file.filename or "").suffix.lower()
+    # The multipart filename is client-controlled and arrives verbatim; keep only
+    # its last component so the image row and its library link agree.
+    filename = Path(file.filename or "").name
+    suffix = Path(filename).suffix.lower()
     if suffix not in _SUPPORTED_IMAGE_EXTS:
         raise HTTPException(status_code=400, detail="Web clip must be a supported image")
     temp = Path(settings.data_training_path) / "web-clips" / f".{uuid.uuid4().hex}{suffix}"
@@ -107,7 +110,7 @@ async def import_web_clip(
             source="webclip",
             source_id=source_id,
             source_url=source_url,
-            title=(title or "").strip() or Path(file.filename or "Web clip").stem,
+            title=(title or "").strip() or Path(filename).stem,
             pages=1,
             download_status="complete",
             import_mode="copy",
@@ -116,11 +119,11 @@ async def import_web_clip(
         )
         db.add(gallery)
         await db.flush()
-        image = Image(gallery_id=gallery.id, page_num=1, filename=file.filename, blob_sha256=sha256)
+        image = Image(gallery_id=gallery.id, page_num=1, filename=filename, blob_sha256=sha256)
         db.add(image)
         await increment_ref_count(sha256, db)
         await db.commit()
-        await create_library_symlink("webclip", source_id, file.filename or f"clip{suffix}", blob)
+        await create_library_symlink("webclip", source_id, filename, blob)
         await emit_safe(
             EventType.IMPORT_COMPLETED,
             actor_user_id=auth["user_id"],

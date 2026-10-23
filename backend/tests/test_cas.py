@@ -731,6 +731,32 @@ class TestCreateLibrarySymlink:
         assert link.is_symlink()
         assert os.readlink(link) == str(ext_file)
 
+    async def test_filename_with_path_components_is_refused_before_touching_disk(self, tmp_path):
+        """The link name must be a single path component.
+
+        A '../' name put the link outside the gallery's dir, after unlinking
+        whatever file already sat at that spot.
+        """
+        from services.cas import create_library_symlink
+
+        data_root = tmp_path / "data"
+        cas_root = data_root / "cas"
+        library_root = data_root / "library"
+        blob_file = cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.jpg"
+        blob_file.parent.mkdir(parents=True)
+        blob_file.write_bytes(b"image-bytes")
+        outside = data_root / "outside.jpg"
+        outside.write_bytes(b"keep me")
+
+        with patch("services.cas.settings", _mock_settings(cas=str(cas_root), library=str(library_root))):
+            for name in ("../../../outside.jpg", "sub/001.jpg", "..", ""):
+                with pytest.raises(ValueError):
+                    await create_library_symlink("webclip", "1:abc", name, self._make_cas_blob())
+
+        assert not outside.is_symlink()
+        assert outside.read_bytes() == b"keep me"
+        assert not (library_root / "webclip").exists()
+
 
 # ---------------------------------------------------------------------------
 # TestDecrementRefCount
