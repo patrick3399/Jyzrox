@@ -148,7 +148,8 @@ async def list_subscriptions(
             query = query.where(Subscription.enabled == enabled)
         if group_id is not None:
             query = query.where(Subscription.group_id == group_id)
-        query = query.order_by(Subscription.created_at.desc()).offset(offset).limit(limit)
+        # id breaks created_at ties so offset paging neither repeats nor skips rows.
+        query = query.order_by(Subscription.created_at.desc(), Subscription.id.desc()).offset(offset).limit(limit)
 
         result = await session.execute(query)
         subs = result.scalars().all()

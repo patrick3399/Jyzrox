@@ -140,6 +140,23 @@ class TestListSubscriptions:
         assert resp.status_code == 200
         assert len(resp.json()["subscriptions"]) <= 2
 
+    async def test_list_subscriptions_offset_pages_with_equal_created_at_neither_repeat_nor_skip(
+        self, client, db_session
+    ):
+        """Bulk-imported subs share created_at; id must break the tie so pages are stable."""
+        await _ensure_user(db_session)
+        ids = [await _insert_subscription(db_session, name=f"Tied Sub {i}") for i in range(6)]
+        await db_session.execute(text("UPDATE subscriptions SET created_at = '2026-01-01 00:00:00'"))
+        await db_session.commit()
+
+        seen: list[int] = []
+        for offset in (0, 2, 4):
+            resp = await client.get("/api/subscriptions/", params={"limit": 2, "offset": offset})
+            assert resp.status_code == 200
+            seen += [s["id"] for s in resp.json()["subscriptions"]]
+
+        assert seen == sorted(ids, reverse=True)
+
     async def test_list_subscriptions_returns_current_gallery_title_without_job(self, client, db_session):
         """Old subscriptions use the current Gallery title even after linked jobs are gone."""
         await _ensure_user(db_session)

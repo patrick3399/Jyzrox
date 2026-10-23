@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
-import { Rss, Plus, X, Trash2, List, Search, FolderOpen, Download } from 'lucide-react'
+import { Rss, Plus, X, Trash2, List, Search, FolderOpen, Download, Globe } from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useWsJobs, useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
 import {
-  useSubscriptions,
+  useAllSubscriptions,
   useCreateSubscription,
   useUpdateSubscription,
   useDeleteSubscription,
@@ -34,6 +34,13 @@ import type { Subscription, SubscriptionGroup, DownloadJob, JobListParams } from
 import useSWR from 'swr'
 import { GroupCard } from '@/components/subscriptions/GroupCard'
 import { CRON_PRESETS, DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
+import {
+  groupBySource,
+  readSubscriptionView,
+  sourceLabel,
+  writeSubscriptionView,
+  type SubscriptionView,
+} from '@/components/subscriptions/sourceGrouping'
 
 const GroupModal = dynamic(
   () => import('@/components/subscriptions/GroupModal').then((module) => module.GroupModal),
@@ -54,7 +61,7 @@ export default function SubscriptionsPage() {
   useLocale()
 
   // Subscriptions data
-  const { data, mutate, isLoading } = useSubscriptions({ limit: 200 })
+  const { data, mutate, isLoading } = useAllSubscriptions()
   const { trigger: createSub, isMutating: creating } = useCreateSubscription()
   const { trigger: updateSub } = useUpdateSubscription()
   const { trigger: deleteSub } = useDeleteSubscription()
@@ -179,14 +186,32 @@ export default function SubscriptionsPage() {
 
   const showDownloadingOnly = downloadingOnly && activeCount > 0
 
+  // Layout: by schedule group (default) or by site. Read after mount — storage is client-only.
+  const [view, setView] = useState<SubscriptionView>('group')
+  useEffect(() => setView(readSubscriptionView()), [])
+  const changeView = (next: SubscriptionView) => {
+    setView(next)
+    writeSubscriptionView(next)
+  }
+
+  const visibleSubs = useMemo(
+    () =>
+      showDownloadingOnly
+        ? filteredSubscriptions.filter((s) => activeIds.has(s.id))
+        : filteredSubscriptions,
+    [filteredSubscriptions, activeIds, showDownloadingOnly],
+  )
+
+  const sourceSections = useMemo(
+    () => groupBySource(visibleSubs, activeIds),
+    [visibleSubs, activeIds],
+  )
+
   // Group subscriptions by group_id (active downloads first inside every group)
   const groupedSubs = useMemo(() => {
     const byGroup: Record<number, Subscription[]> = {}
     const ungrouped: Subscription[] = []
-    const visible = showDownloadingOnly
-      ? filteredSubscriptions.filter((s) => activeIds.has(s.id))
-      : filteredSubscriptions
-    for (const sub of visible) {
+    for (const sub of visibleSubs) {
       if (sub.group_id !== null && sub.group_id !== undefined) {
         if (!byGroup[sub.group_id]) byGroup[sub.group_id] = []
         byGroup[sub.group_id].push(sub)
@@ -198,10 +223,9 @@ export default function SubscriptionsPage() {
       byGroup[Number(key)] = sortActiveFirst(byGroup[Number(key)], activeIds)
     }
     return { byGroup, ungrouped: sortActiveFirst(ungrouped, activeIds) }
-  }, [filteredSubscriptions, activeIds, showDownloadingOnly])
+  }, [visibleSubs, activeIds])
 
-  const hasVisibleSubs =
-    groupedSubs.ungrouped.length > 0 || Object.values(groupedSubs.byGroup).some((l) => l.length > 0)
+  const hasVisibleSubs = visibleSubs.length > 0
 
   // Forms state
   const [showAdd, setShowAdd] = useState(false)
@@ -829,6 +853,34 @@ export default function SubscriptionsPage() {
               </button>
             )}
           </div>
+          <div
+            role="group"
+            aria-label={t('subscriptions.viewLabel')}
+            className="shrink-0 flex rounded-lg border border-vault-border bg-vault-input p-0.5"
+          >
+            {(
+              [
+                ['group', FolderOpen, t('subscriptions.viewByGroup')],
+                ['source', Globe, t('subscriptions.viewBySource')],
+              ] as const
+            ).map(([value, Icon, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => changeView(value)}
+                aria-pressed={view === value}
+                title={label}
+                aria-label={label}
+                className={`rounded-md p-1.5 transition-colors ${
+                  view === value
+                    ? 'bg-vault-accent/20 text-vault-accent'
+                    : 'text-vault-text-muted hover:text-vault-text'
+                }`}
+              >
+                <Icon size={15} />
+              </button>
+            ))}
+          </div>
           {(activeCount > 0 || downloadingOnly) && (
             <button
               type="button"
@@ -869,6 +921,34 @@ export default function SubscriptionsPage() {
         <div className="text-center py-12">
           <Download size={40} className="mx-auto text-vault-text-muted mb-3" />
           <p className="text-sm text-vault-text-muted">{t('subscriptions.noDownloading')}</p>
+        </div>
+      ) : view === 'source' ? (
+        <div className="space-y-3">
+          {sourceSections.map((section) => (
+            <GroupCard
+              key={section.source ?? '__other'}
+              group={null}
+              title={sourceLabel(section.source)}
+              showSubGroup
+              subs={section.subs}
+              jobsData={jobsData ?? {}}
+              groups={groups}
+              onEdit={openEditGroup}
+              onRun={handleGroupRun}
+              onPauseResume={handleGroupPauseResume}
+              onDelete={handleGroupDelete}
+              onToggleSub={handleToggle}
+              onCheckSub={handleCheck}
+              onBackfillSub={handleBackfill}
+              onDeleteSub={handleDelete}
+              onAutoDownloadToggle={handleAutoDownloadToggle}
+              onMoveToGroup={handleMoveToGroup}
+              onRenameSub={handleRename}
+              onCronChangeSub={handleCronChange}
+              checkingId={checkingId}
+              defaultExpanded={true}
+            />
+          ))}
         </div>
       ) : (
         <div className="space-y-3">

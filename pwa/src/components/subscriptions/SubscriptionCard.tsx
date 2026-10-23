@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { CRON_PRESETS } from './constants'
+import { sourceLabel } from './sourceGrouping'
 import type { DownloadJob, Subscription, SubscriptionGroup } from '@/lib/types'
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -30,18 +31,11 @@ const SOURCE_COLORS: Record<string, string> = {
 
 function sourceBadge(source: string | null) {
   const cls = SOURCE_COLORS[source || ''] || 'bg-vault-border text-vault-text-muted'
-  const label = source
-    ? source === 'pixiv'
-      ? 'Pixiv'
-      : source === 'twitter'
-        ? 'Twitter'
-        : source === 'ehentai'
-          ? 'E-Hentai'
-          : source === 'weibo'
-            ? 'Weibo'
-            : source
-    : t('subscriptions.sourceOther')
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>{label}</span>
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>
+      {sourceLabel(source)}
+    </span>
+  )
 }
 
 export function timeAgo(iso: string | null): string {
@@ -257,6 +251,7 @@ export function SubscriptionCard({
   onRename,
   onCronChange,
   checkingId,
+  showGroup = false,
 }: {
   sub: Subscription
   latestJob: DownloadJob | null
@@ -270,8 +265,12 @@ export function SubscriptionCard({
   onRename: (sub: Subscription, name: string) => void
   onCronChange?: (sub: Subscription, cron: string) => void
   checkingId: number | null
+  /** Show the schedule group on the card itself (the list is not laid out by group). */
+  showGroup?: boolean
 }) {
   const [showActions, setShowActions] = useState(false)
+  const isGrouped = sub.group_id !== null && sub.group_id !== undefined
+  const group = groups.find((g) => g.id === sub.group_id) ?? null
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState('')
   const galleryHref = subscriptionGalleryHref(sub, latestJob)
@@ -314,6 +313,20 @@ export function SubscriptionCard({
             </button>
           )}
           {sourceBadge(sub.source)}
+          {showGroup && isGrouped && (
+            <span
+              data-testid="subscription-group-badge"
+              className="flex min-w-0 items-center gap-1 rounded bg-vault-accent/15 px-1.5 py-0.5 text-[10px] text-vault-accent"
+              title={t('subscriptions.intervalFromGroup', {
+                name: group?.name ?? String(sub.group_id),
+                schedule: group?.schedule ?? '',
+              })}
+            >
+              <Users size={10} className="shrink-0" />
+              <span className="truncate">{group?.name ?? `#${sub.group_id}`}</span>
+              {group && <span className="shrink-0 font-mono">{group.schedule}</span>}
+            </span>
+          )}
           <button
             onClick={() => onAutoDownloadToggle(sub)}
             className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
@@ -459,11 +472,7 @@ export function SubscriptionCard({
             {t('common.delete')}
           </button>
           <div className="col-span-2 mt-1 border-t border-vault-border/50 px-2 pt-2">
-            <IntervalRow
-              sub={sub}
-              group={groups.find((g) => g.id === sub.group_id) ?? null}
-              onCronChange={onCronChange}
-            />
+            <IntervalRow sub={sub} group={group} onCronChange={onCronChange} />
           </div>
           {groups.length > 0 && (
             <label className="col-span-2 flex items-center gap-2 px-2 pt-1 text-vault-text-muted">

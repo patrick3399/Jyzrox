@@ -1,7 +1,16 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, FolderOpen, Pause, Play, Settings2, Trash2 } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  Globe,
+  Pause,
+  Play,
+  Settings2,
+  Trash2,
+} from 'lucide-react'
 import { SubscriptionCard, timeAgo } from './SubscriptionCard'
 import { t } from '@/lib/i18n'
 import type { DownloadJob, Subscription, SubscriptionGroup } from '@/lib/types'
@@ -48,8 +57,10 @@ export function GroupCard({
   onCronChangeSub,
   checkingId,
   defaultExpanded,
+  title,
+  showSubGroup = false,
 }: {
-  group: SubscriptionGroup | null // null = ungrouped section
+  group: SubscriptionGroup | null // null = ungrouped section, or a site section when title is set
   subs: Subscription[]
   jobsData: Record<number, DownloadJob>
   groups: SubscriptionGroup[]
@@ -67,6 +78,10 @@ export function GroupCard({
   onCronChangeSub?: (sub: Subscription, cron: string) => void
   checkingId: number | null
   defaultExpanded: boolean
+  /** Heading of a site section (group must be null). */
+  title?: string
+  /** Show each subscription's schedule group on its card. */
+  showSubGroup?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
 
@@ -82,12 +97,16 @@ export function GroupCard({
         <span className="text-vault-text-muted shrink-0">
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </span>
-        <FolderOpen
-          size={16}
-          className={isUngrouped ? 'text-vault-text-muted' : 'text-vault-accent'}
-        />
+        {title !== undefined ? (
+          <Globe size={16} className="text-vault-accent" />
+        ) : (
+          <FolderOpen
+            size={16}
+            className={isUngrouped ? 'text-vault-text-muted' : 'text-vault-accent'}
+          />
+        )}
         <span className="flex-1 font-medium text-sm text-vault-text truncate">
-          {isUngrouped ? t('subscriptions.ungrouped') : group.name}
+          {isUngrouped ? (title ?? t('subscriptions.ungrouped')) : group.name}
         </span>
 
         {/* Group meta */}
@@ -190,6 +209,7 @@ export function GroupCard({
                 onRename={onRenameSub}
                 onCronChange={onCronChangeSub}
                 checkingId={checkingId}
+                showGroup={showSubGroup}
               />
             ))
           )}
