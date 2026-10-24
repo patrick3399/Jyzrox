@@ -31,7 +31,7 @@ import { subscriptions, subscriptionGroups } from './subscriptions'
 import { dedup } from './dedup'
 import { users } from './users'
 import { logs, galleryDl } from './logs'
-import { adminSites, adminQueue } from './admin'
+import { adminSites, adminQueue, adminPersonas } from './admin'
 import { search } from './search'
 import { saucenao } from './saucenao'
 import { novels } from './novels'
@@ -65,6 +65,7 @@ export const api = {
   users,
   logs,
   adminSites,
+  adminPersonas,
   galleryDl,
   adminQueue,
   search,

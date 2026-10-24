@@ -259,7 +259,7 @@ export interface DownloadJob {
     speed?: number
     started_at?: string
     last_update_at?: string
-    wait_reason?: 'source_slot'
+    wait_reason?: 'source_slot' | 'persona_cooldown'
     wait_started_at?: string
     semaphore_key?: string
     queue_position?: number
@@ -289,6 +289,8 @@ export interface DownloadJob {
   retry_count: number
   max_retries: number
   next_retry_at: string | null
+  /** Egress persona the job runs under (ADR 0022); null/absent when not in persona mode. */
+  persona?: string | null
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────
@@ -359,6 +361,27 @@ export interface CredentialAccount {
 }
 
 export type Credentials = Record<string, CredentialStatus>
+
+// ── Egress Personas (Admin, ADR 0022) ─────────────────────────────────
+
+export interface EgressPersona {
+  id: number
+  name: string
+  proxy_url: string | null
+  user_agent: string | null
+  browser_profile: 'chrome' | 'firefox' | null
+  enabled: boolean
+  last_exit_ip: string | null
+  last_tested_at: string | null
+  accounts: { source: string; account: string }[]
+}
+
+export interface PersonaTestResult {
+  ip: string | null
+  colo: string | null
+  same_ip: string[]
+  same_subnet: string[]
+}
 
 export interface EhAccount {
   valid: boolean
@@ -1095,6 +1118,8 @@ export interface SiteConfigItem {
     sleep_request: number | [number, number] | null
     concurrency: number
     inactivity_timeout: number
+    /** ADR 0022: spread manual downloads across egress personas (concurrency becomes per-persona). */
+    spread_personas: boolean
   }
   field_mapping?: Record<string, string | null>
   auto_probe?: ProbeResult | null

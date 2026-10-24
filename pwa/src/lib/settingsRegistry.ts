@@ -17,6 +17,7 @@ import {
   CalendarClock,
   Shapes,
   GitBranch,
+  Network,
 } from 'lucide-react'
 import { hasRole } from '@/lib/pageRegistry'
 import type { UserRole } from '@/lib/types'
@@ -158,6 +159,14 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
     labelKey: 'settingsCategory.novelRemote',
     descKey: 'settingsCategory.novelRemoteDesc',
     icon: GitBranch,
+    minRole: 'admin',
+    group: 'admin',
+  },
+  {
+    slug: 'egress-personas',
+    labelKey: 'settingsCategory.egressPersonas',
+    descKey: 'settingsCategory.egressPersonasDesc',
+    icon: Network,
     minRole: 'admin',
     group: 'admin',
   },

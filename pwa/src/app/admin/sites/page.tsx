@@ -38,6 +38,7 @@ interface DownloadFormState {
   sleep_request_raw: string // free text: "2", "1-5", or empty
   concurrency: number
   inactivity_timeout: number
+  spread_personas: boolean
 }
 
 function parseFormToPayload(form: DownloadFormState): Record<string, unknown> {
@@ -60,6 +61,7 @@ function parseFormToPayload(form: DownloadFormState): Record<string, unknown> {
     sleep_request,
     concurrency: form.concurrency,
     inactivity_timeout: form.inactivity_timeout,
+    spread_personas: form.spread_personas,
   }
 }
 
@@ -76,6 +78,7 @@ function siteToForm(site: SiteConfigItem): DownloadFormState {
     sleep_request_raw,
     concurrency: site.download.concurrency,
     inactivity_timeout: site.download.inactivity_timeout,
+    spread_personas: site.download.spread_personas ?? false,
   }
 }
 
@@ -279,6 +282,20 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
                   className="vault-input rounded-lg px-3 py-2 text-sm"
                 />
               </label>
+              <div className="col-span-2 flex flex-col gap-1">
+                <label className="flex items-center gap-2 text-sm text-vault-text">
+                  <input
+                    type="checkbox"
+                    checked={form.spread_personas}
+                    onChange={(e) => setForm((f) => ({ ...f, spread_personas: e.target.checked }))}
+                    className="accent-vault-accent"
+                  />
+                  {t('admin.sites.spreadPersonas')}
+                </label>
+                <p className="text-xs text-vault-text-muted">
+                  {t('admin.sites.spreadPersonasHint')}
+                </p>
+              </div>
               <label className="col-span-2 flex flex-col gap-1">
                 <span className="text-vault-text-secondary text-xs">
                   {t('admin.sites.sleepRequest')} ({t('admin.sites.seconds')},{' '}

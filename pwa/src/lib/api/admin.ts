@@ -1,6 +1,13 @@
 import { apiFetch, qs } from './client'
 
-import type { SiteConfigItem, ProbeResult, SaqJob, QueueOverview } from '../types'
+import type {
+  SiteConfigItem,
+  ProbeResult,
+  SaqJob,
+  QueueOverview,
+  EgressPersona,
+  PersonaTestResult,
+} from '../types'
 
 // ── Admin Sites ──────────────────────────────────────────────────────
 
@@ -50,4 +57,32 @@ export const adminQueue = {
     apiFetch<{ status: string }>(`/api/admin/queue/jobs/${encodeURIComponent(key)}/abort`, {
       method: 'POST',
     }),
+}
+
+// ── Admin Egress Personas (ADR 0022) ───────────────────────────────────
+
+export const adminPersonas = {
+  list: () => apiFetch<EgressPersona[]>('/api/admin/personas'),
+  create: (data: Partial<EgressPersona> & { name: string }) =>
+    apiFetch<EgressPersona>('/api/admin/personas', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: Partial<EgressPersona>) =>
+    apiFetch<EgressPersona>(`/api/admin/personas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  remove: (id: number) => apiFetch<void>(`/api/admin/personas/${id}`, { method: 'DELETE' }),
+  bindAccount: (id: number, source: string, account: string) =>
+    apiFetch<EgressPersona>(`/api/admin/personas/${id}/accounts/${encodeURIComponent(source)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ account }),
+    }),
+  unbindAccount: (id: number, source: string) =>
+    apiFetch<void>(`/api/admin/personas/${id}/accounts/${encodeURIComponent(source)}`, {
+      method: 'DELETE',
+    }),
+  test: (id: number) =>
+    apiFetch<PersonaTestResult>(`/api/admin/personas/${id}/test`, { method: 'POST' }),
 }

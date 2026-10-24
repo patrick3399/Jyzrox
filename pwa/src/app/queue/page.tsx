@@ -13,6 +13,7 @@ import {
   WifiOff,
   RotateCcw,
   RefreshCw,
+  Network,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { galleryHref } from '@/lib/galleryRoutes'
@@ -223,6 +224,8 @@ function JobRow({
   const galleryTitle = job.progress?.title
   const isWaitingForSourceSlot =
     job.status === 'queued' && job.progress?.wait_reason === 'source_slot'
+  const isWaitingForPersonaCooldown =
+    job.status === 'queued' && job.progress?.wait_reason === 'persona_cooldown'
   const semaphoreKey =
     typeof job.progress?.semaphore_key === 'string' && job.progress.semaphore_key
       ? job.progress.semaphore_key
@@ -273,6 +276,15 @@ function JobRow({
               {t('queue.source')}:{' '}
               <span className="text-vault-text-secondary">{job.source || t('common.auto')}</span>
             </span>
+            {job.persona && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-vault-accent/15 text-vault-accent text-[11px] font-medium"
+                title={t('queue.persona')}
+              >
+                <Network className="w-3 h-3" />
+                {job.persona}
+              </span>
+            )}
             <span>
               {t('queue.created')}: <span className="text-vault-text-secondary">{createdAt}</span>
             </span>
@@ -291,6 +303,9 @@ function JobRow({
                 <> · {t('queue.queuePosition', { position: queuePosition })}</>
               )}
             </p>
+          )}
+          {isWaitingForPersonaCooldown && (
+            <p className="mt-1 text-xs text-yellow-400">{t('queue.waitingPersonaCooldown')}</p>
           )}
           {/* Retry info */}
           {job.retry_count > 0 && (
