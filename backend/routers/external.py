@@ -476,10 +476,11 @@ async def enqueue_download(
     resolved_url = normalize_download_url(resolved_url)
     job_id = _uuid.uuid4()
     source = detect_source(resolved_url)
-    from services.download_admission import admission_key_for
+    from services.egress_persona import resolve_admission_key
 
     # Persist first so workers can never observe a queue entry without its DB
     # identity. The partial unique index closes concurrent duplicate races.
+    admission_key = await resolve_admission_key(source, resolved_url, subscription_id=None)
     try:
         async with async_session() as session:
             session.add(
@@ -490,7 +491,7 @@ async def enqueue_download(
                     source=source,
                     status="queued",
                     user_id=token_data["user_id"],
-                    admission_key=admission_key_for(source, resolved_url),
+                    admission_key=admission_key,
                 )
             )
             await session.commit()

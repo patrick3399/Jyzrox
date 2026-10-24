@@ -835,3 +835,93 @@ async def test_download_passes_valid_media_policy_to_config_builder(tmp_path):
             )
 
     assert build_config.call_args.kwargs["media"] == MediaPolicy(max_files=20, include_videos=False)
+
+
+# ── Egress persona network identity (ADR 0022) ──
+
+
+@pytest.mark.asyncio
+async def test_persona_config_routes_whole_job_through_persona_proxy_and_identity(
+    mock_config_path, mock_site_config_service
+):
+    from core.site_config import DownloadParams
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    # A per-site proxy/browser from site config must not survive in a persona job.
+    mock_site_config_service.get_all_download_params.return_value = {
+        "twitter": DownloadParams(proxy_url="http://site-proxy:1", browser_profile="chrome")
+    }
+    path = await _build_gallery_dl_config(
+        {"twitter": '{"auth_token": "b"}'},
+        config_id="job-1",
+        target_source_id="twitter",
+        persona={"proxy_url": "http://egress-12:8888", "user_agent": None, "browser_profile": "firefox"},
+    )
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["proxy"] == "http://egress-12:8888"
+    assert config["extractor"]["browser"] == "firefox"
+    assert "user-agent" not in config["extractor"]
+    assert config["downloader"]["proxy"] == "http://egress-12:8888"
+    for name, entry in config["extractor"].items():
+        if isinstance(entry, dict):
+            assert not {"proxy", "browser", "user-agent"} & entry.keys(), name
+
+
+@pytest.mark.asyncio
+async def test_persona_overrides_proxy_and_user_agent_from_credential_fragment(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    fragment = '{"cookies": {"auth_token": "b"}, "user-agent": "FragmentUA", "proxy": "http://frag:1"}'
+    path = await _build_gallery_dl_config(
+        {"twitter": fragment},
+        config_id="job-3",
+        target_source_id="twitter",
+        persona={"proxy_url": "http://egress-13:8888", "user_agent": None, "browser_profile": "chrome"},
+    )
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["twitter"]["cookies"] == {"auth_token": "b"}
+    assert "user-agent" not in config["extractor"]["twitter"]
+    assert "proxy" not in config["extractor"]["twitter"]
+    assert config["extractor"]["proxy"] == "http://egress-13:8888"
+
+
+@pytest.mark.asyncio
+async def test_persona_with_user_agent_sets_root_user_agent_only(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    ua = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+    path = await _build_gallery_dl_config(
+        {},
+        config_id="job-2",
+        target_source_id="danbooru",
+        persona={"proxy_url": None, "user_agent": ua, "browser_profile": None},
+    )
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["user-agent"] == ua
+    assert "proxy" not in config["extractor"]
+    assert "proxy" not in config["downloader"]
+
+
+@pytest.mark.asyncio
+async def test_config_without_persona_is_unchanged(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    a = json.loads((await _build_gallery_dl_config({}, config_id="j", target_source_id="twitter")).read_text())
+    b = json.loads(
+        (await _build_gallery_dl_config({}, config_id="j", target_source_id="twitter", persona=None)).read_text()
+    )
+    assert a == b
+    assert "proxy" not in a["extractor"] and "proxy" not in a["downloader"]
+
+
+def test_sync_diagnostic_reports_throttle_signals_sorted():
+    from plugins.builtin.gallery_dl.source import _DownloadState, _sync_diagnostic
+
+    state = _DownloadState()
+    state.throttle_signals.update({"http_429", "http_403"})
+    ctx: dict = {}
+    _sync_diagnostic(state, ctx)
+    assert ctx["throttle_signals"] == ["http_403", "http_429"]

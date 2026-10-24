@@ -59,6 +59,33 @@ async def test_update_site_overrides_and_persists(client):
 
 
 @pytest.mark.asyncio
+async def test_update_site_spread_personas_persists_and_defaults_off(client):
+    """PUT download.spread_personas=true is accepted and echoed (ADR 0022); default is off."""
+    before = await client.get("/api/admin/sites/twitter")
+    assert before.json()["download"]["spread_personas"] is False
+
+    resp = await client.put(
+        "/api/admin/sites/twitter",
+        json={"download": {"spread_personas": True}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["download"]["spread_personas"] is True
+
+    resp2 = await client.get("/api/admin/sites/twitter")
+    assert resp2.json()["download"]["spread_personas"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_site_rejects_non_boolean_spread_personas_with_400(client):
+    """PUT download.spread_personas="yes" returns 400 instead of storing a truthy string."""
+    resp = await client.put(
+        "/api/admin/sites/twitter",
+        json={"download": {"spread_personas": "yes"}},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_update_rejects_invalid_concurrency(client):
     """PUT with concurrency=0 returns 400."""
     resp = await client.put(

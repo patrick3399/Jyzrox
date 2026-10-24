@@ -21,9 +21,10 @@ from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
-from services.download_admission import admission_key_for, next_admission_ticket
+from services.download_admission import next_admission_ticket
 from services.download_policy import get_credential_policy, normalize_download_options
 from services.download_presenter import serialize_download_job
+from services.egress_persona import resolve_admission_key
 from worker.helpers import compute_job_key, enqueue_download_job
 
 logger = logging.getLogger(__name__)
@@ -202,7 +203,7 @@ async def _enqueue(
             progress=initial_progress or {},
             options=options or {},
             user_id=user_id,
-            admission_key=admission_key_for(source, canonical_url),
+            admission_key=await resolve_admission_key(source, canonical_url, subscription_id=None),
         )
         db.add(job)
         await db.commit()
@@ -572,7 +573,7 @@ async def pause_resume_job(
             raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
 
         job.admission_ticket = await next_admission_ticket(db)
-        job.admission_key = admission_key_for(job.source, job.url)
+        job.admission_key = await resolve_admission_key(job.source, job.url, subscription_id=job.subscription_id)
         job.admission_token = None
         job.status = "queued"
         job.error = None
@@ -677,7 +678,9 @@ async def retry_job(
 
     job.retry_count = new_retry_count
     job.admission_ticket = await next_admission_ticket(db)
-    job.admission_key = admission_key_for(job.source, job.url)
+    job.admission_key = await resolve_admission_key(
+        job.source, job.url, subscription_id=getattr(job, "subscription_id", None)
+    )
     job.admission_token = None
     job.status = "queued"
     job.finished_at = None

@@ -980,6 +980,38 @@ CREATE TABLE IF NOT EXISTS novel_mentions (
 CREATE INDEX IF NOT EXISTS idx_novel_notes_type ON novel_notes (note_type);
 CREATE INDEX IF NOT EXISTS idx_novel_mentions_note ON novel_mentions (note_path);
 
+-- ── Egress personas (ADR 0022) ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS egress_personas (
+    id              BIGSERIAL PRIMARY KEY,
+    name            TEXT NOT NULL UNIQUE,
+    proxy_url       TEXT,
+    user_agent      TEXT,
+    browser_profile TEXT CHECK (browser_profile IN ('chrome', 'firefox')),
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    last_exit_ip    TEXT,
+    last_tested_at  TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_egress_personas_one_identity CHECK (browser_profile IS NULL OR user_agent IS NULL)
+);
+CREATE TABLE IF NOT EXISTS persona_accounts (
+    persona_id BIGINT NOT NULL REFERENCES egress_personas(id) ON DELETE CASCADE,
+    source     TEXT NOT NULL,
+    account    TEXT NOT NULL,
+    PRIMARY KEY (persona_id, source),
+    CONSTRAINT uq_persona_accounts_account UNIQUE (source, account),
+    CONSTRAINT fk_persona_accounts_credential FOREIGN KEY (source, account)
+        REFERENCES credentials(source, account) ON DELETE CASCADE
+);
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS persona_id BIGINT;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS persona_name TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_download_jobs_persona') THEN
+        ALTER TABLE download_jobs ADD CONSTRAINT fk_download_jobs_persona
+            FOREIGN KEY (persona_id) REFERENCES egress_personas(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
 -- ── PostgreSQL 18 features ─────────────────────────────────────────────
 
 -- UUIDv7: timestamp-ordered UUIDs for better B-tree index write performance

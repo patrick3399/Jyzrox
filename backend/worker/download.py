@@ -323,12 +323,13 @@ async def download_job(
 
     source_id = plugin.meta.source_id
     admission_key = plugin.meta.semaphore_key or source_id
+    site_source_id = source_id
     if source_id == "gallery_dl":
         from plugins.builtin.gallery_dl._sites import get_site_by_domain
 
         domain = (urlparse(url).hostname or "unknown").removeprefix("www.")
-        effective_source_id = get_site_by_domain(domain).source_id
-        dl_params = await site_config_service.get_effective_download_params(effective_source_id)
+        site_source_id = get_site_by_domain(domain).source_id
+        dl_params = await site_config_service.get_effective_download_params(site_source_id)
         if admission_key == "gallery_dl":
             admission_key = admission_key_for("gallery_dl", url)
     else:
@@ -340,9 +341,19 @@ async def download_job(
         )
 
     from core.database import AsyncSessionLocal
+    from services.egress_persona import claim_download_slot
 
     async with AsyncSessionLocal() as session:
-        claim = await DownloadAdmission(session).claim(db_job_id, admission_key, dl_params.concurrency)
+        decision = await claim_download_slot(
+            session,
+            job_id=db_job_id,
+            base_key=admission_key,
+            site_source_id=site_source_id,
+            capacity=dl_params.concurrency,
+            admission=DownloadAdmission(session),
+        )
+    claim = decision.claim
+    admission_key = decision.key
     if not claim.acquired:
         # A token-less result with no queue position means the durable row is
         # no longer queued (cancelled, paused, terminal, or a duplicate active
@@ -355,7 +366,7 @@ async def download_job(
             {
                 **base_progress,
                 "status_text": "Waiting for download slot...",
-                "wait_reason": "source_slot",
+                "wait_reason": "persona_cooldown" if decision.personas_cooling else "source_slot",
                 "semaphore_key": admission_key,
                 "queue_position": claim.queue_position,
             },
@@ -366,7 +377,7 @@ async def download_job(
             source=source,
             options=options,
             total=total,
-            delay_seconds=5,
+            delay_seconds=60 if decision.personas_cooling else 5,
         )
         return {"status": "queued", "queue_position": claim.queue_position}
 
@@ -387,6 +398,8 @@ async def download_job(
             plugin=plugin,
             dl_params=dl_params,
             admission_token=claim.token,
+            persona_id=claim.persona_id if decision.persona_mode else None,
+            site_source_id=site_source_id,
         )
     finally:
         released = False
@@ -410,6 +423,8 @@ async def _run_download_job(
     plugin,
     dl_params,
     admission_token: uuid.UUID | None,
+    persona_id: int | None = None,
+    site_source_id: str | None = None,
 ) -> dict:
     """Download a gallery via the plugin registry — unified progressive import."""
     logger.info("[download] url=%s", url)
@@ -422,6 +437,22 @@ async def _run_download_job(
 
     # ── 2. Load credentials (unified) ───────────────────────────────
     credentials, credential_accounts = await _load_credentials(plugin)
+
+    # ADR 0022: a persona job swaps the site's active account for its bound one
+    # (or none); credential_accounts then feeds the cookie writeback below.
+    persona_identity = None
+    if persona_id is not None and site_source_id:
+        from services.egress_persona import PersonaUnavailable, prepare_persona_run
+
+        try:
+            persona_identity, credentials, credential_accounts = await prepare_persona_run(
+                persona_id, site_source_id, credentials, credential_accounts
+            )
+        except PersonaUnavailable as exc:
+            err = str(exc)
+            logger.error("[download] %s", err)
+            await _set_job_status(db_job_id, "failed", err)
+            return {"status": "failed", "error": err}
 
     # ── 3. Output directory ─────────────────────────────────────────
     downloader = plugin_registry.get_downloader(source_id)
@@ -711,6 +742,8 @@ async def _run_download_job(
         opts["inactivity_timeout"] = dl_params.inactivity_timeout
         opts["timing_ctx"] = timing_ctx
         opts["diagnostic_ctx"] = diagnostic_ctx
+        if persona_identity is not None:
+            opts["persona"] = persona_identity.network_options()
         opts["job_context"] = (options or {}).get("job_context", "manual")
         # last_completed_at travels through SAQ as ISO string (JSON-safe);
         # source.py expects a datetime, so reify here.
@@ -763,6 +796,14 @@ async def _run_download_job(
         config_path = Path(f"/app/config/gallery-dl-{db_job_id}.json") if db_job_id else None
         if config_path:
             config_path.unlink(missing_ok=True)
+
+    # Outside the try above: a cooldown failure must not turn a partial result into failed.
+    if persona_identity is not None and result.status in ("failed", "partial"):
+        from services.egress_persona import mark_persona_cooldown, throttle_signal
+
+        signal = throttle_signal(diagnostic_ctx)
+        if signal:
+            await mark_persona_cooldown(persona_identity.persona_id, site_source_id, signal)
 
     # ── 12. Post-download: cancel guard ─────────────────────────────
     if result.status == "cancelled":

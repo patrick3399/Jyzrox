@@ -349,6 +349,52 @@ class TestEnqueueDownload:
             assert "status" in data
             assert "source" in data
 
+    async def test_enqueue_stamps_persona_key_when_site_spreads_personas(self, client, db_session):
+        """Regression: the row is persisted with the persona-mode key at write time.
+
+        A base-key stamp left the row invisible to the persona FIFO until its first
+        claim attempt, so a newer job could claim ahead of it.
+        """
+        from sqlalchemy import select
+
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        with (
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+        ):
+            resp = await client.post("/api/download/", json={"url": "https://x.com/someone/media"})
+
+        assert resp.status_code == 200
+        job_id = uuid.UUID(resp.json()["job_id"])
+        job = (await db_session.execute(select(DownloadJob).where(DownloadJob.id == job_id))).scalar_one()
+        assert job.admission_key == "gallery_dl:x.com#persona"
+
+    async def test_enqueue_stamps_base_key_when_site_does_not_spread_personas(self, client, db_session):
+        """With the site switch off the row keeps the plain per-host key."""
+        from sqlalchemy import select
+
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        with (
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=False)),
+            ),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+        ):
+            resp = await client.post("/api/download/", json={"url": "https://x.com/someone/media"})
+
+        assert resp.status_code == 200
+        job_id = uuid.UUID(resp.json()["job_id"])
+        job = (await db_session.execute(select(DownloadJob).where(DownloadJob.id == job_id))).scalar_one()
+        assert job.admission_key == "gallery_dl:x.com"
+
 
 # ---------------------------------------------------------------------------
 # List jobs
@@ -2122,3 +2168,114 @@ class TestCheckUrlMediaPolicy:
         body = resp.json()
         assert body["supported"] is False
         assert body["supports_media_policy"] is False
+
+
+# ---------------------------------------------------------------------------
+# Admission key re-stamp on retry / resume (ADR 0022 persona FIFO)
+# ---------------------------------------------------------------------------
+
+
+class TestRequeueRestampsAdmissionKey:
+    """Retry and resume re-stamp the queue key before the row is delivered again."""
+
+    async def _manual_job(self, db_session, *, admission_key: str, status: str = "failed", admission_ticket=None):
+        from db.models import DownloadJob
+
+        job = DownloadJob(
+            id=uuid.uuid4(),
+            url="https://x.com/someone/media",
+            canonical_url="https://x.com/someone/media",
+            source="twitter",
+            status=status,
+            progress={},
+            user_id=1,
+            retry_count=0,
+            max_retries=3,
+            admission_key=admission_key,
+            admission_ticket=admission_ticket,
+        )
+        db_session.add(job)
+        await db_session.commit()
+        return job.id
+
+    async def test_retry_restamps_manual_job_with_persona_key_when_site_spreads_personas(
+        self, member_client, db_session, mock_redis
+    ):
+        """Regression: a retry written under the base key was invisible to the persona FIFO."""
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        mock_redis.get = AsyncMock(return_value=None)
+        job_id = await self._manual_job(db_session, admission_key="gallery_dl:x.com")
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
+
+        assert resp.status_code == 200
+        db_session.expire_all()
+        job = await db_session.get(DownloadJob, job_id)
+        assert job.status == "queued"
+        assert job.admission_key == "gallery_dl:x.com#persona"
+
+    async def test_retry_keeps_subscription_job_on_base_key_even_when_site_spreads_personas(
+        self, member_client, db_session, mock_redis
+    ):
+        """Subscription runs never use persona mode, so their retry stays on the direct queue."""
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        mock_redis.get = AsyncMock(return_value=None)
+        job_id = await self._manual_job(db_session, admission_key="gallery_dl:x.com")
+        job = await db_session.get(DownloadJob, job_id)
+        job.subscription_id = 7
+        await db_session.commit()
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
+
+        assert resp.status_code == 200
+        db_session.expire_all()
+        job = await db_session.get(DownloadJob, job_id)
+        assert job.admission_key == "gallery_dl:x.com"
+
+    async def test_resume_restamps_paused_manual_job_with_persona_key_when_site_spreads_personas(
+        self, member_client, db_session, mock_redis
+    ):
+        """Regression: a token-less paused job re-queued by resume joins the persona FIFO."""
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        job_id = await self._manual_job(
+            db_session, admission_key="gallery_dl:x.com", status="paused", admission_ticket=5
+        )
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download.enqueue_download_job", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            resp = await member_client.patch(f"/api/download/jobs/{job_id}", json={"action": "resume"})
+
+        assert resp.status_code == 200
+        assert resp.json()["restarted"] is True
+        db_session.expire_all()
+        job = await db_session.get(DownloadJob, job_id)
+        assert job.status == "queued"
+        assert job.admission_key == "gallery_dl:x.com#persona"

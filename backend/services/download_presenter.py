@@ -23,6 +23,7 @@ def serialize_download_job(j: DownloadJob, gallery: Gallery | None = None) -> di
         "next_retry_at": j.next_retry_at.isoformat() if j.next_retry_at else None,
         "gallery_id": j.gallery_id,
         "subscription_id": j.subscription_id,
+        "persona": j.persona_name,
     }
     if gallery:
         d["gallery_source"] = gallery.source

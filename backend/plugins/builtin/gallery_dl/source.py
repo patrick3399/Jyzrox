@@ -181,6 +181,7 @@ async def _build_gallery_dl_config(
     force_full_scan: bool = False,
     target_source_id: str | None = None,
     media: MediaPolicy | None = None,
+    persona: dict | None = None,
 ) -> Path:
     """Write gallery-dl config with v3.0 features: PG archive, native rate-limiting, postprocessors.
 
@@ -199,6 +200,9 @@ async def _build_gallery_dl_config(
             params — other sites' settings must not leak into the job.
         media: Per-job media policy (newest-N files, videos on/off); ``None``
             leaves the config exactly as it was before the option existed.
+        persona: ADR 0022 network identity of a persona job — proxy and browser/UA
+            for the whole job, overriding every per-site value; ``None`` leaves
+            the config unchanged.
 
     Returns:
         Path to the config file written.
@@ -367,6 +371,24 @@ async def _build_gallery_dl_config(
             for name in (ext, *cfg.extra_extractors):
                 config["extractor"].setdefault(name, {})["cookies-update"] = cookie_export
 
+    # ADR 0022: a persona job is one identity end to end. Child extractors and
+    # file downloads must not fall back to the host's own route or a per-site
+    # proxy/browser, so the persona is set at the root and per-site values go.
+    # After the credentials loop: credential fragments are merged with
+    # .update(fragment) and may carry their own proxy/user-agent.
+    if persona is not None:
+        for entry in config["extractor"].values():
+            if isinstance(entry, dict):
+                for key in ("proxy", "browser", "user-agent"):
+                    entry.pop(key, None)
+        if persona.get("proxy_url"):
+            config["extractor"]["proxy"] = persona["proxy_url"]
+            config["downloader"]["proxy"] = persona["proxy_url"]
+        if persona.get("browser_profile"):
+            config["extractor"]["browser"] = persona["browser_profile"]
+        elif persona.get("user_agent"):
+            config["extractor"]["user-agent"] = persona["user_agent"]
+
     # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
     if "pixiv" in credentials and credentials["pixiv"]:
         config["extractor"]["postprocessors"].append(
@@ -410,6 +432,8 @@ class _DownloadState:
     gdl_state_seconds: float | None = None
     gdl_state_started_at: float = 0.0
     recent_log: list[str] = field(default_factory=list)
+    # HTTP 403/429 seen on stderr; read by the persona cooldown (ADR 0022).
+    throttle_signals: set[str] = field(default_factory=set)
 
     def push_log(self, line: str) -> None:
         self.recent_log.append(line)
@@ -436,6 +460,7 @@ def _sync_diagnostic(state: _DownloadState, diagnostic_ctx: dict | None) -> None
         diagnostic_ctx["gdl_state_seconds"] = state.gdl_state_seconds
     else:
         diagnostic_ctx.pop("gdl_state_seconds", None)
+    diagnostic_ctx["throttle_signals"] = sorted(state.throttle_signals)
     diagnostic_ctx["recent_log"] = list(state.recent_log)
 
 
@@ -550,7 +575,10 @@ async def _read_stderr(
                 state.stderr_lines.append(line)
             state.push_log(line)
 
-            if state.source_id and _RE_403.search(line):
+            is_403 = _RE_403.search(line) is not None
+            if is_403:
+                state.throttle_signals.add("http_403")
+            if state.source_id and is_403:
                 try:
                     await adaptive_engine.record_signal(state.source_id, AdaptiveSignal.HTTP_403)
                 except Exception:
@@ -566,6 +594,7 @@ async def _read_stderr(
                 except ValueError, IndexError:
                     code = 0
                 if code == 429:
+                    state.throttle_signals.add("http_429")
                     state.gdl_state = GDL_STATE_RATE_LIMITED
                     if m_sleep:
                         state.gdl_state_seconds = float(m_sleep.group(1))
@@ -934,6 +963,7 @@ class GalleryDlPlugin(SourcePlugin):
             force_full_scan=bool(options.get("force_full_scan", False)) if options else False,
             target_source_id=_site_cfg.source_id,
             media=media,
+            persona=(options or {}).get("persona"),
         )
 
         from worker.gallery_dl_venv import get_gdl_exec_cmd

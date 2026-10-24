@@ -22,6 +22,21 @@ class AdmissionClaim:
     acquired: bool
     token: uuid.UUID | None = None
     queue_position: int | None = None
+    persona_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PersonaSlot:
+    """One egress persona's share of a persona-mode admission key (ADR 0022)."""
+
+    persona_id: int
+    name: str
+    capacity: int
+
+
+def persona_admission_key(base_key: str) -> str:
+    """Persona-spread jobs queue apart from the site's direct queue (ADR 0022)."""
+    return f"{base_key}#persona"
 
 
 def admission_key_for(source: str | None, url: str) -> str:
@@ -70,9 +85,11 @@ class DownloadAdmission:
                 {"admission_key": key},
             )
 
-    async def claim(self, job_id: uuid.UUID | str, key: str, max_count: int) -> AdmissionClaim:
-        """Atomically claim one of the first ``max_count`` FIFO positions."""
-        job_uuid = uuid.UUID(str(job_id))
+    async def _enter_queue(self, job_uuid: uuid.UUID, key: str) -> int | None:
+        """Lock ``key``, stamp key/ticket on a claimable row, return its FIFO position.
+
+        Returns None (after rolling back) when the row cannot claim.
+        """
         await self._lock_key(key)
 
         stmt = select(DownloadJob).where(DownloadJob.id == job_uuid)
@@ -81,7 +98,7 @@ class DownloadAdmission:
         job = (await self.session.execute(stmt)).scalar_one_or_none()
         if job is None or job.status != "queued" or job.admission_token is not None:
             await self.session.rollback()
-            return AdmissionClaim(acquired=False)
+            return None
 
         job.admission_key = key
         if job.admission_ticket is None:
@@ -102,9 +119,35 @@ class DownloadAdmission:
             ).scalars()
         )
         try:
-            queue_position = ordered_ids.index(job_uuid) + 1
+            return ordered_ids.index(job_uuid) + 1
         except ValueError:
             await self.session.rollback()
+            return None
+
+    async def _take_token(self, job_uuid: uuid.UUID, key: str, queue_position: int, **extra) -> AdmissionClaim:
+        token = uuid.uuid4()
+        result = await self.session.execute(
+            update(DownloadJob)
+            .where(
+                DownloadJob.id == job_uuid,
+                DownloadJob.status == "queued",
+                DownloadJob.admission_token.is_(None),
+            )
+            .values(status="running", admission_key=key, admission_token=token, **extra)
+        )
+        if result.rowcount != 1:
+            await self.session.rollback()
+            return AdmissionClaim(acquired=False, queue_position=queue_position)
+        await self.session.commit()
+        return AdmissionClaim(
+            acquired=True, token=token, queue_position=queue_position, persona_id=extra.get("persona_id")
+        )
+
+    async def claim(self, job_id: uuid.UUID | str, key: str, max_count: int) -> AdmissionClaim:
+        """Atomically claim one of the first ``max_count`` FIFO positions."""
+        job_uuid = uuid.UUID(str(job_id))
+        queue_position = await self._enter_queue(job_uuid, key)
+        if queue_position is None:
             return AdmissionClaim(acquired=False)
 
         holders = int(
@@ -123,22 +166,58 @@ class DownloadAdmission:
         if queue_position > available:
             await self.session.commit()
             return AdmissionClaim(acquired=False, queue_position=queue_position)
+        # A direct claim clears the display snapshot so a retry on the direct
+        # path does not keep showing a stale persona chip. persona_id is left
+        # untouched: it stays the sticky preference for a later persona-mode
+        # retry (ADR 0022).
+        return await self._take_token(job_uuid, key, queue_position, persona_name=None)
 
-        token = uuid.uuid4()
-        result = await self.session.execute(
-            update(DownloadJob)
-            .where(
-                DownloadJob.id == job_uuid,
-                DownloadJob.status == "queued",
-                DownloadJob.admission_token.is_(None),
-            )
-            .values(status="running", admission_key=key, admission_token=token)
-        )
-        if result.rowcount != 1:
-            await self.session.rollback()
+    async def claim_with_personas(
+        self,
+        job_id: uuid.UUID | str,
+        key: str,
+        slots: list[PersonaSlot],
+        preferred_persona_id: int | None = None,
+    ) -> AdmissionClaim:
+        """FIFO claim on a persona-mode key that also picks the persona (ADR 0022).
+
+        Capacity is per persona. The job may claim when its FIFO position fits in
+        the total free slots of the candidate personas; it then takes the
+        preferred persona if that one has room, else the least-held one.
+        """
+        job_uuid = uuid.UUID(str(job_id))
+        queue_position = await self._enter_queue(job_uuid, key)
+        if queue_position is None:
+            return AdmissionClaim(acquired=False)
+
+        held: dict[int | None, int] = {
+            persona_id: int(count)
+            for persona_id, count in (
+                await self.session.execute(
+                    select(DownloadJob.persona_id, func.count())
+                    .where(
+                        DownloadJob.admission_key == key,
+                        DownloadJob.admission_token.is_not(None),
+                    )
+                    .group_by(DownloadJob.persona_id)
+                )
+            ).all()
+        }
+        free = {
+            slot.persona_id: slot.capacity - held.get(slot.persona_id, 0)
+            for slot in slots
+            if slot.capacity - held.get(slot.persona_id, 0) > 0
+        }
+        if queue_position > sum(free.values()):
+            await self.session.commit()
             return AdmissionClaim(acquired=False, queue_position=queue_position)
-        await self.session.commit()
-        return AdmissionClaim(acquired=True, token=token, queue_position=queue_position)
+
+        if preferred_persona_id in free:
+            chosen = preferred_persona_id
+        else:
+            chosen = min(free, key=lambda pid: (held.get(pid, 0), pid))
+        name = next(slot.name for slot in slots if slot.persona_id == chosen)
+        return await self._take_token(job_uuid, key, queue_position, persona_id=chosen, persona_name=name)
 
     async def release(self, job_id: uuid.UUID | str, token: uuid.UUID | str | None) -> bool:
         """Release only when the caller still owns the exact execution token."""

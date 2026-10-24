@@ -11,7 +11,8 @@ from core.database import AsyncSessionLocal
 from core.queue import get_queue
 from core.queue_config import JOB_QUEUE_ROUTING, QUEUE_INTERACTIVE
 from db.models import DownloadJob
-from services.download_admission import admission_key_for, next_admission_ticket
+from services.download_admission import next_admission_ticket
+from services.egress_persona import resolve_admission_key
 from worker.constants import DISK_LOW_KEY
 from worker.helpers import _cron_record, _cron_should_run, compute_job_key, enqueue_download_job
 
@@ -187,7 +188,9 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
             for job in jobs:
                 job.retry_count += 1
                 job.admission_token = None
-                job.admission_key = admission_key_for(job.source, job.url)
+                job.admission_key = await resolve_admission_key(
+                    job.source, job.url, subscription_id=job.subscription_id
+                )
                 job.admission_ticket = await next_admission_ticket(session)
                 job.finished_at = None
                 job.error = None

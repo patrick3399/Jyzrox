@@ -216,3 +216,18 @@ class TestSchemaInvariant:
             session.add(Credential(source="twitter", account="b", is_active=True, credential_type="cookie"))
             with pytest.raises(IntegrityError):
                 await session.commit()
+
+
+class TestGetAccountCredential:
+    async def test_get_account_credential_reads_inactive_account_without_switching(self, cred_db):
+        from services.credential import get_account_credential, get_active_credential, set_credential
+
+        await set_credential("twitter", '{"auth_token": "a"}', "cookies", account="main")
+        await set_credential("twitter", '{"auth_token": "b"}', "cookies", account="alt1")
+
+        alt = await get_account_credential("twitter", "alt1")
+        active = await get_active_credential("twitter")
+
+        assert alt is not None and alt.account == "alt1" and '"b"' in alt.value
+        assert active is not None and active.account == "main"
+        assert await get_account_credential("twitter", "missing") is None

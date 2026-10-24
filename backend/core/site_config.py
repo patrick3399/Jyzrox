@@ -31,6 +31,7 @@ _DOWNLOAD_FIELDS = {
     "browser_profile",
     "proxy_url",
     "rate_limit",
+    "spread_personas",
 }
 
 # Jyzrox canonical field names allowed in overrides.field_mapping
@@ -61,6 +62,7 @@ class DownloadParams:
     browser_profile: str | None = None
     proxy_url: str | None = None
     rate_limit: str | None = None
+    spread_personas: bool = False  # ADR 0022: concurrency becomes the per-persona cap
 
 
 class SiteConfigService:
@@ -351,6 +353,8 @@ class SiteConfigService:
             c = dl["concurrency"]
             if not isinstance(c, int) or c < 1 or c > 20:
                 raise ValueError(f"concurrency must be 1-20, got {c}")
+        if "spread_personas" in dl and not isinstance(dl["spread_personas"], bool):
+            raise ValueError("spread_personas must be a boolean")
         if "retries" in dl:
             r = dl["retries"]
             if not isinstance(r, int) or r < 0 or r > 50:

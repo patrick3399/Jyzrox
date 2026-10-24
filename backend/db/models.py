@@ -354,6 +354,14 @@ class DownloadJob(Base):
     subscription_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True
     )
+    # ADR 0022: persona_id is the persona the job last claimed with. It is kept
+    # as the sticky preference for retries, even across a later direct claim.
+    # persona_name is the snapshot for the current run's display and is cleared
+    # by a direct claim.
+    persona_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("egress_personas.id", ondelete="SET NULL"), nullable=True
+    )
+    persona_name: Mapped[str | None] = mapped_column(Text)
 
 
 class ReadProgress(Base):
@@ -426,6 +434,43 @@ class Credential(Base):
     value_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_verified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EgressPersona(Base):
+    """A fixed download identity: egress proxy + browser identity (ADR 0022)."""
+
+    __tablename__ = "egress_personas"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    proxy_url: Mapped[str | None] = mapped_column(Text)  # None = direct (host default route)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    browser_profile: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    last_exit_ip: Mapped[str | None] = mapped_column(Text)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersonaAccount(Base):
+    """Binds one credential account of a site to exactly one persona."""
+
+    __tablename__ = "persona_accounts"
+    __table_args__ = (
+        UniqueConstraint("source", "account", name="uq_persona_accounts_account"),
+        ForeignKeyConstraint(
+            ["source", "account"],
+            ["credentials.source", "credentials.account"],
+            ondelete="CASCADE",
+            name="fk_persona_accounts_credential",
+        ),
+    )
+
+    persona_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("egress_personas.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    account: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class ApiToken(Base):

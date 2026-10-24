@@ -526,7 +526,9 @@ _SQLITE_SCHEMA = [
         admission_token TEXT,
         admission_ticket INTEGER,
         gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
-        subscription_id INTEGER
+        subscription_id INTEGER,
+        persona_id INTEGER REFERENCES egress_personas(id) ON DELETE SET NULL,
+        persona_name TEXT
     )
     """,
     """
@@ -633,6 +635,29 @@ _SQLITE_SCHEMA = [
         expires_at TIMESTAMP,
         last_verified TIMESTAMP,
         PRIMARY KEY (source, account)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS egress_personas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        proxy_url TEXT,
+        user_agent TEXT,
+        browser_profile TEXT,
+        enabled BOOLEAN NOT NULL DEFAULT 1,
+        last_exit_ip TEXT,
+        last_tested_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS persona_accounts (
+        persona_id INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        account TEXT NOT NULL,
+        PRIMARY KEY (persona_id, source),
+        UNIQUE (source, account),
+        FOREIGN KEY (source, account) REFERENCES credentials(source, account) ON DELETE CASCADE
     )
     """,
     """

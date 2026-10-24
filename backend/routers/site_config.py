@@ -66,6 +66,7 @@ def _build_site_response(
             "sleep_request": params.sleep_request,
             "concurrency": params.concurrency,
             "inactivity_timeout": params.inactivity_timeout,
+            "spread_personas": params.spread_personas,
         },
     }
     if row is not None:

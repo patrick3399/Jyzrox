@@ -77,6 +77,15 @@ async def get_active_credential(source: str) -> ActiveCredential | None:
         return ActiveCredential(account=cred.account, value=decrypt(bytes(cred.value_encrypted)))
 
 
+async def get_account_credential(source: str, account: str) -> ActiveCredential | None:
+    """Load one named account regardless of which account is active (ADR 0022)."""
+    async with AsyncSessionLocal() as session:
+        cred = await session.get(Credential, (source, account))
+        if cred is None or cred.value_encrypted is None or _is_expired(cred):
+            return None
+        return ActiveCredential(account=cred.account, value=decrypt(bytes(cred.value_encrypted)))
+
+
 async def get_credential(source: str) -> str | None:
     """Load and decrypt the active credential of a source. Returns None if not set or expired."""
     active = await get_active_credential(source)

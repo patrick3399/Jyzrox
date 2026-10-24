@@ -329,3 +329,17 @@ async def test_reset_adaptive_resets_redis_before_committing_db():
         await svc.reset_adaptive("ehentai")
 
     assert order == ["reset", "commit"], f"Redis reset must precede DB commit, got {order}"
+
+
+def test_spread_personas_defaults_off_and_override_turns_it_on():
+    from db.models import SiteConfig
+
+    svc = SiteConfigService()
+    assert svc._merge("twitter", None).spread_personas is False
+    row = SiteConfig(source_id="twitter", overrides={"download": {"spread_personas": True}}, adaptive={})
+    assert svc._merge("twitter", row).spread_personas is True
+
+
+def test_spread_personas_override_must_be_boolean():
+    with pytest.raises(ValueError, match="spread_personas"):
+        SiteConfigService._validate_overrides({"download": {"spread_personas": "yes"}})

@@ -487,6 +487,36 @@ class TestExternalDownload:
             assert "job_id" in data
             assert data["status"] == "queued"
 
+    async def test_enqueue_download_stamps_persona_key_when_site_spreads_personas(self, ext_client, db_session):
+        """Regression: the external trigger also persists the persona-mode key at write time."""
+        from unittest.mock import AsyncMock
+
+        from sqlalchemy import select
+
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        user_id = await _insert_user(db_session)
+        await _insert_token(db_session, user_id, _TEST_TOKEN_HASH)
+
+        with (
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            resp = await ext_client.post(
+                "/api/external/v1/download",
+                params={"url": "https://x.com/someone/media"},
+                headers={"X-API-Token": _TEST_TOKEN},
+            )
+
+        assert resp.status_code == 200
+        job_id = uuid.UUID(resp.json()["job_id"])
+        job = (await db_session.execute(select(DownloadJob).where(DownloadJob.id == job_id))).scalar_one()
+        assert job.admission_key == "gallery_dl:x.com#persona"
+
     async def test_enqueue_download_missing_url(self, ext_client, db_session):
         """POST /download without ?url= → 422 validation error."""
         user_id = await _insert_user(db_session)
