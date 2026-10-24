@@ -14,9 +14,6 @@ x-backend-env: &backend-env
   PGID: ${PGID:-1042}
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vault}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vault}
   NOVEL_REPO_PATH: /data/novel
-  # entrypoint.sh copies the read-only secret to /tmp with 600 perms (ssh refuses
-  # group/world-readable keys); BatchMode keeps git from hanging on prompts.
-  GIT_SSH_COMMAND: "ssh -i /tmp/novel_deploy_key -o UserKnownHostsFile=/run/secrets/novel_known_hosts -o IdentitiesOnly=yes -o BatchMode=yes"
 
 x-backend-depends: &backend-depends
   postgres:
@@ -115,11 +112,8 @@ services:
       # Custom gallery-dl extractors: drop a .py file in, restart api + worker,
       # reload nginx. Overrides the copy baked into the image (see its README.md).
       - ./backend/plugins/builtin/gallery_dl/extractors:/app/plugins/builtin/gallery_dl/extractors:ro
-      # host: generate secrets/novel_deploy_key + novel_known_hosts before up
-      # (see docs/superpowers/plans/2026-07-05-novel-module-phase0.md Task 0)
       - ${JYZROX_DATA_ROOT}/novel:/data/novel
-      - ./secrets/novel_deploy_key:/run/secrets/novel_deploy_key:ro
-      - ./secrets/novel_known_hosts:/run/secrets/novel_known_hosts:ro
+      - novel_ssh:/var/lib/jyzrox/novel_ssh
     depends_on:
       <<: *backend-depends
     networks:
@@ -156,7 +150,7 @@ services:
         APP_VERSION: ${APP_VERSION:-dev}
         GDL_VERSION: ${GDL_VERSION:-}
     command: python -m worker
-    # PID 1 reaper: git (GIT_SSH_COMMAND via sh) leaves orphaned sh that python-as-PID1 never waits on
+    # PID 1 reaper: git (ssh spawned via sh) leaves orphaned sh that python-as-PID1 never waits on
     init: true
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 55s
@@ -180,8 +174,7 @@ services:
       # see the same extractors.
       - ./backend/plugins/builtin/gallery_dl/extractors:/app/plugins/builtin/gallery_dl/extractors:ro
       - ${JYZROX_DATA_ROOT}/novel:/data/novel
-      - ./secrets/novel_deploy_key:/run/secrets/novel_deploy_key:ro
-      - ./secrets/novel_known_hosts:/run/secrets/novel_known_hosts:ro
+      - novel_ssh:/var/lib/jyzrox/novel_ssh
     depends_on:
       <<: *backend-depends
     networks:
@@ -351,6 +344,7 @@ volumes:
       type: none
       o: bind
       device: ${JYZROX_DATA_ROOT}/venv
+  novel_ssh:
 
 networks:
   frontend:

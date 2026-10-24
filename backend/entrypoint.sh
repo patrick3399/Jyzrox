@@ -26,15 +26,13 @@ for dir in /data/download_temp /data/thumbs /data/training /data/avatars /data/c
     chown "$PUID:$PGID" "$dir" 2>/dev/null || true
 done
 
-# Novel module: own the working clone and lock down the ssh deploy key.
-# The bind-mounted secret is root-owned read-only; ssh requires a 600 key owned
-# by the running user, so copy it to /tmp and tighten permissions there.
+# Novel module: own the working clone.
 mkdir -p /data/novel 2>/dev/null || true
 chown -R "$PUID:$PGID" /data/novel 2>/dev/null || true
-if [ -f /run/secrets/novel_deploy_key ]; then
-    cp /run/secrets/novel_deploy_key /tmp/novel_deploy_key
-    chown "$PUID:$PGID" /tmp/novel_deploy_key
-    chmod 600 /tmp/novel_deploy_key
-fi
+
+# Managed SSH identity for the novel hub (named volume, api/worker only).
+mkdir -p /var/lib/jyzrox/novel_ssh 2>/dev/null || true
+chown -R "$PUID:$PGID" /var/lib/jyzrox/novel_ssh 2>/dev/null || true
+chmod 700 /var/lib/jyzrox/novel_ssh 2>/dev/null || true
 
 exec gosu appuser "$@"
