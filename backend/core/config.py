@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     data_library_path: str = "/data/library"
     data_backups_path: str = "/data/backups"
     novel_repo_path: str = "/data/novel"
+    novel_ssh_dir: str = "/var/lib/jyzrox/novel_ssh"  # managed SSH key + known_hosts (api/worker only)
     backup_retention_count: int = 14
     backup_pg_dump_timeout: int = 3600
     # Disk space
