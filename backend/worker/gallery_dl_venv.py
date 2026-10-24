@@ -54,6 +54,10 @@ PIP_INSTALL_TIMEOUT = 600.0
 PIP_INSTALL_TIMEOUT_OFFLINE = 120.0
 VENV_CREATE_TIMEOUT = 30.0
 
+# Unreleased development build, installed only by the admin's explicit
+# "install latest development build" action. Fixed URL: never user-supplied.
+MASTER_ARCHIVE_URL = "https://codeberg.org/mikf/gallery-dl/archive/master.tar.gz"
+
 _UPGRADE_LOCK_NAME = ".upgrade.lock"
 
 _VERSION_DIR_RE = re.compile(r"^v\d+$")
@@ -457,21 +461,29 @@ async def _fail(status: str, error: str, requested_version: str | None = None, *
     return {"status": status, "error": error}
 
 
-async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: ARG001
-    """SAQ job: upgrade gallery-dl to a specific version (or latest)."""
-    return await _upgrade(version)
+async def upgrade_job(ctx: dict, version: str | None = None, source: str = "pypi") -> dict:  # noqa: ARG001
+    """SAQ job: upgrade gallery-dl to a specific version (or latest).
+
+    ``source="master"`` installs the unreleased development build instead and
+    ignores ``version``.
+    """
+    return await _upgrade(version, source=source)
 
 
-async def _upgrade(version: str | None, *, offline: bool = False, quiet: bool = False) -> dict:
+async def _upgrade(
+    version: str | None, *, offline: bool = False, quiet: bool = False, source: str = "pypi"
+) -> dict:
     """Build a fresh venv and swap it in; one upgrade/rollback runs at a time."""
     try:
         async with _single_flight_guard():
-            return await _upgrade_locked(version, offline=offline, quiet=quiet)
+            return await _upgrade_locked(version, offline=offline, quiet=quiet, source=source)
     except UpgradeInProgress as exc:
         return await _fail("rejected", str(exc), version, quiet=quiet)
 
 
-async def _upgrade_locked(version: str | None, *, offline: bool = False, quiet: bool = False) -> dict:
+async def _upgrade_locked(
+    version: str | None, *, offline: bool = False, quiet: bool = False, source: str = "pypi"
+) -> dict:
     """Build a fresh venv and swap it in, guarded against active downloads.
 
     ``offline`` installs from the image's baked wheels instead of PyPI;
@@ -515,7 +527,11 @@ async def _upgrade_locked(version: str | None, *, offline: bool = False, quiet: 
         # 3. pip install — invoke pip via the new venv's own python so the
         #    install always targets new_dir, independent of any shebang.
         py_bin = str(new_dir / "bin" / "python")
-        pkg = f"gallery-dl=={version}" if version else "gallery-dl"
+        if source == "master":
+            version = None
+            pkg = MASTER_ARCHIVE_URL
+        else:
+            pkg = f"gallery-dl=={version}" if version else "gallery-dl"
         logger.info("[gallery-dl venv] Installing %s", pkg)
         step = "pip install"
         pip_timeout = PIP_INSTALL_TIMEOUT_OFFLINE if offline else PIP_INSTALL_TIMEOUT

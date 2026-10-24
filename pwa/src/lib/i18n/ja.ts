@@ -502,6 +502,9 @@ const ja: Record<string, string> = {
   'settings.galleryDlUpgrade': 'アップグレード',
   'settings.galleryDlUpgradeTo': '{version}にアップグレード',
   'settings.galleryDlRollback': 'ロールバック',
+  'settings.galleryDlMaster': '最新の開発版に置き換える',
+  'settings.galleryDlMasterConfirm': 'master の未リリース開発版をインストールしますか？不安定な可能性があります。後でアップグレードまたはロールバックで戻せます。',
+  'settings.galleryDlMasterQueued': '開発版のインストールをキューに追加しました',
   'settings.galleryDlUpgradeQueued': 'アップグレードジョブをキューに追加しました',
   'settings.galleryDlRollbackQueued': 'ロールバックジョブをキューに追加しました',
   'settings.galleryDlRunningWarning':

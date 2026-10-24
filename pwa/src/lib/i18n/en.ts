@@ -364,6 +364,9 @@ const en: Record<string, string> = {
   'settings.galleryDlUpgrade': 'Upgrade',
   'settings.galleryDlUpgradeTo': 'Upgrade to {version}',
   'settings.galleryDlRollback': 'Rollback',
+  'settings.galleryDlMaster': 'Install latest development build',
+  'settings.galleryDlMasterConfirm': 'Install the unreleased development build from master? It may be unstable. You can switch back with Upgrade or Rollback.',
+  'settings.galleryDlMasterQueued': 'Development build install queued',
   'settings.galleryDlUpgradeQueued': 'Upgrade job queued',
   'settings.galleryDlRollbackQueued': 'Rollback job queued',
   'settings.galleryDlRunningWarning':

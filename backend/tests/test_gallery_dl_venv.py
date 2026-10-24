@@ -968,3 +968,36 @@ async def test_ensure_venv_fresh_install_uses_image_version_and_writes_marker(tm
     assert "gallery-dl==1.32.1" not in installs[0]
     assert "--no-index" in installs[0]
     assert (base / ".synced_image_version").read_text() == "1.32.15"
+
+
+async def test_upgrade_job_master_source_installs_fixed_archive_url(tmp_path):
+    """source=master must pip-install the hard-coded master archive, ignoring version."""
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gdl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+    installs: list[list[str]] = []
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.1")
+            return (0, "", "")
+        if "install" in cmd:
+            installs.append(cmd)
+            return (1, "", "stop here")
+        return (0, "", "")
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_active_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", AsyncMock()),
+    ):
+        await venv_mod.upgrade_job({}, version="1.99.0", source="master")
+
+    assert len(installs) == 1
+    assert venv_mod.MASTER_ARCHIVE_URL in installs[0]
+    assert not any("1.99.0" in a for a in installs[0])

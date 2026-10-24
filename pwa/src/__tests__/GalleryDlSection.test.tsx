@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   lastGdlUpgrade: null as GdlUpgradeEvent | null,
 }))
 
+const mockUpgradeToMaster = vi.fn(async () => ({ job_id: 'j' }))
 const mockGetVersion = vi.fn(async () => ({ current: '1.32.1', latest: '1.32.6' }))
 
 vi.mock('@/lib/i18n', () => ({
@@ -32,13 +33,14 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/lib/api', () => ({
-  api: { galleryDl: { getVersion: () => mockGetVersion(), upgrade: vi.fn(), rollback: vi.fn() } },
+  api: { galleryDl: { getVersion: () => mockGetVersion(), upgrade: vi.fn(), upgradeToMaster: () => mockUpgradeToMaster(), rollback: vi.fn() } },
 }))
 
 vi.mock('@/lib/ws', () => ({
   useWsGdlUpgrade: () => ({ lastGdlUpgrade: h.lastGdlUpgrade }),
 }))
 
+import { fireEvent } from '@testing-library/react'
 import { GalleryDlSection } from '@/components/settings/GalleryDlSection'
 import { toast } from 'sonner'
 
@@ -133,5 +135,21 @@ describe('GalleryDlSection — image drift indication', () => {
     await waitFor(() => expect(screen.getByText('settings.galleryDlImage')).toBeInTheDocument())
 
     expect(screen.queryByText(/settings\.galleryDlImageNewer/)).not.toBeInTheDocument()
+  })
+
+  it('test_masterButton_confirmedClickQueuesMasterInstall_evenWhenCurrentIsDev', async () => {
+    mockGetVersion.mockResolvedValueOnce({ current: '1.32.0.dev0', latest: '1.32.17' } as never)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<GalleryDlSection />)
+    const btn = await screen.findByText('settings.galleryDlMaster')
+    fireEvent.click(btn)
+    await waitFor(() => expect(mockUpgradeToMaster).toHaveBeenCalledTimes(1))
+  })
+
+  it('test_masterButton_declinedConfirmDoesNotQueueInstall', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<GalleryDlSection />)
+    fireEvent.click(await screen.findByText('settings.galleryDlMaster'))
+    expect(mockUpgradeToMaster).not.toHaveBeenCalled()
   })
 })

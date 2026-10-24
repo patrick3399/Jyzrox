@@ -164,6 +164,17 @@ export function GalleryDlSection() {
         </button>
         <button
           type="button"
+          onClick={() => {
+            if (!window.confirm(t('settings.galleryDlMasterConfirm'))) return
+            void runJob(() => api.galleryDl.upgradeToMaster(), t('settings.galleryDlMasterQueued'))
+          }}
+          disabled={operating}
+          className="px-4 py-2 bg-red-900/30 border border-red-700/50 text-red-400 hover:bg-red-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {t('settings.galleryDlMaster')}
+        </button>
+        <button
+          type="button"
           onClick={() =>
             runJob(() => api.galleryDl.rollback(), t('settings.galleryDlRollbackQueued'))
           }
