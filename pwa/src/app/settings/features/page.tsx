@@ -93,13 +93,6 @@ export default function FeaturesSettingsPage() {
               disabled={featuresLoading}
             />
             <ToggleRow
-              label={t('settings.novelModule')}
-              description={t('settings.novelModuleDesc')}
-              checked={features.novel_enabled ?? false}
-              onChange={(v) => handleToggle('novel_enabled', v)}
-              disabled={featuresLoading}
-            />
-            <ToggleRow
               label={t('settings.tagTranslation')}
               description={t('settings.tagTranslationDesc')}
               checked={features.tag_translation_enabled ?? true}

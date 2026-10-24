@@ -16,6 +16,7 @@ import {
   Tags,
   CalendarClock,
   Shapes,
+  GitBranch,
 } from 'lucide-react'
 import { hasRole } from '@/lib/pageRegistry'
 import type { UserRole } from '@/lib/types'
@@ -149,6 +150,14 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
     labelKey: 'settingsCategory.scheduled',
     descKey: 'settingsCategory.scheduledDesc',
     icon: CalendarClock,
+    minRole: 'admin',
+    group: 'admin',
+  },
+  {
+    slug: 'novel-remote',
+    labelKey: 'settingsCategory.novelRemote',
+    descKey: 'settingsCategory.novelRemoteDesc',
+    icon: GitBranch,
     minRole: 'admin',
     group: 'admin',
   },
