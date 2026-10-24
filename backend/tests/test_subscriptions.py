@@ -600,6 +600,75 @@ class TestUpdateSubscription:
         assert resp.status_code == 404
 
 
+class TestSubscriptionMediaPolicy:
+    """PATCH/POST download_options.media validation."""
+
+    async def test_patch_subscription_media_options_rejected_for_pixiv_subscription(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(
+            db_session, url="https://www.pixiv.net/users/12345", source="pixiv", name="Pixiv Sub"
+        )
+
+        resp = await client.patch(
+            f"/api/subscriptions/{sub_id}",
+            json={"download_options": {"media": {"max_files": 10}}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
+
+    async def test_patch_subscription_unknown_id_returns_404_before_validation(self, client, db_session):
+        await _ensure_user(db_session)
+
+        # max_files=0 is invalid; a 404 (not 422) proves ownership is checked first.
+        resp = await client.patch(
+            "/api/subscriptions/99999",
+            json={"download_options": {"media": {"max_files": 0}}},
+        )
+
+        assert resp.status_code == 404
+
+    async def test_patch_subscription_zero_max_files_returns_422_for_gallery_dl_subscription(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, url="https://x.com/someuser", source="twitter")
+
+        resp = await client.patch(
+            f"/api/subscriptions/{sub_id}",
+            json={"download_options": {"media": {"max_files": 0}}},
+        )
+
+        assert resp.status_code == 422
+
+    async def test_patch_subscription_media_options_saved_for_twitter_subscription(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, url="https://x.com/someuser", source="twitter")
+
+        resp = await client.patch(
+            f"/api/subscriptions/{sub_id}",
+            json={"download_options": {"media": {"max_files": 20, "include_videos": False}}},
+        )
+
+        assert resp.status_code == 200
+        raw = (
+            await db_session.execute(text("SELECT download_options FROM subscriptions WHERE id = :i"), {"i": sub_id})
+        ).scalar_one()
+        import json as _json
+
+        stored = _json.loads(raw) if isinstance(raw, str) else raw
+        assert stored["media"] == {"max_files": 20, "include_videos": False}
+
+    async def test_create_subscription_media_options_rejected_for_pixiv_url(self, client, db_session):
+        await _ensure_user(db_session)
+
+        resp = await client.post(
+            "/api/subscriptions/",
+            json={"url": "https://www.pixiv.net/users/12345", "download_options": {"media": {"max_files": 10}}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
+
+
 # ---------------------------------------------------------------------------
 # DELETE /api/subscriptions/{sub_id}
 # ---------------------------------------------------------------------------

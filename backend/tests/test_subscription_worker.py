@@ -226,6 +226,39 @@ class TestEnqueueForSubscription:
         assert "job_id" in result
         mock_enqueue.assert_awaited_once()
 
+    async def test_subscription_job_options_include_media_policy(self):
+        """download_options.media is copied into the created DownloadJob.options."""
+        from worker.subscription import _enqueue_for_subscription
+
+        sub = _make_sub()
+        sub.download_options = {"media": {"max_files": 20, "include_videos": False}}
+        sub.last_success_at = None
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+
+        mock_cfg = MagicMock()
+        mock_cfg.credential_requirement = "optional"
+        mock_cfg.source_id = "gallery_dl"
+
+        session = _make_mock_session(scalar_result=None)
+
+        with (
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
+            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await _enqueue_for_subscription(_make_ctx(), sub)
+
+        assert result["status"] == "ok"
+        expected = {"max_files": 20, "include_videos": False}
+        job = session.add.call_args.args[0]
+        assert job.options["media"] == expected
+        assert job.options["job_context"] == "subscription"
+        assert mock_enqueue.await_args.kwargs["options"]["media"] == expected
+
     async def test_no_redis_pool_in_ctx_returns_failed(self):
         """If ctx has no redis key, function returns failed immediately."""
         from worker.subscription import _enqueue_for_subscription

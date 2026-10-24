@@ -22,7 +22,7 @@ from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
 from services.download_admission import admission_key_for, next_admission_ticket
-from services.download_policy import get_credential_policy, normalize_source_options
+from services.download_policy import get_credential_policy, normalize_download_options
 from services.download_presenter import serialize_download_job
 from worker.helpers import compute_job_key, enqueue_download_job
 
@@ -182,9 +182,9 @@ async def _enqueue(
 
     source = detect_source(canonical_url)
     try:
-        options = normalize_source_options(source, options)
+        options = await normalize_download_options(canonical_url, source, options)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid download options: {exc}") from exc
     job_id = uuid.uuid4()
     initial_progress = {"total": total} if total is not None else {}
 
@@ -399,6 +399,8 @@ async def check_url(
     _: dict = Depends(require_auth),
 ):
     """Check whether a URL is from a known supported site."""
+    from plugins.registry import plugin_registry
+
     entry = detect_source_info(url)
     if entry is not None:
         return {
@@ -406,6 +408,7 @@ async def check_url(
             "source_id": entry["source_id"],
             "name": entry["name"],
             "category": entry["category"],
+            "supports_media_policy": await plugin_registry.supports_media_policy(url),
         }
 
     # Not in registry — treat as supported if it looks like a valid URL (gallery-dl fallback)
@@ -417,11 +420,12 @@ async def check_url(
                 "source_id": "gallery_dl",
                 "name": "gallery-dl",
                 "category": "other",
+                "supports_media_policy": await plugin_registry.supports_media_policy(url),
             }
     except Exception:
         pass
 
-    return {"supported": False}
+    return {"supported": False, "supports_media_policy": False}
 
 
 @router.get("/supported-sites")

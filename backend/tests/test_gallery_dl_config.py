@@ -642,3 +642,196 @@ def test_gdl_extractor_name_returns_raw_category_only_when_unregistered(source, 
     from plugins.builtin.gallery_dl._sites import gdl_extractor_name
 
     assert gdl_extractor_name(source) == expected
+
+
+# ── per-job media policy (options.media) ──
+
+_MEDIA_KEYS = ("file-range", "file-filter", "videos")
+
+
+@pytest.mark.asyncio
+async def test_media_policy_max_files_sets_file_range(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(max_files=200))
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-200"
+    # Videos stay included: no video filter or 'videos' switch may appear.
+    assert "file-filter" not in config["extractor"]
+    assert "videos" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_exclude_videos_sets_videos_false_and_filter(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(include_videos=False))
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+    # No count cap requested: no file-range.
+    assert "file-range" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_both_fields_set_range_and_video_filter(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(max_files=20, include_videos=False))
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-20"
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+
+
+@pytest.mark.asyncio
+async def test_no_media_policy_leaves_config_without_range_or_filter(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+
+    for key in _MEDIA_KEYS:
+        assert key not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_no_media_policy_config_is_identical_to_omitting_the_argument(mock_config_path):
+    """A job without media must get the exact config it got before the feature."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    without_arg = mock_config_path.read_text()
+    await _build_gallery_dl_config({}, media=None)
+
+    assert mock_config_path.read_text() == without_arg
+
+
+@pytest.mark.asyncio
+async def test_media_policy_does_not_leak_into_next_jobs_config(mock_config_path):
+    """Media keys live in one job's config; a later job without media must not inherit them."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(max_files=5, include_videos=False))
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+
+    for key in _MEDIA_KEYS:
+        assert key not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_applies_under_force_full_scan(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config(
+        {},
+        job_context="subscription",
+        force_full_scan=True,
+        media=MediaPolicy(max_files=200, include_videos=False),
+    )
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-200"
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+    # The force path still drops the archive; media must not bring it back.
+    assert "archive" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_applies_under_incremental_subscription(mock_config_path):
+    from datetime import UTC, datetime
+
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    last = datetime(2026, 3, 15, 8, 0, 0, tzinfo=UTC)
+    await _build_gallery_dl_config(
+        {},
+        job_context="subscription",
+        last_completed_at=last,
+        media=MediaPolicy(max_files=200, include_videos=False),
+    )
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-200"
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+    # Incremental boundary is preserved alongside the policy.
+    assert config["extractor"]["skip"] == "abort:10"
+    assert config["extractor"]["date-after"] == "2026-03-14T08:00:00"
+
+
+@pytest.mark.asyncio
+async def test_download_with_invalid_media_options_fails_without_running_gallery_dl(tmp_path):
+    """A stored policy that no longer validates must fail the job, not download everything."""
+    from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+    with (
+        patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as spawn,
+        patch(
+            "plugins.builtin.gallery_dl.source._ensure_job_archive_table",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+            new_callable=AsyncMock,
+        ) as build_config,
+    ):
+        result = await GalleryDlPlugin().download(
+            url="https://example.com/gallery/1",
+            dest_dir=tmp_path,
+            credentials={},
+            options={"media": {"max_files": 0}},
+        )
+
+    assert result.status == "failed"
+    assert result.error is not None and result.error.startswith("Invalid media options:")
+    assert result.downloaded == 0
+    spawn.assert_not_called()
+    build_config.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_download_passes_valid_media_policy_to_config_builder(tmp_path):
+    """The call site must parse options.media and hand the policy to the config builder."""
+    from pathlib import Path
+
+    from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+    from services.download_policy import MediaPolicy
+
+    class _StopHere(Exception):
+        pass
+
+    with (
+        patch(
+            "plugins.builtin.gallery_dl.source._ensure_job_archive_table",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+            new_callable=AsyncMock,
+            side_effect=_StopHere,
+        ) as build_config,
+        patch("pathlib.Path.mkdir"),
+    ):
+        with pytest.raises(_StopHere):
+            await GalleryDlPlugin().download(
+                url="https://example.com/gallery/1",
+                dest_dir=Path(tmp_path),
+                credentials={},
+                options={"media": {"max_files": 20, "include_videos": False}},
+            )
+
+    assert build_config.call_args.kwargs["media"] == MediaPolicy(max_files=20, include_videos=False)

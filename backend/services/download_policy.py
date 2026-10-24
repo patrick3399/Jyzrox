@@ -7,6 +7,8 @@ risk #1).
 
 from dataclasses import dataclass
 
+from pydantic import BaseModel, ConfigDict, Field
+
 
 @dataclass(frozen=True)
 class CredentialPolicy:
@@ -68,3 +70,45 @@ def normalize_source_options(source: str, options: dict | None) -> dict | None:
 
         return normalized_fanbox_options(options)
     return options
+
+
+class MediaPolicy(BaseModel):
+    """Generic per-job selection: how many of the newest files, and whether videos count."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_files: int | None = Field(default=None, ge=1, le=100_000)
+    include_videos: bool = True
+
+    @property
+    def is_default(self) -> bool:
+        return self.max_files is None and self.include_videos
+
+
+def media_policy_from_options(options: dict | None) -> MediaPolicy | None:
+    """Parse ``options.media``; ``None`` means the job keeps today's behaviour."""
+    raw = (options or {}).get("media")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("options.media must be an object")
+    policy = MediaPolicy.model_validate(raw)
+    return None if policy.is_default else policy
+
+
+async def normalize_download_options(url: str, source: str | None, options: dict | None) -> dict | None:
+    """Validate every download-option policy for one URL before a job or subscription is persisted."""
+    from plugins.registry import plugin_registry
+
+    normalized = normalize_source_options(source or "", options)
+    if not normalized or "media" not in normalized:
+        return normalized
+    normalized = dict(normalized)
+    policy = media_policy_from_options(normalized)
+    if policy is None:
+        normalized.pop("media")
+        return normalized
+    if not await plugin_registry.supports_media_policy(url):
+        raise ValueError("media options are not supported for this source")
+    normalized["media"] = policy.model_dump(mode="json")
+    return normalized

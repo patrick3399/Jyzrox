@@ -1978,3 +1978,147 @@ class TestPreviewViaRegistry:
         import routers.download as rd
 
         assert not hasattr(rd, "_EH_URL_RE") and not hasattr(rd, "_PIXIV_URL_RE")
+
+
+# ---------------------------------------------------------------------------
+# options.media — download media policy
+# ---------------------------------------------------------------------------
+
+# The EH gallery token must be 10 hex chars, or the native plugin does not claim
+# the URL and gallery-dl (which supports the policy) would handle it instead.
+_EH_GALLERY_MEDIA_URL = "https://e-hentai.org/g/123456/abcdef1234/"
+
+
+class TestEnqueueMediaPolicy:
+    """POST /api/download/ — options.media validation and persistence."""
+
+    @staticmethod
+    def _patches():
+        return (
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+        )
+
+    async def test_enqueue_rejects_media_options_for_eh_gallery_url(self, client):
+        p1, p2 = self._patches()
+        with p1, p2, patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock:
+            resp = await client.post(
+                "/api/download/",
+                json={"url": _EH_GALLERY_MEDIA_URL, "options": {"media": {"max_files": 10}}},
+            )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
+        enqueue_mock.assert_not_awaited()
+
+    async def test_enqueue_rejects_zero_max_files_for_twitter_url(self, client):
+        p1, p2 = self._patches()
+        with p1, p2, patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock:
+            resp = await client.post(
+                "/api/download/",
+                json={"url": "https://x.com/someuser", "options": {"media": {"max_files": 0}}},
+            )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
+        enqueue_mock.assert_not_awaited()
+
+    @pytest.mark.parametrize("url", ["https://x.com/someuser", "https://twitter.com/someuser/media"])
+    async def test_enqueue_persists_normalized_media_options_for_twitter_url(self, db_session, mock_redis, url):
+        from routers.download import _enqueue
+
+        added: list = []
+        real_add = db_session.add
+
+        def _spy_add(obj):
+            added.append(obj)
+            return real_add(obj)
+
+        p1, p2 = self._patches()
+        with (
+            p1,
+            p2,
+            patch.object(db_session, "add", side_effect=_spy_add),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock,
+        ):
+            result = await _enqueue(
+                url,
+                db_session,
+                options={"media": {"max_files": 200, "include_videos": False}},
+                user_id=1,
+            )
+
+        assert result["status"] == "queued"
+        expected = {"max_files": 200, "include_videos": False}
+        assert len(added) == 1
+        assert added[0].options["media"] == expected
+        # The SAQ payload carries the same normalized options the worker will read.
+        assert enqueue_mock.await_args.kwargs["options"]["media"] == expected
+
+    async def test_enqueue_drops_default_media_options(self, db_session, mock_redis):
+        from routers.download import _enqueue
+
+        added: list = []
+        real_add = db_session.add
+
+        def _spy_add(obj):
+            added.append(obj)
+            return real_add(obj)
+
+        p1, p2 = self._patches()
+        with (
+            p1,
+            p2,
+            patch.object(db_session, "add", side_effect=_spy_add),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock,
+        ):
+            result = await _enqueue(
+                "https://x.com/someuser",
+                db_session,
+                options={"media": {"max_files": None, "include_videos": True}},
+                user_id=1,
+            )
+
+        assert result["status"] == "queued"
+        assert len(added) == 1
+        assert "media" not in added[0].options
+        assert "media" not in enqueue_mock.await_args.kwargs["options"]
+
+    async def test_enqueue_media_options_http_roundtrip_for_twitter_url(self, client):
+        """Through the real route: accepted (not 422) and no validation error leaks."""
+        p1, p2 = self._patches()
+        with p1, p2, patch("core.queue.enqueue", new_callable=AsyncMock):
+            resp = await client.post(
+                "/api/download/",
+                json={"url": "https://x.com/someuser", "options": {"media": {"max_files": 20}}},
+            )
+
+        # SQLite may fail the ORM insert (500); the policy itself must not be refused.
+        assert resp.status_code in (200, 500)
+
+
+class TestCheckUrlMediaPolicy:
+    """GET /api/download/check-url — supports_media_policy capability flag."""
+
+    async def test_check_url_reports_media_policy_support(self, client):
+        twitter = await client.get("/api/download/check-url", params={"url": "https://x.com/someuser"})
+        eh_gallery = await client.get("/api/download/check-url", params={"url": _EH_GALLERY_MEDIA_URL})
+
+        assert twitter.status_code == 200
+        assert twitter.json()["supports_media_policy"] is True
+        assert eh_gallery.status_code == 200
+        assert eh_gallery.json()["supports_media_policy"] is False
+
+    async def test_check_url_pixiv_reports_no_media_policy_support(self, client):
+        resp = await client.get("/api/download/check-url", params={"url": "https://www.pixiv.net/artworks/99999"})
+
+        assert resp.status_code == 200
+        assert resp.json()["supports_media_policy"] is False
+
+    async def test_check_url_not_a_url_reports_no_media_policy_support(self, client):
+        resp = await client.get("/api/download/check-url", params={"url": "not-a-url"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["supported"] is False
+        assert body["supports_media_policy"] is False

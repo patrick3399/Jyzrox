@@ -15,7 +15,7 @@ from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
 from db.models import DEFAULT_SUBSCRIPTION_CRON, DownloadJob, Gallery, Subscription
-from services.download_policy import normalize_source_options
+from services.download_policy import normalize_download_options
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
@@ -229,9 +229,9 @@ async def create_subscription(
     cron_expr = req.cron_expr or DEFAULT_SUBSCRIPTION_CRON
     download_options = req.download_options or {}
     try:
-        download_options = normalize_source_options(source, download_options)
+        download_options = await normalize_download_options(normalized_url, source, download_options)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid download options: {exc}") from exc
     next_check = croniter(cron_expr, datetime.now(UTC)).get_next(datetime)
 
     async with async_session() as session:
@@ -379,18 +379,24 @@ async def update_subscription(
     if req.group_id is not None:
         updates["group_id"] = req.group_id
     if req.download_options is not None:
-        # Policy validation needs the source from the owned subscription rather
-        # than trusting a caller-supplied source identifier.
+        # Policy validation needs the source and URL from the owned subscription
+        # rather than trusting caller-supplied identifiers.
         async with async_session() as session:
-            source = (
+            owned = (
                 await session.execute(
-                    select(Subscription.source).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+                    select(Subscription.source, Subscription.url).where(
+                        Subscription.id == sub_id, Subscription.user_id == user_id
+                    )
                 )
-            ).scalar_one_or_none()
+            ).first()
+        if owned is None:
+            raise HTTPException(status_code=404, detail="Subscription not found")
         try:
-            updates["download_options"] = normalize_source_options(source or "", req.download_options)
+            updates["download_options"] = await normalize_download_options(
+                owned.url, owned.source, req.download_options
+            )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+            raise HTTPException(status_code=422, detail=f"Invalid download options: {exc}") from exc
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")

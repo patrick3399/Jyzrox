@@ -137,6 +137,16 @@ class PluginRegistry:
         """Return the gallery-dl fallback plugin."""
         return self._fallback
 
+    async def supports_media_policy(self, url: str) -> bool:
+        """Whether the plugin that will download ``url`` honours ``options.media``.
+
+        Resolves the handler exactly like the download worker does, so an EH
+        tag-search URL (gallery-dl fallback) supports it while an EH gallery
+        URL (native plugin) does not.
+        """
+        plugin = await self.get_handler(url) or self.get_fallback()
+        return bool(getattr(plugin, "supports_media_policy", False))
+
     def get_browser(self, source_id: str) -> BrowsePlugin | None:
         return self._browsers.get(source_id)
 

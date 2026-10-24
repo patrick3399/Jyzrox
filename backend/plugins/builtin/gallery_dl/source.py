@@ -32,6 +32,8 @@ from plugins.models import (
     PluginMeta,
     SiteInfo,
 )
+from services.download_policy import MediaPolicy, media_policy_from_options
+from services.media_formats import VIDEO_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +180,7 @@ async def _build_gallery_dl_config(
     last_completed_at: datetime | None = None,
     force_full_scan: bool = False,
     target_source_id: str | None = None,
+    media: MediaPolicy | None = None,
 ) -> Path:
     """Write gallery-dl config with v3.0 features: PG archive, native rate-limiting, postprocessors.
 
@@ -194,6 +197,8 @@ async def _build_gallery_dl_config(
         target_source_id: The site this job actually downloads from. Global
             downloader options (rate) are only applied from this site's
             params — other sites' settings must not leak into the job.
+        media: Per-job media policy (newest-N files, videos on/off); ``None``
+            leaves the config exactly as it was before the option existed.
 
     Returns:
         Path to the config file written.
@@ -280,6 +285,20 @@ async def _build_gallery_dl_config(
 
             cutoff = last_completed_at - timedelta(days=1)
             config["extractor"]["date-after"] = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Per-job media policy (options.media). The config file is per job, so
+    # root-level extractor keys cannot leak into other jobs.
+    if media is not None:
+        if media.max_files is not None:
+            # Counts files that pass the filter, archived ones included, and
+            # stops paginating once the range is exhausted.
+            config["extractor"]["file-range"] = f"1-{media.max_files}"
+        if not media.include_videos:
+            # 'videos' is read by twitter/instagram/facebook and skips video
+            # posts before any request; the extension filter covers the rest.
+            config["extractor"]["videos"] = False
+            exts = ", ".join(repr(e.lstrip(".")) for e in sorted(VIDEO_EXTENSIONS))
+            config["extractor"]["file-filter"] = f"extension not in ({exts})"
 
     # Inject per-site sleep-request via SiteConfigService
     from core.site_config import site_config_service
@@ -838,6 +857,8 @@ def _read_url_file(path: Path) -> list[str]:
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""
 
+    supports_media_policy = True
+
     meta = PluginMeta(
         name="gallery-dl (Fallback)",
         source_id="gallery_dl",
@@ -893,6 +914,12 @@ class GalleryDlPlugin(SourcePlugin):
         _domain = _urlparse(url).netloc.removeprefix("www.")
         _site_cfg = get_site_by_domain(_domain)
 
+        # Fail a malformed stored policy loudly instead of silently downloading everything.
+        try:
+            media = media_policy_from_options(options)
+        except ValueError as exc:
+            return DownloadResult(status="failed", downloaded=0, total=0, error=f"Invalid media options: {exc}")
+
         # A force-full-scan run has no archive (see _build_gallery_dl_config).
         if not (options or {}).get("force_full_scan"):
             if archive_error := await _ensure_job_archive_table(url):
@@ -906,6 +933,7 @@ class GalleryDlPlugin(SourcePlugin):
             last_completed_at=options.get("last_completed_at") if options else None,
             force_full_scan=bool(options.get("force_full_scan", False)) if options else False,
             target_source_id=_site_cfg.source_id,
+            media=media,
         )
 
         from worker.gallery_dl_venv import get_gdl_exec_cmd

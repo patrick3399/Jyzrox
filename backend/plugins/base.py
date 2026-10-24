@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 from fastapi import APIRouter
 
@@ -132,6 +132,8 @@ class SourcePlugin(ABC):
     """
 
     meta: PluginMeta
+    # Whether download() honours ``options.media`` (newest-N / no-video policy).
+    supports_media_policy: ClassVar[bool] = False
 
     @abstractmethod
     async def can_handle(self, url: str) -> bool:
