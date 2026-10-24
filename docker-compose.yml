@@ -97,7 +97,8 @@ services:
         GDL_VERSION: ${GDL_VERSION:-}
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8'
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
-    stop_grace_period: 30s
+    # uvicorn drains in-flight requests on SIGTERM; 10s is plenty for a personal gallery
+    stop_grace_period: 10s
     environment:
       <<: *backend-env
       # Cap glibc per-thread arenas like the worker: the api memory floor
@@ -153,7 +154,8 @@ services:
     # PID 1 reaper: git (ssh spawned via sh) leaves orphaned sh that python-as-PID1 never waits on
     init: true
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
-    stop_grace_period: 55s
+    # Short grace: worker startup recovery re-enqueues/fails in-flight jobs, so a SIGKILL is safe
+    stop_grace_period: 10s
     environment:
       <<: *backend-env
       WORKER_CONCURRENCY_INTERACTIVE: ${WORKER_CONCURRENCY_INTERACTIVE:-6}
