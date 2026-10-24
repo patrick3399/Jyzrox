@@ -1,4 +1,12 @@
 const zhCN: Record<string, string> = {
+  'mediaPolicy.title': '下载选项',
+  'mediaPolicy.maxFiles': '最新文件数',
+  'mediaPolicy.maxFilesHint': '只下载最新 N 个文件；留空表示全部',
+  'mediaPolicy.includeVideos': '包含视频',
+  'mediaPolicy.invalidMaxFiles': '请输入 1 到 100000 的整数',
+  'mediaPolicy.saved': '下载选项已保存',
+  'mediaPolicy.allPlaceholder': '全部',
+  'mediaPolicy.noVideos': '不含视频',
   'fanbox.contentPolicy': 'Fanbox 内容',
   'fanbox.freeOnly': '仅免费帖子',
   'fanbox.accessible': '所有可访问帖子',

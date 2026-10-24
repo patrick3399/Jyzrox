@@ -1,4 +1,12 @@
 const zhTW: Record<string, string> = {
+  'mediaPolicy.title': '下載選項',
+  'mediaPolicy.maxFiles': '最新檔案數',
+  'mediaPolicy.maxFilesHint': '只下載最新 N 個檔案；留空表示全部',
+  'mediaPolicy.includeVideos': '包含影片',
+  'mediaPolicy.invalidMaxFiles': '請輸入 1 到 100000 的整數',
+  'mediaPolicy.saved': '下載選項已儲存',
+  'mediaPolicy.allPlaceholder': '全部',
+  'mediaPolicy.noVideos': '不含影片',
   'fanbox.contentPolicy': 'Fanbox 內容',
   'fanbox.freeOnly': '僅免費貼文',
   'fanbox.accessible': '所有可存取貼文',

@@ -1,4 +1,12 @@
 const en: Record<string, string> = {
+  'mediaPolicy.title': 'Download options',
+  'mediaPolicy.maxFiles': 'Newest files',
+  'mediaPolicy.maxFilesHint': 'Newest N files; leave empty for all',
+  'mediaPolicy.includeVideos': 'Include videos',
+  'mediaPolicy.invalidMaxFiles': 'Enter a whole number from 1 to 100000',
+  'mediaPolicy.saved': 'Download options saved',
+  'mediaPolicy.allPlaceholder': 'All',
+  'mediaPolicy.noVideos': 'No videos',
   'fanbox.contentPolicy': 'Fanbox content',
   'fanbox.freeOnly': 'Free posts only',
   'fanbox.accessible': 'All accessible posts',

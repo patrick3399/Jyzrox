@@ -859,6 +859,12 @@ export interface SubscriptionGroup {
 
 // ── Subscriptions ───────────────────────────────────────────────────
 
+/** Per-job media selection carried in `options.media` / `download_options.media`. */
+export interface MediaPolicy {
+  max_files: number | null
+  include_videos: boolean
+}
+
 export interface Subscription {
   id: number
   name: string | null

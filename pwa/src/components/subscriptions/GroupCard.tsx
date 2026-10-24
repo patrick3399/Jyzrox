@@ -55,6 +55,7 @@ export function GroupCard({
   onMoveToGroup,
   onRenameSub,
   onCronChangeSub,
+  onDownloadOptionsChangeSub,
   checkingId,
   defaultExpanded,
   title,
@@ -76,6 +77,7 @@ export function GroupCard({
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
   onRenameSub: (sub: Subscription, name: string) => void
   onCronChangeSub?: (sub: Subscription, cron: string) => void
+  onDownloadOptionsChangeSub?: (sub: Subscription, options: Record<string, unknown>) => void
   checkingId: number | null
   defaultExpanded: boolean
   /** Heading of a site section (group must be null). */
@@ -208,6 +210,7 @@ export function GroupCard({
                 onMoveToGroup={onMoveToGroup}
                 onRename={onRenameSub}
                 onCronChange={onCronChangeSub}
+                onDownloadOptionsChange={onDownloadOptionsChangeSub}
                 checkingId={checkingId}
                 showGroup={showSubGroup}
               />

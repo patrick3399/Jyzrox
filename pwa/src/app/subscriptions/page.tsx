@@ -26,11 +26,19 @@ import {
   useResumeGroup,
   useBulkMove,
 } from '@/hooks/useSubscriptionGroups'
-import { useDownloadJobs } from '@/hooks/useDownloadQueue'
+import { useDownloadJobs, useCheckUrl } from '@/hooks/useDownloadQueue'
+import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
+import { DEFAULT_MEDIA_POLICY, withMediaPolicy } from '@/lib/mediaPolicy'
 import { activeSubscriptionIds, sortActiveFirst } from '@/lib/downloadJobFilters'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { api } from '@/lib/api'
-import type { Subscription, SubscriptionGroup, DownloadJob, JobListParams } from '@/lib/types'
+import type {
+  Subscription,
+  SubscriptionGroup,
+  DownloadJob,
+  JobListParams,
+  MediaPolicy,
+} from '@/lib/types'
 import useSWR from 'swr'
 import { GroupCard } from '@/components/subscriptions/GroupCard'
 import { CRON_PRESETS, DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
@@ -240,6 +248,14 @@ export default function SubscriptionsPage() {
   >('accessible')
   const [fanboxSubscriptionFeeMin, setFanboxSubscriptionFeeMin] = useState('')
   const [fanboxSubscriptionFeeMax, setFanboxSubscriptionFeeMax] = useState('')
+  const [mediaPolicy, setMediaPolicy] = useState<MediaPolicy>(DEFAULT_MEDIA_POLICY)
+  const [debouncedAddUrl, setDebouncedAddUrl] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAddUrl(url), 300)
+    return () => clearTimeout(timer)
+  }, [url])
+  const { data: addUrlCheck } = useCheckUrl(showAdd ? debouncedAddUrl : '')
+  const supportsMediaPolicy = addUrlCheck?.supports_media_policy === true
   const [checkingId, setCheckingId] = useState<number | null>(null)
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [batchUrls, setBatchUrls] = useState('')
@@ -259,6 +275,18 @@ export default function SubscriptionsPage() {
   // Handlers — subscriptions
   const handleAdd = async () => {
     if (!url.trim()) return
+    const fanboxOptions: Record<string, unknown> = url.includes('fanbox.cc')
+      ? {
+          fanbox: {
+            content: fanboxSubscriptionContent,
+            ...(fanboxSubscriptionFeeMin ? { fee_min: Number(fanboxSubscriptionFeeMin) } : {}),
+            ...(fanboxSubscriptionFeeMax ? { fee_max: Number(fanboxSubscriptionFeeMax) } : {}),
+          },
+        }
+      : {}
+    const downloadOptions = supportsMediaPolicy
+      ? withMediaPolicy(fanboxOptions, mediaPolicy)
+      : fanboxOptions
     try {
       const result = await createSub({
         url: url.trim(),
@@ -266,21 +294,7 @@ export default function SubscriptionsPage() {
         auto_download: autoDownload,
         cron_expr: cronExpr,
         group_id: selectedGroupId,
-        ...(url.includes('fanbox.cc')
-          ? {
-              download_options: {
-                fanbox: {
-                  content: fanboxSubscriptionContent,
-                  ...(fanboxSubscriptionFeeMin
-                    ? { fee_min: Number(fanboxSubscriptionFeeMin) }
-                    : {}),
-                  ...(fanboxSubscriptionFeeMax
-                    ? { fee_max: Number(fanboxSubscriptionFeeMax) }
-                    : {}),
-                },
-              },
-            }
-          : {}),
+        ...(Object.keys(downloadOptions).length > 0 ? { download_options: downloadOptions } : {}),
       })
       if (result?.duplicate) {
         toast.info(t('subscriptions.duplicateUpdated'))
@@ -295,6 +309,7 @@ export default function SubscriptionsPage() {
       setFanboxSubscriptionContent('accessible')
       setFanboxSubscriptionFeeMin('')
       setFanboxSubscriptionFeeMax('')
+      setMediaPolicy(DEFAULT_MEDIA_POLICY)
       setShowAdd(false)
       mutate()
     } catch (err) {
@@ -377,6 +392,19 @@ export default function SubscriptionsPage() {
       mutate()
     } catch {
       toast.error(t('subscriptions.updateFailed'))
+    }
+  }
+
+  const handleDownloadOptionsChange = async (
+    sub: Subscription,
+    download_options: Record<string, unknown>,
+  ) => {
+    try {
+      await updateSub({ id: sub.id, data: { download_options } })
+      toast.success(t('mediaPolicy.saved'))
+      mutate()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('subscriptions.updateFailed'))
     }
   }
 
@@ -664,6 +692,9 @@ export default function SubscriptionsPage() {
               )}
             </div>
           )}
+          {supportsMediaPolicy && (
+            <MediaPolicyFields value={mediaPolicy} onChange={setMediaPolicy} disabled={creating} />
+          )}
           <div>
             <label className="text-xs text-vault-text-muted block mb-1">
               {t('subscriptions.name')}
@@ -945,6 +976,7 @@ export default function SubscriptionsPage() {
               onMoveToGroup={handleMoveToGroup}
               onRenameSub={handleRename}
               onCronChangeSub={handleCronChange}
+              onDownloadOptionsChangeSub={handleDownloadOptionsChange}
               checkingId={checkingId}
               defaultExpanded={true}
             />
@@ -976,6 +1008,7 @@ export default function SubscriptionsPage() {
                 onMoveToGroup={handleMoveToGroup}
                 onRenameSub={handleRename}
                 onCronChangeSub={handleCronChange}
+                onDownloadOptionsChangeSub={handleDownloadOptionsChange}
                 checkingId={checkingId}
                 defaultExpanded={true}
               />
@@ -1000,6 +1033,7 @@ export default function SubscriptionsPage() {
               onMoveToGroup={handleMoveToGroup}
               onRenameSub={handleRename}
               onCronChangeSub={handleCronChange}
+              onDownloadOptionsChangeSub={handleDownloadOptionsChange}
               checkingId={checkingId}
               defaultExpanded={true}
             />

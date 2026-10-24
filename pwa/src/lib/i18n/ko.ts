@@ -1,4 +1,12 @@
 const ko: Record<string, string> = {
+  'mediaPolicy.title': '다운로드 옵션',
+  'mediaPolicy.maxFiles': '최신 파일 수',
+  'mediaPolicy.maxFilesHint': '최신 N개 파일만; 비워 두면 전체',
+  'mediaPolicy.includeVideos': '동영상 포함',
+  'mediaPolicy.invalidMaxFiles': '1에서 100000 사이의 정수를 입력하세요',
+  'mediaPolicy.saved': '다운로드 옵션이 저장되었습니다',
+  'mediaPolicy.allPlaceholder': '전체',
+  'mediaPolicy.noVideos': '동영상 제외',
   'fanbox.contentPolicy': 'Fanbox 콘텐츠',
   'fanbox.freeOnly': '무료 게시물만',
   'fanbox.accessible': '접근 가능한 모든 게시물',

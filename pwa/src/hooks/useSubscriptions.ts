@@ -50,6 +50,7 @@ export function useCreateSubscription() {
           cron_expr?: string
           auto_download?: boolean
           group_id?: number | null
+          download_options?: Record<string, unknown>
         }
       },
     ) => api.subscriptions.create(arg),
@@ -72,6 +73,7 @@ export function useUpdateSubscription() {
             auto_download?: boolean
             cron_expr?: string
             group_id?: number | null
+            download_options?: Record<string, unknown>
           }
         }
       },

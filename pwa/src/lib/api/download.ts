@@ -63,9 +63,13 @@ export const download = {
     ),
 
   checkUrl: (url: string) =>
-    apiFetch<{ supported: boolean; source_id?: string; name?: string; category?: string }>(
-      `/api/download/check-url${qs({ url })}`,
-    ),
+    apiFetch<{
+      supported: boolean
+      source_id?: string
+      name?: string
+      category?: string
+      supports_media_policy?: boolean
+    }>(`/api/download/check-url${qs({ url })}`),
 
   supportedSites: () =>
     apiFetch<{

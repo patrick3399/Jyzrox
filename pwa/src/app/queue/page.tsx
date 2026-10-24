@@ -31,9 +31,11 @@ import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
+import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
+import { DEFAULT_MEDIA_POLICY, withMediaPolicy } from '@/lib/mediaPolicy'
 import { SUBSCRIPTION_ACTIVE_ANCHOR, isActiveJob } from '@/lib/downloadJobFilters'
 import { useWsConnection } from '@/lib/ws'
-import type { DownloadJob, DownloadPreview, JobListParams } from '@/lib/types'
+import type { DownloadJob, DownloadPreview, JobListParams, MediaPolicy } from '@/lib/types'
 
 // Module-level so the SWR key stays referentially stable across renders.
 const MANUAL_JOBS_PARAMS: JobListParams = { exclude_subscription: true }
@@ -498,6 +500,7 @@ export default function QueuePage() {
   >('accessible')
   const [fanboxFeeMin, setFanboxFeeMin] = useState('')
   const [fanboxFeeMax, setFanboxFeeMax] = useState('')
+  const [mediaPolicy, setMediaPolicy] = useState<MediaPolicy>(DEFAULT_MEDIA_POLICY)
   const isFanboxUrl = /fanbox\.cc\/(?:@[^/]+\/)?posts\/\d+/i.test(urlInput)
 
   useEffect(() => {
@@ -506,6 +509,7 @@ export default function QueuePage() {
   }, [urlInput])
 
   const { data: checkResult } = useCheckUrl(debouncedUrl)
+  const supportsMediaPolicy = checkResult?.supports_media_policy === true
   const { data: sitesData } = useSupportedSites()
   const { data: downloadPreview, isLoading: previewLoading } = useDownloadPreview(debouncedUrl)
 
@@ -541,22 +545,24 @@ export default function QueuePage() {
     const url = urlInput.trim()
     if (!url) return
     try {
+      const baseOptions: Record<string, unknown> = isFanboxUrl
+        ? {
+            fanbox: {
+              content: fanboxContent,
+              ...(fanboxFeeMin ? { fee_min: Number(fanboxFeeMin) } : {}),
+              ...(fanboxFeeMax ? { fee_max: Number(fanboxFeeMax) } : {}),
+            },
+          }
+        : {}
+      // The policy only applies to URLs the server says honour it.
+      const options = supportsMediaPolicy ? withMediaPolicy(baseOptions, mediaPolicy) : baseOptions
       const result = await enqueue({
         url,
-        ...(isFanboxUrl
-          ? {
-              options: {
-                fanbox: {
-                  content: fanboxContent,
-                  ...(fanboxFeeMin ? { fee_min: Number(fanboxFeeMin) } : {}),
-                  ...(fanboxFeeMax ? { fee_max: Number(fanboxFeeMax) } : {}),
-                },
-              },
-            }
-          : {}),
+        ...(Object.keys(options).length > 0 ? { options } : {}),
       })
       toast.success(t('queue.queuedSuccessWithJob', { id: result.job_id }))
       setUrlInput('')
+      setMediaPolicy(DEFAULT_MEDIA_POLICY)
       await mutate()
       if (result.warning) {
         const warningMap: Record<string, string> = {
@@ -569,7 +575,17 @@ export default function QueuePage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to enqueue download')
     }
-  }, [urlInput, enqueue, mutate, isFanboxUrl, fanboxContent, fanboxFeeMin, fanboxFeeMax])
+  }, [
+    urlInput,
+    enqueue,
+    mutate,
+    isFanboxUrl,
+    fanboxContent,
+    fanboxFeeMin,
+    fanboxFeeMax,
+    supportsMediaPolicy,
+    mediaPolicy,
+  ])
 
   const handleCancel = useCallback(
     async (id: string) => {
@@ -721,6 +737,9 @@ export default function QueuePage() {
               </>
             )}
           </div>
+        )}
+        {supportsMediaPolicy && (
+          <MediaPolicyFields value={mediaPolicy} onChange={setMediaPolicy} disabled={isEnqueuing} />
         )}
         {/* URL Recognition Badge */}
         {debouncedUrl.trim() && checkResult && (

@@ -1,4 +1,12 @@
 const ja: Record<string, string> = {
+  'mediaPolicy.title': 'ダウンロードオプション',
+  'mediaPolicy.maxFiles': '最新ファイル数',
+  'mediaPolicy.maxFilesHint': '最新の N 件のみ。空欄ですべて',
+  'mediaPolicy.includeVideos': '動画を含める',
+  'mediaPolicy.invalidMaxFiles': '1〜100000 の整数を入力してください',
+  'mediaPolicy.saved': 'ダウンロードオプションを保存しました',
+  'mediaPolicy.allPlaceholder': 'すべて',
+  'mediaPolicy.noVideos': '動画なし',
   'fanbox.contentPolicy': 'Fanbox コンテンツ',
   'fanbox.freeOnly': '無料投稿のみ',
   'fanbox.accessible': 'アクセス可能な投稿すべて',

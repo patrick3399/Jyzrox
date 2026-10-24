@@ -7,8 +7,10 @@ import {
   Check,
   CheckCircle,
   Clock,
+  ChevronDown,
   Download,
   ExternalLink,
+  SlidersHorizontal,
   MoreHorizontal,
   Rss,
   ScanSearch,
@@ -18,9 +20,12 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
+import { useCheckUrl } from '@/hooks/useDownloadQueue'
+import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
+import { isDefaultMediaPolicy, mediaPolicyFromOptions, withMediaPolicy } from '@/lib/mediaPolicy'
 import { CRON_PRESETS } from './constants'
 import { sourceLabel } from './sourceGrouping'
-import type { DownloadJob, Subscription, SubscriptionGroup } from '@/lib/types'
+import type { DownloadJob, MediaPolicy, Subscription, SubscriptionGroup } from '@/lib/types'
 
 const SOURCE_COLORS: Record<string, string> = {
   pixiv: 'bg-blue-500/20 text-blue-400',
@@ -231,6 +236,71 @@ function IntervalRow({
   )
 }
 
+/**
+ * Collapsible per-subscription download options (newest N files, include videos).
+ *
+ * Support is resolved by URL on the server, so the check only runs while the row
+ * is expanded. Save sends the whole `download_options` object because the PATCH
+ * replaces it wholesale; `withMediaPolicy` keeps every other key (e.g. `fanbox`).
+ */
+function DownloadOptionsRow({
+  sub,
+  onDownloadOptionsChange,
+}: {
+  sub: Subscription
+  onDownloadOptionsChange?: (sub: Subscription, options: Record<string, unknown>) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const stored = mediaPolicyFromOptions(sub.download_options)
+  const [policy, setPolicy] = useState<MediaPolicy>(stored)
+  const { data: check } = useCheckUrl(expanded ? sub.url : '')
+  const supported = check?.supports_media_policy === true
+  const dirty =
+    policy.max_files !== stored.max_files || policy.include_videos !== stored.include_videos
+
+  return (
+    <div data-testid="subscription-download-options" className="text-[10px] text-vault-text-muted">
+      <button
+        type="button"
+        onClick={() => {
+          if (!expanded) setPolicy(stored)
+          setExpanded((value) => !value)
+        }}
+        aria-expanded={expanded}
+        className="flex items-center gap-1.5 transition-colors hover:text-vault-text"
+      >
+        <SlidersHorizontal size={11} className="shrink-0" />
+        <span>{t('mediaPolicy.title')}</span>
+        {!isDefaultMediaPolicy(stored) && (
+          <span className="rounded bg-vault-accent/15 px-1.5 py-0.5 text-vault-accent">
+            {stored.max_files !== null ? stored.max_files : t('mediaPolicy.allPlaceholder')}
+            {stored.include_videos ? '' : ' · ' + t('mediaPolicy.noVideos')}
+          </span>
+        )}
+        <ChevronDown
+          size={11}
+          className={`shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {expanded && supported && (
+        <div>
+          <MediaPolicyFields value={policy} onChange={setPolicy} />
+          <button
+            type="button"
+            disabled={!dirty || !onDownloadOptionsChange}
+            onClick={() =>
+              onDownloadOptionsChange?.(sub, withMediaPolicy(sub.download_options, policy))
+            }
+            className="mt-2 rounded bg-vault-accent px-2 py-1 text-xs text-white transition-colors hover:bg-vault-accent/90 disabled:opacity-40"
+          >
+            {t('common.save')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
   const source = latestJob?.gallery_source ?? sub.gallery_source
   const sourceId = latestJob?.gallery_source_id ?? sub.gallery_source_id
@@ -250,6 +320,7 @@ export function SubscriptionCard({
   onMoveToGroup,
   onRename,
   onCronChange,
+  onDownloadOptionsChange,
   checkingId,
   showGroup = false,
 }: {
@@ -264,6 +335,7 @@ export function SubscriptionCard({
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
   onRename: (sub: Subscription, name: string) => void
   onCronChange?: (sub: Subscription, cron: string) => void
+  onDownloadOptionsChange?: (sub: Subscription, options: Record<string, unknown>) => void
   checkingId: number | null
   /** Show the schedule group on the card itself (the list is not laid out by group). */
   showGroup?: boolean
@@ -473,6 +545,9 @@ export function SubscriptionCard({
           </button>
           <div className="col-span-2 mt-1 border-t border-vault-border/50 px-2 pt-2">
             <IntervalRow sub={sub} group={group} onCronChange={onCronChange} />
+          </div>
+          <div className="col-span-2 px-2 pt-1">
+            <DownloadOptionsRow sub={sub} onDownloadOptionsChange={onDownloadOptionsChange} />
           </div>
           {groups.length > 0 && (
             <label className="col-span-2 flex items-center gap-2 px-2 pt-1 text-vault-text-muted">
