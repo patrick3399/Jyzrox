@@ -21,6 +21,9 @@ import { useProfile } from '@/hooks/useProfile'
 import { CredentialAccounts, sanitizeAccountName } from '@/components/CredentialAccounts'
 import type { Credentials, EhAccount, PluginInfo, CredentialFlow, FieldDef } from '@/lib/types'
 
+// Sources that have their own credential section; the generic site list must not repeat them.
+const NON_GENERIC_SOURCES = new Set(['ehentai', 'pixiv', 'saucenao'])
+
 // ── Shared style constants ─────────────────────────────────────────────────
 
 const inputClass =
@@ -804,7 +807,7 @@ function SiteCredentialSection({
 
   const genericSites = credentials
     ? Object.entries(credentials).filter(
-        ([source]) => source !== 'ehentai' && source !== 'pixiv' && credentials[source].configured,
+        ([source]) => !NON_GENERIC_SOURCES.has(source) && credentials[source].configured,
       )
     : []
 
