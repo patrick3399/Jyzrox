@@ -33,6 +33,7 @@ from plugins.models import (
     PluginMeta,
     SiteInfo,
 )
+from services.browser_http import browser_client
 from services.media_formats import IMAGE_EXTENSIONS as _IMAGE_EXTS
 from services.media_formats import VIDEO_EXTENSIONS as _VIDEO_EXTS
 
@@ -65,9 +66,23 @@ def _cookies(credentials: dict | str | None) -> dict[str, str]:
     return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
 
 
+_FANBOX_ORIGIN = "https://www.fanbox.cc"
+
+
 def _api_headers() -> dict[str, str]:
-    """Headers for Fanbox requests, with the Accept the www.fanbox.cc web app sends."""
-    return {**browser_headers("application/json, text/plain, */*"), "Referer": "https://www.fanbox.cc/"}
+    """A fetch() from www.fanbox.cc to api.fanbox.cc, with the Accept its web app sends."""
+    return browser_headers(
+        "fetch",
+        site="same-site",
+        origin=_FANBOX_ORIGIN,
+        referer=f"{_FANBOX_ORIGIN}/",
+        accept="application/json, text/plain, */*",
+    )
+
+
+def _media_headers() -> dict[str, str]:
+    """An <img> on www.fanbox.cc loading from downloads.fanbox.cc."""
+    return browser_headers("image", site="same-site", referer=f"{_FANBOX_ORIGIN}/")
 
 
 def _extension(url: str, content_type: str | None) -> str:
@@ -162,20 +177,21 @@ class FanboxSourcePlugin(SourcePlugin):
         creator_id = self.creator_id_from_url(creator_url)
         if not creator_id:
             raise ValueError("Fanbox subscription requires a creator URL")
-        headers = _api_headers()
         works: list[NewWork] = []
         latest_id: str | None = None
-        async with httpx.AsyncClient(
-            headers=headers, cookies=_cookies(credentials), follow_redirects=True, timeout=45
-        ) as client:
-            response = await client.get("https://api.fanbox.cc/post.paginateCreator", params={"creatorId": creator_id})
+        async with browser_client(cookies=_cookies(credentials), follow_redirects=True, timeout=45) as client:
+            response = await client.get(
+                "https://api.fanbox.cc/post.paginateCreator",
+                params={"creatorId": creator_id},
+                headers=_api_headers(),
+            )
             response.raise_for_status()
             pages = response.json().get("body")
             if not isinstance(pages, list):
                 return works, latest_id
             reached_boundary = False
             for page_url in pages:
-                response = await client.get(str(page_url))
+                response = await client.get(str(page_url), headers=_api_headers())
                 response.raise_for_status()
                 posts = response.json().get("body")
                 if not isinstance(posts, list):
@@ -296,17 +312,16 @@ class FanboxSourcePlugin(SourcePlugin):
 
         post_id = match.group(1)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        headers = _api_headers()
         summary = {"policy": policy.model_dump(mode="json"), "skipped_policy": 0, "skipped_inaccessible": 0}
         diagnostic = (options or {}).get("diagnostic_ctx")
         if isinstance(diagnostic, dict):
             diagnostic["source_summary"] = summary
 
-        async with httpx.AsyncClient(
-            headers=headers, cookies=_cookies(credentials), follow_redirects=True, timeout=45
-        ) as client:
+        async with browser_client(cookies=_cookies(credentials), follow_redirects=True, timeout=45) as client:
             try:
-                response = await client.get("https://api.fanbox.cc/post.info", params={"postId": post_id})
+                response = await client.get(
+                    "https://api.fanbox.cc/post.info", params={"postId": post_id}, headers=_api_headers()
+                )
                 if response.status_code in (401, 403):
                     summary["skipped_inaccessible"] = 1
                     return DownloadResult(status="done", downloaded=0, total=0)
@@ -351,7 +366,7 @@ class FanboxSourcePlugin(SourcePlugin):
                         )
                     await asyncio.sleep(0.5)
                 try:
-                    media = await client.get(media_url)
+                    media = await client.get(media_url, headers=_media_headers())
                     media.raise_for_status()
                     path = (
                         dest_dir / f"{post_id}_p{index:04d}{_extension(media_url, media.headers.get('content-type'))}"

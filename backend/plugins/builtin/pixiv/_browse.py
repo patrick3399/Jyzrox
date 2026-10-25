@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import core.queue
 from core.auth import require_auth, require_role
-from core.client_identity import ACCEPT_FETCH, ACCEPT_IMAGE, browser_headers
+from core.client_identity import browser_headers
 from core.config import settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
@@ -34,6 +34,7 @@ from plugins.models import (
     SiteInfo,
 )
 from services import cache
+from services.browser_http import browser_client
 from services.credential import get_credential
 from services.download_admission import admission_key_for
 from services.pixiv_client import PixivClient
@@ -176,13 +177,21 @@ async def _make_client(locale: str = "en") -> PixivClient:
     return PixivClient(refresh_token=refresh_token)
 
 
-def _web_headers(accept: str = ACCEPT_FETCH) -> dict[str, str]:
-    """Headers for anonymous www.pixiv.net / pximg requests: the browser identity.
+_PIXIV_ORIGIN = "https://www.pixiv.net"
 
-    Requests made with a Pixiv account go through PixivClient, which presents
-    the Pixiv app identity instead.
+
+def _ajax_headers() -> dict[str, str]:
+    """A fetch() made by a www.pixiv.net page, without a Pixiv account.
+
+    Requests made with an account go through PixivClient, which presents the
+    Pixiv app identity instead.
     """
-    return {**browser_headers(accept), "Referer": "https://www.pixiv.net/"}
+    return browser_headers("fetch", site="same-origin", referer=f"{_PIXIV_ORIGIN}/")
+
+
+def _pximg_headers() -> dict[str, str]:
+    """An <img> on www.pixiv.net loading from i.pximg.net."""
+    return browser_headers("image", site="cross-site", referer=f"{_PIXIV_ORIGIN}/")
 
 
 # ── Media type detection ──────────────────────────────────────────────
@@ -272,9 +281,9 @@ async def get_ranking(
     if date:
         params["date"] = date
 
-    headers = _web_headers()
+    headers = _ajax_headers()
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
+    async with browser_client(timeout=30, follow_redirects=True) as http:
         try:
             resp = await http.get(
                 "https://www.pixiv.net/ranking.php",
@@ -320,9 +329,9 @@ async def search_public(
         "lang": "en",
     }
 
-    headers = _web_headers()
+    headers = _ajax_headers()
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
+    async with browser_client(timeout=30, follow_redirects=True) as http:
         try:
             resp = await http.get(
                 f"https://www.pixiv.net/ajax/search/artworks/{word}",
@@ -461,9 +470,9 @@ async def search_illust(
 
 async def _fetch_illust_public(illust_id: int) -> dict:
     """Fetch illust detail via Pixiv public ajax API (no credentials required)."""
-    headers = _web_headers()
+    headers = _ajax_headers()
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
+    async with browser_client(timeout=30, follow_redirects=True) as http:
         try:
             resp = await http.get(
                 f"https://www.pixiv.net/ajax/illust/{illust_id}",
@@ -484,7 +493,7 @@ async def _fetch_illust_public(illust_id: int) -> dict:
     # Also try to fetch pages info
     pages: list = []
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
+        async with browser_client(timeout=30, follow_redirects=True) as http:
             pages_resp = await http.get(
                 f"https://www.pixiv.net/ajax/illust/{illust_id}/pages",
                 headers=headers,
@@ -1260,9 +1269,9 @@ async def image_proxy(
         client = await _make_client()
     except HTTPException:
         # Anonymous fallback — pximg.net only checks Referer, not auth tokens
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
+        async with browser_client(timeout=30, follow_redirects=True) as http:
             try:
-                resp = await http.get(url, headers=_web_headers(ACCEPT_IMAGE))
+                resp = await http.get(url, headers=_pximg_headers())
                 resp.raise_for_status()
                 image_bytes = resp.content
             except httpx.HTTPError as e:

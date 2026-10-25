@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import and_, select
 
 from core.auth import gallery_access_filter, require_auth
-from core.client_identity import ACCEPT_IMAGE, browser_headers
+from core.client_identity import browser_headers
 from core.config import settings as app_settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
@@ -36,6 +36,7 @@ from plugins.models import (
     SiteInfo,
 )
 from services import cache
+from services.browser_http import browser_client
 from services.cache import push_system_alert
 from services.credential import get_credential
 from services.eh_client import EhClient
@@ -180,10 +181,9 @@ class EhBrowsePlugin(BrowsePlugin):
             else:
                 cookies = credentials  # type: ignore[assignment]
 
-        async with httpx.AsyncClient(
-            headers=browser_headers(ACCEPT_IMAGE), cookies=cookies, follow_redirects=True, timeout=30
-        ) as http:
-            resp = await http.get(url)
+        referer = "https://exhentai.org/" if "exhentai" in (urlparse(url).hostname or "") else "https://e-hentai.org/"
+        async with browser_client(cookies=cookies, follow_redirects=True, timeout=30) as http:
+            resp = await http.get(url, headers=browser_headers("image", site="cross-site", referer=referer))
             resp.raise_for_status()
             data = resp.content
             media_type = detect_media_type(data)
@@ -1190,8 +1190,8 @@ async def thumb_proxy(
     async with _thumb_semaphore:
         try:
             referer = "https://exhentai.org/" if "exhentai" in (parsed.hostname or "") else "https://e-hentai.org/"
-            async with httpx.AsyncClient(headers=browser_headers(ACCEPT_IMAGE), cookies=cookies, timeout=30) as client:
-                resp = await client.get(url, headers={"Referer": referer})
+            async with browser_client(cookies=cookies, timeout=30) as client:
+                resp = await client.get(url, headers=browser_headers("image", site="cross-site", referer=referer))
                 resp.raise_for_status()
                 content = resp.content
                 media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]

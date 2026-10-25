@@ -15,11 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, text
 
 from core.auth import require_auth, require_role
-from core.client_identity import ACCEPT_DOCUMENT, browser_headers, pixiv_app_headers
+from core.client_identity import browser_headers, pixiv_app_headers
 from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import BlobRelationship
+from services.browser_http import browser_client
 from services.cache import dismiss_system_alert, get_system_alerts, push_system_alert
 from services.credential import ACCOUNT_PATTERN, delete_account, get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
@@ -125,7 +126,7 @@ async def eh_login_with_password(
     _: dict = Depends(_admin),
 ):
     """Login to E-Hentai with username/password to auto-obtain cookies (EhViewer-style)."""
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+    async with browser_client(follow_redirects=True, timeout=30) as client:
         resp = await client.post(
             "https://forums.e-hentai.org/index.php?act=Login&CODE=01",
             data={
@@ -135,11 +136,12 @@ async def eh_login_with_password(
                 "CookieDate": "1",
                 "temporary_https": "off",
             },
-            headers={
-                **browser_headers(ACCEPT_DOCUMENT),
-                "Referer": "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
-                "Origin": "https://forums.e-hentai.org",
-            },
+            headers=browser_headers(
+                "document",
+                site="same-origin",
+                referer="https://forums.e-hentai.org/index.php?act=Login&CODE=00",
+                origin="https://forums.e-hentai.org",
+            ),
         )
 
     ipb_member_id = resp.cookies.get("ipb_member_id")
@@ -148,14 +150,14 @@ async def eh_login_with_password(
         raise HTTPException(status_code=400, detail="Login failed: incorrect username or password")
 
     # Fetch sk cookie from main EH page
-    async with httpx.AsyncClient(
+    async with browser_client(
         cookies={"ipb_member_id": ipb_member_id, "ipb_pass_hash": ipb_pass_hash},
         follow_redirects=True,
         timeout=15,
     ) as client:
         resp2 = await client.get(
             "https://e-hentai.org/",
-            headers=browser_headers(ACCEPT_DOCUMENT),
+            headers=browser_headers("document", site="none"),
         )
     sk = resp2.cookies.get("sk", "")
 
@@ -164,14 +166,14 @@ async def eh_login_with_password(
     # Try to obtain igneous cookie for ExHentai access
     igneous = None
     try:
-        async with httpx.AsyncClient(
+        async with browser_client(
             cookies=cookies,
             follow_redirects=True,
             timeout=15,
         ) as ex_client:
             ex_resp = await ex_client.get(
                 "https://exhentai.org/",
-                headers=browser_headers(ACCEPT_DOCUMENT),
+                headers=browser_headers("document", site="none"),
             )
             igneous = ex_resp.cookies.get("igneous")
             if not igneous:
@@ -354,8 +356,8 @@ async def set_pixiv_cookie_credentials(
         # Step 1: Hit the OAuth URL with the provided PHPSESSID cookie
         # follow_redirects=False is crucial here to capture the 302 response
         cookies = {"PHPSESSID": req.phpsessid}
-        async with httpx.AsyncClient(follow_redirects=False) as client:
-            resp = await client.get(auth_url, cookies=cookies, headers=browser_headers(ACCEPT_DOCUMENT))
+        async with browser_client(follow_redirects=False) as client:
+            resp = await client.get(auth_url, cookies=cookies, headers=browser_headers("document", site="none"))
 
             # The expected success response is a 302 redirect back to the app-api.pixiv.net URL
             if resp.status_code != 302:

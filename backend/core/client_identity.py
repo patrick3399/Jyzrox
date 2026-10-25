@@ -5,35 +5,95 @@ gallery-dl's own ``browser`` / ``user-agent`` options and the egress personas
 (ADR 0022).
 """
 
-# One desktop browser, Firefox on Windows, for every native web and image
-# request. Firefox sends no User-Agent client hints, so an httpx request with a
-# Firefox UA and no ``sec-ch-ua*`` headers looks like the real browser. A Chrome
-# UA without them is a well-known bot tell, and faking them would claim Chrome
-# over a TLS handshake that is not Chrome's. ``Sec-Fetch-*`` is not faked
-# either: its values depend on how each request was started. Accept-Encoding
-# stays httpx's own, because advertising an encoding it cannot decode breaks
-# the response.
-#
-# The version is static on purpose: bump it when Firefox stable moves on
-# (LATEST_FIREFOX_VERSION in product-details.mozilla.org/1.0/firefox_versions.json).
-# Mozilla moved from four-week to two-week releases in September 2026, so a
-# version computed from the date drifts.
-_FIREFOX_MAJOR = 158
+from typing import Literal
+
+# The browser is one curl_cffi impersonation target. services.browser_http
+# sends that target's TLS ClientHello, HTTP/2 settings and header order, and
+# the headers below claim the same Chrome release, client hints included.
+# Bump BROWSER_TARGET together with curl_cffi and take the new release's
+# sec-ch-ua GREASE brand; a test compares both with what curl_cffi itself
+# sends for the target. The platform is Windows rather than the target's macOS
+# capture: Chrome's TLS and HTTP/2 fingerprints do not change with the OS.
+BROWSER_TARGET = "chrome150"
+_CHROME_MAJOR = BROWSER_TARGET.removeprefix("chrome")
+_SEC_CH_UA = f'"Not;A=Brand";v="8", "Chromium";v="{_CHROME_MAJOR}", "Google Chrome";v="{_CHROME_MAJOR}"'
 
 BROWSER_USER_AGENT = (
-    f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{_FIREFOX_MAJOR}.0) Gecko/20100101 Firefox/{_FIREFOX_MAJOR}.0"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    f"Chrome/{_CHROME_MAJOR}.0.0.0 Safari/537.36"
 )
 BROWSER_ACCEPT_LANGUAGE = "en-US,en;q=0.9"
 
-# Firefox's Accept per request kind (MDN "List of default Accept values").
-ACCEPT_DOCUMENT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-ACCEPT_IMAGE = "image/avif,image/jxl,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
+# Chrome's Accept per request kind.
+ACCEPT_DOCUMENT = (
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,"
+    "application/signed-exchange;v=b3;q=0.7"
+)
+ACCEPT_IMAGE = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
 ACCEPT_FETCH = "*/*"
 
+RequestKind = Literal["document", "fetch", "image"]
+FetchSite = Literal["none", "same-origin", "same-site", "cross-site"]
 
-def browser_headers(accept: str = ACCEPT_FETCH) -> dict[str, str]:
-    """Return a new dict of the browser identity headers with the given Accept."""
-    return {"User-Agent": BROWSER_USER_AGENT, "Accept": accept, "Accept-Language": BROWSER_ACCEPT_LANGUAGE}
+
+def browser_base_headers() -> dict[str, str]:
+    """Return a new dict of the headers Chrome sends on every request."""
+    return {
+        "sec-ch-ua": _SEC_CH_UA,
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "User-Agent": BROWSER_USER_AGENT,
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": BROWSER_ACCEPT_LANGUAGE,
+    }
+
+
+def browser_headers(
+    kind: RequestKind,
+    *,
+    site: FetchSite,
+    referer: str | None = None,
+    origin: str | None = None,
+    accept: str | None = None,
+) -> dict[str, str]:
+    """Return a new dict of the per-request headers for one kind of Chrome request.
+
+    ``document`` is a top-level navigation (page loads, form posts), ``fetch`` a
+    script's fetch()/XHR such as a JSON API, ``image`` an <img> load. ``site``
+    is Sec-Fetch-Site as seen from the page that would make the request. The
+    transport puts headers in Chrome's order, so dict order does not matter.
+    """
+    if kind == "document":
+        headers = {
+            "Upgrade-Insecure-Requests": "1",
+            "Accept": accept or ACCEPT_DOCUMENT,
+            "Sec-Fetch-Site": site,
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-User": "?1",
+            "Sec-Fetch-Dest": "document",
+            "Priority": "u=0, i",
+        }
+    elif kind == "fetch":
+        headers = {
+            "Accept": accept or ACCEPT_FETCH,
+            "Sec-Fetch-Site": site,
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
+            "Priority": "u=1, i",
+        }
+    else:
+        headers = {
+            "Accept": accept or ACCEPT_IMAGE,
+            "Sec-Fetch-Site": site,
+            "Sec-Fetch-Mode": "no-cors",
+            "Sec-Fetch-Dest": "image",
+            "Priority": "i",
+        }
+    if referer:
+        headers["Referer"] = referer
+    if origin:
+        headers["Origin"] = origin
+    return headers
 
 
 # The Pixiv iOS app, for every app-api, OAuth and pximg request made with a

@@ -1,8 +1,12 @@
 """Native E-Hentai, Pixiv and Fanbox requests present the central client identities.
 
+Browser requests go through services.browser_http (curl_cffi as Chrome); the
+Pixiv app path keeps plain httpx / pixivpy3 with the Pixiv iOS app identity.
 Requests are captured at the transport (httpx.MockTransport, or a requests
 adapter for pixivpy3), so the assertions see the headers actually sent after
-client defaults and per-request headers are merged.
+client defaults and per-request headers are merged. The transport each client
+was built with is recorded before the swap, which tells a Chrome client from a
+plain one. Header order and the TLS fingerprint are covered in test_browser_http.
 """
 
 import re
@@ -14,18 +18,18 @@ import requests
 from requests.adapters import BaseAdapter
 
 from core.client_identity import (
-    ACCEPT_DOCUMENT,
-    ACCEPT_FETCH,
-    ACCEPT_IMAGE,
-    BROWSER_ACCEPT_LANGUAGE,
+    BROWSER_TARGET,
     BROWSER_USER_AGENT,
     PIXIV_APP_REFERER,
+    browser_base_headers,
     browser_headers,
     pixiv_app_headers,
 )
+from services.browser_http import ImpersonatingTransport
 
 _RealAsyncClient = httpx.AsyncClient
-_JPEG = b"\xff\xd8\xff" + b"\x00" * 16
+_JPEG = b"\xff\xd8\xff" + b"\x00" * 200
+_FANBOX_ACCEPT = "application/json, text/plain, */*"
 
 
 class _Recorder:
@@ -33,11 +37,13 @@ class _Recorder:
 
     def __init__(self, respond=None):
         self.requests: list[httpx.Request] = []
+        self.transports: list = []  # what each client was built with, before the swap
         self._respond = respond or (lambda request: httpx.Response(200, content=_JPEG))
         recorder = self
 
         class _RecordingAsyncClient(_RealAsyncClient):
             def __init__(self, *args, **kwargs):
+                recorder.transports.append(kwargs.get("transport"))
                 kwargs["transport"] = httpx.MockTransport(recorder._handle)
                 super().__init__(*args, **kwargs)
 
@@ -46,6 +52,11 @@ class _Recorder:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         return self._respond(request)
+
+    def assert_all_impersonate_chrome(self) -> None:
+        assert self.transports
+        for transport in self.transports:
+            assert isinstance(transport, ImpersonatingTransport)
 
 
 class _RecordingAdapter(BaseAdapter):
@@ -89,11 +100,21 @@ def _recording_app_api(sent: list):
     return factory
 
 
-def _assert_browser_identity(request: httpx.Request, accept: str) -> None:
-    assert request.headers["User-Agent"] == BROWSER_USER_AGENT
-    assert request.headers["Accept"] == accept
-    assert request.headers["Accept-Language"] == BROWSER_ACCEPT_LANGUAGE
-    assert not [name for name in request.headers if name.lower().startswith("sec-ch-ua")]
+def _assert_chrome(request: httpx.Request, kind, site, *, referer=None, origin=None, accept=None) -> None:
+    """Chrome's base headers plus exactly this kind's per-request headers."""
+    expected = {
+        **browser_base_headers(),
+        **browser_headers(kind, site=site, referer=referer, origin=origin, accept=accept),
+    }
+    for name, value in expected.items():
+        assert request.headers.get(name) == value, name
+    if kind != "document":
+        assert "Upgrade-Insecure-Requests" not in request.headers
+        assert "Sec-Fetch-User" not in request.headers
+    if referer is None:
+        assert "Referer" not in request.headers
+    if origin is None:
+        assert "Origin" not in request.headers
 
 
 def _assert_pixiv_app_identity(headers) -> None:
@@ -106,26 +127,28 @@ def _assert_pixiv_app_identity(headers) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_browser_identity_claims_one_firefox_release_without_client_hints():
-    """rv: and Firefox/ must name the same release, and Firefox sends no sec-ch-ua*."""
-    match = re.fullmatch(
-        r"Mozilla/5\.0 \(Windows NT 10\.0; Win64; x64; rv:(\d+)\.0\) Gecko/20100101 Firefox/(\d+)\.0",
-        BROWSER_USER_AGENT,
+def test_browser_identity_claims_the_impersonated_chrome_release():
+    """UA and client hints must name the release whose TLS and HTTP/2 the transport sends."""
+    major = BROWSER_TARGET.removeprefix("chrome")
+    assert re.fullmatch(r"\d+", major)
+    expected_ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        f"Chrome/{major}.0.0.0 Safari/537.36"
     )
-    assert match is not None
-    assert match.group(1) == match.group(2)
-    assert not [name for name in browser_headers() if name.lower().startswith("sec-ch")]
+    assert expected_ua == BROWSER_USER_AGENT
+    base = browser_base_headers()
+    assert f'"Chromium";v="{major}"' in base["sec-ch-ua"]
+    assert f'"Google Chrome";v="{major}"' in base["sec-ch-ua"]
+    assert base["sec-ch-ua-platform"] == '"Windows"'  # agrees with the UA's Windows NT token
 
 
 def test_identity_header_dicts_are_not_shared_between_callers():
     """A caller that edits its headers must not change what the next caller gets."""
-    browser = browser_headers()
-    browser["User-Agent"] = "edited"
-    app = pixiv_app_headers()
-    app["User-Agent"] = "edited"
-
-    assert browser_headers()["User-Agent"] == BROWSER_USER_AGENT
-    assert pixiv_app_headers()["User-Agent"] != "edited"
+    for factory in (browser_base_headers, lambda: browser_headers("image", site="cross-site"), pixiv_app_headers):
+        edited = factory()
+        for name in edited:
+            edited[name] = "edited"
+        assert "edited" not in factory().values()
 
 
 # ---------------------------------------------------------------------------
@@ -133,34 +156,100 @@ def test_identity_header_dicts_are_not_shared_between_callers():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("factory", "accept"),
-    [
-        ("_get_shared_http", ACCEPT_DOCUMENT),
-        ("_get_shared_img_http", ACCEPT_IMAGE),
-        ("_get_shared_http_weak_dh", ACCEPT_DOCUMENT),
-        ("_get_shared_img_http_weak_dh", ACCEPT_IMAGE),
-    ],
-)
-async def test_eh_shared_clients_send_central_browser_identity(monkeypatch, factory, accept):
-    """Every EhClient request goes through these four clients, weak-DH fallbacks included."""
+def _eh_respond(request: httpx.Request) -> httpx.Response:
+    if request.url.path.endswith("api.php"):
+        return httpx.Response(200, json={})
+    if request.url.host.startswith("upld."):
+        return httpx.Response(200, text="<html>" + "x" * 200 + "</html>")
+    return httpx.Response(200, content=_JPEG)
+
+
+@pytest.fixture
+async def eh_recorder(monkeypatch):
+    """EH shared clients built fresh through a recorder, closed afterwards."""
     import services.eh_client as eh
 
-    recorder = _Recorder()
+    recorder = _Recorder(_eh_respond)
     monkeypatch.setattr(httpx, "AsyncClient", recorder.client_class)
     for name in ("_shared_http", "_shared_img_http", "_shared_http_weak_dh", "_shared_img_http_weak_dh"):
         monkeypatch.setattr(eh, name, None)
+    yield recorder
+    await eh.shutdown_shared_clients()
+
+
+@pytest.mark.parametrize("factory", ["_get_shared_http", "_get_shared_img_http"])
+async def test_eh_primary_shared_clients_connect_as_chrome(eh_recorder, factory):
+    import services.eh_client as eh
+
+    getattr(eh, factory)()
+
+    eh_recorder.assert_all_impersonate_chrome()
+
+
+@pytest.mark.parametrize("factory", ["_get_shared_http_weak_dh", "_get_shared_img_http_weak_dh"])
+async def test_eh_tls_fallback_clients_stay_on_plain_httpx_with_chrome_headers(eh_recorder, factory):
+    """The fallback exists for H@H nodes whose TLS Chrome's handshake cannot complete."""
+    import services.eh_client as eh
 
     client = getattr(eh, factory)()
-    try:
-        await client.get("https://e-hentai.org/g/1/abcdef/")
-    finally:
-        await client.aclose()
 
-    _assert_browser_identity(recorder.requests[0], accept)
+    assert eh_recorder.transports == [None]
+    for name, value in browser_base_headers().items():
+        assert client.headers[name] == value
 
 
-async def test_eh_plugin_image_proxy_sends_browser_identity_with_account_cookies(monkeypatch):
+async def test_eh_page_requests_are_chrome_navigations_with_account_cookies(eh_recorder):
+    from services.eh_client import EhClient
+
+    async with EhClient(cookies={"ipb_member_id": "1"}) as client:
+        await client._http_get("https://e-hentai.org/g/1/abcdef/")
+
+    request = eh_recorder.requests[0]
+    _assert_chrome(request, "document", "none")
+    assert "ipb_member_id=1" in request.headers["Cookie"]
+
+
+@pytest.mark.parametrize(
+    ("use_ex", "origin", "site"),
+    [(False, "https://e-hentai.org", "same-site"), (True, "https://exhentai.org", "same-origin")],
+)
+async def test_eh_api_calls_are_chrome_fetches_from_the_gallery_page(eh_recorder, use_ex, origin, site):
+    """api.php is called by the page's script; it used to go out with navigation headers."""
+    from services.eh_client import EhClient
+
+    async with EhClient(cookies={"ipb_member_id": "1"}, use_ex=use_ex) as client:
+        await client._api({"method": "gdata", "gidlist": [[1, "abcdef"]], "namespace": 1})
+
+    request = eh_recorder.requests[0]
+    assert request.method == "POST"
+    _assert_chrome(request, "fetch", site, origin=origin, referer=f"{origin}/")
+    assert request.headers["Content-Type"] == "application/json"
+
+
+async def test_eh_image_search_upload_is_a_chrome_form_post(eh_recorder):
+    from services.eh_client import EhClient
+
+    async with EhClient(cookies={"ipb_member_id": "1"}) as client:
+        await client.image_search(_JPEG, "a.jpg")
+
+    request = eh_recorder.requests[0]
+    assert request.url.host == "upld.e-hentai.org"
+    _assert_chrome(request, "document", "same-site", origin="https://e-hentai.org", referer="https://e-hentai.org/")
+
+
+@pytest.mark.parametrize("use_ex", [False, True])
+async def test_eh_image_fetches_are_chrome_image_loads_with_the_site_referer(eh_recorder, use_ex):
+    """H@H image requests used to carry no Referer at all."""
+    from services.eh_client import EhClient
+
+    base = "https://exhentai.org" if use_ex else "https://e-hentai.org"
+    async with EhClient(cookies={"ipb_member_id": "1"}, use_ex=use_ex) as client:
+        await client._img_get("https://abcd.hath.network:1234/h/abc/keystamp=1/1.jpg")
+
+    _assert_chrome(eh_recorder.requests[0], "image", "cross-site", referer=f"{base}/")
+
+
+async def test_eh_plugin_image_proxy_is_a_chrome_image_load_with_account_cookies(monkeypatch):
     """It used to send httpx's default python-httpx User-Agent next to the account cookies."""
     from plugins.builtin.ehentai.browse import EhBrowsePlugin
 
@@ -169,12 +258,13 @@ async def test_eh_plugin_image_proxy_sends_browser_identity_with_account_cookies
 
     await EhBrowsePlugin().proxy_image("https://ehgt.org/t/00/01.jpg", {"ipb_member_id": "1"})
 
+    recorder.assert_all_impersonate_chrome()
     request = recorder.requests[0]
-    _assert_browser_identity(request, ACCEPT_IMAGE)
+    _assert_chrome(request, "image", "cross-site", referer="https://e-hentai.org/")
     assert "ipb_member_id=1" in request.headers["Cookie"]
 
 
-async def test_eh_thumbnail_proxy_sends_browser_identity(client, mock_redis):
+async def test_eh_thumbnail_proxy_is_a_chrome_image_load(client, mock_redis):
     """The thumbnail CDN fetch used to send httpx's default User-Agent."""
     mock_redis.get = AsyncMock(return_value=None)
     recorder = _Recorder()
@@ -187,12 +277,11 @@ async def test_eh_thumbnail_proxy_sends_browser_identity(client, mock_redis):
         resp = await client.get("/api/eh/thumb-proxy", params={"url": "https://ehgt.org/t/00/01.jpg"})
 
     assert resp.status_code == 200
-    request = recorder.requests[0]
-    _assert_browser_identity(request, ACCEPT_IMAGE)
-    assert request.headers["Referer"] == "https://e-hentai.org/"
+    recorder.assert_all_impersonate_chrome()
+    _assert_chrome(recorder.requests[0], "image", "cross-site", referer="https://e-hentai.org/")
 
 
-async def test_eh_password_login_sends_browser_identity_on_every_request(client):
+async def test_eh_password_login_requests_are_chrome_navigations(client):
     """Forum login, e-hentai.org and exhentai.org must all see the account's one browser."""
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -220,13 +309,18 @@ async def test_eh_password_login_sends_browser_identity_on_every_request(client)
         )
 
     assert resp.status_code == 200
-    assert [request.url.host for request in recorder.requests] == [
-        "forums.e-hentai.org",
-        "e-hentai.org",
-        "exhentai.org",
-    ]
-    for request in recorder.requests:
-        _assert_browser_identity(request, ACCEPT_DOCUMENT)
+    recorder.assert_all_impersonate_chrome()
+    forum, eh_home, ex_home = recorder.requests
+    _assert_chrome(
+        forum,
+        "document",
+        "same-origin",
+        origin="https://forums.e-hentai.org",
+        referer="https://forums.e-hentai.org/index.php?act=Login&CODE=00",
+    )
+    assert (eh_home.url.host, ex_home.url.host) == ("e-hentai.org", "exhentai.org")
+    _assert_chrome(eh_home, "document", "none")
+    _assert_chrome(ex_home, "document", "none")
 
 
 # ---------------------------------------------------------------------------
@@ -234,36 +328,61 @@ async def test_eh_password_login_sends_browser_identity_on_every_request(client)
 # ---------------------------------------------------------------------------
 
 
-async def test_fanbox_requests_send_full_browser_user_agent(monkeypatch, tmp_path):
-    """Fanbox used to send a bare "Mozilla/5.0", the most bot-like UA in the codebase."""
+async def test_fanbox_api_calls_are_chrome_fetches_and_media_are_image_loads(monkeypatch, tmp_path):
+    """Fanbox used to send a bare "Mozilla/5.0" on every request."""
     from plugins.builtin.fanbox.policy import FanboxDownloadPolicy
     from plugins.builtin.fanbox.source import FanboxSourcePlugin
 
+    media_url = "https://downloads.fanbox.cc/images/post/42/1.jpeg"
+    post = {
+        "id": "42",
+        "title": "t",
+        "feeRequired": 0,
+        "creatorId": "artist",
+        "publishedDatetime": "2026-07-11T00:00:00+00:00",
+        "body": {"images": [{"originalUrl": media_url}]},
+    }
+
     def respond(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/post.info":
-            return httpx.Response(401)
+            return httpx.Response(200, json={"body": post})
+        if request.url.host == "downloads.fanbox.cc":
+            return httpx.Response(200, content=_JPEG, headers={"content-type": "image/jpeg"})
         return httpx.Response(200, json={"body": []})
 
     recorder = _Recorder(respond)
     monkeypatch.setattr(httpx, "AsyncClient", recorder.client_class)
     plugin = FanboxSourcePlugin()
 
-    await plugin.download("https://www.fanbox.cc/@artist/posts/42", tmp_path, credentials={"fanboxsessid": "s"})
+    result = await plugin.download(
+        "https://www.fanbox.cc/@artist/posts/42", tmp_path, credentials={"fanboxsessid": "s"}
+    )
     await plugin.discover_posts("https://www.fanbox.cc/@artist", None, FanboxDownloadPolicy(), None)
 
-    assert [request.url.path for request in recorder.requests] == ["/post.info", "/post.paginateCreator"]
-    for request in recorder.requests:
-        _assert_browser_identity(request, "application/json, text/plain, */*")
-        assert request.headers["Referer"] == "https://www.fanbox.cc/"
+    assert result.downloaded == 1
+    recorder.assert_all_impersonate_chrome()
+    post_info, media, paginate = recorder.requests
+    for api_request in (post_info, paginate):
+        _assert_chrome(
+            api_request,
+            "fetch",
+            "same-site",
+            origin="https://www.fanbox.cc",
+            referer="https://www.fanbox.cc/",
+            accept=_FANBOX_ACCEPT,
+        )
+    assert str(media.url) == media_url
+    _assert_chrome(media, "image", "same-site", referer="https://www.fanbox.cc/")
+    assert "FANBOXSESSID=s" in post_info.headers["Cookie"]
 
 
 # ---------------------------------------------------------------------------
-# Pixiv — anonymous web paths use the browser identity
+# Pixiv — anonymous web paths connect as Chrome
 # ---------------------------------------------------------------------------
 
 
-async def test_pixiv_public_ajax_requests_send_current_browser_identity(monkeypatch):
-    """The public ajax fallback used to claim Chrome/124."""
+async def test_pixiv_public_ajax_requests_are_chrome_fetches(monkeypatch):
+    """The public ajax fallback used to claim Chrome/124 over Python's TLS."""
     from plugins.builtin.pixiv._browse import _fetch_illust_public
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -276,14 +395,29 @@ async def test_pixiv_public_ajax_requests_send_current_browser_identity(monkeypa
 
     await _fetch_illust_public(1)
 
+    recorder.assert_all_impersonate_chrome()
     assert [request.url.path for request in recorder.requests] == ["/ajax/illust/1", "/ajax/illust/1/pages"]
     for request in recorder.requests:
-        _assert_browser_identity(request, ACCEPT_FETCH)
-        assert request.headers["Referer"] == "https://www.pixiv.net/"
+        _assert_chrome(request, "fetch", "same-origin", referer="https://www.pixiv.net/")
 
 
-async def test_pixiv_anonymous_image_fallback_sends_browser_identity(client):
-    """Without an account, pximg is fetched as the browser, not with httpx's default UA."""
+async def test_pixiv_public_ranking_is_a_chrome_fetch(client):
+    recorder = _Recorder(lambda request: httpx.Response(200, json={"contents": []}))
+
+    with (
+        patch("plugins.builtin.pixiv._browse.get_credential", new_callable=AsyncMock, return_value=None),
+        patch("httpx.AsyncClient", recorder.client_class),
+    ):
+        resp = await client.get("/api/pixiv/ranking", params={"mode": "daily"})
+
+    assert resp.status_code == 200
+    recorder.assert_all_impersonate_chrome()
+    assert recorder.requests[0].url.path == "/ranking.php"
+    _assert_chrome(recorder.requests[0], "fetch", "same-origin", referer="https://www.pixiv.net/")
+
+
+async def test_pixiv_anonymous_image_fallback_is_a_chrome_image_load(client):
+    """Without an account, pximg is fetched as Chrome, not with httpx's default UA."""
     recorder = _Recorder()
 
     with (
@@ -299,13 +433,12 @@ async def test_pixiv_anonymous_image_fallback_sends_browser_identity(client):
         )
 
     assert resp.status_code == 200
-    request = recorder.requests[0]
-    _assert_browser_identity(request, ACCEPT_IMAGE)
-    assert request.headers["Referer"] == "https://www.pixiv.net/"
+    recorder.assert_all_impersonate_chrome()
+    _assert_chrome(recorder.requests[0], "image", "cross-site", referer="https://www.pixiv.net/")
 
 
 # ---------------------------------------------------------------------------
-# Pixiv — account paths use one app identity
+# Pixiv — account paths keep one app identity on Python's TLS
 # ---------------------------------------------------------------------------
 
 
@@ -334,6 +467,8 @@ async def test_pixiv_api_oauth_and_image_requests_share_one_app_identity(monkeyp
     for headers in [request.headers for request in sent] + [recorder.requests[0].headers]:
         _assert_pixiv_app_identity(headers)
     assert recorder.requests[0].headers["Referer"] == PIXIV_APP_REFERER
+    # The app path deliberately keeps plain httpx: no Chrome TLS under an iOS app UA.
+    assert recorder.transports == [None]
 
 
 async def test_pixiv_credential_verify_uses_the_app_identity_client():
@@ -385,9 +520,10 @@ async def test_pixiv_oauth_callback_exchanges_code_with_the_app_identity(client)
     assert resp.status_code == 200
     assert str(recorder.requests[0].url) == "https://oauth.secure.pixiv.net/auth/token"
     _assert_pixiv_app_identity(recorder.requests[0].headers)
+    assert recorder.transports == [None]
 
 
-async def test_pixiv_cookie_login_uses_browser_for_the_web_session_and_app_for_the_token(client):
+async def test_pixiv_cookie_login_uses_chrome_for_the_web_session_and_the_app_for_the_token(client):
     """The PHPSESSID request is a browser navigation; the token exchange is the app."""
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -405,7 +541,10 @@ async def test_pixiv_cookie_login_uses_browser_for_the_web_session_and_app_for_t
 
     assert resp.status_code == 200
     web, token = recorder.requests
+    web_transport, token_transport = recorder.transports
     assert web.url.host == "accounts.pixiv.net"
-    _assert_browser_identity(web, ACCEPT_DOCUMENT)
+    assert isinstance(web_transport, ImpersonatingTransport)
+    _assert_chrome(web, "document", "none")
     assert token.url.host == "oauth.secure.pixiv.net"
+    assert token_transport is None
     _assert_pixiv_app_identity(token.headers)

@@ -16,8 +16,9 @@ from urllib.parse import urlencode
 import httpx
 from bs4 import BeautifulSoup
 
-from core.client_identity import ACCEPT_DOCUMENT, ACCEPT_IMAGE, browser_headers
+from core.client_identity import FetchSite, RequestKind, browser_base_headers, browser_headers
 from core.config import settings
+from services.browser_http import TLSHandshakeError, browser_client
 
 logger = logging.getLogger(__name__)
 
@@ -49,37 +50,40 @@ def _weak_dh_fallback_ssl_context() -> ssl.SSLContext:
     Certificate chain and hostname verification stay fully enabled, so the peer
     is still authenticated; only forward secrecy is given up, and only on
     connections that would otherwise fail outright.
+
+    The primary clients now connect as Chrome (services.browser_http), whose
+    BoringSSL handshake never offers finite-field DHE, so this exact failure
+    no longer happens there. The fallback stays for any H@H node whose TLS
+    that handshake cannot complete: the retry goes out over OpenSSL, with
+    Python's TLS fingerprint under Chrome's headers, a mismatch only a broken
+    node ever sees.
     """
     ctx = ssl.create_default_context()
     ctx.set_ciphers("DEFAULT:!kDHE")
     return ctx
 
 
-def _is_weak_dh_error(exc: Exception) -> bool:
-    return "DH_KEY_TOO_SMALL" in str(exc)
+def _needs_tls_fallback(exc: Exception) -> bool:
+    """A handshake failure worth one retry over the OpenSSL fallback client.
+
+    TLSHandshakeError comes from the Chrome transport; DH_KEY_TOO_SMALL is
+    OpenSSL's own wording. A certificate failure is neither, so the fallback
+    never sidesteps verification.
+    """
+    return isinstance(exc, TLSHandshakeError) or "DH_KEY_TOO_SMALL" in str(exc)
 
 
 def _get_shared_http() -> httpx.AsyncClient:
     global _shared_http
     if _shared_http is None or _shared_http.is_closed:
-        _shared_http = httpx.AsyncClient(
-            headers=browser_headers(ACCEPT_DOCUMENT),
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            timeout=settings.eh_request_timeout,
-            follow_redirects=True,
-        )
+        _shared_http = browser_client(max_connections=20, timeout=settings.eh_request_timeout, follow_redirects=True)
     return _shared_http
 
 
 def _get_shared_img_http() -> httpx.AsyncClient:
     global _shared_img_http
     if _shared_img_http is None or _shared_img_http.is_closed:
-        _shared_img_http = httpx.AsyncClient(
-            headers=browser_headers(ACCEPT_IMAGE),
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            timeout=20,
-            follow_redirects=True,
-        )
+        _shared_img_http = browser_client(max_connections=20, timeout=20, follow_redirects=True)
     return _shared_img_http
 
 
@@ -87,7 +91,7 @@ def _get_shared_http_weak_dh() -> httpx.AsyncClient:
     global _shared_http_weak_dh
     if _shared_http_weak_dh is None or _shared_http_weak_dh.is_closed:
         _shared_http_weak_dh = httpx.AsyncClient(
-            headers=browser_headers(ACCEPT_DOCUMENT),
+            headers=browser_base_headers(),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=settings.eh_request_timeout,
             follow_redirects=True,
@@ -100,7 +104,7 @@ def _get_shared_img_http_weak_dh() -> httpx.AsyncClient:
     global _shared_img_http_weak_dh
     if _shared_img_http_weak_dh is None or _shared_img_http_weak_dh.is_closed:
         _shared_img_http_weak_dh = httpx.AsyncClient(
-            headers=browser_headers(ACCEPT_IMAGE),
+            headers=browser_base_headers(),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=20,
             follow_redirects=True,
@@ -298,28 +302,34 @@ class EhClient:
             client.cookies.clear()
 
     async def _get_via_weak_dh_fallback(self, fallback: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
-        logger.warning("[eh_client] weak DH handshake at %s — retrying without finite-field DH", url)
+        logger.warning("[eh_client] TLS handshake failed at %s — retrying over the OpenSSL fallback", url)
         try:
             return await fallback.get(url, **kwargs)
         finally:
             self._clear_client_cookie_jar(fallback)
 
     async def _http_get(self, url: str, **kwargs) -> httpx.Response:
-        kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        kwargs["headers"] = self._with_cookie_header(
+            {**browser_headers("document", site="none"), **(kwargs.pop("headers", None) or {})}
+        )
         client = self._http_client_or_raise()
         try:
             try:
                 return await client.get(url, **kwargs)
             except httpx.ConnectError as exc:
                 # The browse proxy fetches H@H images through this client too.
-                if not _is_weak_dh_error(exc):
+                if not _needs_tls_fallback(exc):
                     raise
                 return await self._get_via_weak_dh_fallback(_get_shared_http_weak_dh(), url, **kwargs)
         finally:
             self._clear_client_cookie_jar(client)
 
-    async def _http_post(self, url: str, **kwargs) -> httpx.Response:
-        kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+    async def _http_post(
+        self, url: str, *, kind: RequestKind = "document", site: FetchSite = "same-origin", **kwargs
+    ) -> httpx.Response:
+        kwargs["headers"] = self._with_cookie_header(
+            {**browser_headers(kind, site=site), **(kwargs.pop("headers", None) or {})}
+        )
         client = self._http_client_or_raise()
         try:
             return await client.post(url, **kwargs)
@@ -327,21 +337,37 @@ class EhClient:
             self._clear_client_cookie_jar(client)
 
     async def _img_get(self, url: str, **kwargs) -> httpx.Response:
-        kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        kwargs["headers"] = self._with_cookie_header(
+            {
+                **browser_headers("image", site="cross-site", referer=f"{self.base_url}/"),
+                **(kwargs.pop("headers", None) or {}),
+            }
+        )
         client = self._image_client_or_raise()
         try:
             try:
                 return await client.get(url, **kwargs)
             except httpx.ConnectError as exc:
-                if not _is_weak_dh_error(exc):
+                if not _needs_tls_fallback(exc):
                     raise
                 return await self._get_via_weak_dh_fallback(_get_shared_img_http_weak_dh(), url, **kwargs)
         finally:
             self._clear_client_cookie_jar(client)
 
+    async def _api_post(self, api_url: str, payload: dict) -> httpx.Response:
+        """POST to api.php the way the gallery page's own script does."""
+        site: FetchSite = "same-origin" if api_url.startswith(self.base_url) else "same-site"
+        return await self._http_post(
+            api_url,
+            json=payload,
+            kind="fetch",
+            site=site,
+            headers={"Origin": self.base_url, "Referer": f"{self.base_url}/"},
+        )
+
     async def _api(self, payload: dict) -> dict:
         api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
-        resp = await self._http_post(api_url, json=payload)
+        resp = await self._api_post(api_url, payload)
         resp.raise_for_status()
         data = resp.json()
         if data.get("error"):
@@ -484,6 +510,7 @@ class EhClient:
             upload_url,
             data=data,
             files={"sfile": (filename, image, "image/jpeg")},
+            site="same-site",
             headers={"Referer": f"{self.base_url}/", "Origin": self.base_url},
             follow_redirects=True,
         )
@@ -818,7 +845,7 @@ class EhClient:
             payload["nl"] = nl
 
         api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
-        resp = await self._http_post(api_url, json=payload)
+        resp = await self._api_post(api_url, payload)
         resp.raise_for_status()
         data = resp.json()
 

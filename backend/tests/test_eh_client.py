@@ -365,6 +365,55 @@ class TestWeakDhFallback:
 
         fallback.get.assert_not_awaited()
 
+    async def test_img_get_retries_over_fallback_when_the_chrome_handshake_fails(self):
+        """Chrome's BoringSSL handshake (no finite-field DHE) can still fail on an odd H@H node."""
+        import services.eh_client as mod
+        from services.browser_http import TLSHandshakeError
+
+        client = self._client()
+        client._img_http.get = AsyncMock(side_effect=TLSHandshakeError("curl: (35) TLS connect error"))
+        fallback = AsyncMock()
+        fallback.get = AsyncMock(return_value=MagicMock(spec=httpx.Response))
+        fallback.cookies = httpx.Cookies()
+
+        with patch.object(mod, "_get_shared_img_http_weak_dh", return_value=fallback):
+            resp = await client._img_get("https://node.hath.network:1234/h/img.webp")
+
+        assert resp is fallback.get.return_value
+        # The retry is the same request: Chrome's image headers, only the TLS stack differs.
+        assert fallback.get.await_args.kwargs["headers"]["Sec-Fetch-Dest"] == "image"
+
+    async def test_http_get_retries_over_fallback_when_the_chrome_handshake_fails(self):
+        import services.eh_client as mod
+        from services.browser_http import TLSHandshakeError
+
+        client = self._client()
+        client._http.get = AsyncMock(side_effect=TLSHandshakeError("curl: (35) TLS connect error"))
+        fallback = AsyncMock()
+        fallback.get = AsyncMock(return_value=MagicMock(spec=httpx.Response))
+        fallback.cookies = httpx.Cookies()
+
+        with patch.object(mod, "_get_shared_http_weak_dh", return_value=fallback):
+            resp = await client._http_get("https://node.hath.network:1234/h/img.webp")
+
+        assert resp is fallback.get.return_value
+
+    async def test_certificate_failure_never_uses_the_fallback(self):
+        """A bad certificate is a plain ConnectError; retrying elsewhere must not sidestep it."""
+        import services.eh_client as mod
+
+        client = self._client()
+        client._img_http.get = AsyncMock(
+            side_effect=httpx.ConnectError("curl: (60) SSL certificate problem: unable to get local issuer")
+        )
+        fallback = AsyncMock()
+
+        with patch.object(mod, "_get_shared_img_http_weak_dh", return_value=fallback):
+            with pytest.raises(httpx.ConnectError, match="certificate"):
+                await client._img_get("https://node.hath.network:1234/h/img.webp")
+
+        fallback.get.assert_not_awaited()
+
     async def test_http_get_retries_over_fallback_when_dh_key_too_small(self):
         """The browse proxy fetches H@H images through the HTML client too."""
         import services.eh_client as mod

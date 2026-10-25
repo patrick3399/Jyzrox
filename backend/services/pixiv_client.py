@@ -24,6 +24,14 @@ logger = logging.getLogger(__name__)
 # Pixiv image downloads require Referer + User-Agent headers; they present the
 # same app identity as the API calls. The shared client is reused across
 # PixivClient instances to avoid creating a new connection pool per request.
+#
+# The Pixiv app path keeps Python's TLS: pixivpy3's cloudscraper session for
+# API and OAuth calls, and this plain httpx client for pximg. Under an iOS app
+# User-Agent that is a known mismatch, the same one gallery-dl's Pixiv app API
+# has. It stays (decided 2026-10-25) because pixivpy3's cloudscraper session
+# handles Cloudflare challenges on the OAuth endpoint, and no curl_cffi target
+# is the Pixiv app's own iOS networking stack; services.browser_http is for
+# browser requests only.
 
 _shared_img_http: httpx.AsyncClient | None = None
 

@@ -23,11 +23,14 @@ beautifulsoup4==4.14.3
     # via -r requirements.txt
 certifi==2026.10.19
     # via
+    #   curl-cffi
     #   httpcore
     #   httpx
     #   requests
 cffi==2.0.0
-    # via cryptography
+    # via
+    #   cryptography
+    #   curl-cffi
 charset-normalizer==3.4.7
     # via requests
 click==8.3.3
@@ -39,6 +42,8 @@ croniter==6.2.2
     #   -r requirements.txt
     #   saq
 cryptography==50.0.0
+    # via -r requirements.txt
+curl-cffi==0.16.3
     # via -r requirements.txt
 fastapi==0.136.1
     # via -r requirements.txt
