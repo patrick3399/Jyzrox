@@ -9,7 +9,7 @@ import { t } from '@/lib/i18n'
 import { api } from '@/lib/api'
 import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, hasRole, passesFeatureFlag, type PageDef } from '@/lib/pageRegistry'
-import { getTabHref, markTabRestore } from '@/lib/navMemory'
+import { getListHref, getTabHref, markTabRestore } from '@/lib/navMemory'
 import {
   getDefaultSidebarConfig,
   loadSidebarConfig,
@@ -96,28 +96,36 @@ export function useNavigation() {
   // Shared by Sidebar + MobileNav so desktop and the mobile drawer match the
   // BottomTabBar's restore behaviour.
   const [resolvedHrefs, setResolvedHrefs] = useState<Record<string, string>>({})
+  // Last list-level URL per tab root: where a link goes from a deep page of
+  // its own section.
+  const [resolvedListHrefs, setResolvedListHrefs] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const next: Record<string, string> = {}
+    const lists: Record<string, string> = {}
     for (const group of groupedLinks) {
       for (const link of group.links) {
         next[link.href] = getTabHref(link.href)
+        lists[link.href] = getListHref(link.href)
       }
     }
     setResolvedHrefs(next)
+    setResolvedListHrefs(lists)
   }, [groupedLinks, pathname])
 
   const resolveHref = useCallback(
     (href: string) => {
-      // Already inside this section? Point the link at the section root so the
-      // user can always get back to the list — not the remembered deep URL,
-      // which would be the very sub-page (e.g. a gallery detail) they're on.
-      const withinSection =
-        pathname === href || (href !== '/' && pathname.startsWith(href + '/'))
-      if (withinSection) return href
+      // Already inside this section? Point the link at the section's list so
+      // the user can always get back to it — not the remembered deep URL, which
+      // would be the very sub-page (e.g. a gallery detail) they're on. From a
+      // deep page that is the last list-level URL (`/pixiv?tab=bookmarks`), not
+      // the bare root, which would be a different list. At the root itself the
+      // link stays bare: clicking it only scrolls to top.
+      if (pathname === href) return href
+      if (href !== '/' && pathname.startsWith(href + '/')) return resolvedListHrefs[href] ?? href
       return resolvedHrefs[href] ?? href
     },
-    [pathname, resolvedHrefs],
+    [pathname, resolvedHrefs, resolvedListHrefs],
   )
 
   const handleNavClick = useCallback(

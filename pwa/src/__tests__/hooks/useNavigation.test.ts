@@ -67,7 +67,7 @@ import { useNavigation } from '@/hooks/useNavigation'
 import { PAGE_REGISTRY } from '@/lib/pageRegistry'
 import { useTheme } from 'next-themes'
 import { useProfile } from '@/hooks/useProfile'
-import { rememberLocation } from '@/lib/navMemory'
+import { rememberLocation, consumeTabRestore } from '@/lib/navMemory'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -452,5 +452,52 @@ describe('useNavigation — nav memory', () => {
     // Not intercepted → <Link href="/library"> performs the navigation up to the list.
     expect(e.preventDefault).not.toHaveBeenCalled()
     expect(scrollSpy).not.toHaveBeenCalled()
+  })
+
+  // Regression: on a deep page of the section the nav link resolved to the bare
+  // root (`/pixiv` = ranking, `/e-hentai` = popular), discarding the list-level
+  // URL the user came from (`/pixiv?tab=bookmarks`).
+  it('test_resolveHref_onDeepPage_returnsRememberedListUrlNotBareRoot', () => {
+    rememberLocation(['/pixiv'], '/pixiv', 'tab=bookmarks')
+    rememberLocation(['/pixiv'], '/pixiv/illust/1', '')
+    currentNavPath = '/pixiv/illust/1'
+
+    const { result } = renderHook(() => useNavigation())
+
+    expect(result.current.resolveHref('/pixiv')).toBe('/pixiv?tab=bookmarks')
+  })
+
+  it('test_resolveHref_onDeepPageWithoutListMemory_returnsBareRoot', () => {
+    rememberLocation(['/pixiv'], '/pixiv/illust/1', '')
+    currentNavPath = '/pixiv/illust/1'
+
+    const { result } = renderHook(() => useNavigation())
+
+    expect(result.current.resolveHref('/pixiv')).toBe('/pixiv')
+  })
+
+  it('test_resolveHref_atSectionRoot_staysBareRoot', () => {
+    rememberLocation(['/pixiv'], '/pixiv', 'tab=bookmarks')
+    currentNavPath = '/pixiv'
+
+    const { result } = renderHook(() => useNavigation())
+
+    expect(result.current.resolveHref('/pixiv')).toBe('/pixiv')
+  })
+
+  it('test_handleNavClick_onDeepPage_climbsToListWithoutArmingTabRestore', () => {
+    rememberLocation(['/pixiv'], '/pixiv', 'tab=bookmarks')
+    rememberLocation(['/pixiv'], '/pixiv/illust/1', '')
+    currentNavPath = '/pixiv/illust/1'
+
+    const { result } = renderHook(() => useNavigation())
+    const e = { preventDefault: vi.fn() } as unknown as React.MouseEvent
+
+    act(() => result.current.handleNavClick(e, '/pixiv'))
+
+    expect(e.preventDefault).not.toHaveBeenCalled()
+    // The destination is the list itself, not a deep page: back there must walk
+    // history normally rather than climb.
+    expect(consumeTabRestore('/pixiv?tab=bookmarks')).toBe(false)
   })
 })

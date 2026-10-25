@@ -7,7 +7,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { PAGE_REGISTRY, type PageDef } from '@/lib/pageRegistry'
-import { getTabHref, clearTabMemory, markTabRestore } from '@/lib/navMemory'
+import { getListHref, getTabHref, clearTabMemory, markTabRestore } from '@/lib/navMemory'
 
 // Re-export for BottomTabConfig compatibility
 export type TabDefinition = PageDef
@@ -42,6 +42,12 @@ export function getDefaultTabs(): TabDefinition[] {
   return DEFAULT_TAB_HREFS.map((href) => ALL_TABS.find((t) => t.href === href)!)
 }
 
+/** `pathname` is the section root or a page under it (a `/` boundary, so
+ *  `/pixivx` does not count as inside `/pixiv`). */
+function isWithinSection(pathname: string, root: string): boolean {
+  return pathname === root || (root !== '/' && pathname.startsWith(root + '/'))
+}
+
 interface BottomTabBarProps {
   onMoreClick: () => void
   downloadStats?: { running: number; finished: number }
@@ -63,14 +69,20 @@ export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBar
 
   useEffect(() => {
     const next: Record<string, string> = {}
-    for (const tab of tabs) next[tab.href] = getTabHref(tab.href)
+    for (const tab of tabs) {
+      // On a deep page of its own section a tab leads back to that section's
+      // list (the remembered tab URL would be the very page being left).
+      next[tab.href] =
+        pathname !== tab.href && isWithinSection(pathname, tab.href)
+          ? getListHref(tab.href)
+          : getTabHref(tab.href)
+    }
     setResolvedHrefs(next)
   }, [tabs, pathname])
 
   const handleTabClick = useCallback(
     (e: React.MouseEvent, root: string) => {
-      const isActive = pathname === root || (root !== '/' && pathname.startsWith(root))
-      if (!isActive) {
+      if (!isWithinSection(pathname, root)) {
         // Restoring a deep sub-page from another section: flag it so the back
         // button there climbs to the section list instead of history-backing
         // into the section we're leaving now.
@@ -78,6 +90,10 @@ export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBar
         if (target.split('?')[0] !== root) markTabRestore(target)
         return // let <Link> navigate to the remembered href
       }
+      // On a deep page of this section the tap climbs to the remembered list:
+      // let <Link> navigate to its href. Scroll-to-top and double-tap reset
+      // are for the root itself.
+      if (pathname !== root) return
       e.preventDefault()
       const now = Date.now()
       const last = lastTapRef.current
@@ -111,7 +127,7 @@ export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBar
       onContextMenu={(event) => event.preventDefault()}
     >
       {tabs.map(({ href, labelKey, icon: Icon }) => {
-        const isActive = pathname === href || (href !== '/' && pathname.startsWith(href))
+        const isActive = isWithinSection(pathname, href)
         return (
           <Link
             key={href}
