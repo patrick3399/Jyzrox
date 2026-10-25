@@ -128,9 +128,11 @@ export function useBrowseSession<Item, Cursor, Identity>({
   )
   const [state, dispatch] = useReducer(reducer, identityKey, createBrowseState<Item, Cursor>)
   const stateRef = useRef(state)
+  const readyRef = useRef(ready)
   useLayoutEffect(() => {
     stateRef.current = state
-  }, [state])
+    readyRef.current = ready
+  }, [ready, state])
 
   const stableScope = useMemo(
     () => ({
@@ -437,7 +439,12 @@ export function useBrowseSession<Item, Cursor, Identity>({
     }
   }, [autoLoad, clearRestore, identityKey, publishRestore, ready, requestPages, saveState, store])
 
+  // While `ready` is false the scope (tab claim, user id) is a placeholder: a
+  // request would fetch against it and a fake page would commit as a real
+  // result. Callers such as a seed effect fire inside that window on every
+  // remount, so the actions are inert until the effect above can restore.
   const loadMore = useCallback(async (): Promise<void> => {
+    if (!readyRef.current) return
     const current = stateRef.current
     if (current.status === 'loading' || current.terminal) return
     if (current.status === 'error') {
@@ -455,6 +462,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
   }, [requestPages])
 
   const refresh = useCallback(async (): Promise<void> => {
+    if (!readyRef.current) return
     const current = stateRef.current
     if (
       current.terminal ||
@@ -473,6 +481,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
   }, [requestPages])
 
   const retry = useCallback(async (): Promise<void> => {
+    if (!readyRef.current) return
     const current = stateRef.current
     if (
       !current.failedRequest ||
@@ -528,8 +537,14 @@ export function useBrowseSession<Item, Cursor, Identity>({
   // source metadata — belongs to the identity that produced it and must read
   // as unknown until the new one commits. Consumers guard on null; handing
   // them the previous identity's numbers makes those guards unsound.
+  //
+  // Until `ready`, nothing has been restored or requested, so the buffer is
+  // empty because it is unresolved, not because the list is: publishing 'idle'
+  // there reads as "No results" and flashes before the snapshot hydrates.
   const publishedState = useMemo<BrowseSessionState<Item, Cursor>>(() => {
-    if (state.identityKey === identityKey) return { ...state, pending: false }
+    if (state.identityKey === identityKey) {
+      return ready ? { ...state, pending: false } : { ...state, pending: false, status: 'loading' }
+    }
     return {
       ...state,
       pending: true,
@@ -543,7 +558,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
       terminal: null,
       meta: null,
     }
-  }, [identityKey, state])
+  }, [identityKey, ready, state])
 
   return {
     state: publishedState,
