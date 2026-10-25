@@ -1131,6 +1131,9 @@ async def set_rate_limit_override(
         await redis.set("rate_limit:override:unlocked", "1")
     else:
         await redis.delete("rate_limit:override:unlocked")
+    # The download dashboard serves a 3s cached snapshot that embeds boost_mode;
+    # drop it so the next read reflects this toggle instead of the old state.
+    await redis.delete("dashboard:snapshot")
     return {"override_active": req.unlocked}
 
 

@@ -511,8 +511,14 @@ export default function DownloadDashboardPage() {
     if (!data) return
     setToggling(true)
     try {
-      await api.settings.setRateLimitOverride(!data.global.boost_mode)
-      await mutate()
+      const next = !data.global.boost_mode
+      await api.settings.setRateLimitOverride(next)
+      // Write the new state locally first: with the WebSocket connected the
+      // dashboard has no polling, so a plain refetch could show the old state.
+      await mutate(
+        (prev) => (prev ? { ...prev, global: { ...prev.global, boost_mode: next } } : prev),
+        { revalidate: true },
+      )
     } catch {
       toast.error(t('common.errorOccurred'))
     } finally {
