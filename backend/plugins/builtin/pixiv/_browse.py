@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import core.queue
 from core.auth import require_auth, require_role
+from core.client_identity import ACCEPT_FETCH, ACCEPT_IMAGE, browser_headers
 from core.config import settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
@@ -175,6 +176,15 @@ async def _make_client(locale: str = "en") -> PixivClient:
     return PixivClient(refresh_token=refresh_token)
 
 
+def _web_headers(accept: str = ACCEPT_FETCH) -> dict[str, str]:
+    """Headers for anonymous www.pixiv.net / pximg requests: the browser identity.
+
+    Requests made with a Pixiv account go through PixivClient, which presents
+    the Pixiv app identity instead.
+    """
+    return {**browser_headers(accept), "Referer": "https://www.pixiv.net/"}
+
+
 # ── Media type detection ──────────────────────────────────────────────
 
 
@@ -262,14 +272,7 @@ async def get_ranking(
     if date:
         params["date"] = date
 
-    headers = {
-        "Referer": "https://www.pixiv.net/",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-    }
+    headers = _web_headers()
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
         try:
@@ -317,14 +320,7 @@ async def search_public(
         "lang": "en",
     }
 
-    headers = {
-        "Referer": "https://www.pixiv.net/",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-    }
+    headers = _web_headers()
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
         try:
@@ -465,14 +461,7 @@ async def search_illust(
 
 async def _fetch_illust_public(illust_id: int) -> dict:
     """Fetch illust detail via Pixiv public ajax API (no credentials required)."""
-    headers = {
-        "Referer": "https://www.pixiv.net/",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-    }
+    headers = _web_headers()
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
         try:
@@ -1273,7 +1262,7 @@ async def image_proxy(
         # Anonymous fallback — pximg.net only checks Referer, not auth tokens
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
             try:
-                resp = await http.get(url, headers={"Referer": "https://www.pixiv.net/"})
+                resp = await http.get(url, headers=_web_headers(ACCEPT_IMAGE))
                 resp.raise_for_status()
                 image_bytes = resp.content
             except httpx.HTTPError as e:

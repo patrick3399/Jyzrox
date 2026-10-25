@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from core.client_identity import browser_headers
 from core.redis_client import get_typed_download_delay
 from core.version import __version__
 from plugins.base import SourcePlugin
@@ -62,6 +63,11 @@ def _cookies(credentials: dict | str | None) -> dict[str, str]:
         return {"FANBOXSESSID": str(credentials["fanboxsessid"])}
     raw = credentials.get("cookies", credentials)
     return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+
+def _api_headers() -> dict[str, str]:
+    """Headers for Fanbox requests, with the Accept the www.fanbox.cc web app sends."""
+    return {**browser_headers("application/json, text/plain, */*"), "Referer": "https://www.fanbox.cc/"}
 
 
 def _extension(url: str, content_type: str | None) -> str:
@@ -156,11 +162,7 @@ class FanboxSourcePlugin(SourcePlugin):
         creator_id = self.creator_id_from_url(creator_url)
         if not creator_id:
             raise ValueError("Fanbox subscription requires a creator URL")
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://www.fanbox.cc/",
-            "User-Agent": "Mozilla/5.0",
-        }
+        headers = _api_headers()
         works: list[NewWork] = []
         latest_id: str | None = None
         async with httpx.AsyncClient(
@@ -294,11 +296,7 @@ class FanboxSourcePlugin(SourcePlugin):
 
         post_id = match.group(1)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://www.fanbox.cc/",
-            "User-Agent": "Mozilla/5.0",
-        }
+        headers = _api_headers()
         summary = {"policy": policy.model_dump(mode="json"), "skipped_policy": 0, "skipped_inaccessible": 0}
         diagnostic = (options or {}).get("diagnostic_ctx")
         if isinstance(diagnostic, dict):

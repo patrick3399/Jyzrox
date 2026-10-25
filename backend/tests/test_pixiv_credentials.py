@@ -135,11 +135,8 @@ class TestVerifyPixivCredential:
         mock_user_detail.user = MagicMock()
         mock_user_detail.user.name = "TestUser"
 
-        mock_pixivpy3 = MagicMock()
-        mock_pixivpy3.AppPixivAPI.return_value = mock_api
-
         with (
-            patch.dict("sys.modules", {"pixivpy3": mock_pixivpy3}),
+            patch("services.pixiv_client.new_app_api", return_value=mock_api),
             patch("asyncio.to_thread", new_callable=AsyncMock) as mock_thread,
         ):
             # First call to to_thread is api.auth, second is api.user_detail
@@ -156,11 +153,8 @@ class TestVerifyPixivCredential:
 
         mock_api = MagicMock()
 
-        mock_pixivpy3 = MagicMock()
-        mock_pixivpy3.AppPixivAPI.return_value = mock_api
-
         with (
-            patch.dict("sys.modules", {"pixivpy3": mock_pixivpy3}),
+            patch("services.pixiv_client.new_app_api", return_value=mock_api),
             patch(
                 "asyncio.to_thread",
                 new_callable=AsyncMock,
@@ -191,11 +185,8 @@ class TestVerifyPixivCredential:
 
         mock_api = MagicMock()
 
-        mock_pixivpy3 = MagicMock()
-        mock_pixivpy3.AppPixivAPI.return_value = mock_api
-
         with (
-            patch.dict("sys.modules", {"pixivpy3": mock_pixivpy3}),
+            patch("services.pixiv_client.new_app_api", return_value=mock_api),
             patch(
                 "asyncio.to_thread",
                 new_callable=AsyncMock,

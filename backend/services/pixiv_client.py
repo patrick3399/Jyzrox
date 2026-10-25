@@ -5,11 +5,14 @@ import hashlib
 import logging
 import secrets
 import time
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 from pixivpy3 import AppPixivAPI
 
+from core.client_identity import PIXIV_APP_REFERER, pixiv_app_headers
 from core.config import settings
 from core.redis_client import get_redis
 
@@ -18,9 +21,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Module-level shared HTTP client (singleton, lazy-created)
 # ---------------------------------------------------------------------------
-# Pixiv image downloads require Referer + User-Agent headers.
-# The shared client is reused across PixivClient instances to avoid
-# creating a new connection pool per request.
+# Pixiv image downloads require Referer + User-Agent headers; they present the
+# same app identity as the API calls. The shared client is reused across
+# PixivClient instances to avoid creating a new connection pool per request.
 
 _shared_img_http: httpx.AsyncClient | None = None
 
@@ -29,10 +32,7 @@ def _get_shared_img_http() -> httpx.AsyncClient:
     global _shared_img_http
     if _shared_img_http is None or _shared_img_http.is_closed:
         _shared_img_http = httpx.AsyncClient(
-            headers={
-                "Referer": "https://www.pixiv.net/",
-                "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-            },
+            headers={**pixiv_app_headers(), "Referer": PIXIV_APP_REFERER},
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=settings.pixiv_request_timeout,
             follow_redirects=True,
@@ -45,6 +45,35 @@ async def shutdown_shared_pixiv_clients() -> None:
     global _shared_img_http
     if _shared_img_http and not _shared_img_http.is_closed:
         await _shared_img_http.aclose()
+
+
+class _AppPixivAPI(AppPixivAPI):
+    """AppPixivAPI that presents the Pixiv app identity from core.client_identity.
+
+    pixivpy3 writes its own, older iOS identity into each call's headers, where
+    ``additional_headers`` cannot override it. Every API, OAuth and download
+    call goes through ``requests_call``, so the identity is applied there.
+    """
+
+    def requests_call(
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, Any] | None = None,
+        params: Any = None,
+        data: Any = None,
+        stream: bool = False,
+    ) -> Any:
+        identity = pixiv_app_headers()
+        names = {name.lower() for name in identity}
+        merged = {key: value for key, value in (headers or {}).items() if key.lower() not in names}
+        merged.update(identity)
+        return super().requests_call(method, url, merged, params, data, stream)
+
+
+def new_app_api() -> AppPixivAPI:
+    """Return a pixivpy3 client that presents the Pixiv app identity."""
+    return _AppPixivAPI()
 
 
 _TOKEN_KEY_PREFIX = "pixiv:access_token"
@@ -81,9 +110,7 @@ class PixivClient:
         self._img_http: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> PixivClient:
-        api = AppPixivAPI()
-        api.additional_headers["Accept-Language"] = "en"
-        self._api = api
+        self._api = new_app_api()
         await self._ensure_token()
         self._img_http = _get_shared_img_http()
         return self

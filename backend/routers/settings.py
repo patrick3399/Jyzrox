@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, text
 
 from core.auth import require_auth, require_role
+from core.client_identity import ACCEPT_DOCUMENT, browser_headers, pixiv_app_headers
 from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
@@ -135,7 +136,7 @@ async def eh_login_with_password(
                 "temporary_https": "off",
             },
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                **browser_headers(ACCEPT_DOCUMENT),
                 "Referer": "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
                 "Origin": "https://forums.e-hentai.org",
             },
@@ -154,9 +155,7 @@ async def eh_login_with_password(
     ) as client:
         resp2 = await client.get(
             "https://e-hentai.org/",
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            },
+            headers=browser_headers(ACCEPT_DOCUMENT),
         )
     sk = resp2.cookies.get("sk", "")
 
@@ -172,9 +171,7 @@ async def eh_login_with_password(
         ) as ex_client:
             ex_resp = await ex_client.get(
                 "https://exhentai.org/",
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                },
+                headers=browser_headers(ACCEPT_DOCUMENT),
             )
             igneous = ex_resp.cookies.get("igneous")
             if not igneous:
@@ -247,9 +244,9 @@ async def set_pixiv_credentials(
     try:
         import asyncio as _asyncio
 
-        import pixivpy3
+        from services.pixiv_client import new_app_api
 
-        api = pixivpy3.AppPixivAPI()
+        api = new_app_api()
         await _asyncio.to_thread(api.auth, refresh_token=req.refresh_token)
         detail = await _asyncio.to_thread(api.user_detail, api.user_id)
         username = detail.user.name
@@ -310,13 +307,10 @@ async def pixiv_oauth_callback(
             "redirect_uri": "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback",
             "include_policy": "true",
         }
-        headers = {
-            "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-            "App-OS-Version": "11",
-            "App-OS": "android",
-        }
         async with httpx.AsyncClient() as client:
-            resp = await client.post("https://oauth.secure.pixiv.net/auth/token", data=data, headers=headers)
+            resp = await client.post(
+                "https://oauth.secure.pixiv.net/auth/token", data=data, headers=pixiv_app_headers()
+            )
             resp.raise_for_status()
             token_data = resp.json()
             refresh_token = token_data.get("refresh_token")
@@ -360,12 +354,8 @@ async def set_pixiv_cookie_credentials(
         # Step 1: Hit the OAuth URL with the provided PHPSESSID cookie
         # follow_redirects=False is crucial here to capture the 302 response
         cookies = {"PHPSESSID": req.phpsessid}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-
         async with httpx.AsyncClient(follow_redirects=False) as client:
-            resp = await client.get(auth_url, cookies=cookies, headers=headers)
+            resp = await client.get(auth_url, cookies=cookies, headers=browser_headers(ACCEPT_DOCUMENT))
 
             # The expected success response is a 302 redirect back to the app-api.pixiv.net URL
             if resp.status_code != 302:
@@ -394,13 +384,10 @@ async def set_pixiv_cookie_credentials(
             "redirect_uri": redirect_uri,
             "include_policy": "true",
         }
-        headers_exchange = {
-            "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-            "App-OS-Version": "11",
-            "App-OS": "android",
-        }
         async with httpx.AsyncClient() as client:
-            resp = await client.post("https://oauth.secure.pixiv.net/auth/token", data=data, headers=headers_exchange)
+            resp = await client.post(
+                "https://oauth.secure.pixiv.net/auth/token", data=data, headers=pixiv_app_headers()
+            )
             resp.raise_for_status()
             token_data = resp.json()
             refresh_token = token_data.get("refresh_token")

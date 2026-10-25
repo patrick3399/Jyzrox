@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import and_, select
 
 from core.auth import gallery_access_filter, require_auth
+from core.client_identity import ACCEPT_IMAGE, browser_headers
 from core.config import settings as app_settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
@@ -179,7 +180,9 @@ class EhBrowsePlugin(BrowsePlugin):
             else:
                 cookies = credentials  # type: ignore[assignment]
 
-        async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=30) as http:
+        async with httpx.AsyncClient(
+            headers=browser_headers(ACCEPT_IMAGE), cookies=cookies, follow_redirects=True, timeout=30
+        ) as http:
             resp = await http.get(url)
             resp.raise_for_status()
             data = resp.content
@@ -1187,7 +1190,7 @@ async def thumb_proxy(
     async with _thumb_semaphore:
         try:
             referer = "https://exhentai.org/" if "exhentai" in (parsed.hostname or "") else "https://e-hentai.org/"
-            async with httpx.AsyncClient(cookies=cookies, timeout=30) as client:
+            async with httpx.AsyncClient(headers=browser_headers(ACCEPT_IMAGE), cookies=cookies, timeout=30) as client:
                 resp = await client.get(url, headers={"Referer": referer})
                 resp.raise_for_status()
                 content = resp.content

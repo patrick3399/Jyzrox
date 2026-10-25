@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 import httpx
 from bs4 import BeautifulSoup
 
+from core.client_identity import ACCEPT_DOCUMENT, ACCEPT_IMAGE, browser_headers
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -32,10 +33,6 @@ _shared_img_http: httpx.AsyncClient | None = None
 # Weak-DH fallback pair — see _weak_dh_fallback_ssl_context().
 _shared_http_weak_dh: httpx.AsyncClient | None = None
 _shared_img_http_weak_dh: httpx.AsyncClient | None = None
-
-_BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
 
 
 def _weak_dh_fallback_ssl_context() -> ssl.SSLContext:
@@ -66,11 +63,7 @@ def _get_shared_http() -> httpx.AsyncClient:
     global _shared_http
     if _shared_http is None or _shared_http.is_closed:
         _shared_http = httpx.AsyncClient(
-            headers={
-                "User-Agent": _BROWSER_UA,
-                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
+            headers=browser_headers(ACCEPT_DOCUMENT),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=settings.eh_request_timeout,
             follow_redirects=True,
@@ -82,10 +75,7 @@ def _get_shared_img_http() -> httpx.AsyncClient:
     global _shared_img_http
     if _shared_img_http is None or _shared_img_http.is_closed:
         _shared_img_http = httpx.AsyncClient(
-            headers={
-                "User-Agent": _BROWSER_UA,
-                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-            },
+            headers=browser_headers(ACCEPT_IMAGE),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=20,
             follow_redirects=True,
@@ -97,11 +87,7 @@ def _get_shared_http_weak_dh() -> httpx.AsyncClient:
     global _shared_http_weak_dh
     if _shared_http_weak_dh is None or _shared_http_weak_dh.is_closed:
         _shared_http_weak_dh = httpx.AsyncClient(
-            headers={
-                "User-Agent": _BROWSER_UA,
-                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
+            headers=browser_headers(ACCEPT_DOCUMENT),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=settings.eh_request_timeout,
             follow_redirects=True,
@@ -114,10 +100,7 @@ def _get_shared_img_http_weak_dh() -> httpx.AsyncClient:
     global _shared_img_http_weak_dh
     if _shared_img_http_weak_dh is None or _shared_img_http_weak_dh.is_closed:
         _shared_img_http_weak_dh = httpx.AsyncClient(
-            headers={
-                "User-Agent": _BROWSER_UA,
-                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-            },
+            headers=browser_headers(ACCEPT_IMAGE),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=20,
             follow_redirects=True,
