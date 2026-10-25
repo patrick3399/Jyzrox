@@ -13,9 +13,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.redis_client import get_typed_download_delay
-from services.pixiv_client import PixivClient
+from services.pixiv_client import PixivClient, PixivRateLimitError
 
 logger = logging.getLogger(__name__)
+
+# A throttled call is retried after the shared cooldown (services.pixiv_client)
+# has run out; this many throttled attempts in a row end the download.
+_RATE_LIMIT_ATTEMPTS = 4
+
+
+async def _wait_out_rate_limit(retry_after: float, cancel_check: Callable[[], Awaitable[bool]] | None) -> bool:
+    """Sleep through the cooldown in short slices; False when cancelled meanwhile."""
+    remaining = retry_after
+    while remaining > 0:
+        if cancel_check and await cancel_check():
+            return False
+        step = min(remaining, 1.0)
+        await asyncio.sleep(step)
+        remaining -= step
+    return not (cancel_check and await cancel_check())
 
 
 async def download_pixiv_illust(
@@ -46,8 +62,27 @@ async def download_pixiv_illust(
 
     async with PixivClient(refresh_token) as client:
         # Get illustration detail (already normalised by PixivClient)
+        detail = None
         try:
-            detail = await client.illust_detail(illust_id)
+            for attempt in range(_RATE_LIMIT_ATTEMPTS):
+                try:
+                    detail = await client.illust_detail(illust_id)
+                    break
+                except PixivRateLimitError as limited:
+                    if attempt == _RATE_LIMIT_ATTEMPTS - 1:
+                        raise
+                    logger.warning("Pixiv rate limit on illust %d, waiting %.0fs", illust_id, limited.retry_after)
+                    if not await _wait_out_rate_limit(limited.retry_after, cancel_check):
+                        return {"status": "cancelled", "downloaded": 0, "total": 0, "failed_pages": []}
+        except PixivRateLimitError as exc:
+            return {
+                "status": "failed",
+                "downloaded": 0,
+                "total": 0,
+                "failed_pages": [],
+                "error": str(exc),
+                "rate_limited": True,
+            }
         except ValueError as exc:
             return {
                 "status": "failed",
@@ -295,7 +330,26 @@ async def download_pixiv_user_works(
                 }
 
             try:
-                data = await client.user_illusts(user_id, offset=offset)
+                for attempt in range(_RATE_LIMIT_ATTEMPTS):
+                    try:
+                        data = await client.user_illusts(user_id, offset=offset)
+                        break
+                    except PixivRateLimitError as limited:
+                        if attempt == _RATE_LIMIT_ATTEMPTS - 1:
+                            raise
+                        if not await _wait_out_rate_limit(limited.retry_after, cancel_check):
+                            return {"status": "cancelled", "downloaded": 0, "total": len(all_illusts), "failed": []}
+            except PixivRateLimitError as exc:
+                # A truncated catalogue must not finish as "done": the next
+                # incremental check would believe the missing works were seen.
+                logger.error("Pixiv rate limit while listing user %d at offset %d: %s", user_id, offset, exc)
+                return {
+                    "status": "failed",
+                    "downloaded": 0,
+                    "total": len(all_illusts),
+                    "failed": [],
+                    "error": str(exc),
+                }
             except Exception as exc:
                 logger.error("Failed to fetch user %d illusts at offset %d: %s", user_id, offset, exc)
                 break
@@ -374,6 +428,15 @@ async def download_pixiv_user_works(
                         "downloaded": downloaded,
                         "total": total,
                         "failed": failed,
+                    }
+                elif result.get("rate_limited"):
+                    # Every remaining artwork would wait out the same cooldown.
+                    return {
+                        "status": "failed",
+                        "downloaded": downloaded,
+                        "total": total,
+                        "failed": [*failed, illust_id],
+                        "error": result["error"],
                     }
                 else:
                     failed.append(illust_id)

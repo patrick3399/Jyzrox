@@ -640,3 +640,128 @@ class TestTokenLockWaitLoop:
             patch("asyncio.to_thread", new_callable=AsyncMock),
         ):
             await client._ensure_token()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Rate limit detection and cooldown
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_BODY = {"error": {"user_message": "", "message": "Rate Limit", "reason": "", "user_message_details": {}}}
+
+
+class TestRateLimit:
+    """Pixiv answers a throttled app-API call with an ``error`` body, not an exception."""
+
+    async def test_rate_limit_error_body_raises_rate_limit_not_not_found(self):
+        """A throttled illust_detail must not be reported as 'Illust N not found'."""
+        from services.pixiv_client import PixivRateLimitError
+
+        client = _build_pixiv_client()
+        mock_redis = _make_mock_redis()
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=_RATE_LIMIT_BODY),
+        ):
+            with pytest.raises(PixivRateLimitError):
+                await client.illust_detail(85938015)
+
+    async def test_rate_limit_error_body_sets_shared_cooldown(self):
+        """The first throttled response records a cooldown so other callers back off."""
+        from services.pixiv_client import _COOLDOWN_KEY, PixivRateLimitError
+
+        client = _build_pixiv_client()
+        mock_redis = _make_mock_redis()
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=_RATE_LIMIT_BODY),
+        ):
+            with pytest.raises(PixivRateLimitError) as excinfo:
+                await client._call(lambda: None)
+
+        assert excinfo.value.retry_after > 0
+        mock_redis.setex.assert_awaited_once()
+        assert mock_redis.setex.await_args.args[0] == _COOLDOWN_KEY
+
+    async def test_active_cooldown_blocks_call_without_touching_pixiv(self):
+        """While the cooldown is active, no request reaches Pixiv (it would extend the ban)."""
+        import time
+
+        from services.pixiv_client import PixivRateLimitError
+
+        client = _build_pixiv_client()
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(return_value=str(time.time() + 90))
+        to_thread = AsyncMock(return_value={"illust": {}})
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            patch("asyncio.to_thread", to_thread),
+        ):
+            with pytest.raises(PixivRateLimitError) as excinfo:
+                await client._call(lambda: None)
+
+        to_thread.assert_not_awaited()
+        assert 0 < excinfo.value.retry_after <= 90
+
+    async def test_expired_cooldown_value_lets_call_through(self):
+        """A stale cooldown timestamp in the past does not block requests."""
+        import time
+
+        client = _build_pixiv_client()
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(return_value=str(time.time() - 5))
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value={"illust": {"id": 1}}),
+        ):
+            result = await client._call(lambda: None)
+
+        assert result == {"illust": {"id": 1}}
+
+    async def test_rate_limit_exception_is_not_treated_as_expired_token(self):
+        """An exception that mentions both 403 and Rate Limit must not trigger a token refresh."""
+        from services.pixiv_client import PixivRateLimitError
+
+        client = _build_pixiv_client()
+        mock_redis = _make_mock_redis()
+        to_thread = AsyncMock(side_effect=Exception("[ERROR] 403 Forbidden: Rate Limit"))
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            patch("asyncio.to_thread", to_thread),
+        ):
+            with pytest.raises(PixivRateLimitError):
+                await client._call(lambda: None)
+
+        assert to_thread.await_count == 1
+        mock_redis.delete.assert_not_awaited()
+
+    async def test_deleted_work_error_body_still_reports_not_found(self):
+        """Only throttling is reclassified; a genuinely missing work stays a ValueError."""
+        client = _build_pixiv_client()
+        mock_redis = _make_mock_redis()
+        body = {"error": {"user_message": "", "message": "Page not found", "reason": ""}}
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=body),
+        ):
+            with pytest.raises(ValueError, match="not found"):
+                await client.illust_detail(1)
+
+    async def test_cooldown_check_fails_open_when_redis_is_down(self):
+        """A Redis outage must not stop Pixiv requests."""
+        client = _build_pixiv_client()
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=ConnectionError("redis down"))
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value={"illust": {"id": 1}}),
+        ):
+            result = await client._call(lambda: None)
+
+        assert result == {"illust": {"id": 1}}

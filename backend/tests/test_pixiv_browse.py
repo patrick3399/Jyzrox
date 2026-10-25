@@ -1599,3 +1599,25 @@ class TestPixivPublicAjaxParsing:
 
         unknown_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100
         assert _detect_media_type(unknown_bytes) == "image/jpeg"
+
+
+class TestPixivRateLimitResponse:
+    """Browse pages hit the same throttled account/IP as downloads."""
+
+    async def test_rate_limit_error_maps_to_429_with_retry_after(self, client):
+        from main import app
+        from services.pixiv_client import PixivRateLimitError
+
+        async def _throttled():
+            raise PixivRateLimitError(42.0)
+
+        route_path = "/api/_test/pixiv-rate-limit"
+        app.add_api_route(route_path, _throttled, methods=["GET"])
+        try:
+            resp = await client.get(route_path)
+        finally:
+            app.router.routes.pop()
+
+        assert resp.status_code == 429
+        assert resp.headers["Retry-After"] == "43"
+        assert "rate limiting" in resp.json()["detail"]

@@ -664,3 +664,115 @@ class TestPixivPluginIncrementalWiring:
             )
 
         assert captured["date_after"] is None
+
+
+# ---------------------------------------------------------------------------
+# Rate limit handling
+# ---------------------------------------------------------------------------
+
+
+class TestPixivDownloaderRateLimit:
+    """A throttled illust_detail waits out the cooldown instead of failing the artwork."""
+
+    async def test_illust_waits_out_rate_limit_then_downloads(self, tmp_path):
+        from services.pixiv_client import PixivRateLimitError
+        from services.pixiv_downloader import download_pixiv_illust
+
+        mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
+        mock_client.illust_detail = AsyncMock(side_effect=[PixivRateLimitError(2.0), _SINGLE_PAGE_DETAIL])
+        sleep = AsyncMock()
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_downloader.asyncio.sleep", sleep),
+        ):
+            result = await download_pixiv_illust(111111, "tok", tmp_path)
+
+        assert result["status"] == "done"
+        assert mock_client.illust_detail.await_count == 2
+        assert sleep.await_count >= 1
+
+    async def test_illust_gives_up_with_rate_limit_error_after_repeated_throttling(self, tmp_path):
+        from services.pixiv_client import PixivRateLimitError
+        from services.pixiv_downloader import download_pixiv_illust
+
+        mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
+        mock_client.illust_detail = AsyncMock(side_effect=PixivRateLimitError(1.0))
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
+        ):
+            result = await download_pixiv_illust(111111, "tok", tmp_path)
+
+        assert result["status"] == "failed"
+        assert "rate limit" in result["error"].lower()
+        assert "not found" not in result["error"].lower()
+
+    async def test_illust_cancel_during_rate_limit_wait_returns_cancelled(self, tmp_path):
+        from services.pixiv_client import PixivRateLimitError
+        from services.pixiv_downloader import download_pixiv_illust
+
+        mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
+        mock_client.illust_detail = AsyncMock(side_effect=PixivRateLimitError(120.0))
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
+        ):
+            result = await download_pixiv_illust(111111, "tok", tmp_path, cancel_check=AsyncMock(return_value=True))
+
+        assert result["status"] == "cancelled"
+        assert mock_client.illust_detail.await_count == 1
+
+    async def test_user_works_pagination_rate_limit_does_not_report_partial_list_as_done(self, tmp_path):
+        """Throttled pagination used to be swallowed, so a truncated catalogue finished as 'done'."""
+        from services.pixiv_client import PixivRateLimitError
+        from services.pixiv_downloader import download_pixiv_user_works
+
+        mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
+        mock_client.user_illusts = AsyncMock(
+            side_effect=[
+                {"illusts": [{"id": 111111, "create_date": "2026-01-20T10:00:00+09:00"}], "next_offset": 30},
+                PixivRateLimitError(1.0),
+                PixivRateLimitError(1.0),
+                PixivRateLimitError(1.0),
+                PixivRateLimitError(1.0),
+            ]
+        )
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
+        ):
+            result = await download_pixiv_user_works(22222, "tok", tmp_path)
+
+        assert result["status"] == "failed"
+        assert "rate limit" in result["error"].lower()
+
+    async def test_user_works_stops_after_an_artwork_exhausts_rate_limit_retries(self, tmp_path):
+        """Without the abort, each remaining artwork would burn its own full cooldown wait."""
+        from services.pixiv_client import PixivRateLimitError
+        from services.pixiv_downloader import download_pixiv_user_works
+
+        mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
+        mock_client.user_illusts = AsyncMock(
+            return_value={
+                "illusts": [{"id": 1}, {"id": 2}, {"id": 3}],
+                "next_offset": None,
+            }
+        )
+        mock_client.illust_detail = AsyncMock(side_effect=PixivRateLimitError(1.0))
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
+        ):
+            result = await download_pixiv_user_works(22222, "tok", tmp_path)
+
+        assert result["status"] == "failed"
+        assert result["failed"] == [1]
+        assert mock_client.illust_detail.await_count == 4

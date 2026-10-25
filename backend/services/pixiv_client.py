@@ -90,6 +90,57 @@ _TOKEN_TTL = 3500  # seconds — Pixiv tokens last 3600s; refresh before expiry
 _LOCK_TIMEOUT = 10  # seconds
 
 
+# Pixiv throttles by account and egress IP, so one shared cooldown covers every
+# caller (downloads, subscriptions and browse pages): once a call is throttled,
+# further requests only extend the ban.
+_COOLDOWN_KEY = "pixiv:rate_limit:cooldown_until"
+_RATE_LIMIT_COOLDOWN = 180  # seconds
+
+
+class PixivRateLimitError(Exception):
+    """Pixiv throttled the app API; ``retry_after`` is the seconds left on the cooldown."""
+
+    def __init__(self, retry_after: float) -> None:
+        self.retry_after = max(retry_after, 0.0)
+        super().__init__(f"Pixiv rate limit, retry in {int(self.retry_after)}s")
+
+
+async def pixiv_cooldown_remaining() -> float:
+    """Seconds left on the shared rate-limit cooldown; 0 when clear or Redis is unreachable."""
+    try:
+        raw = await get_redis().get(_COOLDOWN_KEY)
+        if raw is None:
+            return 0.0
+        until = float(raw.decode() if isinstance(raw, bytes) else raw)
+    except Exception:
+        return 0.0
+    return max(until - time.time(), 0.0)
+
+
+async def _start_cooldown() -> float:
+    """Record a cooldown after a throttled response and return its length in seconds."""
+    until = time.time() + _RATE_LIMIT_COOLDOWN
+    try:
+        await get_redis().setex(_COOLDOWN_KEY, _RATE_LIMIT_COOLDOWN, str(until))
+    except Exception:
+        logger.warning("Could not record the Pixiv rate-limit cooldown", exc_info=True)
+    return float(_RATE_LIMIT_COOLDOWN)
+
+
+def _is_rate_limit_body(result: Any) -> bool:
+    """True for pixivpy3's parsed ``{"error": {"message": "Rate Limit"}}`` response."""
+    if not isinstance(result, Mapping):
+        return False
+    error = result.get("error")
+    if not error:
+        return False
+    if isinstance(error, Mapping):
+        text = f"{error.get('message', '')} {error.get('user_message', '')}"
+    else:
+        text = str(error)
+    return "rate limit" in text.lower()
+
+
 def _token_keys(refresh_token: str) -> tuple[str, str]:
     """Redis keys for one refresh token: (cached access token, refresh lock).
 
@@ -188,11 +239,18 @@ class PixivClient:
         """
         Wrap a synchronous pixivpy3 call with to_thread().
         On 403 (token expired mid-session), flush cache and retry once.
+        Raises PixivRateLimitError while Pixiv is throttling us, without
+        sending the request when the shared cooldown is still running.
         """
+        remaining = await pixiv_cooldown_remaining()
+        if remaining > 0:
+            raise PixivRateLimitError(remaining)
         try:
             result = await asyncio.to_thread(fn, *args, **kwargs)
         except Exception as exc:
             msg = str(exc).lower()
+            if "rate limit" in msg:
+                raise PixivRateLimitError(await _start_cooldown()) from exc
             if "403" in msg or "invalid_grant" in msg or "invalid_token" in msg:
                 logger.warning("Pixiv token expired mid-session, retrying refresh")
                 r = get_redis()
@@ -206,6 +264,9 @@ class PixivClient:
                     raise PermissionError(f"Pixiv request failed after token refresh: {exc2}") from exc2
             else:
                 raise
+        if _is_rate_limit_body(result):
+            logger.warning("Pixiv rate limit hit, cooling down for %ds", _RATE_LIMIT_COOLDOWN)
+            raise PixivRateLimitError(await _start_cooldown())
         return result
 
     # ── Normalisation helpers ─────────────────────────────────────────

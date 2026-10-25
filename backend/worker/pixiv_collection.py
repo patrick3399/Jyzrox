@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.events import EventType, emit_safe
+from core.redis_client import get_typed_download_delay
 from db.models import DownloadJob, Gallery, GallerySourceItem, Image, ReadProgress, Subscription
 from plugins.models import GalleryImportData
 from services.credential import get_credential
@@ -70,7 +71,7 @@ async def _discover(client: PixivClient, user_id: int, *, stop_at: str | None) -
         if next_offset is None:
             return works, True
         offset = int(next_offset)
-        await asyncio.sleep(0)
+        await asyncio.sleep(await get_typed_download_delay("pixiv", "pagination", 1000))
 
 
 async def _reorder_author_gallery(gallery_id: int) -> None:
@@ -222,8 +223,14 @@ async def pixiv_collection_job(
             return {"status": "cancelled"}
         gallery_id = importer.gallery_id
 
+        async def _is_cancelled() -> bool:
+            return await redis.get(f"download:cancel:{db_job_id}") is not None
+
+        async def _is_paused() -> bool:
+            return await redis.get(f"download:pause:{db_job_id}") is not None
+
         for index, illust in enumerate(works):
-            if await redis.get(f"download:cancel:{db_job_id}") is not None:
+            if await _is_cancelled():
                 await importer.finalize(target_dir, partial=True)
                 await _set_job_status(db_job_id, "cancelled")
                 return {"status": "cancelled", "completed": completed}
@@ -271,7 +278,13 @@ async def pixiv_collection_job(
                 output_dir=target_dir / str(illust_id),
                 on_file=importer.import_file,
                 filename_prefix=str(illust_id),
+                cancel_check=_is_cancelled,
+                pause_check=_is_paused,
             )
+            if result["status"] == "cancelled":
+                await importer.finalize(target_dir, partial=True)
+                await _set_job_status(db_job_id, "cancelled")
+                return {"status": "cancelled", "completed": completed}
             if result["status"] != "done":
                 raise RuntimeError(result.get("error") or f"Failed to download artwork {illust_id}")
             completed += 1
@@ -284,6 +297,8 @@ async def pixiv_collection_job(
                     "status_text": f"Syncing {title} ({completed}/{len(works)})",
                 },
             )
+            # Pixiv throttles bursts of API calls; boost mode zeroes this delay.
+            await asyncio.sleep(await get_typed_download_delay("pixiv", "illust", 2000))
 
         await importer.finalize(target_dir)
         async with AsyncSessionLocal() as session:

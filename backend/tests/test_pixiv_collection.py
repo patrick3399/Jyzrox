@@ -10,6 +10,12 @@ from worker.helpers import enqueue_download_job
 from worker.pixiv_collection import _discover, _published_at
 
 
+@pytest.fixture(autouse=True)
+def _no_pagination_delay():
+    with patch("worker.pixiv_collection.get_typed_download_delay", new_callable=AsyncMock, return_value=0) as delay:
+        yield delay
+
+
 class _Client:
     def __init__(self, pages: dict[int, dict]):
         self.pages = pages
@@ -83,3 +89,34 @@ async def test_collection_retry_keeps_specialized_worker_route():
         full_reconcile=True,
         subscription_id=9,
     )
+
+
+@pytest.mark.asyncio
+async def test_discover_waits_the_configured_pagination_delay_between_pages(_no_pagination_delay):
+    """Author catalogue paging used to burst with sleep(0); it must honour the pixiv pagination delay."""
+    client = _Client(
+        {
+            0: {"illusts": [{"id": 30}], "next_offset": 1},
+            1: {"illusts": [{"id": 20}], "next_offset": 2},
+            2: {"illusts": [{"id": 10}], "next_offset": None},
+        }
+    )
+
+    await _discover(client, 1960050, stop_at=None)
+
+    assert _no_pagination_delay.await_count == 2
+    _no_pagination_delay.assert_awaited_with("pixiv", "pagination", 1000)
+
+
+@pytest.mark.asyncio
+async def test_discover_propagates_rate_limit_instead_of_returning_a_partial_catalogue():
+    from services.pixiv_client import PixivRateLimitError
+
+    class _Throttled(_Client):
+        async def user_illusts(self, user_id, *, type=None, offset=0):
+            if offset:
+                raise PixivRateLimitError(60)
+            return {"illusts": [{"id": 30}], "next_offset": 1}
+
+    with pytest.raises(PixivRateLimitError):
+        await _discover(_Throttled({}), 1960050, stop_at=None)

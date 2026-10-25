@@ -4,7 +4,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -70,6 +70,7 @@ from routers import site_config as site_config_router
 from routers import (
     users as users_router,
 )
+from services.pixiv_client import PixivRateLimitError
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -153,6 +154,18 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,  # served manually with auth below
 )
+
+
+@app.exception_handler(PixivRateLimitError)
+async def pixiv_rate_limit_handler(_: Request, exc: PixivRateLimitError) -> JSONResponse:
+    """Pixiv is throttling us: tell the client to wait instead of reporting a broken upstream."""
+    retry_after = max(int(exc.retry_after) + 1, 1)
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": f"Pixiv is rate limiting requests, retry in {retry_after}s"},
+        headers={"Retry-After": str(retry_after)},
+    )
+
 
 # Mount swagger-ui static assets
 app.mount("/api/docs/static", StaticFiles(directory="/app/static/swagger-ui"), name="swagger-static")
