@@ -71,3 +71,64 @@ describe('tag click → local library search', () => {
     expect(pushedQuery()).toBe('"long hair"')
   })
 })
+
+// Regression: the popover closed on a document-level Escape, but the key event
+// carried on to the detail page's window-level keydown handler, which treated
+// the same Escape as "go back" — closing the popover also navigated away.
+describe('Escape while the tag popover is open', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function renderPopover(onClose: () => void) {
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    return render(
+      <TagSearchPopover
+        tag="female:glasses"
+        gallerySource="local"
+        anchorEl={anchor}
+        onClose={onClose}
+      />,
+    )
+  }
+
+  it('closes the popover and does not reach window-level shortcuts', () => {
+    const onClose = vi.fn()
+    renderPopover(onClose)
+    const windowSaw = vi.fn()
+    window.addEventListener('keydown', windowSaw)
+    try {
+      fireEvent.keyDown(document.body, { key: 'Escape' })
+    } finally {
+      window.removeEventListener('keydown', windowSaw)
+    }
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(windowSaw).not.toHaveBeenCalled()
+  })
+
+  it('marks the Escape as handled for listeners that run anyway', () => {
+    renderPopover(() => {})
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+
+    document.body.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('leaves other keys alone', () => {
+    const onClose = vi.fn()
+    renderPopover(onClose)
+    const windowSaw = vi.fn()
+    window.addEventListener('keydown', windowSaw)
+    try {
+      fireEvent.keyDown(document.body, { key: 'Enter' })
+    } finally {
+      window.removeEventListener('keydown', windowSaw)
+    }
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(windowSaw).toHaveBeenCalledTimes(1)
+  })
+})

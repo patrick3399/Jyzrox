@@ -32,6 +32,11 @@ export function TagSearchPopover({ tag, gallerySource, anchorEl, onClose }: TagS
     }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // This Escape dismisses the popover and nothing else. The detail page
+        // listens on window for the same key to go back; document listeners
+        // run first, so claim the event before it gets there.
+        e.preventDefault()
+        e.stopPropagation()
         onClose()
       }
     }
