@@ -69,6 +69,10 @@ export type BrowseSnapshotRestore<Item, Cursor> =
 const DEFAULT_MAX_ENTRIES = 8
 const DEFAULT_MAX_BYTES = 2_000_000
 
+const PARTITION_HEAD = '{"version":1,"entries":['
+const PARTITION_TAIL = ']}'
+const PARTITION_ENVELOPE_BYTES = PARTITION_HEAD.length + PARTITION_TAIL.length
+
 // Superseded by the scoped partitions below. Safe to delete outright once the
 // compatibility migrations that read them are retired.
 const RETIRED_BROWSE_KEYS = [
@@ -266,25 +270,44 @@ export function createBrowseSnapshotStore<Item, Cursor>({
     return { version: 1, entries: [] }
   }
 
-  function write(partition: StoredPartition<Item, Cursor>): boolean {
-    let raw: string
+  /** Store `entries` (listed most valuable first) as the partition, within the
+   *  byte budget and the storage quota. Reports whether it was stored; a failure
+   *  leaves whatever the partition held before untouched, so callers decide what
+   *  is safe to give up — one list that does not fit must not cost the others. */
+  function writeSerialized(serialized: string[], bytes: number[], count: number): boolean {
+    // JSON.stringify of { version, entries } is this header, the entries joined
+    // by commas, and this footer; summing per-entry sizes avoids re-encoding
+    // the whole partition on every eviction retry.
+    let total = PARTITION_ENVELOPE_BYTES + Math.max(0, count - 1)
+    for (let index = 0; index < count; index += 1) total += bytes[index]
+    if (total > maxBytes) return false
     try {
-      raw = JSON.stringify(partition)
-    } catch {
-      clear()
-      return false
-    }
-    if (serializedBytes(raw) > maxBytes) {
-      clear()
-      return false
-    }
-    try {
-      storage.setItem(storageKey, raw)
+      storage.setItem(
+        storageKey,
+        `${PARTITION_HEAD}${serialized.slice(0, count).join(',')}${PARTITION_TAIL}`,
+      )
       return true
     } catch {
-      clear()
       return false
     }
+  }
+
+  function serializeEntries(entries: StoredEntry<Item, Cursor>[]): {
+    serialized: string[]
+    bytes: number[]
+  } | null {
+    try {
+      const serialized = entries.map((entry) => JSON.stringify(entry))
+      return { serialized, bytes: serialized.map(serializedBytes) }
+    } catch {
+      return null
+    }
+  }
+
+  function write(partition: StoredPartition<Item, Cursor>): boolean {
+    const encoded = serializeEntries(partition.entries)
+    if (!encoded) return false
+    return writeSerialized(encoded.serialized, encoded.bytes, partition.entries.length)
   }
 
   function restore(identityKey: string): BrowseSnapshotRestore<Item, Cursor> {
@@ -307,8 +330,11 @@ export function createBrowseSnapshotStore<Item, Cursor>({
       else write({ version: 1, entries: remaining })
       return { kind: 'expired', replayable: true }
     }
+    // The touch only refreshes LRU order. If it cannot be persisted (the quota
+    // is shared with every other source's partition) the stored partition is
+    // still intact and the snapshot is still good, so return it regardless.
     entry.lastAccess = now()
-    if (!write(partition)) return { kind: 'missing', replayable: true }
+    write(partition)
     return { kind: 'snapshot', snapshot: entry.snapshot, metadata: entry.metadata }
   }
 
@@ -325,13 +351,17 @@ export function createBrowseSnapshotStore<Item, Cursor>({
       snapshot: BrowseSnapshot<Item, Cursor>,
       options: BrowseSnapshotSaveOptions = {},
     ): boolean {
+      const limit = Math.max(0, maxEntries)
+      if (limit === 0) {
+        clear()
+        return false
+      }
       const partition = read()
-      const entries = partition.entries.filter((entry) => entry.identityKey !== identityKey)
       const savedAt = now()
       const ttlMs = options.ttlMs
       const expiresAt =
         ttlMs === undefined ? null : savedAt + Math.max(0, Number.isFinite(ttlMs) ? ttlMs : 0)
-      entries.push({
+      const target: StoredEntry<Item, Cursor> = {
         identityKey,
         snapshot,
         lastAccess: savedAt,
@@ -340,28 +370,50 @@ export function createBrowseSnapshotStore<Item, Cursor>({
           savedAt,
           expiresAt,
         },
-      })
-      entries.sort(
-        (left, right) =>
-          right.lastAccess - left.lastAccess || left.identityKey.localeCompare(right.identityKey),
-      )
-      const bounded = {
-        version: 1 as const,
-        entries: entries.slice(0, Math.max(0, maxEntries)),
       }
-      if (!bounded.entries.some((entry) => entry.identityKey === identityKey)) {
+      // The entry being saved is the most recent by definition, whatever the
+      // clock says, so count eviction and fit eviction only ever pick among the
+      // others, least recently used first.
+      const others = partition.entries
+        .filter((entry) => entry.identityKey !== identityKey)
+        .sort(
+          (left, right) =>
+            right.lastAccess - left.lastAccess || left.identityKey.localeCompare(right.identityKey),
+        )
+        .slice(0, limit - 1)
+      const encodedOthers = serializeEntries(others)
+      if (!encodedOthers) {
         clear()
         return false
       }
-      return write(bounded)
+      const encodedTarget = serializeEntries([target])
+      if (encodedTarget) {
+        const serialized = [...encodedTarget.serialized, ...encodedOthers.serialized]
+        const bytes = [...encodedTarget.bytes, ...encodedOthers.bytes]
+        // Shed the least recently used other entry one at a time until the
+        // partition fits the byte budget and the storage quota.
+        for (let count = serialized.length; count >= 1; count -= 1) {
+          if (writeSerialized(serialized, bytes, count)) return true
+        }
+      }
+      // The target cannot be stored even on its own. The partition may still
+      // hold its previous snapshot, which would be restored as if it were
+      // current — replace it with the other entries (as many as fit), or drop
+      // the partition when nothing can be written at all.
+      for (let count = others.length; count >= 1; count -= 1) {
+        if (writeSerialized(encodedOthers.serialized, encodedOthers.bytes, count)) return false
+      }
+      clear()
+      return false
     },
 
     remove(identityKey: string): void {
       const partition = read()
       const entries = partition.entries.filter((entry) => entry.identityKey !== identityKey)
       if (entries.length === partition.entries.length) return
-      if (entries.length === 0) clear()
-      else write({ version: 1, entries })
+      // A failed write would leave the removed entry in place to be restored
+      // later, so fall back to dropping the partition.
+      if (entries.length === 0 || !write({ version: 1, entries })) clear()
     },
 
     clear,
