@@ -6,15 +6,16 @@
  * the outer reader-container, and its isDisabled callback only checked zoom
  * state — not whether the grid overview was open.
  */
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import Reader from '@/components/Reader'
 import type { GalleryImage } from '@/lib/types'
 
 const back = vi.fn()
+const push = vi.fn()
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ back, push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ back, push, replace: vi.fn() }),
   useParams: () => ({}),
   useSearchParams: () => new URLSearchParams(''),
   usePathname: () => '/reader/local/1',
@@ -88,8 +89,22 @@ function swipeUp(el: Element) {
 }
 
 describe('Reader grid overview vs swipe-up-to-exit gesture', () => {
+  let historyLength = 1
+
   beforeEach(() => {
     back.mockClear()
+    push.mockClear()
+    // Exits resolve through smartBack: with a one-entry history it pushes the
+    // fallback instead of calling router.back(). Give these tests a real stack.
+    historyLength = 3
+    Object.defineProperty(window.history, 'length', {
+      configurable: true,
+      get: () => historyLength,
+    })
+  })
+
+  afterEach(() => {
+    delete (window.history as unknown as { length?: number }).length
   })
 
   it('does not exit the Reader on a swipe-up gesture while the grid overview is open', async () => {
@@ -111,6 +126,7 @@ describe('Reader grid overview vs swipe-up-to-exit gesture', () => {
     swipeUp(container as Element)
 
     expect(back).not.toHaveBeenCalled()
+    expect(push).not.toHaveBeenCalled()
   })
 
   it('control: the same swipe-up gesture exits the Reader when the grid overview is closed', () => {
@@ -129,5 +145,25 @@ describe('Reader grid overview vs swipe-up-to-exit gesture', () => {
     swipeUp(container as Element)
 
     expect(back).toHaveBeenCalledTimes(1)
+  })
+
+  it('control: with nothing to history-back to the same swipe goes to the fallback instead of a no-op', () => {
+    historyLength = 1
+    render(
+      <Reader
+        source="local"
+        sourceId="1"
+        downloadStatus="complete"
+        images={makeGalleryImages(20)}
+        totalPages={20}
+      />,
+    )
+
+    const container = document.querySelector('.reader-container')
+    expect(container).not.toBeNull()
+    swipeUp(container as Element)
+
+    expect(back).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledWith('/library')
   })
 })

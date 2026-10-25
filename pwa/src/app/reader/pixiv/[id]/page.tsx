@@ -11,12 +11,25 @@ import { useLocale } from '@/components/LocaleProvider'
 import { t } from '@/lib/i18n'
 import type { GalleryImage } from '@/lib/types'
 
+const AUTHOR_COLLECTION_PREFIX = 'user:'
+
+/** Where the reader's exits lead when there is no history to go back to: the
+ *  artwork (or artist) the reader was opened from, never the library default. */
+function readerExitHref(id: string, illustId: number): string {
+  if (id.startsWith(AUTHOR_COLLECTION_PREFIX)) {
+    const authorId = id.slice(AUTHOR_COLLECTION_PREFIX.length)
+    return /^\d+$/.test(authorId) ? `/pixiv/user/${authorId}` : '/pixiv'
+  }
+  return Number.isNaN(illustId) ? '/pixiv' : `/pixiv/illust/${illustId}`
+}
+
 export default function PixivReaderPage({ params }: { params: Promise<{ id: string }> }) {
   useLocale()
   const { id } = use(params)
   const router = useRouter()
-  const isAuthorCollection = id.startsWith('user:')
+  const isAuthorCollection = id.startsWith(AUTHOR_COLLECTION_PREFIX)
   const illustId = parseInt(id, 10)
+  const backHref = readerExitHref(id, illustId)
   const searchParams = useSearchParams()
   const initialPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1)
 
@@ -35,7 +48,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
 
   if (isAuthorCollection) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
       </ReaderFallbackScreen>
     )
@@ -43,7 +56,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
 
   if (isNaN(illustId)) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{t('common.invalidId')}</p>
@@ -56,7 +69,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
 
   if (error) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">
@@ -69,7 +82,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
 
   if (!pagesData) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">{t('pixiv.loading')}</p>
@@ -102,6 +115,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
         images={images}
         totalPages={pagesData.page_count}
         initialPage={Math.min(initialPage, pagesData.page_count)}
+        backHref={backHref}
       />
     </ErrorBoundary>
   )

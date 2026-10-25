@@ -17,6 +17,7 @@ import { DEFAULT_READER_SETTINGS } from './types'
 import { t } from '@/lib/i18n'
 import { api } from '@/lib/api'
 import { galleryHref } from '@/lib/galleryRoutes'
+import { smartBack } from '@/lib/navBack'
 import { toast } from 'sonner'
 import {
   useReaderState,
@@ -402,6 +403,9 @@ interface ReaderProps {
   onHideImage?: (pageNum: number) => Promise<void>
   /** Pre-fetched favorited image IDs from the parent page (avoids duplicate fetch) */
   initialFavoritedImageIds?: number[]
+  /** Where every exit goes when history has nothing to go back to (share link,
+   *  new tab, PWA relaunch) or the URL was restored by a nav tab. Defaults to /library. */
+  backHref?: string
 }
 
 // ── SinglePageView ────────────────────────────────────────────────────
@@ -1547,8 +1551,10 @@ export default function Reader({
   onSeekToPage,
   onHideImage,
   initialFavoritedImageIds,
+  backHref,
 }: ReaderProps) {
   const router = useRouter()
+  const exitHref = backHref ?? '/library'
   const isProxyMode = downloadStatus === 'proxy_only'
 
   const [hiddenPages, setHiddenPages] = useState<Set<number>>(new Set())
@@ -1736,7 +1742,10 @@ export default function Reader({
   useProgressSave(source, sourceId, state.currentPage, !isProxyMode)
 
   const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
-  const handleBack = useCallback(() => router.back(), [router])
+  // Reader routes have no chrome and no swipe-back, so every exit must resolve
+  // like the back FAB: a no-op router.back() on a one-entry history would trap
+  // the user, and a tab-restored URL must climb instead of leaving the section.
+  const handleBack = useCallback(() => smartBack(router, exitHref), [router, exitHref])
 
   // Track viewMode in ref so swipe callbacks stay stable across mode changes
   const viewModeRef = useRef(state.viewMode)
@@ -1831,12 +1840,12 @@ export default function Reader({
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (state.isGridOpen) return
-        router.back()
+        handleBack()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [router, state.isGridOpen])
+  }, [handleBack, state.isGridOpen])
 
   // Help overlay
   const [showHelp, setShowHelp] = useState(false)
@@ -1959,7 +1968,7 @@ export default function Reader({
 
       if (remainingImages.length === 0) {
         // All images hidden — leave the reader
-        router.back()
+        handleBack()
         return
       }
 
@@ -1986,7 +1995,7 @@ export default function Reader({
     hiddenPages,
     state.currentPage,
     setPage,
-    router,
+    handleBack,
     onHideImage,
   ])
 

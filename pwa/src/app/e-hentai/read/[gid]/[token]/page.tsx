@@ -8,6 +8,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ReaderFallbackScreen } from '@/components/Reader/ReaderFallbackScreen'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
+import { smartBack } from '@/lib/navBack'
 import type { GalleryImage } from '@/lib/types'
 
 export default function EhProxyReaderPageWrapper() {
@@ -84,11 +85,15 @@ function EhProxyReaderPage() {
   )
 
   const error = galleryError || tokensError
+  // Every exit goes back to the gallery this reader was opened from. A reader
+  // URL with nothing behind it (shared link, new tab, PWA relaunch) has no
+  // history to step back through, and an unparseable id has no gallery page.
+  const backHref = isNaN(gid) ? '/e-hentai' : `/e-hentai/${gid}/${token}`
   const hasInitialTokens = Object.keys(tokenMap).length > 0
 
   if (isNaN(gid)) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{t('common.invalidId')}</p>
@@ -99,12 +104,12 @@ function EhProxyReaderPage() {
 
   if (error) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error.message}</p>
           <button
-            onClick={() => router.back()}
+            onClick={() => smartBack(router, backHref)}
             className="mt-4 px-4 py-2 bg-neutral-800 rounded text-sm hover:bg-neutral-700 transition-colors"
           >
             {t('common.goBack')}
@@ -117,7 +122,7 @@ function EhProxyReaderPage() {
   // Wait for gallery metadata + first batch of tokens before showing Reader.
   if (!gallery || !hasInitialTokens) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <LoadingSpinner />
           <p className="mt-3 text-sm opacity-50">
@@ -136,7 +141,7 @@ function EhProxyReaderPage() {
             <div className="mt-4 space-y-2">
               <p className="text-xs text-yellow-500">{t('reader.loadingTooLong')}</p>
               <button
-                onClick={() => router.back()}
+                onClick={() => smartBack(router, backHref)}
                 className="px-4 py-2 bg-neutral-800 rounded text-xs hover:bg-neutral-700 transition-colors"
               >
                 {t('common.goBack')}
@@ -160,6 +165,7 @@ function EhProxyReaderPage() {
         previews={previewMap}
         onPageChange={handlePageChange}
         onSeekToPage={fetchUpTo}
+        backHref={backHref}
       />
     </ErrorBoundary>
   )

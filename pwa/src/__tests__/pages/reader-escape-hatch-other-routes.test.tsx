@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 
 import { api } from '@/lib/api'
@@ -15,14 +15,20 @@ import EhReaderPage from '@/app/e-hentai/read/[gid]/[token]/page'
  * Their loading, error and empty states render before `<Reader />` mounts, and
  * the only back control lives inside Reader. The global edge-swipe-back is
  * disarmed on reader routes, so an installed PWA had nothing to press.
+ *
+ * The control must also work when history has nothing to go back to (shared
+ * link, new tab, PWA relaunch): a bare `router.back()` is a no-op there, so it
+ * resolves through `smartBack` to the page's own detail route instead.
  */
 
 const back = vi.fn()
+const push = vi.fn()
+const replace = vi.fn()
 const swr = vi.hoisted(() => ({ data: undefined as unknown, error: undefined as unknown }))
 const route = vi.hoisted(() => ({ gid: '123' }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ back, push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ back, push, replace }),
   useParams: () => ({ artistId: 'ehentai%3Asomeone', gid: route.gid, token: 'abc' }),
   useSearchParams: () => new URLSearchParams(''),
 }))
@@ -72,9 +78,25 @@ const mocked = api as unknown as {
 
 const pending = () => new Promise(() => {})
 
-function expectWayBack() {
+let historyLength = 1
+
+/** The escape hatch with nothing to history-back to must land on the fallback
+ *  (a RegExp when the page has no valid id to build the exact route from). */
+function expectWayBack(fallback: string | RegExp) {
+  historyLength = 1
+  fireEvent.click(screen.getByTitle('reader.goBack'))
+  expect(push).toHaveBeenCalledTimes(1)
+  if (typeof fallback === 'string') expect(push).toHaveBeenCalledWith(fallback)
+  else expect(push.mock.calls[0][0]).toMatch(fallback)
+  expect(back).not.toHaveBeenCalled()
+}
+
+/** Counterpart: with somewhere to go back to, the control walks history. */
+function expectHistoryBack() {
+  historyLength = 4
   fireEvent.click(screen.getByTitle('reader.goBack'))
   expect(back).toHaveBeenCalledTimes(1)
+  expect(push).not.toHaveBeenCalled()
 }
 
 async function renderPixiv(id: string) {
@@ -90,9 +112,20 @@ async function renderPixiv(id: string) {
 describe('reader escape hatch on the other reader routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
+    historyLength = 1
+    Object.defineProperty(window.history, 'length', {
+      configurable: true,
+      get: () => historyLength,
+    })
     swr.data = undefined
     swr.error = undefined
     route.gid = '123'
+  })
+
+  afterEach(() => {
+    // Drop the instance override so other tests see jsdom's own getter.
+    delete (window.history as unknown as { length?: number }).length
   })
 
   it('favourites reader offers a way back while the favourites are loading', async () => {
@@ -101,7 +134,7 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<FavoriteReaderPage />)
 
     await screen.findByText('reader.loadingFavoriteImages')
-    expectWayBack()
+    expectWayBack('/library')
   })
 
   it('favourites reader offers a way back when the favourites fail to load', async () => {
@@ -110,7 +143,7 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<FavoriteReaderPage />)
 
     await screen.findByText('boom')
-    expectWayBack()
+    expectWayBack('/library')
   })
 
   it('favourites reader offers a way back when there are no favourites', async () => {
@@ -124,7 +157,7 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<FavoriteReaderPage />)
 
     await screen.findByText('reader.noFavoriteImages')
-    expectWayBack()
+    expectWayBack('/library')
   })
 
   it('artist reader offers a way back while the artist images are loading', async () => {
@@ -133,7 +166,7 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<ArtistReaderPage />)
 
     await screen.findByText('reader.loadingImages')
-    expectWayBack()
+    expectWayBack('/library')
   })
 
   it('artist reader offers a way back when the artist images fail to load', async () => {
@@ -142,14 +175,14 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<ArtistReaderPage />)
 
     await screen.findByText('boom')
-    expectWayBack()
+    expectWayBack('/library')
   })
 
   it('pixiv reader offers a way back while the illustration is loading', async () => {
     await renderPixiv('123')
 
     screen.getByText('pixiv.loading')
-    expectWayBack()
+    expectWayBack('/pixiv/illust/123')
   })
 
   it('pixiv reader offers a way back when the illustration fails to load', async () => {
@@ -158,21 +191,21 @@ describe('reader escape hatch on the other reader routes', () => {
     await renderPixiv('123')
 
     screen.getByText('boom')
-    expectWayBack()
+    expectWayBack('/pixiv/illust/123')
   })
 
   it('pixiv reader offers a way back when the illustration id is not a number', async () => {
     await renderPixiv('nope')
 
     screen.getByText('common.invalidId')
-    expectWayBack()
+    expectWayBack(/^\/pixiv/)
   })
 
   it('e-hentai reader offers a way back while the gallery metadata is loading', () => {
     render(<EhReaderPage />)
 
     screen.getByText('reader.loadingMetadata')
-    expectWayBack()
+    expectWayBack('/e-hentai/123/abc')
   })
 
   it('e-hentai reader offers a way back when the gallery id is not a number', () => {
@@ -180,6 +213,20 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<EhReaderPage />)
 
     screen.getByText('common.invalidId')
-    expectWayBack()
+    expectWayBack(/^\/e-hentai/)
+  })
+
+  it('pixiv reader walks history back when the stack has an entry to go back to', async () => {
+    await renderPixiv('123')
+
+    screen.getByText('pixiv.loading')
+    expectHistoryBack()
+  })
+
+  it('e-hentai reader walks history back when the stack has an entry to go back to', () => {
+    render(<EhReaderPage />)
+
+    screen.getByText('reader.loadingMetadata')
+    expectHistoryBack()
   })
 })
