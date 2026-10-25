@@ -166,7 +166,7 @@ describe('usePixivBrowseSession cursor and item mapping', () => {
       { surface: 'following', restrict: 'public' } as PixivBrowseIdentity,
       'getFollowing',
       { user_previews: [{ user: { id: 23 } }], next_offset: 60 },
-      [{ kind: 'user', preview: { user: { id: 23 } } }],
+      [{ kind: 'user', preview: { user: { id: 23 }, illusts: [] } }],
     ],
   ])(
     'maps %s to an offset cursor and its discriminated item kind',
@@ -345,6 +345,283 @@ describe('usePixivBrowseSession isolation and readiness', () => {
       credentialsConfigured: false,
     })
     await Promise.resolve()
+    expect(pixivApi.getFollowingFeed).not.toHaveBeenCalled()
+  })
+})
+
+// A browse snapshot is sessionStorage JSON with a 2 MB budget per source
+// partition, so what a page stores per item decides how deep a list survives.
+describe('usePixivBrowseSession stored item size', () => {
+  const pximg = 'https://i.pximg.net/c/360x360_70/img-master/img/2024/05/17/12/30/45'
+  const original = 'https://i.pximg.net/img-original/img/2024/05/17/12/30/45'
+
+  function fatIllust(id: number, pages = 50) {
+    return {
+      id,
+      title: `Manga chapter ${id}`,
+      type: 'manga',
+      image_urls: {
+        square_medium: `${pximg}/${id}_p0_square1200.jpg`,
+        medium: `${pximg}/${id}_p0_master1200.jpg`,
+        large: `${pximg}/${id}_p0_master1200.jpg`,
+        original: `${original}/${id}_p0.png`,
+      },
+      caption: `<strong>Chapter ${id}</strong><br />${'Long author note with <a href="https://example.com/x">links</a>. '.repeat(12)}`,
+      user: {
+        id: 13419413,
+        name: 'Artist Name',
+        account: 'artist_account',
+        profile_image: 'https://i.pximg.net/user-profile/img/2020/01/01/00/00/00/12345_170.jpg',
+      },
+      tags: Array.from({ length: 12 }, (_, i) => ({
+        name: `タグ${i}`,
+        translated_name: `tag ${i}`,
+      })),
+      create_date: '2024-05-17T12:30:45+09:00',
+      page_count: pages,
+      width: 1200,
+      height: 1700,
+      sanity_level: 2,
+      total_view: 123456,
+      total_bookmarks: 7890,
+      is_bookmarked: true,
+      meta_pages: Array.from({ length: pages }, (_, p) => ({
+        image_urls: {
+          square_medium: `${pximg}/${id}_p${p}_square1200.jpg`,
+          medium: `${pximg}/${id}_p${p}_master1200.jpg`,
+          large: `${pximg}/${id}_p${p}_master1200.jpg`,
+          original: `${original}/${id}_p${p}.png`,
+        },
+      })),
+    }
+  }
+
+  async function fetchedItems(
+    identity: PixivBrowseIdentity,
+    method: 'search' | 'getFollowingFeed' | 'getMyBookmarks' | 'getFollowing' | 'ranking',
+    response: unknown,
+  ) {
+    const usePixivBrowseSession = await loadHook()
+    pixivApi[method].mockResolvedValueOnce(response)
+    const { result } = renderHook(() => usePixivBrowseSession(ready(identity)))
+    await waitFor(() => expect(result.current.state.items.length).toBeGreaterThan(0))
+    return result.current.state.items
+  }
+
+  it('stores no caption, meta_pages or original/medium/large urls for a fetched illust', async () => {
+    const items = await fetchedItems(
+      { surface: 'bookmarks', restrict: 'public' },
+      'getMyBookmarks',
+      {
+        illusts: [fatIllust(77)],
+        next_offset: 1234,
+      },
+    )
+
+    const illust = (items[0] as Extract<PixivBrowseItem, { kind: 'illust' }>).illust
+    expect(illust).not.toHaveProperty('caption')
+    expect(illust).not.toHaveProperty('meta_pages')
+    expect(illust.image_urls).not.toHaveProperty('original')
+    expect(illust.image_urls).not.toHaveProperty('medium')
+    expect(illust.image_urls).not.toHaveProperty('large')
+    expect(JSON.stringify(illust)).not.toContain('_p1_')
+  })
+
+  it('keeps exactly the fields the list cards and bookmark/download actions read', async () => {
+    const items = await fetchedItems({ surface: 'feed' }, 'getFollowingFeed', {
+      illusts: [fatIllust(78, 3)],
+      next_offset: null,
+    })
+
+    const illust = (items[0] as Extract<PixivBrowseItem, { kind: 'illust' }>).illust
+    expect(Object.keys(illust).sort()).toEqual([
+      'id',
+      'image_urls',
+      'is_bookmarked',
+      'page_count',
+      'tags',
+      'title',
+      'total_bookmarks',
+      'total_view',
+      'user',
+    ])
+    expect(illust).toMatchObject({
+      id: 78,
+      title: 'Manga chapter 78',
+      image_urls: { square_medium: `${pximg}/78_p0_square1200.jpg` },
+      user: { id: 13419413, name: 'Artist Name' },
+      page_count: 3,
+      total_view: 123456,
+      total_bookmarks: 7890,
+      is_bookmarked: true,
+    })
+    expect(Object.keys(illust.image_urls as object)).toEqual(['square_medium'])
+    expect(Object.keys(illust.user as object).sort()).toEqual(['id', 'name'])
+    expect((illust.tags as unknown[])[0]).toEqual({ name: 'タグ0' })
+    expect(illust.tags).toHaveLength(12)
+  })
+
+  it('turns the public search backend string tags into named tags the card can render', async () => {
+    const usePixivBrowseSession = await loadHook()
+    pixivApi.searchPublic.mockResolvedValueOnce({
+      illusts: [
+        { id: 79, title: 'Public', tags: ['blue', 'sky'], image_urls: { square_medium: 'u' } },
+      ],
+      next_offset: null,
+    })
+    const identity: PixivBrowseIdentity = {
+      surface: 'search',
+      query: 'miku',
+      sort: 'date_desc',
+      duration: '',
+      backend: 'public',
+    }
+
+    const { result } = renderHook(() =>
+      usePixivBrowseSession({ ...ready(identity), credentialsConfigured: false }),
+    )
+    await waitFor(() => expect(result.current.state.items).toHaveLength(1))
+
+    const illust = (result.current.state.items[0] as Extract<PixivBrowseItem, { kind: 'illust' }>)
+      .illust
+    expect(illust.tags).toEqual([{ name: 'blue' }, { name: 'sky' }])
+  })
+
+  // 30 illusts is one page; each is a 50-page manga, the worst realistic case
+  // (a 50-page manga carries ~200 urls in meta_pages alone).
+  // Per slim item: ~190 B of urls/ids + ~55 B title + ~20 B user + 12 tags at
+  // ~20 B + counters ~60 B ≈ 600 B; the bound allows 1 KB per item so tag-heavy
+  // works fit. At 30 KB a page, the 2 MB partition holds ~65 pages (~2000
+  // illusts) instead of the ~3 pages the fat records (~690 KB a page) allowed.
+  it('serializes a page of 30 fifty-page manga illusts to under 30 KB (fat records are ~690 KB)', async () => {
+    const fat = Array.from({ length: 30 }, (_, i) => fatIllust(1000 + i))
+    const fatBytes = JSON.stringify(fat).length
+    expect(fatBytes).toBeGreaterThan(600_000)
+
+    const items = await fetchedItems({ surface: 'feed' }, 'getFollowingFeed', {
+      illusts: fat,
+      next_offset: 31,
+    })
+
+    expect(items).toHaveLength(30)
+    expect(JSON.stringify(items).length).toBeLessThan(30 * 1024)
+  })
+
+  it('stores only what a following card shows: the user and three preview thumbnails', async () => {
+    const preview = {
+      user: {
+        id: 23,
+        name: 'Followed',
+        account: 'followed_account',
+        profile_image: 'https://i.pximg.net/user-profile/23.jpg',
+        is_followed: true,
+        comment: 'x'.repeat(500),
+      },
+      illusts: [fatIllust(301), fatIllust(302), fatIllust(303), fatIllust(304)],
+      novels: [{ id: 1 }],
+      is_muted: false,
+    }
+    const items = await fetchedItems({ surface: 'following', restrict: 'public' }, 'getFollowing', {
+      user_previews: [preview],
+      next_offset: 30,
+    })
+
+    const stored = (items[0] as Extract<PixivBrowseItem, { kind: 'user' }>).preview
+    expect(Object.keys(stored).sort()).toEqual(['illusts', 'user'])
+    expect(stored.user).toEqual({
+      id: 23,
+      name: 'Followed',
+      profile_image: 'https://i.pximg.net/user-profile/23.jpg',
+    })
+    expect(stored.illusts).toEqual([
+      { id: 301, image_urls: { square_medium: `${pximg}/301_p0_square1200.jpg` } },
+      { id: 302, image_urls: { square_medium: `${pximg}/302_p0_square1200.jpg` } },
+      { id: 303, image_urls: { square_medium: `${pximg}/303_p0_square1200.jpg` } },
+    ])
+  })
+
+  it('gives a following preview without works an empty illusts list the card can read', async () => {
+    const items = await fetchedItems({ surface: 'following', restrict: 'public' }, 'getFollowing', {
+      user_previews: [{ user: { id: 24, name: 'Quiet' } }],
+      next_offset: null,
+    })
+
+    expect((items[0] as Extract<PixivBrowseItem, { kind: 'user' }>).preview.illusts).toEqual([])
+  })
+
+  it('stores only the fields a ranking card reads', async () => {
+    const items = await fetchedItems(
+      { surface: 'ranking', mode: 'daily', content: 'all', r18: false },
+      'ranking',
+      {
+        contents: [
+          {
+            illust_id: 55,
+            title: 'Ranked',
+            user_name: 'Ranker',
+            url: `${pximg}/55_p0_master1200.jpg`,
+            rank: 3,
+            yes_rank: 4,
+            tags: ['a', 'b', 'c'],
+            profile_img: 'https://i.pximg.net/user-profile/x.jpg',
+            illust_content_type: { sexual: 0, lo: false, grotesque: false },
+            illust_series: false,
+            view_count: 1,
+            attr: '',
+            width: 1,
+            height: 2,
+            date: '2024年05月17日 00:00',
+          },
+        ],
+        has_next: false,
+        rank_total: 500,
+      },
+    )
+
+    expect(items).toEqual([
+      {
+        kind: 'ranking',
+        entry: {
+          illust_id: 55,
+          title: 'Ranked',
+          user_name: 'Ranker',
+          url: `${pximg}/55_p0_master1200.jpg`,
+          rank: 3,
+        },
+      },
+    ])
+  })
+
+  it('still restores a snapshot written before items were slimmed, fat fields and all', async () => {
+    const usePixivBrowseSession = await loadHook()
+    const storage = new MemoryStorage()
+    const scope: BrowseSnapshotScope = {
+      userId: 'alice',
+      tabId: 'tab-a',
+      sourceId: 'pixiv',
+      schemaVersion: 1,
+    }
+    const feed: PixivBrowseIdentity = { surface: 'feed' }
+    const fat = fatIllust(91, 4)
+    createBrowseSnapshotStore<PixivBrowseItem, Cursor>({ storage, scope }).save(
+      pixivIdentityKey(feed),
+      {
+        pages: [[{ kind: 'illust', illust: fat }]],
+        cursor: { kind: 'offset', value: 30 },
+        hasMore: true,
+        total: null,
+        anchor: null,
+        layout: null,
+      },
+    )
+
+    const { result } = renderHook(() => usePixivBrowseSession(ready(feed, storage)))
+    await waitFor(() => expect(result.current.state.items).toHaveLength(1))
+
+    expect(result.current.state.items[0]).toMatchObject({
+      kind: 'illust',
+      illust: { id: 91, title: 'Manga chapter 91', page_count: 4 },
+    })
     expect(pixivApi.getFollowingFeed).not.toHaveBeenCalled()
   })
 })

@@ -19,6 +19,8 @@ const ja: Record<string, string> = {
   'pixiv.userWorks': '作品',
   'pixiv.userBookmarks': 'ブックマーク',
   'pixiv.noBookmarks': 'ブックマークはありません。',
+  'pixiv.addBookmark': 'ブックマークに追加',
+  'pixiv.removeBookmark': 'ブックマークを解除',
   'pixiv.collectionCreate': '作者作品集を作成',
   'pixiv.collectionOpen': '作品集を開く',
   'pixiv.collectionSync': '新作を同期',

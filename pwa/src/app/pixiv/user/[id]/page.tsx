@@ -3,16 +3,55 @@
 import { useState, useEffect } from 'react'
 import { use } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import useSWRInfinite from 'swr/infinite'
 import { api } from '@/lib/api'
+import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { useScrollPositionRestore } from '@/hooks/useScrollRestore'
+import { commitBrowseUrl } from '@/lib/browse/browseHistory'
+import { smartBack } from '@/lib/navBack'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import type { PixivIllust, PixivSearchResult } from '@/lib/types'
+
+type UserTab = 'works' | 'bookmarks'
+
+// Where the page was scrolled to when the user left through a link, so
+// artist -> artwork -> back lands on the same card. Kept per artist and
+// sub-tab, consumed once on the next mount.
+const scrollStorageKey = (userId: number, tab: UserTab) => `pixiv_user_scroll:${userId}:${tab}`
+
+function readSavedScroll(key: string): number | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(key)
+    if (raw === null) return null
+    const value = Number(raw)
+    return Number.isFinite(value) && value >= 0 ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writeSavedScroll(key: string, scrollY: number): void {
+  try {
+    window.sessionStorage.setItem(key, String(Math.round(scrollY)))
+  } catch {
+    // Best effort: without it back simply opens at the top.
+  }
+}
+
+function clearSavedScroll(key: string): void {
+  try {
+    window.sessionStorage.removeItem(key)
+  } catch {
+    // Best effort.
+  }
+}
 
 function IllustCard({ illust }: { illust: PixivIllust }) {
   const [downloading, setDownloading] = useState(false)
@@ -91,13 +130,43 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
     { refreshInterval: (data) => (data?.job_id ? 3000 : 0) },
   )
 
-  const [activeTab, setActiveTab] = useState<'works' | 'bookmarks'>('works')
-  const [bookmarkOffset, setBookmarkOffset] = useState(0)
+  // The sub-tab lives in the URL (`?tab=bookmarks`; works is the bare URL) so
+  // it survives artist -> artwork -> back and follows back/forward.
+  const searchParams = useSearchParams()
+  const activeTab: UserTab = searchParams.get('tab') === 'bookmarks' ? 'bookmarks' : 'works'
+  const scrollKey = scrollStorageKey(userId, activeTab)
 
-  const { data: bookmarksData, isLoading: bookmarksLoading } = useSWR(
-    activeTab === 'bookmarks' && validId ? ['pixiv-user-bookmarks', userId, bookmarkOffset] : null,
-    ([, uid, offset], { signal }: { signal?: AbortSignal } = {}) =>
-      api.pixiv.getUserBookmarks(uid as number, offset as number, { signal }),
+  const handleTabChange = (tab: UserTab) => {
+    if (tab === activeTab) return
+    // Same-page transition: write the URL directly rather than through the
+    // router (FE-T17), and replace so a tab is not a history entry.
+    commitBrowseUrl(
+      tab === 'bookmarks' ? `/pixiv/user/${userId}?tab=bookmarks` : `/pixiv/user/${userId}`,
+      'replace',
+    )
+  }
+
+  // Bookmarks are paged by Pixiv's `max_bookmark_id` cursor, which the API hands
+  // back as `next_offset`: the only valid way to the next page is that value,
+  // so pages append (like works) instead of stepping a numeric offset.
+  const getBookmarksKey = (pageIndex: number, previous: PixivSearchResult | null) => {
+    if (activeTab !== 'bookmarks' || !validId) return null
+    const cursor = pageIndex === 0 ? 0 : previous?.next_offset
+    if (cursor === null || cursor === undefined) return null
+    return ['pixiv-user-bookmarks', userId, cursor]
+  }
+
+  const {
+    data: bookmarksData,
+    size: bookmarksSize,
+    setSize: setBookmarksSize,
+    isLoading: bookmarksInitialLoading,
+    isValidating: bookmarksLoading,
+  } = useSWRInfinite<PixivSearchResult>(
+    getBookmarksKey,
+    ([, uid, cursor], { signal }: { signal?: AbortSignal } = {}) =>
+      api.pixiv.getUserBookmarks(uid as number, cursor as number, { signal }),
+    { revalidateFirstPage: false },
   )
 
   useEffect(() => {
@@ -180,13 +249,48 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
 
   const allWorks = worksData?.flatMap((page) => page.illusts) ?? []
   const hasMoreWorks = worksData ? worksData[worksData.length - 1]?.next_offset !== null : false
+  const allBookmarks = bookmarksData?.flatMap((page) => page.illusts) ?? []
+  const hasMoreBookmarks = bookmarksData
+    ? bookmarksData[bookmarksData.length - 1]?.next_offset != null
+    : false
+
+  // Restore only the sub-tab the page opened on, and only once its cards are in
+  // the DOM: scrolling earlier would clamp to a short page.
+  const [restoreTarget] = useState(() => ({ key: scrollKey, scrollY: readSavedScroll(scrollKey) }))
+  useScrollPositionRestore({
+    scrollY: restoreTarget.scrollY,
+    isReady:
+      restoreTarget.key === scrollKey &&
+      userResult !== undefined &&
+      (activeTab === 'works' ? worksData !== undefined : bookmarksData !== undefined),
+    restoreKey: restoreTarget.key,
+    onRestored: () => clearSavedScroll(restoreTarget.key),
+  })
+
+  // Capture while the page is still laid out: by the time an unmount cleanup
+  // runs the router has already scrolled to the top (FE-T12).
+  const rememberScrollOnLeave = (event: React.MouseEvent) => {
+    if (!(event.target instanceof Element)) return
+    // The card's Download button sits inside its link but never navigates.
+    if (event.target.closest('button')) return
+    const link = event.target.closest('a[href]')
+    const href = link?.getAttribute('href')
+    if (!link || !href?.startsWith('/') || link.getAttribute('target') === '_blank') return
+    writeSavedScroll(scrollKey, window.scrollY)
+  }
 
   if (!validId)
-    return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
+    return (
+      <div className="p-8 text-center text-vault-text-secondary">
+        <BackButton fallback="/pixiv" />
+        {t('common.invalidId')}
+      </div>
+    )
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
+        <BackButton fallback="/pixiv" />
         <LoadingSpinner size="lg" />
       </div>
     )
@@ -197,7 +301,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
       <div className="p-6 text-center text-vault-text-secondary">
         <p>{t('common.failedToLoad')}</p>
         <button
-          onClick={() => router.back()}
+          onClick={() => smartBack(router, '/pixiv')}
           className="text-vault-accent underline mt-2 inline-block"
         >
           <ArrowLeft size={14} className="inline mr-1" />
@@ -210,15 +314,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
   const { user, recent_illusts: recentWorks } = userResult
 
   return (
-    <div className="space-y-6">
-      {/* Back link */}
-      <button
-        onClick={() => router.back()}
-        className="inline-flex items-center gap-1.5 text-sm text-vault-text-secondary hover:text-vault-text transition-colors"
-      >
-        <ArrowLeft size={14} />
-        {t('pixiv.title')}
-      </button>
+    <div className="space-y-6" onClickCapture={rememberScrollOnLeave}>
+      <BackButton fallback="/pixiv" />
 
       {/* Profile header */}
       <div className="bg-vault-card border border-vault-border rounded-xl p-6">
@@ -337,7 +434,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
       {/* Tab bar */}
       <div className="flex gap-1 bg-vault-card border border-vault-border rounded-lg p-1 w-fit">
         <button
-          onClick={() => setActiveTab('works')}
+          onClick={() => handleTabChange('works')}
+          aria-current={activeTab === 'works' ? 'page' : undefined}
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
             activeTab === 'works' ? 'bg-vault-accent text-white' : 'text-vault-text-secondary hover:text-vault-text'
           }`}
@@ -345,7 +443,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
           {t('pixiv.userWorks')}
         </button>
         <button
-          onClick={() => setActiveTab('bookmarks')}
+          onClick={() => handleTabChange('bookmarks')}
+          aria-current={activeTab === 'bookmarks' ? 'page' : undefined}
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
             activeTab === 'bookmarks' ? 'bg-vault-accent text-white' : 'text-vault-text-secondary hover:text-vault-text'
           }`}
@@ -401,37 +500,30 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
       {/* Bookmarks tab */}
       {activeTab === 'bookmarks' && (
         <div className="space-y-3">
-          {bookmarksLoading ? (
+          {bookmarksInitialLoading ? (
             <div className="flex items-center justify-center py-16">
               <LoadingSpinner size="lg" />
             </div>
-          ) : !bookmarksData?.illusts?.length ? (
+          ) : allBookmarks.length === 0 ? (
             <p className="text-center py-8 text-vault-text-muted">{t('pixiv.noBookmarks')}</p>
           ) : (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                {bookmarksData.illusts.map((illust) => (
+                {allBookmarks.map((illust) => (
                   <IllustCard key={illust.id} illust={illust} />
                 ))}
               </div>
-              <div className="flex justify-center gap-2 pt-2">
-                {bookmarkOffset > 0 && (
+              {hasMoreBookmarks && (
+                <div className="flex justify-center pt-2">
                   <button
-                    onClick={() => setBookmarkOffset((prev) => Math.max(0, prev - 30))}
-                    className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors"
+                    onClick={() => setBookmarksSize(bookmarksSize + 1)}
+                    disabled={bookmarksLoading}
+                    className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
                   >
-                    {t('common.previousPage')}
+                    {bookmarksLoading ? t('pixiv.loading') : t('pixiv.loadMore')}
                   </button>
-                )}
-                {bookmarksData.next_offset !== null && (
-                  <button
-                    onClick={() => setBookmarkOffset(bookmarksData.next_offset ?? bookmarkOffset + 30)}
-                    className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors"
-                  >
-                    {t('pixiv.loadMore')}
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
             </>
           )}
         </div>

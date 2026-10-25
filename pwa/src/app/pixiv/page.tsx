@@ -26,6 +26,7 @@ import { usePixivBrowseSession } from '@/hooks/usePixivBrowseSession'
 import { useProfile } from '@/hooks/useProfile'
 import { api } from '@/lib/api'
 import { decideAnchorRestore, type BrowseAnchor } from '@/lib/browse/anchor'
+import { commitBrowseUrl } from '@/lib/browse/browseHistory'
 import {
   parsePixivIdentity,
   serializePixivIdentity,
@@ -537,10 +538,11 @@ function PixivPageInner() {
       const url = `/pixiv?${serializePixivIdentity(nextIdentity).toString()}`
       const changesSurface = nextIdentity.surface !== identitySurfaceRef.current
       identitySurfaceRef.current = nextIdentity.surface
-      if (changesSurface) router.push(url, { scroll: false })
-      else router.replace(url, { scroll: false })
+      // Same-page transition: the session already owns the view, so write the
+      // URL without a router round trip (see commitBrowseUrl, FE-T17).
+      commitBrowseUrl(url, changesSurface ? 'push' : 'replace')
     },
-    [captureView, checkpoint, flushPendingViewWork, router],
+    [captureView, checkpoint, flushPendingViewWork],
   )
 
   const openPixivItem = useCallback(

@@ -1516,6 +1516,8 @@ const en: Record<string, string> = {
   'pixiv.userWorks': 'Works',
   'pixiv.userBookmarks': 'Bookmarks',
   'pixiv.noBookmarks': 'No bookmarks found.',
+  'pixiv.addBookmark': 'Add bookmark',
+  'pixiv.removeBookmark': 'Remove bookmark',
   'pixiv.collectionCreate': 'Create author collection',
   'pixiv.collectionOpen': 'Open collection',
   'pixiv.collectionSync': 'Sync new works',

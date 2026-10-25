@@ -13,6 +13,8 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { ExternalLink, ArrowLeft, BookOpen } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
+import { detailHotkey } from '@/lib/detailHotkeys'
+import { smartBack } from '@/lib/navBack'
 import DOMPurify from 'dompurify'
 
 export default function IllustDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -43,28 +45,33 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     tag: string
   } | null>(null)
 
+  const tagPopoverOpen = pixivTagPopover !== null
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (e.key === 'Enter' || e.key === ' ') {
+      // The tag popover owns Escape/ArrowUp while it is open.
+      const action = detailHotkey(e)
+      if (!action || tagPopoverOpen) return
+      if (action === 'open') {
+        if (isNaN(illustId)) return
         e.preventDefault()
-        if (!isNaN(illustId)) router.push(`/reader/pixiv/${illustId}`)
+        router.push(`/reader/pixiv/${illustId}`)
+        return
       }
-      if (e.key === 'ArrowUp' || e.key === 'Escape') {
-        e.preventDefault()
-        if (history.length > 1) {
-          router.back()
-        } else {
-          router.push('/pixiv')
-        }
-      }
+      e.preventDefault()
+      smartBack(router, '/pixiv')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [illustId, router])
+  }, [illustId, router, tagPopoverOpen])
 
   if (isNaN(illustId))
-    return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
+    return (
+      <div className="p-8 text-center text-vault-text-secondary">
+        <BackButton fallback="/pixiv" />
+        {t('common.invalidId')}
+      </div>
+    )
 
   const handleBookmark = async () => {
     if (bookmarking) return
@@ -99,6 +106,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
+        <BackButton fallback="/pixiv" />
         <LoadingSpinner size="lg" />
       </div>
     )
@@ -109,7 +117,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
       <div className="p-6 text-center text-vault-text-secondary">
         <p>{t('common.failedToLoad')}</p>
         <button
-          onClick={() => router.back()}
+          onClick={() => smartBack(router, '/pixiv')}
           className="text-vault-accent underline mt-2 inline-block"
         >
           <ArrowLeft size={14} className="inline mr-1" />
@@ -119,6 +127,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     )
   }
 
+  const bookmarkLabel = isBookmarked ? t('pixiv.removeBookmark') : t('pixiv.addBookmark')
   const mainImageUrl = api.pixiv.imageProxyUrl(illust.image_urls.large)
   const squareUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
 
@@ -191,7 +200,8 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
             <button
               onClick={handleBookmark}
               disabled={bookmarking}
-              title={isBookmarked ? t('pixiv.unfollow') : t('pixiv.bookmarks')}
+              title={bookmarkLabel}
+              aria-label={bookmarkLabel}
               className={`w-10 h-10 flex items-center justify-center rounded-lg border text-base transition-colors disabled:opacity-50 ${
                 isBookmarked
                   ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400 hover:bg-red-500/10 hover:text-red-400'

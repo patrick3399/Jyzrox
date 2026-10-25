@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PixivBrowseItem } from '@/lib/browse/pixiv'
 
 type GridProps = {
@@ -61,7 +61,7 @@ vi.mock('next/navigation', () => ({
       runtime.push(url)
     },
     replace: (url: string, options: unknown) => {
-      runtime.events.push(`replace:${url}`)
+      runtime.events.push(`router-replace:${url}`)
       runtime.replace(url, options)
     },
   }),
@@ -174,8 +174,15 @@ beforeEach(() => {
   runtime.acknowledgeRestore.mockClear()
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('Pixiv Phase 2 runtime ownership', () => {
   it('checkpoints the outgoing view before a canonical filter transition', () => {
+    vi.spyOn(window.history, 'replaceState').mockImplementation((_state, _title, url) => {
+      runtime.events.push(`replace:${url}`)
+    })
     render(<PixivPage />)
     fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'weekly' } })
 

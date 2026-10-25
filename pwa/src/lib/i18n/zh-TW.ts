@@ -19,6 +19,8 @@ const zhTW: Record<string, string> = {
   'pixiv.userWorks': '作品',
   'pixiv.userBookmarks': '書籤',
   'pixiv.noBookmarks': '尚無書籤。',
+  'pixiv.addBookmark': '加入書籤',
+  'pixiv.removeBookmark': '移除書籤',
   'pixiv.collectionCreate': '建立作者作品集',
   'pixiv.collectionOpen': '開啟作品集',
   'pixiv.collectionSync': '同步新作品',

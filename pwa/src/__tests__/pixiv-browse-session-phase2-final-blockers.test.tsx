@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type SessionItem =
   | { kind: 'illust'; illust: Record<string, unknown> }
@@ -30,8 +30,12 @@ const testState = vi.hoisted(() => {
   const updateView = vi.fn()
   const acknowledgeRestore = vi.fn()
   return {
+    // Router calls; same-page identity commits must not reach these.
     push: vi.fn(),
     replace: vi.fn(),
+    // window.history writes (commitBrowseUrl).
+    pushState: vi.fn(),
+    replaceState: vi.fn(),
     checkpoint,
     loadMore,
     refresh,
@@ -184,6 +188,8 @@ function user(id: number): SessionItem {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.spyOn(window.history, 'pushState').mockImplementation(testState.pushState)
+  vi.spyOn(window.history, 'replaceState').mockImplementation(testState.replaceState)
   testState.search = ''
   testState.gridProps = undefined
   testState.gridHistory = []
@@ -204,6 +210,10 @@ beforeEach(() => {
   Object.defineProperty(window, 'scrollY', { configurable: true, value: 100 })
   window.scrollTo = vi.fn()
   window.scrollBy = vi.fn()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('Pixiv Phase 2 final blockers', () => {
@@ -347,12 +357,14 @@ describe('Pixiv Phase 2 final blockers', () => {
       render(<PixivPage />)
       transition()
 
-      const used = expectedMethod === 'push' ? testState.push : testState.replace
-      const unused = expectedMethod === 'push' ? testState.replace : testState.push
+      const used = expectedMethod === 'push' ? testState.pushState : testState.replaceState
+      const unused = expectedMethod === 'push' ? testState.replaceState : testState.pushState
 
       expect(testState.checkpoint).toHaveBeenCalledTimes(1)
       expect(used).toHaveBeenCalledTimes(1)
       expect(unused).not.toHaveBeenCalled()
+      expect(testState.push).not.toHaveBeenCalled()
+      expect(testState.replace).not.toHaveBeenCalled()
       expect(testState.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(
         used.mock.invocationCallOrder[0],
       )

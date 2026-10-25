@@ -19,6 +19,8 @@ const zhCN: Record<string, string> = {
   'pixiv.userWorks': '作品',
   'pixiv.userBookmarks': '书签',
   'pixiv.noBookmarks': '暂无书签。',
+  'pixiv.addBookmark': '添加书签',
+  'pixiv.removeBookmark': '移除书签',
   'pixiv.collectionCreate': '创建作者作品集',
   'pixiv.collectionOpen': '打开作品集',
   'pixiv.collectionSync': '同步新作品',

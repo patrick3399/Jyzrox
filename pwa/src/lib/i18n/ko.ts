@@ -19,6 +19,8 @@ const ko: Record<string, string> = {
   'pixiv.userWorks': '작품',
   'pixiv.userBookmarks': '북마크',
   'pixiv.noBookmarks': '북마크가 없습니다.',
+  'pixiv.addBookmark': '북마크에 추가',
+  'pixiv.removeBookmark': '북마크 해제',
   'pixiv.collectionCreate': '작가 작품집 만들기',
   'pixiv.collectionOpen': '작품집 열기',
   'pixiv.collectionSync': '새 작품 동기화',
