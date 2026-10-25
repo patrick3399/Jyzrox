@@ -335,9 +335,16 @@ function BrowsePage() {
   )
   useEffect(() => {
     if (!browseUserId || items.length !== 0 || !state.hasMore || state.status !== 'idle') return
-    // Favorites requires credentials. Deferring one task lets the coordinator's
-    // restore effect hydrate an existing snapshot before a seed request races it.
+    // Favorites requires credentials.
     if (tab === 'favorites' && !ehConfigured) return
+    // The kernel is inert until the browse-tab-scope claim resolves (>= 32 ms
+    // after every mount): it publishes 'loading' and ignores loadMore, so this
+    // effect cannot seed during that window. It does run in the commit where the
+    // claim flips `ready`. The kernel restores the snapshot in a layout effect
+    // of that commit, but this passive effect runs before the HYDRATE re-render
+    // and still sees the empty buffer. Deferring one task lets that re-render
+    // clear the timer; without it back-navigation fetches page one again next
+    // to the restored snapshot.
     const timer = setTimeout(() => void loadMore(), 0)
     return () => clearTimeout(timer)
   }, [browseUserId, ehConfigured, items.length, loadMore, seedKey, state.hasMore, state.status, tab])
@@ -644,7 +651,7 @@ function BrowsePage() {
   const clearSearch = useCallback(() => {
     setInputValue('')
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    actions.reset()
+    actions.clearSearch()
   }, [actions])
 
   const captureAnchor = useCallback(
@@ -657,7 +664,12 @@ function BrowsePage() {
               return !!rect && rect.bottom > 0
             })
           : items[fallbackIndex]
-      const gallery = preferred ?? listAnchor
+      // A picked gallery that is not rendered (open-random over a virtualized
+      // list) has no element to measure; anchoring on it would store offset 0 and
+      // scroll it to the top of the viewport on back. Keep the visible position.
+      const preferredRendered =
+        preferred && itemElementsRef.current.has(preferred.gid) ? preferred : undefined
+      const gallery = preferredRendered ?? listAnchor
       const element = gallery ? itemElementsRef.current.get(gallery.gid) : null
       return {
         itemId: gallery?.gid ?? null,
@@ -840,7 +852,7 @@ function BrowsePage() {
   }, [actions, imageSearchCovers, imageSearchExpunged, imageSearchFile, imageSearchSimilar])
 
   // ── Keyboard grid navigation ────────────────────────────
-  const { focusedIndex } = useGridKeyboard({
+  const { focusedIndex, registerElement } = useGridKeyboard({
     totalItems: items.length,
     colCount,
     onEnter: (i) => {
@@ -1909,6 +1921,9 @@ function BrowsePage() {
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onRegisterElement={(index, element) => {
+                // Keyboard navigation needs the rendered cells too: without them
+                // its first arrow key cannot find the visible start and jumps to 0.
+                registerElement(index, element)
                 const gallery = items[index]
                 if (!gallery) return
                 if (element) itemElementsRef.current.set(gallery.gid, element)

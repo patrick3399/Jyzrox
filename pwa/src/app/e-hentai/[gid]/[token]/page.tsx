@@ -1,6 +1,14 @@
 'use client'
 
-import { Suspense, useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import {
+  Suspense,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+} from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useEhGallery, useEhGalleryPreviews, useEhGalleryComments } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
@@ -11,6 +19,8 @@ import { t } from '@/lib/i18n'
 import DOMPurify from 'dompurify'
 import { BackButton } from '@/components/BackButton'
 import { smartBack } from '@/lib/navBack'
+import { detailHotkey } from '@/lib/detailHotkeys'
+import { ehDetailViewKey, readEhDetailView, saveEhDetailView } from '@/lib/ehDetailView'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
 import useSWR from 'swr'
@@ -222,19 +232,32 @@ function EhGalleryDetail() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const { data: gallery, error: galleryError } = useEhGallery(gid, token)
-  const { data: previewData } = useEhGalleryPreviews(gid, token)
+  // An id that cannot name a gallery never fetches (the SWR keys are null), so
+  // without its own state the page would show the loading spinner forever.
+  const invalidId = !Number.isInteger(gid) || gid <= 0 || !token
+  const fetchGid = invalidId ? null : gid
+  const fetchToken = invalidId ? null : token
+
+  // What the page looked like the last time the user used it (loaded previews,
+  // comments, a scroll position banked on the way to the reader).
+  const viewKey = ehDetailViewKey(gid, token)
+  const [restoredView] = useState(() => readEhDetailView(viewKey))
+  const pendingScrollRef = useRef<number | null>(restoredView?.scrollY ?? null)
+  const restoredThumbCountRef = useRef(restoredView?.thumbCount ?? 0)
+
+  const { data: gallery, error: galleryError } = useEhGallery(fetchGid, fetchToken)
+  const { data: previewData } = useEhGalleryPreviews(fetchGid, fetchToken)
   const { data: relationships } = useSWR(
-    Number.isFinite(gid) && token ? ['eh/gallery-relationships', gid, token] : null,
+    !invalidId ? ['eh/gallery-relationships', gid, token] : null,
     () => api.eh.getGalleryRelationships(gid, token),
   )
 
   // Comments state
-  const [showComments, setShowComments] = useState(false)
-  const [showAllComments, setShowAllComments] = useState(false)
+  const [showComments, setShowComments] = useState(restoredView?.showComments ?? false)
+  const [showAllComments, setShowAllComments] = useState(restoredView?.showAllComments ?? false)
   const { data: commentsData, isLoading: commentsLoading } = useEhGalleryComments(
-    gid,
-    token,
+    fetchGid,
+    fetchToken,
     showComments,
   )
   const comments = commentsData?.comments
@@ -247,7 +270,7 @@ function EhGalleryDetail() {
   const [favoriteNote, setFavoriteNote] = useState('')
   const favRef = useRef<HTMLDivElement>(null)
   const { data: favoriteState, mutate: mutateFavoriteState } = useSWR(
-    Number.isFinite(gid) && token ? ['eh/favorite-state', gid, token] : null,
+    !invalidId ? ['eh/favorite-state', gid, token] : null,
     () => api.eh.getFavoriteState(gid, token),
   )
 
@@ -265,11 +288,35 @@ function EhGalleryDetail() {
   } | null>(null)
 
   // Load More previews state
-  const [extraPreviews, setExtraPreviews] = useState<Record<string, string>>({})
-  const [hasMore, setHasMore] = useState(true)
+  const [extraPreviews, setExtraPreviews] = useState<Record<string, string>>(
+    () => restoredView?.extraPreviews ?? {},
+  )
+  const [hasMore, setHasMore] = useState(restoredView?.hasMore ?? true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [infiniteScroll, setInfiniteScroll] = useState(false) // enabled after first Load More
+  // enabled after first Load More
+  const [infiniteScroll, setInfiniteScroll] = useState(restoredView?.infiniteScroll ?? false)
   const sentinelRef = useRef<HTMLDivElement>(null)
+
+  // Keep the paginated previews and the UI state around them so that a remount
+  // (reader -> back) rebuilds the same page instead of the first batch only.
+  useEffect(() => {
+    if (invalidId) return
+    saveEhDetailView(viewKey, {
+      extraPreviews,
+      hasMore,
+      infiniteScroll,
+      showComments,
+      showAllComments,
+    })
+  }, [
+    extraPreviews,
+    hasMore,
+    infiniteScroll,
+    invalidId,
+    showAllComments,
+    showComments,
+    viewKey,
+  ])
 
   // Close fav picker on outside click
   useEffect(() => {
@@ -418,12 +465,34 @@ function EhGalleryDetail() {
     }
   }, [gallery])
 
+  // Leave for a page the user is expected to come back from (the reader, a
+  // related gallery, an uploader search). The scroll position is read here, at
+  // the moment of the action: Next scrolls to the top before unmount cleanups
+  // run, so a cleanup-time read would bank 0 (FE-T12).
+  const navigateAway = useCallback(
+    (href: string) => {
+      saveEhDetailView(viewKey, { scrollY: window.scrollY, thumbCount: previewThumbs.length })
+      router.push(href)
+    },
+    [previewThumbs.length, router, viewKey],
+  )
+
   const handleRead = useCallback(
     (startPage = 1) => {
-      router.push(`/e-hentai/read/${gid}/${token}?page=${startPage}`)
+      navigateAway(`/e-hentai/read/${gid}/${token}?page=${startPage}`)
     },
-    [router, gid, token],
+    [navigateAway, gid, token],
   )
+
+  // Put the page back where the user left it once the content that made it that
+  // tall has rendered again; applying it earlier would clamp to a shorter page.
+  useLayoutEffect(() => {
+    const savedY = pendingScrollRef.current
+    if (savedY === null || !gallery || previewThumbs.length < restoredThumbCountRef.current) return
+    pendingScrollRef.current = null
+    saveEhDetailView(viewKey, { scrollY: null })
+    window.scrollTo(0, savedY)
+  }, [gallery, previewThumbs.length, viewKey])
 
   const loadMorePreviews = useCallback(async () => {
     if (!gallery || loadingMore || !hasMore) return
@@ -465,46 +534,72 @@ function EhGalleryDetail() {
 
   // ── Keyboard navigation ──
 
+  // A popover or picker owns the keyboard while it is open: Escape closes it,
+  // and nothing else may open the reader or leave the page underneath it.
+  const overlayOpen = tagPopover !== null || showFavPicker
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (showFavPicker && e.key === 'Escape' && !e.defaultPrevented && !e.isComposing) {
         e.preventDefault()
-        router.push(`/e-hentai/read/${gid}/${token}?page=1`)
+        setShowFavPicker(false)
+        return
       }
-      if (e.key === 'ArrowUp' || e.key === 'Escape') {
-        e.preventDefault()
-        smartBack(router, '/e-hentai')
-      }
+      const action = detailHotkey(e)
+      if (!action || overlayOpen) return
+      e.preventDefault()
+      if (action === 'open') handleRead(1)
+      else smartBack(router, '/e-hentai')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [router, gid, token])
+  }, [handleRead, overlayOpen, router, showFavPicker])
 
   // ── Error / Loading ──
+  // Each of these renders without the page chrome that normally offers a way
+  // out, so each carries the same fixed back control as the loaded page.
+
+  if (invalidId) {
+    return (
+      <>
+        <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-red-400 text-lg font-semibold">{t('common.error')}</p>
+            <p className="text-sm text-vault-text-muted mt-1">{t('common.invalidId')}</p>
+          </div>
+        </div>
+        <BackButton fallback="/e-hentai" />
+      </>
+    )
+  }
 
   if (galleryError) {
     return (
-      <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-400 text-lg font-semibold">{t('library.failedToLoad')}</p>
-          <p className="text-sm text-vault-text-muted mt-1">{galleryError.message}</p>
-          <button
-            onClick={() => router.back()}
-            className="mt-4 px-4 py-2 bg-vault-card rounded text-sm hover:bg-vault-card-hover"
-          >
-            {t('reader.goBack')}
-          </button>
+      <>
+        <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-red-400 text-lg font-semibold">{t('library.failedToLoad')}</p>
+            <p className="text-sm text-vault-text-muted mt-1">{galleryError.message}</p>
+            <button
+              onClick={() => smartBack(router, '/e-hentai')}
+              className="mt-4 px-4 py-2 bg-vault-card rounded text-sm hover:bg-vault-card-hover"
+            >
+              {t('reader.goBack')}
+            </button>
+          </div>
         </div>
-      </div>
+        <BackButton fallback="/e-hentai" />
+      </>
     )
   }
 
   if (!gallery) {
     return (
-      <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
-        <LoadingSpinner />
-      </div>
+      <>
+        <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
+          <LoadingSpinner />
+        </div>
+        <BackButton fallback="/e-hentai" />
+      </>
     )
   }
 
@@ -578,7 +673,7 @@ function EhGalleryDetail() {
                 <button
                   type="button"
                   onClick={() =>
-                    router.push(
+                    navigateAway(
                       `/e-hentai?q=${encodeURIComponent(`uploader:${gallery.uploader.includes(' ') ? `"${gallery.uploader}"` : gallery.uploader}`)}`,
                     )
                   }
@@ -701,7 +796,7 @@ function EhGalleryDetail() {
                 <button
                   type="button"
                   onClick={() =>
-                    router.push(`/e-hentai/${parentRelationship.gid}/${parentRelationship.token}`)
+                    navigateAway(`/e-hentai/${parentRelationship.gid}/${parentRelationship.token}`)
                   }
                   className="text-vault-accent hover:underline"
                 >
@@ -716,7 +811,7 @@ function EhGalleryDetail() {
                   <button
                     key={`${version.gid}-${version.token}`}
                     type="button"
-                    onClick={() => router.push(`/e-hentai/${version.gid}/${version.token}`)}
+                    onClick={() => navigateAway(`/e-hentai/${version.gid}/${version.token}`)}
                     className="text-vault-accent hover:underline"
                   >
                     {version.title || `Gallery ${version.gid}`}

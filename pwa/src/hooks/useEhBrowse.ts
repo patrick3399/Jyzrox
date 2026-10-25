@@ -90,16 +90,24 @@ export type EhHistoryMode = BrowseHistoryMode
 
 /** Which identity changes are worth a history entry.
  *
- *  A tab is a place the user navigated to, so it must be reachable by back: the
- *  browse list has no back FAB, and on mobile the edge swipe is the only back
- *  affordance, so collapsing popular -> favorites into one entry means backing
- *  out of E-Hentai entirely instead of stepping back a tab.
+ *  A surface (Popular, Latest, a query search, Favorites, Toplist, image
+ *  results) is a place the user navigated to, so it must be reachable by back:
+ *  the browse list has no back FAB, and on mobile the edge swipe is the only
+ *  back affordance, so collapsing popular -> favorites into one entry means
+ *  backing out of E-Hentai entirely instead of stepping back a surface.
  *
- *  Filters inside a tab are not places. Their controls stay on screen, and
+ *  The comparison is on the canonical surface, not on `tab`: Latest and a query
+ *  search both live on `tab: 'search'` but are different result sets, and
+ *  treating them as one made Popular -> Latest -> "foo" overwrite the Latest
+ *  entry.
+ *
+ *  Filters inside a surface are not places. Their controls stay on screen, and
  *  banking an entry per favourite-category pill or per advanced-search checkbox
  *  would make leaving the section take one swipe per pill the user touched. */
 function historyModeFor(previous: EhBrowseState, next: EhBrowseState): EhHistoryMode {
-  return previous.tab === next.tab ? 'replace' : 'push'
+  return canonicalEhIdentity(previous).surface === canonicalEhIdentity(next).surface
+    ? 'replace'
+    : 'push'
 }
 
 export function useEhBrowse(scopeInput?: EhBrowseScope) {
@@ -149,9 +157,11 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
 
   const fetchPage = useCallback(
     async (identity: typeof canonicalIdentity, cursor: Cursor, signal: AbortSignal) => {
-      if (!scopeReady) {
-        return { items: [], cursor: null, hasMore: false, total: 0 }
-      }
+      // Defensive only: the kernel does not issue requests while `ready` is
+      // false. If one ever slipped through, committing a fabricated empty page
+      // as a real result would show "No results" and stop pagination
+      // (hasMore false), so fail loudly instead.
+      if (!scopeReady) throw new Error('E-Hentai browse scope is not ready')
       const plan = buildParamsFromIdentity(identity, cursor)
       // The kernel's total is number | null. A source payload that omits the
       // field must degrade to "unknown", never to undefined: consumers guard
@@ -313,29 +323,63 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
     stateRef.current = returnedState
   })
 
+  // Identity key of the history entry this page instance pushed and is still
+  // sitting on. Lets "Clear search" step back over an entry it banked itself
+  // instead of stacking a duplicate of the surface the user came from. Null
+  // whenever the current entry's origin is unknown (deep link, reload, history
+  // moved by the browser).
+  const pushedEntryKeyRef = useRef<string | null>(null)
+  const writeHistory = useCallback(
+    (next: EhBrowseState, previous: EhBrowseState, historyMode?: EhHistoryMode) => {
+      const mode = historyMode ?? historyModeFor(previous, next)
+      const params = identityToUrlParams(next).toString()
+      commitBrowseUrl(params ? `/e-hentai?${params}` : '/e-hentai', mode)
+      if (mode === 'push' || pushedEntryKeyRef.current === queryKey(previous)) {
+        // A replace inside the pushed entry keeps it pushed under its new key.
+        pushedEntryKeyRef.current = queryKey(next)
+      } else {
+        pushedEntryKeyRef.current = null
+      }
+    },
+    [],
+  )
+
+  // Save the view of the identity being left. `scrollY` is read live here, at
+  // the moment the user acts, because Next's router resets it before unmount
+  // cleanups run (FE-T12).
+  const checkpointCurrentView = useCallback(() => {
+    const current = stateRef.current
+    const liveView = liveViewRef.current
+    const liveAnchor = {
+      itemId: liveView?.anchor?.itemId ?? current.anchor?.itemId ?? null,
+      offset: liveView?.anchor?.offset ?? current.anchor?.offset ?? 0,
+      scrollY: window.scrollY,
+    }
+    sessionCheckpoint({ anchor: liveAnchor, layout: liveView?.layout ?? current.layout }, retention)
+  }, [retention, sessionCheckpoint])
+
   const commitIdentity = useCallback(
     (actions: Action[], historyMode?: EhHistoryMode) => {
-      let preview = identityStateRef.current
+      const previous = identityStateRef.current
+      let preview = previous
       for (const action of actions) preview = reducer(preview, action)
-      if (queryKey(preview) === queryKey(identityStateRef.current)) {
+      if (queryKey(preview) === queryKey(previous)) {
         for (const action of actions) identityDispatch(action)
+        // Panel expansion is excluded from the identity key, but it is still
+        // serialized into the URL (`adv_open`). Without this write the entry
+        // keeps whatever the panel looked like when it was created, so after
+        // reader -> back the panel is open or closed depending on click history.
+        if (identityToUrlParams(preview).toString() !== identityToUrlParams(previous).toString()) {
+          writeHistory(preview, previous, 'replace')
+        }
         return
       }
-      const current = stateRef.current
-      const liveView = liveViewRef.current
-      const liveAnchor = {
-        itemId: liveView?.anchor?.itemId ?? current.anchor?.itemId ?? null,
-        offset: liveView?.anchor?.offset ?? current.anchor?.offset ?? 0,
-        scrollY: window.scrollY,
-      }
-      sessionCheckpoint({ anchor: liveAnchor, layout: liveView?.layout ?? current.layout }, retention)
+      checkpointCurrentView()
       cancelPending()
       for (const action of actions) identityDispatch(action)
-      const params = identityToUrlParams(preview).toString()
-      const url = params ? `/e-hentai?${params}` : '/e-hentai'
-      commitBrowseUrl(url, historyMode ?? historyModeFor(identityStateRef.current, preview))
+      writeHistory(preview, previous, historyMode)
     },
-    [cancelPending, retention, sessionCheckpoint],
+    [cancelPending, checkpointCurrentView, writeHistory],
   )
 
   const imageSessionCounterRef = useRef(0)
@@ -382,9 +426,12 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
           },
           { replayable: false, ttlMs: IMAGE_SESSION_TTL_MS },
         )
+        const previous = identityStateRef.current
+        // Results are a new surface like any other: replacing the entry the
+        // user came from made back leave E-Hentai instead of returning to it.
+        if (historyModeFor(previous, next) === 'push') checkpointCurrentView()
         identityDispatch({ type: 'SHOW_EXTERNAL_RESULTS', session: imageSession, items, total })
-        const params = identityToUrlParams(next).toString()
-        commitBrowseUrl(`/e-hentai?${params}`, 'replace')
+        writeHistory(next, previous)
       },
       setScroll: (scrollY: number) => {
         const current = liveViewRef.current
@@ -427,8 +474,30 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
         sessionCheckpoint(view, retention)
       },
       reset: () => commitIdentity([{ type: 'RESET' }], 'replace'),
+      /** Leave a query search. When this page pushed the search entry on top of
+       *  another surface, step back over it: popstate restores that surface and
+       *  its snapshot, and history does not grow a duplicate entry (replacing
+       *  instead left [popular, popular], so the first back did nothing). With no
+       *  such entry (deep link, reload) fall back to resetting in place. */
+      clearSearch: () => {
+        if (pushedEntryKeyRef.current === queryKey(identityStateRef.current)) {
+          pushedEntryKeyRef.current = null
+          window.history.back()
+          return
+        }
+        commitIdentity([{ type: 'RESET' }], 'replace')
+      },
     }),
-    [cancelPending, commitIdentity, retention, scopedStore, sessionCheckpoint, updateSessionView],
+    [
+      cancelPending,
+      checkpointCurrentView,
+      commitIdentity,
+      retention,
+      scopedStore,
+      sessionCheckpoint,
+      updateSessionView,
+      writeHistory,
+    ],
   )
 
   const compatibilityDispatch = useCallback(
@@ -465,6 +534,9 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
     }
     const next = { ...identityStateRef.current, ...identity }
     if (queryKey(identityStateRef.current) !== queryKey(next)) {
+      // The URL moved without this page writing it (browser back/forward, a
+      // deep link): whichever entry it is on now was not pushed by us.
+      pushedEntryKeyRef.current = null
       cancelPending()
       identityDispatch({ type: 'APPLY_IDENTITY', identity })
     }
