@@ -74,6 +74,39 @@ async def _discover(client: PixivClient, user_id: int, *, stop_at: str | None) -
         await asyncio.sleep(await get_typed_download_delay("pixiv", "pagination", 1000))
 
 
+async def _gallery_resume_anchor(session, *, user_id: int, owner_user_id: int) -> str | None:
+    """Return the newest stored work ID to stop incremental discovery at.
+
+    Only a ``complete`` gallery holds every work older than its newest one.
+    Works sync newest-first, so a run that died part-way keeps only the newest
+    works; anchoring on those would skip the older remainder for good.
+    """
+    existing_gallery_id = (
+        await session.execute(
+            select(Gallery.id).where(
+                Gallery.source == "pixiv",
+                Gallery.source_id == f"user:{user_id}",
+                Gallery.created_by_user_id == owner_user_id,
+                Gallery.deleted_at.is_(None),
+                Gallery.download_status == "complete",
+            )
+        )
+    ).scalar_one_or_none()
+    if not existing_gallery_id:
+        return None
+    latest_item = (
+        await session.execute(
+            select(GallerySourceItem.source_item_id)
+            .where(GallerySourceItem.gallery_id == existing_gallery_id)
+            .order_by(GallerySourceItem.source_position.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest_item and latest_item.startswith("pixiv:"):
+        return latest_item.split(":", 1)[1]
+    return None
+
+
 async def _reorder_author_gallery(gallery_id: int) -> None:
     """Apply published-desc/work-id-desc/page-asc ordering and repair progress."""
     async with AsyncSessionLocal() as session:
@@ -182,27 +215,7 @@ async def pixiv_collection_job(
                 sub = await session.get(Subscription, subscription_id) if subscription_id else None
                 stop_at = None if full_reconcile or not sub else sub.last_item_id
                 if not full_reconcile and not stop_at:
-                    existing_gallery_id = (
-                        await session.execute(
-                            select(Gallery.id).where(
-                                Gallery.source == "pixiv",
-                                Gallery.source_id == f"user:{user_id}",
-                                Gallery.created_by_user_id == owner_user_id,
-                                Gallery.deleted_at.is_(None),
-                            )
-                        )
-                    ).scalar_one_or_none()
-                    if existing_gallery_id:
-                        latest_item = (
-                            await session.execute(
-                                select(GallerySourceItem.source_item_id)
-                                .where(GallerySourceItem.gallery_id == existing_gallery_id)
-                                .order_by(GallerySourceItem.source_position.asc())
-                                .limit(1)
-                            )
-                        ).scalar_one_or_none()
-                        if latest_item and latest_item.startswith("pixiv:"):
-                            stop_at = latest_item.split(":", 1)[1]
+                    stop_at = await _gallery_resume_anchor(session, user_id=user_id, owner_user_id=owner_user_id)
             works, exhaustive = await _discover(client, user_id, stop_at=stop_at)
             if full_reconcile and not exhaustive:
                 raise RuntimeError("Full Pixiv catalogue traversal did not complete")

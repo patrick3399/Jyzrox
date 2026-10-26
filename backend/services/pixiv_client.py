@@ -170,12 +170,21 @@ class PixivClient:
 
     async def __aenter__(self) -> PixivClient:
         self._api = new_app_api()
-        await self._ensure_token()
+        try:
+            await self._ensure_token()
+        except BaseException:
+            await self.__aexit__()
+            raise
         self._img_http = _get_shared_img_http()
         return self
 
     async def __aexit__(self, *_) -> None:
-        pass  # shared client managed externally
+        # The image httpx client is shared and managed externally, but each
+        # pixivpy session is ours: an author sync opens one client per work,
+        # and unclosed sessions leak pooled sockets until "Too many open files".
+        api, self._api = self._api, None
+        if api is not None:
+            api.requests.close()
 
     def _api_or_raise(self) -> AppPixivAPI:
         """Return the initialized pixivpy client."""

@@ -120,3 +120,52 @@ async def test_discover_propagates_rate_limit_instead_of_returning_a_partial_cat
 
     with pytest.raises(PixivRateLimitError):
         await _discover(_Throttled({}), 1960050, stop_at=None)
+
+
+async def _author_gallery(db_session, *, download_status: str, item_ids: list[str]):
+    from datetime import datetime
+
+    from db.models import Gallery, GallerySourceItem
+
+    gallery = Gallery(
+        source="pixiv",
+        source_id="user:2587756",
+        title="author",
+        created_by_user_id=1,
+        download_status=download_status,
+    )
+    db_session.add(gallery)
+    await db_session.flush()
+    # Newest first, as a newest-first sync that died part-way leaves them.
+    for position, item_id in enumerate(item_ids, start=1):
+        db_session.add(
+            GallerySourceItem(
+                gallery_id=gallery.id,
+                source_item_id=f"pixiv:{item_id}",
+                source_position=position,
+                published_at=datetime(2026, 10, 30 - position, tzinfo=UTC),
+            )
+        )
+    await db_session.commit()
+    return gallery
+
+
+@pytest.mark.asyncio
+async def test_incremental_anchor_after_partial_sync_is_none_so_older_works_are_backfilled(db_session):
+    """A sync that died at 370/547 keeps only the newest works. Anchoring the
+    next incremental run on the newest one stops discovery immediately, skips
+    the ~175 older works forever and then marks the gallery complete."""
+    from worker.pixiv_collection import _gallery_resume_anchor
+
+    await _author_gallery(db_session, download_status="partial", item_ids=["300", "200"])
+
+    assert await _gallery_resume_anchor(db_session, user_id=2587756, owner_user_id=1) is None
+
+
+@pytest.mark.asyncio
+async def test_incremental_anchor_after_complete_sync_is_the_newest_work(db_session):
+    from worker.pixiv_collection import _gallery_resume_anchor
+
+    await _author_gallery(db_session, download_status="complete", item_ids=["300", "200"])
+
+    assert await _gallery_resume_anchor(db_session, user_id=2587756, owner_user_id=1) == "300"

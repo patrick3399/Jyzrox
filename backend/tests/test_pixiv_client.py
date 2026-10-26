@@ -765,3 +765,38 @@ class TestRateLimit:
             result = await client._call(lambda: None)
 
         assert result == {"illust": {"id": 1}}
+
+
+class TestClientLifecycle:
+    async def test_exit_closes_pixivpy_session_so_per_work_clients_do_not_leak_sockets(self):
+        """An author sync opens one PixivClient per work. Leaving each
+        pixivpy session open leaked sockets until the worker hit its
+        1024-fd limit ("Too many open files") ~370 works in."""
+        from services.pixiv_client import PixivClient
+
+        api = _make_mock_api()
+        with (
+            patch("services.pixiv_client.new_app_api", return_value=api),
+            patch.object(PixivClient, "_ensure_token", new_callable=AsyncMock),
+        ):
+            async with PixivClient("token") as client:
+                assert client._api is api
+
+        api.requests.close.assert_called_once_with()
+        assert client._api is None
+
+    async def test_enter_token_failure_closes_pixivpy_session(self):
+        from services.pixiv_client import PixivClient
+
+        api = _make_mock_api()
+        with (
+            patch("services.pixiv_client.new_app_api", return_value=api),
+            patch.object(
+                PixivClient, "_ensure_token", new_callable=AsyncMock, side_effect=PermissionError("bad token")
+            ),
+        ):
+            with pytest.raises(PermissionError):
+                async with PixivClient("token"):
+                    pass
+
+        api.requests.close.assert_called_once_with()
