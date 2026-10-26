@@ -34,6 +34,15 @@ function toReaderImage(img: BrowseImage, pageNum: number): FavoriteReaderImage {
   }
 }
 
+function favoritesGridHref(source?: string, category?: string): string {
+  // /images shows favourites unless `favorited=false`, so only the filters go along.
+  const params = new URLSearchParams()
+  if (source) params.set('source', source)
+  if (category) params.set('category', category)
+  const query = params.toString()
+  return query ? `/images?${query}` : '/images'
+}
+
 export default function FavoriteReaderPage() {
   return (
     <Suspense>
@@ -48,6 +57,9 @@ function FavoriteReaderInner() {
   const imageIdParam = Number(searchParams.get('image_id')) || null
   const sourceParam = searchParams.get('source') || undefined
   const categoryParam = searchParams.get('category') || undefined
+  // The favourites grid on /images launches this reader with its filters;
+  // every exit returns there when history has nothing to go back to.
+  const backHref = favoritesGridHref(sourceParam, categoryParam)
 
   const [images, setImages] = useState<FavoriteReaderImage[] | null>(null)
   const originalImageByPageRef = useRef<Map<number, BrowseImage>>(new Map())
@@ -109,7 +121,7 @@ function FavoriteReaderInner() {
 
   if (error) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
@@ -120,7 +132,7 @@ function FavoriteReaderInner() {
 
   if (!images) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">{t('reader.loadingFavoriteImages', { loaded })}</p>
@@ -131,7 +143,7 @@ function FavoriteReaderInner() {
 
   if (images.length === 0) {
     return (
-      <ReaderFallbackScreen>
+      <ReaderFallbackScreen backHref={backHref}>
         <p className="text-sm opacity-60">{t('reader.noFavoriteImages')}</p>
       </ReaderFallbackScreen>
     )
@@ -152,6 +164,7 @@ function FavoriteReaderInner() {
         initialPage={Math.min(targetPage, images.length)}
         initialFavoritedImageIds={images.map((img) => img.id)}
         onHideImage={handleHideImage}
+        backHref={backHref}
       />
     </ErrorBoundary>
   )

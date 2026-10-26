@@ -18,19 +18,23 @@ import EhReaderPage from '@/app/e-hentai/read/[gid]/[token]/page'
  *
  * The control must also work when history has nothing to go back to (shared
  * link, new tab, PWA relaunch): a bare `router.back()` is a no-op there, so it
- * resolves through `smartBack` to the page's own detail route instead.
+ * resolves through `smartBack` to the page's own parent route instead: the
+ * favourites grid (with its filters) for the favourites reader, the artist page
+ * for the artist reader, the detail page for Pixiv and E-Hentai. Reader gets the
+ * same route as `backHref` once it mounts.
  */
 
 const back = vi.fn()
 const push = vi.fn()
 const replace = vi.fn()
 const swr = vi.hoisted(() => ({ data: undefined as unknown, error: undefined as unknown }))
-const route = vi.hoisted(() => ({ gid: '123' }))
+const route = vi.hoisted(() => ({ gid: '123', search: '' }))
+const readerProps = vi.hoisted(() => ({ current: null as null | { backHref?: string } }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ back, push, replace }),
   useParams: () => ({ artistId: 'ehentai%3Asomeone', gid: route.gid, token: 'abc' }),
-  useSearchParams: () => new URLSearchParams(''),
+  useSearchParams: () => new URLSearchParams(route.search),
 }))
 
 vi.mock('@/lib/i18n', async (importOriginal) => ({
@@ -41,7 +45,10 @@ vi.mock('@/lib/i18n', async (importOriginal) => ({
 vi.mock('@/components/LocaleProvider', () => ({ useLocale: () => undefined }))
 
 vi.mock('@/components/Reader', () => ({
-  default: () => <div data-testid="reader" />,
+  default: (props: { backHref?: string }) => {
+    readerProps.current = props
+    return <div data-testid="reader" />
+  },
 }))
 
 vi.mock('@/components/ErrorBoundary', () => ({
@@ -77,6 +84,22 @@ const mocked = api as unknown as {
 }
 
 const pending = () => new Promise(() => {})
+
+const ARTIST_HREF = '/artists/ehentai%3Asomeone'
+
+const browseImage = {
+  id: 3,
+  gallery_id: 1,
+  page_num: 1,
+  width: 100,
+  height: 140,
+  file_path: '/media/cas/a.jpg',
+  thumb_path: '/media/thumbs/a/thumb_160.webp',
+  media_type: 'image',
+  thumbhash: null,
+  source: 'ehentai',
+  source_id: '123',
+}
 
 let historyLength = 1
 
@@ -121,6 +144,8 @@ describe('reader escape hatch on the other reader routes', () => {
     swr.data = undefined
     swr.error = undefined
     route.gid = '123'
+    route.search = ''
+    readerProps.current = null
   })
 
   afterEach(() => {
@@ -134,7 +159,7 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<FavoriteReaderPage />)
 
     await screen.findByText('reader.loadingFavoriteImages')
-    expectWayBack('/library')
+    expectWayBack('/images')
   })
 
   it('favourites reader offers a way back when the favourites fail to load', async () => {
@@ -143,7 +168,7 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<FavoriteReaderPage />)
 
     await screen.findByText('boom')
-    expectWayBack('/library')
+    expectWayBack('/images')
   })
 
   it('favourites reader offers a way back when there are no favourites', async () => {
@@ -157,7 +182,32 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<FavoriteReaderPage />)
 
     await screen.findByText('reader.noFavoriteImages')
-    expectWayBack('/library')
+    expectWayBack('/images')
+  })
+
+  it('favourites reader keeps the grid filters on its way back with a one-entry history', async () => {
+    route.search = 'image_id=3&start=2&source=pixiv&category=Manga'
+    mocked.library.browseImages.mockReturnValue(pending())
+
+    render(<FavoriteReaderPage />)
+
+    await screen.findByText('reader.loadingFavoriteImages')
+    expectWayBack('/images?source=pixiv&category=Manga')
+  })
+
+  it('favourites reader hands Reader the favourites grid as its exit instead of the /library default', async () => {
+    route.search = 'source=pixiv'
+    mocked.library.browseImages.mockResolvedValue({
+      images: [browseImage],
+      next_cursor: null,
+      has_next: false,
+      favorited_image_ids: [3],
+    })
+
+    render(<FavoriteReaderPage />)
+
+    await screen.findByTestId('reader')
+    expect(readerProps.current?.backHref).toBe('/images?source=pixiv')
   })
 
   it('artist reader offers a way back while the artist images are loading', async () => {
@@ -166,7 +216,7 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<ArtistReaderPage />)
 
     await screen.findByText('reader.loadingImages')
-    expectWayBack('/library')
+    expectWayBack(ARTIST_HREF)
   })
 
   it('artist reader offers a way back when the artist images fail to load', async () => {
@@ -175,7 +225,20 @@ describe('reader escape hatch on the other reader routes', () => {
     render(<ArtistReaderPage />)
 
     await screen.findByText('boom')
-    expectWayBack('/library')
+    expectWayBack(ARTIST_HREF)
+  })
+
+  it('artist reader hands Reader the artist page as its exit instead of the /library default', async () => {
+    mocked.library.getArtistImages.mockResolvedValue({
+      images: [{ ...browseImage, gallery_source: 'ehentai', gallery_source_id: '123' }],
+      total: 1,
+      has_next: false,
+    })
+
+    render(<ArtistReaderPage />)
+
+    await screen.findByTestId('reader')
+    expect(readerProps.current?.backHref).toBe(ARTIST_HREF)
   })
 
   it('pixiv reader offers a way back while the illustration is loading', async () => {

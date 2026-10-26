@@ -1,10 +1,11 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
-import { decodeRouteSegment } from '@/lib/galleryRoutes'
+import { decodeRouteSegment, galleryHref } from '@/lib/galleryRoutes'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ReaderFallbackScreen } from '@/components/Reader/ReaderFallbackScreen'
 import { t } from '@/lib/i18n'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { useGalleryEventRefresh } from '@/hooks/useGalleryEventRefresh'
@@ -26,10 +27,12 @@ interface LoadedData {
 }
 
 export default function ReaderPage() {
-  const router = useRouter()
   const params = useParams<{ source: string; sourceId: string }>()
   const source = decodeRouteSegment(params.source)
   const sourceId = decodeRouteSegment(params.sourceId)
+  // Every exit, Reader's own included, leaves for the gallery's detail page
+  // when history has nothing to go back to.
+  const backHref = source && sourceId ? galleryHref(source, sourceId) : '/library'
   const searchParams = useSearchParams()
   const urlPage = parseInt(searchParams.get('page') ?? '', 10) || 0
 
@@ -167,37 +170,23 @@ export default function ReaderPage() {
 
   if (error) {
     return (
-      <div className="relative flex h-screen w-full items-center justify-center bg-black text-white">
-        <button
-          onClick={() => router.back()}
-          title={t('reader.goBack')}
-          className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl"
-        >
-          ✕
-        </button>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
   if (!data) {
     return (
-      <div className="relative flex h-screen w-full items-center justify-center bg-black text-white">
-        <button
-          onClick={() => router.back()}
-          title={t('reader.goBack')}
-          className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl"
-        >
-          ✕
-        </button>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">{t('reader.loadingGallery')}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
@@ -207,19 +196,12 @@ export default function ReaderPage() {
   // The bounded polling/WS refresh above will keep refreshing until images arrive.
   if (images.length === 0 && isGalleryInProgress(gallery.download_status)) {
     return (
-      <div className="relative flex h-screen w-full items-center justify-center bg-black text-white">
-        <button
-          onClick={() => router.back()}
-          title={t('reader.goBack')}
-          className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl"
-        >
-          ✕
-        </button>
+      <ReaderFallbackScreen backHref={backHref}>
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-70">{t('reader.downloadingWait')}</p>
         </div>
-      </div>
+      </ReaderFallbackScreen>
     )
   }
 
@@ -256,6 +238,7 @@ export default function ReaderPage() {
         }
         initialPage={initialPage}
         initialFavoritedImageIds={data.favoritedImageIds}
+        backHref={backHref}
       />
     </ErrorBoundary>
   )
