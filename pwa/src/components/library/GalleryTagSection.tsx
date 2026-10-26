@@ -18,6 +18,8 @@ type GalleryTagSectionProps = {
   onUpdateTag: (tag: string, action: 'add' | 'remove') => void
   /** Tag edits are member-only; viewers get the read-only list. */
   canEdit?: boolean
+  /** Told when the tag search popover opens or closes, so page-level shortcuts can pause. */
+  onPopoverOpenChange?: (open: boolean) => void
 }
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
@@ -55,15 +57,20 @@ export function GalleryTagSection({
   tagData,
   onUpdateTag,
   canEdit = true,
+  onPopoverOpenChange,
 }: GalleryTagSectionProps) {
   const router = useRouter()
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
   const [editingTags, setEditingTags] = useState(false)
-  const [tagPopover, setTagPopover] = useState<{
+  const [tagPopover, setTagPopoverState] = useState<{
     anchor: HTMLElement
     tag: string
     source: string
   } | null>(null)
+  const setTagPopover = (next: typeof tagPopover) => {
+    setTagPopoverState(next)
+    onPopoverOpenChange?.(next !== null)
+  }
   const manualTagSet = useMemo(
     () =>
       new Set(

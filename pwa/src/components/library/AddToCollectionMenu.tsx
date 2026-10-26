@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, FolderHeart, Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -29,6 +29,8 @@ interface AddToCollectionMenuProps {
   /** Accessible name for an icon-only trigger. */
   ariaLabel?: string
   disabled?: boolean
+  /** Told when the sheet opens or closes, e.g. so page-level shortcuts pause. */
+  onOpenChange?: (open: boolean) => void
 }
 
 /**
@@ -44,23 +46,37 @@ export function AddToCollectionMenu({
   children,
   ariaLabel,
   disabled,
+  onOpenChange,
 }: AddToCollectionMenuProps) {
   const singleMode = galleryId !== undefined
-  const [open, setOpen] = useState(false)
+  const [open, setOpenState] = useState(false)
   const [newName, setNewName] = useState('')
   const [busyId, setBusyId] = useState<number | 'new' | null>(null)
 
   const { data, isLoading } = useCollections(open, galleryId)
   const collections = data?.collections ?? []
 
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setOpenState(next)
+      onOpenChange?.(next)
+    },
+    [onOpenChange],
+  )
+
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key !== 'Escape') return
+      // This Escape dismisses the sheet and nothing else. Detail pages listen
+      // on window for the same key to go back; document listeners run first.
+      e.preventDefault()
+      e.stopPropagation()
+      setOpen(false)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [open])
+  }, [open, setOpen])
 
   const close = () => {
     setOpen(false)

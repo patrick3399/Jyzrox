@@ -212,4 +212,52 @@ describe('AddToCollectionMenu', () => {
       collection_id: 7,
     })
   })
+
+  // Regression: the sheet closed on a document-level Escape, but the event went
+  // on to the detail page's window-level shortcut, which took the same Escape
+  // as "go back" — closing the sheet also left the page.
+  it('test_addToCollectionMenu_escapeWhileOpen_closesWithoutReachingWindowShortcuts', () => {
+    render(<AddToCollectionMenu galleryId={5} />)
+    openMenu()
+    const windowSaw = vi.fn()
+    window.addEventListener('keydown', windowSaw)
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    try {
+      fireEvent(document.body, event)
+    } finally {
+      window.removeEventListener('keydown', windowSaw)
+    }
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(windowSaw).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('test_addToCollectionMenu_escapeWhileClosed_leavesTheKeyAlone', () => {
+    render(<AddToCollectionMenu galleryId={5} />)
+    const windowSaw = vi.fn()
+    window.addEventListener('keydown', windowSaw)
+    try {
+      fireEvent.keyDown(document.body, { key: 'Escape' })
+    } finally {
+      window.removeEventListener('keydown', windowSaw)
+    }
+
+    expect(windowSaw).toHaveBeenCalledTimes(1)
+  })
+
+  it('test_addToCollectionMenu_openAndClose_reportedThroughOnOpenChange', () => {
+    const onOpenChange = vi.fn()
+    render(<AddToCollectionMenu galleryId={5} onOpenChange={onOpenChange} />)
+
+    openMenu()
+    expect(onOpenChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }))
+    expect(onOpenChange).toHaveBeenLastCalledWith(false)
+
+    openMenu()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(onOpenChange).toHaveBeenLastCalledWith(false)
+  })
 })

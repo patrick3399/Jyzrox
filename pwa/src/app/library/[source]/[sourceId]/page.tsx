@@ -15,6 +15,8 @@ import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import { galleryStatusAction } from '@/lib/galleryUtils'
+import { detailHotkey } from '@/lib/detailHotkeys'
+import { smartBack } from '@/lib/navBack'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
 import { ThumbPlaceholder } from '@/components/library/ThumbPlaceholder'
 import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
@@ -116,6 +118,8 @@ export default function GalleryDetailPage() {
   const [moreOpen, setMoreOpen] = useState(false)
   const closeMoreSheet = useCallback(() => setMoreOpen(false), [])
   const [infoOpen, setInfoOpen] = useState(false)
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false)
+  const [collectionMenuOpen, setCollectionMenuOpen] = useState(false)
 
   const {
     data: gallery,
@@ -346,33 +350,34 @@ export default function GalleryDetailPage() {
     [gallery, mutateGallery, refetchTagData],
   )
 
+  // Select mode, sheets, menus and image panels own the keyboard while open:
+  // nothing may open the reader or leave the page underneath them. Overlays
+  // that close on Escape also mark it handled, because the close can commit
+  // (and re-bind this listener without the overlay) before the key gets here.
+  const overlayOpen =
+    selectMode ||
+    moreOpen ||
+    tagPopoverOpen ||
+    collectionMenuOpen ||
+    imageMenu !== null ||
+    similarImageId !== null ||
+    saucenaoImageId !== null
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement
-      )
+      const action = detailHotkey(e)
+      if (!action || overlayOpen) return
+      if (action === 'open') {
+        if (!gallery?.source || !gallery?.source_id) return
+        e.preventDefault()
+        router.push(readerHref(gallery.source, gallery.source_id))
         return
-      if (selectMode || moreOpen) return
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        if (gallery?.source && gallery?.source_id) {
-          router.push(readerHref(gallery.source, gallery.source_id))
-        }
       }
-      if (e.key === 'ArrowUp' || e.key === 'Escape') {
-        e.preventDefault()
-        if (history.length > 1) {
-          router.back()
-        } else {
-          router.push('/library')
-        }
-      }
+      e.preventDefault()
+      smartBack(router, '/library')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [gallery?.source, gallery?.source_id, router, selectMode, moreOpen])
+  }, [gallery?.source, gallery?.source_id, router, overlayOpen])
 
   // `importing` (link pages registered, hash pass running) is in progress too.
   const isDownloading =
@@ -844,18 +849,21 @@ export default function GalleryDetailPage() {
 
   if (galleryError) {
     return (
-      <div className="min-h-screen bg-vault-bg flex items-center justify-center">
-        <div className="bg-red-900/30 border border-red-700 rounded-lg p-6 text-red-400 max-w-md text-center">
-          <p className="font-semibold mb-2">{t('library.failedToLoad')}</p>
-          <p className="text-sm">{galleryError.message}</p>
-          <button
-            onClick={() => router.back()}
-            className="mt-4 px-4 py-2 bg-vault-input border border-vault-border rounded text-vault-text-secondary text-sm hover:text-vault-text transition-colors"
-          >
-            {t('common.goBack')}
-          </button>
+      <>
+        <div className="min-h-screen bg-vault-bg flex items-center justify-center">
+          <div className="bg-red-900/30 border border-red-700 rounded-lg p-6 text-red-400 max-w-md text-center">
+            <p className="font-semibold mb-2">{t('library.failedToLoad')}</p>
+            <p className="text-sm">{galleryError.message}</p>
+            <button
+              onClick={() => smartBack(router, '/library')}
+              className="mt-4 px-4 py-2 bg-vault-input border border-vault-border rounded text-vault-text-secondary text-sm hover:text-vault-text transition-colors"
+            >
+              {t('common.goBack')}
+            </button>
+          </div>
         </div>
-      </div>
+        <BackButton fallback="/library" />
+      </>
     )
   }
 
@@ -1132,6 +1140,7 @@ export default function GalleryDetailPage() {
             <AddToCollectionMenu
               galleryId={gallery.id}
               ariaLabel={t('collections.addToCollection')}
+              onOpenChange={setCollectionMenuOpen}
               className={`${ACTION_BUTTON_CLASS} bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent`}
             >
               <FolderHeart size={16} />
@@ -1292,6 +1301,7 @@ export default function GalleryDetailPage() {
         tagData={tagData}
         onUpdateTag={handleUpdateTag}
         canEdit={canEdit}
+        onPopoverOpenChange={setTagPopoverOpen}
       />
 
       {/* Image Thumbnails */}
