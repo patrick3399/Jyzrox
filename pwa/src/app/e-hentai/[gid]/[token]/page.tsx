@@ -22,8 +22,11 @@ import { smartBack } from '@/lib/navBack'
 import { detailHotkey } from '@/lib/detailHotkeys'
 import { ehDetailViewKey, readEhDetailView, saveEhDetailView } from '@/lib/ehDetailView'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
+import { useBrowseListPatcher } from '@/hooks/useBrowseListPatcher'
+import { ehentaiBrowseAdapter, ehFavoritePatch, isEhGallery } from '@/lib/browse/ehentai'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
 import useSWR from 'swr'
+import type { EhGallery } from '@/lib/types'
 
 // ── Preview grid with scaled sprite offsets ─────────────────────────────
 
@@ -269,6 +272,13 @@ function EhGalleryDetail() {
   const [favoriteCategory, setFavoriteCategory] = useState<number | null>(null)
   const [favoriteNote, setFavoriteNote] = useState('')
   const favRef = useRef<HTMLDivElement>(null)
+  // Favourite changes reach the saved E-Hentai lists of this tab, so the
+  // Favorites list the user goes back to does not still show this gallery.
+  const patchEhLists = useBrowseListPatcher<EhGallery>({
+    sourceId: ehentaiBrowseAdapter.sourceId,
+    schemaVersion: ehentaiBrowseAdapter.schemaVersion,
+    validateItem: isEhGallery,
+  })
   const { data: favoriteState, mutate: mutateFavoriteState } = useSWR(
     !invalidId ? ['eh/favorite-state', gid, token] : null,
     () => api.eh.getFavoriteState(gid, token),
@@ -359,6 +369,7 @@ function EhGalleryDetail() {
         toast.success(t('browse.addedToFavorites', { favcat: String(favcat) }))
         setIsFavorited(true)
         setFavoriteCategory(favcat)
+        patchEhLists(ehFavoritePatch(gallery.gid, favcat))
         void mutateFavoriteState(
           { is_favorited: true, category: favcat, note: favoriteNote },
           false,
@@ -370,7 +381,7 @@ function EhGalleryDetail() {
         setFavSaving(false)
       }
     },
-    [favoriteNote, gallery, mutateFavoriteState],
+    [favoriteNote, gallery, mutateFavoriteState, patchEhLists],
   )
 
   const handleRemoveFavorite = useCallback(async () => {
@@ -382,6 +393,7 @@ function EhGalleryDetail() {
       setIsFavorited(false)
       setFavoriteCategory(null)
       setFavoriteNote('')
+      patchEhLists(ehFavoritePatch(gallery.gid, null))
       void mutateFavoriteState({ is_favorited: false, category: null, note: '' }, false)
       setShowFavPicker(false)
     } catch (err) {
@@ -389,7 +401,7 @@ function EhGalleryDetail() {
     } finally {
       setFavSaving(false)
     }
-  }, [gallery, mutateFavoriteState])
+  }, [gallery, mutateFavoriteState, patchEhLists])
 
   // Group tags by namespace
   const tagGroups = useMemo(() => {

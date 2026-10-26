@@ -1,4 +1,5 @@
 import { canonicalIdentityKey } from './identity'
+import type { BrowseListPatch } from './patch'
 import type { EhGallery } from '@/lib/types'
 
 export type EhIdentityFilters = {
@@ -153,3 +154,46 @@ export const ehentaiBrowseAdapter = {
     savedSearch: 'replace',
   },
 } as const
+
+/** The category of a Favorites list identity key, or null for other surfaces. */
+function favoritesCategoryOf(identityKey: string): string | null {
+  let identity: unknown
+  try {
+    identity = JSON.parse(identityKey)
+  } catch {
+    return null
+  }
+  return isRecord(identity) &&
+    identity.surface === 'favorites' &&
+    typeof identity.category === 'string'
+    ? identity.category
+    : null
+}
+
+/**
+ * A favourite change on `gid` (`category` null when it was removed), for the
+ * saved and mounted E-Hentai lists. List cards do not show favourite state, so
+ * a gallery that left a Favorites list is dropped from it (and from its total)
+ * instead of reading as still favourited. One that joined a Favorites list
+ * cannot be placed in it, so a saved list lacking it is discarded and loads
+ * fresh on its next visit. Other surfaces are untouched.
+ */
+export function ehFavoritePatch(gid: number, category: number | null): BrowseListPatch<EhGallery> {
+  const target = category === null ? null : String(category)
+  const keeps = (listCategory: string) =>
+    target !== null && (listCategory === 'all' || listCategory === target)
+  return {
+    updateItem: (item, identityKey) => {
+      if (item.gid !== gid) return item
+      const listCategory = favoritesCategoryOf(identityKey)
+      if (listCategory === null || keeps(listCategory)) return item
+      return null
+    },
+    invalidates: (identityKey, items) => {
+      const listCategory = favoritesCategoryOf(identityKey)
+      return (
+        listCategory !== null && keeps(listCategory) && !items.some((item) => item.gid === gid)
+      )
+    },
+  }
+}

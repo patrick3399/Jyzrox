@@ -542,11 +542,18 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
     }
   }, [cancelPending, searchString])
 
+  const sessionRefresh = session.refresh
+  // An explicit refresh starts the list over from its first page: one request
+  // (E-Hentai rate-limits), and the user asks for it at the top of the list.
+  const refresh = useCallback(() => sessionRefresh({ depth: 'first' }), [sessionRefresh])
+
   return {
     state: returnedState,
     dispatch: compatibilityDispatch as React.Dispatch<Action>,
     actions,
     loadMore: session.loadMore,
+    refresh,
+    refreshing: session.state.status === 'loading' && session.state.requestKind === 'refresh',
     restoreInstruction,
     acknowledgeRestore: session.acknowledgeRestore,
     favCategories: (Array.isArray(session.state.meta) ? session.state.meta : []) as EhFavCategory[],

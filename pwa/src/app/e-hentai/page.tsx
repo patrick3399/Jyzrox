@@ -12,6 +12,7 @@ import {
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
 import { useProfile } from '@/hooks/useProfile'
+import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 import {
   EH_ADVANCED_SEARCH_BITS,
   initialFilters,
@@ -49,6 +50,7 @@ import {
   Rss,
   Shuffle,
   Camera,
+  RefreshCw,
 } from 'lucide-react'
 import type { EhGallery, SavedSearch, TagItem } from '@/lib/types'
 
@@ -200,6 +202,8 @@ function BrowsePage() {
     state,
     actions,
     loadMore,
+    refresh,
+    refreshing,
     favCategories,
     restoreInstruction,
     acknowledgeRestore,
@@ -302,6 +306,17 @@ function BrowsePage() {
 
   // ── Data derivations ──
   const { tab, query, filters, items, total } = state
+  // Image-search results cannot be fetched again (the kernel refuses), and an
+  // empty list has nothing to refresh yet.
+  const canRefresh = items.length > 0 && !state.ephemeralSession && state.status !== 'expired'
+  const refreshFromTop = useCallback(async () => {
+    window.scrollTo({ top: 0 })
+    await refresh()
+  }, [refresh])
+  const { indicator: pullIndicator } = usePullToRefresh({
+    onRefresh: refreshFromTop,
+    enabled: canRefresh,
+  })
   const browseStatusGids = useMemo(
     () => Array.from(new Set(items.map((gallery) => gallery.gid))),
     [items],
@@ -869,6 +884,7 @@ function BrowsePage() {
 
   return (
     <div className="space-y-4">
+      {pullIndicator}
       {/* Credential banner (shown when EH credentials are not configured) */}
       {!ehConfigured && <CredentialBanner source="ehentai" />}
 
@@ -1326,6 +1342,17 @@ function BrowsePage() {
             )}
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={() => void refreshFromTop()}
+          disabled={!canRefresh || refreshing}
+          title={t('common.refresh')}
+          aria-label={t('common.refresh')}
+          className="hidden sm:block p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+        </button>
 
         <button
           type="button"
