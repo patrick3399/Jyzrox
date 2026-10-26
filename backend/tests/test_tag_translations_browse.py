@@ -180,6 +180,33 @@ class TestTagTranslationsBrowse:
         assert data["items"][0]["name"] == "blue_hair"
         assert data["items"][0]["translation"] == "藍髮"
 
+    async def test_browse_zh_traditional_q_matches_simplified_db(self, client, db_session):
+        """language=zh (not only zh-TW): a traditional q must hit simplified rows."""
+        await _insert_translation(db_session, "general", "blue_hair", "zh", "蓝发")
+        await _insert_translation(db_session, "general", "red_eyes", "zh", "红眼")
+
+        resp = await client.get("/api/tags/translations/browse", params={"q": "藍髮", "language": "zh"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "blue_hair"
+
+    async def test_browse_zh_simplified_q_matches_traditional_db(self, client, db_session):
+        """A manually edited traditional translation must be found by a simplified q."""
+        await _insert_translation(db_session, "general", "blue_hair", "zh", "藍髮")
+
+        resp = await client.get("/api/tags/translations/browse", params={"q": "蓝发", "language": "zh"})
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    async def test_browse_ja_q_is_not_script_converted(self, client, db_session):
+        """language=ja: q=鱼 must not be rewritten to 魚 and hit a Japanese row."""
+        await _insert_translation(db_session, "general", "fish", "ja", "魚")
+
+        resp = await client.get("/api/tags/translations/browse", params={"q": "鱼", "language": "ja"})
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
     async def test_browse_pagination_limit_offset(self, client, db_session):
         """limit/offset should paginate results; total must not be affected by pagination."""
         for i in range(10):

@@ -17,6 +17,7 @@ from core.gallery_helpers import (
     get_rating_map,
     get_reading_list_set,
 )
+from core.utils import zh_variants
 from db.models import (
     BlockedTag,
     CollectionGallery,
@@ -30,6 +31,11 @@ from db.models import (
 )
 
 router = APIRouter(tags=["search"])
+
+
+def _text_match(columns, term: str):
+    """ILIKE-contains `term` on any column, also matching its simplified/traditional forms."""
+    return or_(*(col.ilike(f"%{v}%") for v in zh_variants(term) for col in columns))
 
 
 def _tokenize_query(q: str) -> list[str]:
@@ -232,8 +238,7 @@ async def search_galleries(
     filters = []
 
     if text_queries:
-        tq = f"%{text_queries[0]}%"
-        filters.append((Gallery.title.ilike(tq)) | (Gallery.title_jpn.ilike(tq)))
+        filters.append(_text_match((Gallery.title, Gallery.title_jpn), text_queries[0]))
 
     if source_filter:
         filters.append(Gallery.source == source_filter)
@@ -349,13 +354,15 @@ async def search_galleries(
 
                 for bare_name in name_only_tags:
                     variants = name_to_variants.get(bare_name.lower())
-                    text_pattern = f"%{bare_name}%"
-                    text_filter = or_(
-                        Gallery.title.ilike(text_pattern),
-                        Gallery.title_jpn.ilike(text_pattern),
-                        Gallery.uploader.ilike(text_pattern),
-                        Gallery.artist_id.ilike(text_pattern),
-                        Gallery.source_id.ilike(text_pattern),
+                    text_filter = _text_match(
+                        (
+                            Gallery.title,
+                            Gallery.title_jpn,
+                            Gallery.uploader,
+                            Gallery.artist_id,
+                            Gallery.source_id,
+                        ),
+                        bare_name,
                     )
                     if not variants:
                         filters.append(text_filter)

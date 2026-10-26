@@ -18,16 +18,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import has_gallery_write_access, require_auth, require_role
 from core.database import async_session, get_db
 from core.redis_client import get_redis
-from core.utils import escape_like
+from core.utils import escape_like, zh_variants
 from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
 
 _s2twp = OpenCC("s2twp")
-_t2s = OpenCC("t2s")
 
 router = APIRouter(tags=["tags"])
 
 _admin = require_role("admin")
 _member = require_role("member")
+
+
+def _translation_match(q: str, language: str):
+    """ILIKE-contains `q` on the translation column.
+
+    For Chinese the DB mixes scripts (imports are simplified, manual edits may
+    not be), so also match q's simplified/traditional forms.
+    """
+    terms = zh_variants(q) if language.startswith("zh") else [q]
+    return or_(*(TagTranslation.translation.ilike(f"%{escape_like(t)}%", escape="\\") for t in terms))
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -385,7 +394,7 @@ async def autocomplete_tags(
                     Tag.namespace.ilike(f"{safe_ns}%", escape="\\"),
                     or_(
                         Tag.name.ilike(f"{safe_name}%", escape="\\"),
-                        TagTranslation.translation.ilike(f"%{safe_name}%", escape="\\"),
+                        _translation_match(name_prefix, language),
                     ),
                 )
                 .order_by(desc(Tag.count), desc(Tag.id))
@@ -397,7 +406,7 @@ async def autocomplete_tags(
                 base.where(
                     or_(
                         Tag.name.ilike(f"{safe_q}%", escape="\\"),
-                        TagTranslation.translation.ilike(f"%{safe_q}%", escape="\\"),
+                        _translation_match(q, language),
                     )
                 )
                 .order_by(desc(Tag.count), desc(Tag.id))
@@ -503,16 +512,12 @@ async def browse_translations(
         filters.append(TagTranslation.namespace == namespace)
     if q:
         safe_q = escape_like(q)
-        q_filters = [
-            TagTranslation.name.ilike(f"%{safe_q}%", escape="\\"),
-            TagTranslation.translation.ilike(f"%{safe_q}%", escape="\\"),
-        ]
-        if language == "zh-TW":
-            # DB stores simplified Chinese — also match a t2s-converted q
-            # against translation so traditional-input searches still hit.
-            safe_q_simplified = escape_like(_t2s.convert(q))
-            q_filters.append(TagTranslation.translation.ilike(f"%{safe_q_simplified}%", escape="\\"))
-        filters.append(or_(*q_filters))
+        filters.append(
+            or_(
+                TagTranslation.name.ilike(f"%{safe_q}%", escape="\\"),
+                _translation_match(q, language),
+            )
+        )
 
     async with async_session() as session:
         count_query = select(func.count()).select_from(TagTranslation).where(*filters)

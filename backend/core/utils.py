@@ -1,5 +1,6 @@
 """Shared utility functions used across routers and workers."""
 
+import functools
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException
@@ -18,6 +19,27 @@ def validate_cron(expr: str) -> None:
 def escape_like(s: str) -> str:
     """Escape backslash, %, and _ for use in SQLAlchemy .ilike(..., escape='\\')."""
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+@functools.cache
+def _opencc(config: str):
+    # Lazy: building a converter loads its dictionaries, and this module is
+    # imported by workers that never search.
+    from opencc import OpenCC
+
+    return OpenCC(config)
+
+
+def zh_variants(q: str) -> list[str]:
+    """Return q plus its simplified and traditional forms, deduplicated.
+
+    Use for ILIKE matching so "魚子醬" and "鱼子酱" find each other. Plain
+    t2s/s2t only: s2twp rewrites phrases (软件 -> 軟體), which would stop a
+    traditional title written 軟件 from matching. s2t is one-to-many for a few
+    characters (发 -> 發, never 髮), so a simplified query can miss those.
+    Text without Chinese characters comes back as [q].
+    """
+    return list(dict.fromkeys([q, _opencc("t2s").convert(q), _opencc("s2t").convert(q)]))
 
 
 def normalize_subscription_url(url: str) -> str:
