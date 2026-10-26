@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   createBrowseSnapshotStore,
   snapshotStorageKey,
@@ -495,5 +495,107 @@ describe('browse snapshot store under storage pressure', () => {
 
     expect(store.load('A')).toBeNull()
     expect(store.load('B')).toEqual(snapshot(2))
+  })
+})
+
+describe('browse snapshot store patchItems', () => {
+  type Titled = { id: number; title?: string }
+
+  const retitle = (id: number, title: string) => ({
+    updateItem: (item: Titled) => (item.id === id ? { ...item, title } : item),
+  })
+
+  function titledSnapshot(pages: Titled[][], total: number | null = 10): BrowseSnapshot<Titled, Cursor> {
+    return { pages, cursor: 'cursor', hasMore: true, total, anchor: null, layout: null }
+  }
+
+  function lastAccessByKey(storage: Storage): Array<[string, number]> {
+    const partition = JSON.parse(storage.getItem(snapshotStorageKey(scope)) ?? '{"entries":[]}') as {
+      entries: Array<{ identityKey: string; lastAccess: number }>
+    }
+    return partition.entries.map((entry) => [entry.identityKey, entry.lastAccess])
+  }
+
+  it('rewrites the matching item in every saved list without changing LRU order', () => {
+    const storage = new MemoryStorage()
+    let clock = 1
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope, now: () => clock })
+    store.save('A', titledSnapshot([[{ id: 1 }, { id: 2 }]]))
+    clock = 2
+    store.save('B', titledSnapshot([[{ id: 2 }], [{ id: 3 }]]))
+    const before = lastAccessByKey(storage)
+    clock = 3
+
+    expect(store.patchItems(retitle(2, 'patched'))).toBe(true)
+
+    expect(lastAccessByKey(storage)).toEqual(before)
+    expect(store.load('A')?.pages).toEqual([[{ id: 1 }, { id: 2, title: 'patched' }]])
+    expect(store.load('B')?.pages).toEqual([[{ id: 2, title: 'patched' }], [{ id: 3 }]])
+  })
+
+  it('passes each list its own identity key and lowers the total for removed items', () => {
+    const storage = new MemoryStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('favorites', titledSnapshot([[{ id: 1 }, { id: 2 }]], 10))
+    store.save('search', titledSnapshot([[{ id: 1 }]], 10))
+
+    store.patchItems({
+      updateItem: (item, identityKey) =>
+        identityKey === 'favorites' && item.id === 1 ? null : item,
+    })
+
+    expect(store.load('favorites')).toMatchObject({ pages: [[{ id: 2 }]], total: 9 })
+    expect(store.load('search')).toMatchObject({ pages: [[{ id: 1 }]], total: 10 })
+  })
+
+  it('discards a list the patch invalidates and keeps the others', () => {
+    const storage = new MemoryStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('A', titledSnapshot([[{ id: 1 }]]))
+    store.save('B', titledSnapshot([[{ id: 2 }]]))
+
+    expect(
+      store.patchItems({
+        updateItem: (item) => item,
+        invalidates: (identityKey) => identityKey === 'A',
+      }),
+    ).toBe(true)
+
+    expect(store.restore('A')).toEqual({ kind: 'missing', replayable: true })
+    expect(store.load('B')?.pages).toEqual([[{ id: 2 }]])
+  })
+
+  it('reports no change and does not write when no item matches', () => {
+    const storage = new MemoryStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('A', titledSnapshot([[{ id: 1 }]]))
+    const setItem = vi.spyOn(storage, 'setItem')
+
+    expect(store.patchItems(retitle(99, 'absent'))).toBe(false)
+
+    expect(setItem).not.toHaveBeenCalled()
+  })
+
+  it('drops a patched list instead of leaving it stale when the rewrite cannot be stored', () => {
+    class RejectingStorage extends MemoryStorage {
+      reject = false
+      setItem(key: string, value: string) {
+        if (this.reject && value.includes('patched')) {
+          throw new DOMException('quota', 'QuotaExceededError')
+        }
+        super.setItem(key, value)
+      }
+    }
+    const storage = new RejectingStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('A', titledSnapshot([[{ id: 1 }]]))
+    store.save('B', titledSnapshot([[{ id: 2 }]]))
+    storage.reject = true
+
+    store.patchItems(retitle(1, 'patched'))
+    storage.reject = false
+
+    expect(store.restore('A')).toEqual({ kind: 'missing', replayable: true })
+    expect(store.load('B')?.pages).toEqual([[{ id: 2 }]])
   })
 })

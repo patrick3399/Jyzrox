@@ -299,7 +299,7 @@ describe('Pixiv Phase 2 final blockers', () => {
     expect(testState.replacePage).not.toHaveBeenCalled()
 
     expect(sessionSource).toMatch(
-      /kind:\s*'refresh'[\s\S]{0,120}targetDepth:\s*Math\.max\(1,\s*current\.pages\.length\)/,
+      /kind:\s*'refresh'[\s\S]{0,120}targetDepth:\s*options\?\.depth\s*===\s*'first'\s*\?\s*1\s*:\s*Math\.max\(1,\s*current\.pages\.length\)/,
     )
   })
 

@@ -125,3 +125,79 @@ describe('browse reducer contracts', () => {
     expect(state.hasMore).toBe(true)
   })
 })
+
+describe('ITEMS_PATCHED', () => {
+  const retitle = (id: number, title: string) => (item: Item) =>
+    item.id === id ? { ...item, title } : item
+
+  it('rewrites a matching item in its page and in the flattened items', () => {
+    const state = reducer(hydrateA(), {
+      type: 'ITEMS_PATCHED',
+      identityKey: 'A',
+      update: retitle(2, 'patched'),
+    })
+
+    expect(state.pages).toEqual([[{ id: 1, title: 'one' }], [{ id: 2, title: 'patched' }]])
+    expect(state.items).toEqual([
+      { id: 1, title: 'one' },
+      { id: 2, title: 'patched' },
+    ])
+  })
+
+  it('drops an item the patch removes and lowers the total by one', () => {
+    const state = reducer(hydrateA(), {
+      type: 'ITEMS_PATCHED',
+      identityKey: 'A',
+      update: (item) => (item.id === 1 ? null : item),
+    })
+
+    expect(state.pages).toEqual([[], [{ id: 2, title: 'two' }]])
+    expect(state.items).toEqual([{ id: 2, title: 'two' }])
+    expect(state.total).toBe(8)
+  })
+
+  it('ignores a patch addressed to another identity', () => {
+    const before = hydrateA()
+
+    const after = reducer(before, {
+      type: 'ITEMS_PATCHED',
+      identityKey: 'B',
+      update: retitle(1, 'wrong list'),
+    })
+
+    expect(after).toBe(before)
+  })
+
+  it('returns the same state when the patch changes no item', () => {
+    const before = hydrateA()
+
+    expect(
+      reducer(before, { type: 'ITEMS_PATCHED', identityKey: 'A', update: (item) => item }),
+    ).toBe(before)
+  })
+
+  it('keeps the generation so an append already in flight still commits after a patch', () => {
+    let state = reducer(hydrateA(), {
+      type: 'REQUEST_STARTED',
+      generation: 5,
+      request: { kind: 'append', cursor: 'cursor-2', targetDepth: 1 },
+    })
+    state = reducer(state, {
+      type: 'ITEMS_PATCHED',
+      identityKey: 'A',
+      update: retitle(1, 'patched'),
+    })
+
+    expect(state.generation).toBe(5)
+    expect(state.status).toBe('loading')
+
+    state = reducer(state, {
+      type: 'PAGE_SUCCEEDED',
+      identityKey: 'A',
+      generation: 5,
+      mode: 'append',
+      page: { items: [{ id: 3, title: 'three' }], cursor: null, hasMore: false, total: 9 },
+    })
+    expect(state.items.map((item) => item.title)).toEqual(['patched', 'two', 'three'])
+  })
+})

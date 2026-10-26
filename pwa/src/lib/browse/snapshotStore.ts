@@ -1,4 +1,5 @@
 import type { BrowseAnchor } from './anchor'
+import { patchPages, type BrowseListPatch } from './patch'
 
 export type BrowseLayoutSnapshot = {
   columns: number
@@ -414,6 +415,59 @@ export function createBrowseSnapshotStore<Item, Cursor>({
       // A failed write would leave the removed entry in place to be restored
       // later, so fall back to dropping the partition.
       if (entries.length === 0 || !write({ version: 1, entries })) clear()
+    },
+
+    /**
+     * Apply `patch` to every saved list of the partition. A changed list is
+     * rewritten in place, its total lowered by the items removed; a list the
+     * patch invalidates is discarded. Patching is not a visit, so LRU order is
+     * kept. Reports whether anything changed.
+     */
+    patchItems(patch: BrowseListPatch<Item>): boolean {
+      const partition = read()
+      let changed = false
+      const entries: StoredEntry<Item, Cursor>[] = []
+      const rewritten = new Set<StoredEntry<Item, Cursor>>()
+      for (const entry of partition.entries) {
+        const snapshot = entry.snapshot
+        if (snapshot === null) {
+          entries.push(entry)
+          continue
+        }
+        if (patch.invalidates?.(entry.identityKey, snapshot.pages.flat())) {
+          changed = true
+          continue
+        }
+        const patched = patchPages(snapshot.pages, (item) =>
+          patch.updateItem(item, entry.identityKey),
+        )
+        if (!patched) {
+          entries.push(entry)
+          continue
+        }
+        changed = true
+        const next: StoredEntry<Item, Cursor> = {
+          ...entry,
+          snapshot: {
+            ...snapshot,
+            pages: patched.pages,
+            total: snapshot.total === null ? null : Math.max(0, snapshot.total - patched.removed),
+          },
+        }
+        rewritten.add(next)
+        entries.push(next)
+      }
+      if (!changed) return false
+      if (entries.length === 0) {
+        clear()
+        return true
+      }
+      if (write({ version: 1, entries })) return true
+      // The unpatched lists are still stored and would be restored as if they
+      // were current: keep only the untouched ones, or drop the partition.
+      const untouched = entries.filter((entry) => !rewritten.has(entry))
+      if (untouched.length === 0 || !write({ version: 1, entries: untouched })) clear()
+      return true
     },
 
     clear,
