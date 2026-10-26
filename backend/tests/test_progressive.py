@@ -767,6 +767,65 @@ class TestProgressiveImporterTrashedGuard:
 # ---------------------------------------------------------------------------
 
 
+class TestProgressiveImporterCleanupDiscardsArchiveRows:
+    """A cancelled run's gallery-dl archive rows must go with its files.
+
+    Otherwise the next run of the same subscription skips those files as
+    already saved. Postgres behaviour of the delete itself is covered in
+    tests/test_archive_linking_pg.py.
+    """
+
+    @staticmethod
+    def _importer(gallery_id=None, **attrs):
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id="8e03aee6-6e0e-4b3e-913b-dde200894d4b", user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "instagram"
+        importer.source_id = "tanizaki_saya__"
+        for name, value in attrs.items():
+            setattr(importer, name, value)
+        return importer
+
+    async def _cleanup(self, importer, db_session_factory):
+        discard = AsyncMock()
+        with (
+            patch.object(importer, "_discard_run_archive_entries", discard),
+            patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
+            patch("worker.progressive.library_dir", return_value=Path("/nonexistent/lib")),
+            patch("worker.progressive.thumb_dir", return_value=Path("/nonexistent/thumb")),
+        ):
+            await importer.cleanup()
+        return discard
+
+    async def test_cancel_that_deletes_the_new_gallery_discards_every_unlinked_row_of_the_job(
+        self, db_session, db_session_factory
+    ):
+        gallery_id = await _insert_gallery(db_session, source="instagram", source_id="tanizaki_saya__")
+        discard = await self._cleanup(self._importer(gallery_id), db_session_factory)
+        discard.assert_awaited_once_with(since=None)
+
+    async def test_cancel_of_a_rerun_on_a_kept_gallery_discards_only_rows_since_the_run_started(
+        self, db_session, db_session_factory
+    ):
+        importer = self._importer(None, pre_existing=True)
+        discard = await self._cleanup(importer, db_session_factory)
+        discard.assert_awaited_once_with(since=importer._run_started_at)
+
+    async def test_cancel_before_any_gallery_exists_still_discards_the_job_rows(self, db_session_factory):
+        discard = await self._cleanup(self._importer(None), db_session_factory)
+        discard.assert_awaited_once_with(since=None)
+
+    async def test_cancel_against_a_trashed_gallery_discards_the_job_rows_and_keeps_the_gallery(
+        self, db_session, db_session_factory
+    ):
+        gallery_id = await _insert_gallery(db_session, source="instagram", source_id="tanizaki_saya__")
+        discard = await self._cleanup(self._importer(gallery_id, skipped_trashed=True), db_session_factory)
+        discard.assert_awaited_once_with(since=None)
+        row = (await db_session.execute(text("SELECT id FROM galleries WHERE id = :id"), {"id": gallery_id})).fetchone()
+        assert row is not None
+
+
 class TestProgressiveImporterAbort:
     """Tests for ProgressiveImporter.abort()."""
 

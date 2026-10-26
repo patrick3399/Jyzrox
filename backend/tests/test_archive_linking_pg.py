@@ -565,3 +565,87 @@ async def test_eh_rows_written_to_the_exhentai_table_are_linked_and_cascade(db, 
 
     await _delete_gallery(db, 1)
     assert await _owners(db, "exhentai") == {}
+
+
+async def _discard(db, importer, *, since=None) -> None:
+    with patch("worker.progressive.AsyncSessionLocal", db):
+        await importer._discard_run_archive_entries(since=since)
+
+
+async def test_cancelled_job_discards_its_unlinked_rows_so_a_rerun_downloads_them(db, pg_dsn, archive_dsn_for):
+    """Stopping a download deletes its gallery, so the files it archived are gone.
+
+    Left in the table, those rows made the next subscription run skip them as
+    already saved: 160 of 200 Instagram files never came back. Rows another
+    job wrote, rows with no job, and rows a gallery holds are not this run's.
+    """
+    cancelled, neighbour = str(uuid.uuid4()), str(uuid.uuid4())
+    await _add_galleries(db, 1)
+
+    gdl_cancelled = await _GalleryDl.start(await archive_dsn_for(cancelled), "instagram")
+    gdl_neighbour = await _GalleryDl.start(await archive_dsn_for(neighbour), "instagram")
+    gdl_untracked = await _GalleryDl.start(pg_dsn, "instagram")
+    await gdl_cancelled.archive("3100000000000000001", "3100000000000000002", "3100000000000000003")
+    await gdl_neighbour.archive("3200000000000000001")
+    await gdl_untracked.archive("3300000000000000001")
+    for gdl in (gdl_cancelled, gdl_neighbour, gdl_untracked):
+        await gdl.exit()
+    # An earlier attempt of the cancelled job that a gallery already holds.
+    await _link(db, _importer(cancelled, 1, "instagram", None))
+    gdl_cancelled = await _GalleryDl.start(await archive_dsn_for(cancelled), "instagram")
+    await gdl_cancelled.archive("3100000000000000004", "3100000000000000005")
+    await gdl_cancelled.exit()
+
+    await _discard(db, _importer(cancelled, None, "instagram", "tanizaki_saya__"))
+
+    assert await _owners(db, "instagram") == {
+        "3100000000000000001": 1,
+        "3100000000000000002": 1,
+        "3100000000000000003": 1,
+        "3200000000000000001": None,
+        "3300000000000000001": None,
+    }
+
+    rerun = await _GalleryDl.start(await archive_dsn_for(str(uuid.uuid4())), "instagram")
+    await rerun.archive("3100000000000000004")
+    await rerun.exit()
+    assert "3100000000000000004" in await _owners(db, "instagram")
+
+
+async def test_cancelled_rerun_of_a_kept_gallery_discards_only_rows_since_it_started(db, archive_dsn_for):
+    """A cancel that keeps the gallery (re-download, retry) removes only this run's files.
+
+    Unlinked rows an earlier attempt of the same job wrote stand for files the
+    kept gallery still holds, so they must keep blocking a re-download.
+    """
+    from sqlalchemy import text
+
+    job = str(uuid.uuid4())
+    first_attempt = await _GalleryDl.start(await archive_dsn_for(job), "instagram")
+    await first_attempt.archive("3100000000000000001")
+    await first_attempt.exit()
+
+    async with db() as session:
+        since = (await session.execute(text("SELECT clock_timestamp()"))).scalar_one()
+
+    second_attempt = await _GalleryDl.start(await archive_dsn_for(job), "instagram")
+    await second_attempt.archive("3100000000000000002")
+    await second_attempt.exit()
+
+    await _discard(db, _importer(job, None, "instagram", "tanizaki_saya__"), since=since)
+
+    assert await _owners(db, "instagram") == {"3100000000000000001": None}
+
+
+async def test_discard_never_deletes_from_a_table_that_is_not_an_archive(db, pg_dsn):
+    """The table name comes from the gallery's source; only the archive shape qualifies."""
+    from sqlalchemy import text
+
+    async with db() as session:
+        await session.execute(text("CREATE TABLE not_an_archive (entry TEXT, gallery_id BIGINT)"))
+        await session.execute(text("INSERT INTO not_an_archive VALUES ('x', NULL)"))
+        await session.commit()
+
+    await _discard(db, _importer(str(uuid.uuid4()), None, "not_an_archive", "x"))
+
+    assert await _owners(db, "not_an_archive") == {"x": None}

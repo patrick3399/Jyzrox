@@ -155,6 +155,28 @@ def _rmtree_staging_dir(dest_dir: Path) -> None:
         logger.warning("[progressive] failed to remove temp dir %s: %s", dest_dir, exc)
 
 
+async def _is_archive_table(session, table: str) -> bool:
+    """Whether ``table`` has the archive shape.
+
+    Archive table names come from a gallery's source, so only a table with the
+    archive shape qualifies — never one of Jyzrox's own tables.
+    """
+    from sqlalchemy import text
+
+    return bool(
+        (
+            await session.execute(
+                text(
+                    "SELECT count(DISTINCT column_name) = 3 FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = :t "
+                    "AND column_name IN ('entry', 'gallery_id', 'job_id')"
+                ),
+                {"t": table},
+            )
+        ).scalar()
+    )
+
+
 class ProgressiveImporter:
     """Imports files progressively during gallery-dl download."""
 
@@ -179,6 +201,8 @@ class ProgressiveImporter:
         self._preexisting_image_ids: set[int] = set()
         self._preexisting_active_count = 0
         self._preexisting_loaded = False
+        # Archive rows of this job written from here on belong to this attempt.
+        self._run_started_at = datetime.now(UTC)
         self._processed: set[str] = set()
         self._page_counter = 0
         # Page numbers already held by the attached gallery; empty for a new one.
@@ -957,19 +981,7 @@ class ProgressiveImporter:
 
         try:
             async with session.begin_nested():  # SAVEPOINT: failure rolls back only this block
-                # The name comes from the gallery's source, so only a table with
-                # the archive shape qualifies — never one of Jyzrox's own tables.
-                is_archive = (
-                    await session.execute(
-                        text(
-                            "SELECT count(DISTINCT column_name) = 3 FROM information_schema.columns "
-                            "WHERE table_schema = current_schema() AND table_name = :t "
-                            "AND column_name IN ('entry', 'gallery_id', 'job_id')"
-                        ),
-                        {"t": table},
-                    )
-                ).scalar()
-                if not is_archive:
+                if not await _is_archive_table(session, table):
                     return
 
                 if self.db_job_id:
@@ -999,6 +1011,44 @@ class ProgressiveImporter:
 
         except Exception as exc:
             logger.warning("[progressive] failed to link archive entries: %s", exc)
+
+    async def _discard_run_archive_entries(self, *, since: datetime | None) -> None:
+        """Delete the archive rows a cancelled run wrote that no gallery holds.
+
+        Cancellation removes the files this run imported; left behind, their
+        archive rows make the next run skip those files as already saved.
+        Only rows stamped with this job id and still unlinked are touched —
+        rows another job wrote, or a gallery owns, are never this run's.
+
+        ``since`` keeps rows an earlier attempt of the same job wrote, for a
+        cancel that keeps the gallery: their files are still in it.
+        """
+        if not (self.db_job_id and self.source):
+            return
+        try:
+            job_uuid = uuid.UUID(str(self.db_job_id))
+        except ValueError:
+            return
+        from sqlalchemy import text
+
+        from plugins.builtin.gallery_dl._sites import gdl_extractor_name
+
+        table = gdl_extractor_name(self.source)
+        sql = f'DELETE FROM "{table}" WHERE gallery_id IS NULL AND job_id = :jid'
+        params: dict = {"jid": job_uuid}
+        if since is not None:
+            sql += " AND created_at >= :since"
+            params["since"] = since
+        try:
+            async with AsyncSessionLocal() as session:
+                if not await _is_archive_table(session, table):
+                    return
+                result = await session.execute(text(sql), params)
+                await session.commit()
+            if result.rowcount:
+                logger.info("[progressive] discarded %d archive entries of cancelled job %s", result.rowcount, job_uuid)
+        except Exception as exc:
+            logger.warning("[progressive] failed to discard archive entries of job %s: %s", job_uuid, exc)
 
     async def finalize(self, dest_dir: Path, *, partial: bool = False) -> int | None:
         """Wait for pending tasks, update gallery pages + status, clean up temp dir."""
@@ -1143,6 +1193,10 @@ class ProgressiveImporter:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
+
+        # Every branch below drops what this run imported, so its archive rows
+        # go too; a kept gallery keeps what an earlier attempt archived.
+        await self._discard_run_archive_entries(since=self._run_started_at if self.pre_existing else None)
 
         # Audit #8 / #53: a skipped trashed gallery pre-existed this job and had
         # nothing imported into it — cancelling must never delete it.
