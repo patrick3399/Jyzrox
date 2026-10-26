@@ -98,6 +98,7 @@ describe('Reader single-page loading spinner', () => {
       <Reader
         source="local"
         sourceId="1"
+        backHref="/library"
         downloadStatus="complete"
         images={makeGalleryImages(20)}
         totalPages={20}
@@ -127,6 +128,7 @@ describe('Reader single-page loading spinner', () => {
       <Reader
         source="local"
         sourceId="1"
+        backHref="/library"
         downloadStatus="complete"
         images={makeGalleryImages(20)}
         totalPages={20}

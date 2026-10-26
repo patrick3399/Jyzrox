@@ -20,13 +20,13 @@ export function ReaderFallbackScreen({
   backHref,
 }: {
   children: React.ReactNode
-  backHref?: string
+  backHref: string
 }) {
   const router = useRouter()
   return (
     <div className="relative flex h-screen w-full items-center justify-center bg-black text-white">
       <button
-        onClick={() => smartBack(router, backHref ?? '/library')}
+        onClick={() => smartBack(router, backHref)}
         title={t('reader.goBack')}
         aria-label={t('reader.goBack')}
         className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl"

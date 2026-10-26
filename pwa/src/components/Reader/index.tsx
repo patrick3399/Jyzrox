@@ -404,8 +404,10 @@ interface ReaderProps {
   /** Pre-fetched favorited image IDs from the parent page (avoids duplicate fetch) */
   initialFavoritedImageIds?: number[]
   /** Where every exit goes when history has nothing to go back to (share link,
-   *  new tab, PWA relaunch) or the URL was restored by a nav tab. Defaults to /library. */
-  backHref?: string
+   *  new tab, PWA relaunch) or the URL was restored by a nav tab. Required: a
+   *  reader route has no app chrome and no swipe-back, so without it an exit on
+   *  a one-entry history would trap the user. */
+  backHref: string
 }
 
 // ── SinglePageView ────────────────────────────────────────────────────
@@ -1554,7 +1556,6 @@ export default function Reader({
   backHref,
 }: ReaderProps) {
   const router = useRouter()
-  const exitHref = backHref ?? '/library'
   const isProxyMode = downloadStatus === 'proxy_only'
 
   const [hiddenPages, setHiddenPages] = useState<Set<number>>(new Set())
@@ -1745,7 +1746,7 @@ export default function Reader({
   // Reader routes have no chrome and no swipe-back, so every exit must resolve
   // like the back FAB: a no-op router.back() on a one-entry history would trap
   // the user, and a tab-restored URL must climb instead of leaving the section.
-  const handleBack = useCallback(() => smartBack(router, exitHref), [router, exitHref])
+  const handleBack = useCallback(() => smartBack(router, backHref), [router, backHref])
 
   // Track viewMode in ref so swipe callbacks stay stable across mode changes
   const viewModeRef = useRef(state.viewMode)

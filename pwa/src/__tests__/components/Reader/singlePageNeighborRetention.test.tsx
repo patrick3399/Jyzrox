@@ -116,6 +116,7 @@ function renderLocalReader(images: GalleryImage[] = makeGalleryImages(20)) {
     <Reader
       source="local"
       sourceId="1"
+      backHref="/library"
       downloadStatus="complete"
       images={images}
       totalPages={images.length}
@@ -238,6 +239,7 @@ describe('Reader single-page neighbour retention', () => {
       <Reader
         source="ehentai"
         sourceId="1"
+        backHref="/library"
         downloadStatus="proxy_only"
         images={images}
         totalPages={images.length}
@@ -256,6 +258,7 @@ describe('Reader single-page neighbour retention', () => {
       <Reader
         source="ehentai"
         sourceId="1"
+        backHref="/library"
         downloadStatus="proxy_only"
         images={images}
         totalPages={images.length}

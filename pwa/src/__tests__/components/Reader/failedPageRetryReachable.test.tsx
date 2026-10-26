@@ -93,6 +93,7 @@ function renderReader() {
     <Reader
       source="local"
       sourceId="1"
+      backHref="/library"
       downloadStatus="complete"
       images={makeGalleryImages(4)}
       totalPages={4}

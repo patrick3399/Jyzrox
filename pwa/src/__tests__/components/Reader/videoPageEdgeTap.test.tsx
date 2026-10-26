@@ -103,6 +103,7 @@ function renderOnMiddlePage(middle: GalleryImage) {
     <Reader
       source="local"
       sourceId="1"
+      backHref="/library"
       downloadStatus="complete"
       images={[page(1), middle, page(3)]}
       totalPages={3}

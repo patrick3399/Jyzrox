@@ -112,6 +112,7 @@ describe('Reader grid overview vs swipe-up-to-exit gesture', () => {
       <Reader
         source="local"
         sourceId="1"
+        backHref="/library"
         downloadStatus="complete"
         images={makeGalleryImages(20)}
         totalPages={20}
@@ -134,6 +135,7 @@ describe('Reader grid overview vs swipe-up-to-exit gesture', () => {
       <Reader
         source="local"
         sourceId="1"
+        backHref="/library"
         downloadStatus="complete"
         images={makeGalleryImages(20)}
         totalPages={20}
@@ -153,6 +155,7 @@ describe('Reader grid overview vs swipe-up-to-exit gesture', () => {
       <Reader
         source="local"
         sourceId="1"
+        backHref="/library"
         downloadStatus="complete"
         images={makeGalleryImages(20)}
         totalPages={20}

@@ -9,7 +9,9 @@
  *
  * Every exit (the ✕ control, Escape, ArrowUp, the swipe-up gesture, the "all
  * images hidden" path and the pre-Reader fallback screen) must resolve through
- * `smartBack(router, backHref ?? '/library')`.
+ * `smartBack(router, backHref)`. `backHref` is required on both components, so
+ * a reader route that forgets it fails the type-check instead of silently
+ * falling back to an unrelated section.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -111,7 +113,7 @@ afterEach(() => {
   delete (window.history as unknown as { length?: number }).length
 })
 
-function renderReader(props: { backHref?: string; images?: GalleryImage[]; onHideImage?: (page: number) => Promise<void> } = {}) {
+function renderReader(props: { backHref: string; images?: GalleryImage[]; onHideImage?: (page: number) => Promise<void> }) {
   const images = props.images ?? makeGalleryImages(5)
   return render(
     <Reader
@@ -165,16 +167,6 @@ describe('Reader exits when history has nothing to go back to', () => {
 
     expect(router.push).toHaveBeenCalledTimes(1)
     expect(router.push).toHaveBeenCalledWith('/pixiv/illust/9')
-    expect(router.back).not.toHaveBeenCalled()
-  })
-
-  it.each(exits)('$name falls back to /library when no backHref is given', ({ trigger }) => {
-    setHistoryLength(1)
-    renderReader()
-
-    trigger()
-
-    expect(router.push).toHaveBeenCalledWith('/library')
     expect(router.back).not.toHaveBeenCalled()
   })
 
@@ -243,20 +235,6 @@ describe('ReaderFallbackScreen exit', () => {
     expect(router.back).not.toHaveBeenCalled()
   })
 
-  it('falls back to /library when no backHref is given', () => {
-    setHistoryLength(1)
-    render(
-      <ReaderFallbackScreen>
-        <p>waiting</p>
-      </ReaderFallbackScreen>,
-    )
-
-    fireEvent.click(screen.getByTitle('reader.goBack'))
-
-    expect(router.push).toHaveBeenCalledWith('/library')
-    expect(router.back).not.toHaveBeenCalled()
-  })
-
   it('walks history back when there is somewhere to go', () => {
     setHistoryLength(3)
     render(
@@ -269,5 +247,23 @@ describe('ReaderFallbackScreen exit', () => {
 
     expect(router.back).toHaveBeenCalledTimes(1)
     expect(router.push).not.toHaveBeenCalled()
+  })
+})
+
+describe('a mount without backHref', () => {
+  // Checked by `npm run type-check`, not at runtime: each `@ts-expect-error`
+  // turns into an "unused directive" error if backHref becomes optional again,
+  // which is what let a reader route silently fall back to /library.
+  it('does not type-check for Reader or ReaderFallbackScreen', () => {
+    const mounts = [
+      // @ts-expect-error backHref is required
+      <Reader key="reader" source="local" sourceId="1" downloadStatus="complete" images={[]} totalPages={0} />,
+      // @ts-expect-error backHref is required
+      <ReaderFallbackScreen key="fallback">
+        <p>waiting</p>
+      </ReaderFallbackScreen>,
+    ]
+
+    expect(mounts.map((mount) => 'backHref' in mount.props)).toEqual([false, false])
   })
 })
