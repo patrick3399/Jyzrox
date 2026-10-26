@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import core.queue
 from core.auth import require_auth, require_role
-from core.config import settings as app_settings
 from core.database import get_db
 from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
@@ -224,17 +223,10 @@ async def _enqueue(
         raise HTTPException(status_code=500, detail="Failed to persist download job to database")
 
     # 2. Enqueue job. If this fails, mark the DB record as failed.
+    # The shared dispatcher routes on the persisted options (e.g. a Pixiv
+    # author URL goes to pixiv_collection_job), same as retry/recovery.
     try:
-        await core.queue.enqueue(
-            "download_job",
-            _job_id=str(job_id),
-            _timeout=app_settings.download_job_timeout,
-            url=canonical_url,
-            source=source,
-            options=options,
-            db_job_id=str(job_id),
-            total=total,
-        )
+        await enqueue_download_job(job, str(job_id))
     except Exception as exc:
         logger.error("[enqueue] enqueue failed for job %s: %s", job_id, exc)
         try:

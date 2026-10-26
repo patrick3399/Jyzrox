@@ -101,6 +101,14 @@ async def normalize_download_options(url: str, source: str | None, options: dict
     from plugins.registry import plugin_registry
 
     normalized = normalize_source_options(source or "", options)
+    if source == "pixiv":
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+        # A Pixiv author URL belongs to the ``user:{id}`` author collection
+        # (pixiv_collection_job). As a plain download it would import a second
+        # gallery keyed by its output folder, ``user_{id}``.
+        if PixivSourcePlugin.user_match(url):
+            normalized = {**(normalized or {}), "pixiv_collection": True}
     if not normalized or "media" not in normalized:
         return normalized
     normalized = dict(normalized)

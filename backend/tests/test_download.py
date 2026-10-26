@@ -1281,6 +1281,48 @@ class TestEnqueueFailurePaths:
         assert exc_info.value.status_code == 503
         assert "enqueue" in exc_info.value.detail.lower()
 
+    async def test_enqueue_pixiv_user_url_dispatches_collection_job_not_download_job(self, db_session, mock_redis):
+        """A Pixiv users/ URL (e.g. the detail-page repair button re-enqueuing an
+        author collection's source_url) must sync the ``user:{id}`` collection.
+        Running it as a plain download_job imported a second gallery keyed by
+        the output folder name, ``user_{id}``."""
+        from routers.download import _enqueue
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await _enqueue("https://www.pixiv.net/users/2587756", db_session, user_id=7)
+
+        mock_enqueue.assert_awaited_once()
+        args, kwargs = mock_enqueue.call_args
+        assert args[0] == "pixiv_collection_job"
+        assert kwargs["user_id"] == 2587756
+        assert kwargs["owner_user_id"] == 7
+        assert kwargs["db_job_id"] == result["job_id"]
+
+        from db.models import DownloadJob
+
+        job = await db_session.get(DownloadJob, uuid.UUID(result["job_id"]))
+        # Persisted so retry/recovery (enqueue_download_job) keeps routing to the collection job.
+        assert job.options.get("pixiv_collection") is True
+
+    async def test_enqueue_pixiv_artwork_url_still_dispatches_download_job(self, db_session, mock_redis):
+        from routers.download import _enqueue
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            await _enqueue("https://www.pixiv.net/artworks/151313568", db_session, user_id=7)
+
+        assert mock_enqueue.call_args.args[0] == "download_job"
+        assert not (mock_enqueue.call_args.kwargs.get("options") or {}).get("pixiv_collection")
+
     async def test_enqueue_duplicate_url_same_user_returns_existing_job(self, db_session, mock_redis):
         """When same URL + user has a queued job, _enqueue returns existing job without inserting."""
         from routers.download import _enqueue
