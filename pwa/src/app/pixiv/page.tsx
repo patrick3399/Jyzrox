@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { LayoutGrid, List } from 'lucide-react'
+import { LayoutGrid, List, RefreshCw } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { CredentialBanner } from '@/components/CredentialBanner'
@@ -24,11 +24,14 @@ import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useIllustActions } from '@/hooks/useIllustActions'
 import { usePixivBrowseSession } from '@/hooks/usePixivBrowseSession'
 import { useProfile } from '@/hooks/useProfile'
+import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 import { api } from '@/lib/api'
 import { decideAnchorRestore, type BrowseAnchor } from '@/lib/browse/anchor'
 import { commitBrowseUrl } from '@/lib/browse/browseHistory'
 import {
   parsePixivIdentity,
+  pixivBookmarkPatch,
+  pixivFollowPatch,
   serializePixivIdentity,
   type PixivBrowseIdentity,
   type PixivBrowseItem,
@@ -248,21 +251,28 @@ function UserPreviewCard({
 }: {
   preview: PixivUserPreview
   onOpen: () => void
-  onFollow: () => void
+  onFollow: (followed: boolean) => void
 }) {
-  const [followed, setFollowed] = useState(true)
+  const followedInList = preview.user.is_followed !== false
+  const [followed, setFollowed] = useState(followedInList)
   const [toggling, setToggling] = useState(false)
+  // The list item can change after the card mounted (a patch from the
+  // artist's page, a refresh); follow it.
+  useEffect(() => {
+    setFollowed(followedInList)
+  }, [followedInList])
 
   const handleToggleFollow = async (event: React.MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
     if (toggling) return
     setToggling(true)
+    const nextFollowed = !followed
     try {
-      if (followed) await api.pixiv.unfollowUser(preview.user.id)
-      else await api.pixiv.followUser(preview.user.id)
-      setFollowed((value) => !value)
-      onFollow()
+      if (nextFollowed) await api.pixiv.followUser(preview.user.id)
+      else await api.pixiv.unfollowUser(preview.user.id)
+      setFollowed(nextFollowed)
+      onFollow(nextFollowed)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.failedToSave'))
     } finally {
@@ -468,6 +478,7 @@ function PixivPageInner() {
     restoreInstruction,
     acknowledgeRestore,
     updateView,
+    patchItems,
   } = session
   const visibleRangeRef = useRef({ startIndex: 0, endIndex: 0 })
   const layoutRef = useRef<BrowseLayoutSnapshot | null>(null)
@@ -674,13 +685,29 @@ function PixivPageInner() {
     ],
   )
 
-  const onBookmark = useCallback(() => {
-    void refresh()
+  // A user's own change patches the item in place: this list, the other saved
+  // lists, and the snapshot even when the page unmounts first. A refresh here
+  // cost one Pixiv request per loaded page on every tap.
+  const onBookmark = useCallback(
+    (illustId: number, bookmarked: boolean) => patchItems(pixivBookmarkPatch(illustId, bookmarked)),
+    [patchItems],
+  )
+  const onFollow = useCallback(
+    (userId: number, followed: boolean) => patchItems(pixivFollowPatch(userId, followed)),
+    [patchItems],
+  )
+  // An explicit refresh starts the list over from its first page: one request,
+  // and the user asks for it at the top of the list.
+  const canRefresh = state.items.length > 0 && !state.pending
+  const isRefreshing = state.status === 'loading' && state.requestKind === 'refresh'
+  const refreshFromTop = useCallback(async () => {
+    window.scrollTo({ top: 0 })
+    await refresh({ depth: 'first' })
   }, [refresh])
-  const patchItemsFromServer = useCallback(() => {
-    void refresh()
-  }, [refresh])
-  const onFollow = useCallback(() => patchItemsFromServer(), [patchItemsFromServer])
+  const { indicator: pullIndicator } = usePullToRefresh({
+    onRefresh: refreshFromTop,
+    enabled: canRefresh,
+  })
   const loadMoreRetry = retry
 
   const [colCount, setColCount] = useState(2)
@@ -798,6 +825,7 @@ function PixivPageInner() {
 
   return (
     <div className="space-y-4">
+      {pullIndicator}
       {credentialsMissing && <CredentialBanner source="pixiv" />}
       <div className="flex gap-2">
         <input
@@ -838,6 +866,16 @@ function PixivPageInner() {
             <List size={18} />
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => void refreshFromTop()}
+          disabled={!canRefresh || isRefreshing}
+          aria-label={t('common.refresh')}
+          title={t('common.refresh')}
+          className="hidden items-center rounded-lg border border-vault-border px-3 text-vault-text-muted hover:text-vault-text disabled:opacity-40 sm:flex"
+        >
+          <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
+        </button>
       </div>
 
       {identity.surface === 'search' ? (
@@ -1054,7 +1092,7 @@ function PixivPageInner() {
                 <UserPreviewCard
                   preview={preview}
                   onOpen={() => openPixivUser(preview.user.id)}
-                  onFollow={onFollow}
+                  onFollow={(followed) => onFollow(preview.user.id, followed)}
                 />
               )
             }

@@ -13,6 +13,14 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { ExternalLink, ArrowLeft, BookOpen } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
+import { useBrowseListPatcher } from '@/hooks/useBrowseListPatcher'
+import {
+  isPixivBrowseItem,
+  PIXIV_BROWSE_SCHEMA_VERSION,
+  PIXIV_BROWSE_SOURCE_ID,
+  pixivBookmarkPatch,
+  type PixivBrowseItem,
+} from '@/lib/browse/pixiv'
 import { detailHotkey } from '@/lib/detailHotkeys'
 import { smartBack } from '@/lib/navBack'
 import DOMPurify from 'dompurify'
@@ -37,6 +45,13 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     () => api.pixiv.getBookmarkStatus(illustId),
   )
   const isBookmarked = bookmarkData?.is_bookmarked ?? illust?.is_bookmarked ?? false
+  // Bookmark changes reach the saved Pixiv lists of this tab, so the list the
+  // user goes back to shows the new star without refetching.
+  const patchPixivLists = useBrowseListPatcher<PixivBrowseItem>({
+    sourceId: PIXIV_BROWSE_SOURCE_ID,
+    schemaVersion: PIXIV_BROWSE_SCHEMA_VERSION,
+    validateItem: isPixivBrowseItem,
+  })
 
   const [downloading, setDownloading] = useState(false)
   const [bookmarking, setBookmarking] = useState(false)
@@ -76,12 +91,14 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
   const handleBookmark = async () => {
     if (bookmarking) return
     setBookmarking(true)
+    const nextBookmarked = !isBookmarked
     try {
-      if (isBookmarked) {
-        await api.pixiv.deleteBookmark(illustId)
-      } else {
+      if (nextBookmarked) {
         await api.pixiv.addBookmark(illustId)
+      } else {
+        await api.pixiv.deleteBookmark(illustId)
       }
+      patchPixivLists(pixivBookmarkPatch(illustId, nextBookmarked))
       mutateBookmark()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))

@@ -9,8 +9,16 @@ import useSWRInfinite from 'swr/infinite'
 import { api } from '@/lib/api'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { useBrowseListPatcher } from '@/hooks/useBrowseListPatcher'
 import { useScrollPositionRestore } from '@/hooks/useScrollRestore'
 import { commitBrowseUrl } from '@/lib/browse/browseHistory'
+import {
+  isPixivBrowseItem,
+  PIXIV_BROWSE_SCHEMA_VERSION,
+  PIXIV_BROWSE_SOURCE_ID,
+  pixivFollowPatch,
+  type PixivBrowseItem,
+} from '@/lib/browse/pixiv'
 import { smartBack } from '@/lib/navBack'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
@@ -111,6 +119,13 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
 
   const validId = !isNaN(userId)
 
+  // Follow changes reach the saved Pixiv lists of this tab (the Following list).
+  const patchPixivLists = useBrowseListPatcher<PixivBrowseItem>({
+    sourceId: PIXIV_BROWSE_SOURCE_ID,
+    schemaVersion: PIXIV_BROWSE_SCHEMA_VERSION,
+    validateItem: isPixivBrowseItem,
+  })
+
   // User profile + first batch of recent works
   const {
     data: userResult,
@@ -182,9 +197,11 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
       if (isFollowing) {
         await api.pixiv.unfollowUser(userId)
         setIsFollowing(false)
+        patchPixivLists(pixivFollowPatch(userId, false))
       } else {
         await api.pixiv.followUser(userId)
         setIsFollowing(true)
+        patchPixivLists(pixivFollowPatch(userId, true))
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))

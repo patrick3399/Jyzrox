@@ -1,5 +1,6 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BrowseListPatch } from '@/lib/browse/patch'
 import type { PixivBrowseItem } from '@/lib/browse/pixiv'
 
 type GridProps = {
@@ -22,6 +23,7 @@ const runtime = vi.hoisted(() => ({
   refresh: vi.fn(),
   retry: vi.fn(),
   replacePage: vi.fn(),
+  patchItems: vi.fn<(patch: BrowseListPatch<PixivBrowseItem>) => void>(),
   gridProps: null as GridProps | null,
   state: {
     identityKey: 'ranking:daily',
@@ -85,6 +87,7 @@ vi.mock('@/hooks/usePixivBrowseSession', () => ({
     refresh: runtime.refresh,
     retry: runtime.retry,
     replacePage: runtime.replacePage,
+    patchItems: runtime.patchItems,
     restoreInstruction: runtime.restoreInstruction,
     acknowledgeRestore: runtime.acknowledgeRestore,
     updateView: vi.fn(),
@@ -162,6 +165,7 @@ beforeEach(() => {
   runtime.refresh.mockClear()
   runtime.retry.mockClear()
   runtime.replacePage.mockClear()
+  runtime.patchItems.mockClear()
   runtime.gridProps = null
   runtime.state.identityKey = 'ranking:daily'
   runtime.state.items = []
@@ -203,7 +207,7 @@ describe('Pixiv Phase 2 runtime ownership', () => {
     expect(runtime.loadMore).not.toHaveBeenCalled()
   })
 
-  it('refreshes after a bookmark mutation without replacing the loaded page boundaries', () => {
+  it('patches the work in place after a bookmark mutation instead of refreshing or replacing the loaded pages', async () => {
     runtime.state.identityKey = 'feed'
     runtime.state.items = [illustItem()]
     runtime.state.pages = [[illustItem()]]
@@ -211,8 +215,19 @@ describe('Pixiv Phase 2 runtime ownership', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '☆' }))
 
-    expect(runtime.refresh).toHaveBeenCalledOnce()
+    await waitFor(() => expect(runtime.patchItems).toHaveBeenCalledOnce())
+    expect(runtime.refresh).not.toHaveBeenCalled()
     expect(runtime.replacePage).not.toHaveBeenCalled()
+
+    // The patch is a bookmark patch for that work: it sets the star on the
+    // tapped illust and leaves any other work alone.
+    const patch = runtime.patchItems.mock.calls[0][0]
+    expect(patch.updateItem(illustItem(), 'feed')).toMatchObject({
+      kind: 'illust',
+      illust: { id: 11, is_bookmarked: true },
+    })
+    const other = illustItem(12)
+    expect(patch.updateItem(other, 'feed')).toBe(other)
   })
 
   it('keeps the measured restore token stable when request generation advances', () => {

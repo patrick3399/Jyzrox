@@ -532,6 +532,7 @@ describe('usePixivBrowseSession stored item size', () => {
       id: 23,
       name: 'Followed',
       profile_image: 'https://i.pximg.net/user-profile/23.jpg',
+      is_followed: true,
     })
     expect(stored.illusts).toEqual([
       { id: 301, image_urls: { square_medium: `${pximg}/301_p0_square1200.jpg` } },

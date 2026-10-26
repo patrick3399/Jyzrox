@@ -169,6 +169,7 @@ function slimUserPreview(preview: UserPreviewRecord): UserPreviewRecord {
   const user: UserPreviewRecord['user'] = { id: preview.user.id }
   copyField(user, preview.user, 'name', 'string')
   copyField(user, preview.user, 'profile_image', 'string')
+  copyField(user, preview.user, 'is_followed', 'boolean')
   const illusts: Array<{ id: number; image_urls?: { square_medium: string } }> = []
   for (const illust of Array.isArray(preview.illusts) ? preview.illusts : []) {
     if (illusts.length >= USER_PREVIEW_ILLUST_LIMIT) break

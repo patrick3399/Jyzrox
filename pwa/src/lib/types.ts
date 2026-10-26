@@ -816,6 +816,7 @@ export interface PixivUserPreview {
     name: string
     account: string
     profile_image: string
+    is_followed?: boolean
   }
   illusts: PixivIllust[]
 }
