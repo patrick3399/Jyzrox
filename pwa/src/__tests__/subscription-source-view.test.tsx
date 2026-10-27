@@ -1,10 +1,11 @@
 /**
- * Feature test: the subscriptions page can be laid out by site, the choice is
- * remembered per device, every subscription is loaded past the API page cap,
+ * Feature test: the subscriptions page can be laid out by site or by how long
+ * ago each subscription was last checked, the choice is remembered per device, every subscription is loaded past the API page cap,
  * and a card shows its schedule group when the list is not laid out by group.
  *
- * Guards: biggest site first / "Other" last / active first; unreadable storage
- * falls back to the group view; a 450-row account is not cut at 200; the group
+ * Guards: biggest site first / "Other" last / active first; never-checked
+ * first, then the longest unchecked, freshest last; unreadable storage or an
+ * unknown stored value falls back to the group view; a 450-row account is not cut at 200; the group
  * badge appears only for a grouped subscription with showGroup.
  */
 
@@ -15,6 +16,7 @@ import { SubscriptionCard } from '@/components/subscriptions/SubscriptionCard'
 import {
   SUBSCRIPTION_VIEW_KEY,
   groupBySource,
+  groupBySyncAge,
   readSubscriptionView,
   writeSubscriptionView,
 } from '@/components/subscriptions/sourceGrouping'
@@ -89,12 +91,110 @@ describe('groupBySource', () => {
   })
 })
 
+describe('groupBySyncAge', () => {
+  const NOW = Date.parse('2026-10-27T12:00:00Z')
+  const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString()
+
+  it('puts never-checked first, then the longest unchecked, freshest last, hiding empty buckets', () => {
+    const subs = [
+      makeSub({ id: 1, last_checked_at: hoursAgo(2) }),
+      makeSub({ id: 2, last_checked_at: hoursAgo(20 * 24) }),
+      makeSub({ id: 3, last_checked_at: null }),
+      makeSub({ id: 4, last_checked_at: hoursAgo(5 * 24) }),
+      makeSub({ id: 5, last_checked_at: hoursAgo(15 * 24) }),
+      makeSub({ id: 6, last_checked_at: hoursAgo(10 * 24) }),
+      makeSub({ id: 7, last_checked_at: hoursAgo(30) }),
+    ]
+
+    const sections = groupBySyncAge(subs, new Set(), NOW)
+
+    expect(sections.map((s) => s.bucket)).toEqual([
+      'never',
+      'over14d',
+      'days7to14',
+      'days3to7',
+      'days1to3',
+      'within24h',
+    ])
+    // Oldest check first inside a bucket.
+    expect(sections[1].subs.map((s) => s.id)).toEqual([2, 5])
+
+    const withoutMiddle = groupBySyncAge(
+      subs.filter((s) => s.id !== 6),
+      new Set(),
+      NOW,
+    )
+    expect(withoutMiddle.map((s) => s.bucket)).not.toContain('days7to14')
+  })
+
+  it('splits at the 24-hour and 14-day boundaries', () => {
+    const sections = groupBySyncAge(
+      [
+        makeSub({ id: 1, last_checked_at: hoursAgo(23) }),
+        makeSub({ id: 2, last_checked_at: hoursAgo(25) }),
+        makeSub({ id: 3, last_checked_at: hoursAgo(14 * 24 - 1) }),
+        makeSub({ id: 4, last_checked_at: hoursAgo(14 * 24 + 1) }),
+      ],
+      new Set(),
+      NOW,
+    )
+    const bucketOf = (id: number) =>
+      sections.find((s) => s.subs.some((sub) => sub.id === id))?.bucket
+    expect(bucketOf(1)).toBe('within24h')
+    expect(bucketOf(2)).toBe('days1to3')
+    expect(bucketOf(3)).toBe('days7to14')
+    expect(bucketOf(4)).toBe('over14d')
+  })
+
+  it('orders never-checked subscriptions by creation, oldest first, with unknown creation last', () => {
+    const sections = groupBySyncAge(
+      [
+        makeSub({ id: 1, created_at: '2026-10-20T00:00:00Z' }),
+        makeSub({ id: 2, created_at: null }),
+        makeSub({ id: 3, created_at: '2026-10-07T00:00:00Z' }),
+      ],
+      new Set(),
+      NOW,
+    )
+    expect(sections).toHaveLength(1)
+    expect(sections[0].subs.map((s) => s.id)).toEqual([3, 1, 2])
+  })
+
+  it('treats an unparseable check time as never checked instead of fresh', () => {
+    const sections = groupBySyncAge(
+      [makeSub({ id: 1, last_checked_at: 'not-a-date' })],
+      new Set(),
+      NOW,
+    )
+    expect(sections.map((s) => s.bucket)).toEqual(['never'])
+  })
+
+  it('leads each bucket with active downloads', () => {
+    const sections = groupBySyncAge(
+      [
+        makeSub({ id: 1, last_checked_at: hoursAgo(50) }),
+        makeSub({ id: 2, last_checked_at: hoursAgo(30) }),
+      ],
+      new Set([2]),
+      NOW,
+    )
+    expect(sections[0].subs.map((s) => s.id)).toEqual([2, 1])
+  })
+})
+
 describe('subscription view preference', () => {
   it('round-trips the site view through localStorage', () => {
     expect(readSubscriptionView()).toBe('group')
     writeSubscriptionView('source')
     expect(localStorage.getItem(SUBSCRIPTION_VIEW_KEY)).toBe('source')
     expect(readSubscriptionView()).toBe('source')
+  })
+
+  it('round-trips the sync-age view and ignores an unknown stored value', () => {
+    writeSubscriptionView('time')
+    expect(readSubscriptionView()).toBe('time')
+    localStorage.setItem(SUBSCRIPTION_VIEW_KEY, 'bogus')
+    expect(readSubscriptionView()).toBe('group')
   })
 
   it('falls back to the group view when storage throws', () => {

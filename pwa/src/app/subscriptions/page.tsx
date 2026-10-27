@@ -2,7 +2,18 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
-import { Rss, Plus, X, Trash2, List, Search, FolderOpen, Download, Globe } from 'lucide-react'
+import {
+  Rss,
+  Plus,
+  X,
+  Trash2,
+  List,
+  Search,
+  FolderOpen,
+  Download,
+  Globe,
+  Clock,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
@@ -44,8 +55,10 @@ import { GroupCard } from '@/components/subscriptions/GroupCard'
 import { CRON_PRESETS, DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
 import {
   groupBySource,
+  groupBySyncAge,
   readSubscriptionView,
   sourceLabel,
+  syncAgeLabel,
   writeSubscriptionView,
   type SubscriptionView,
 } from '@/components/subscriptions/sourceGrouping'
@@ -194,7 +207,7 @@ export default function SubscriptionsPage() {
 
   const showDownloadingOnly = downloadingOnly && activeCount > 0
 
-  // Layout: by schedule group (default) or by site. Read after mount — storage is client-only.
+  // Layout: by schedule group (default), by site, or by last check. Read after mount — storage is client-only.
   const [view, setView] = useState<SubscriptionView>('group')
   useEffect(() => setView(readSubscriptionView()), [])
   const changeView = (next: SubscriptionView) => {
@@ -212,6 +225,11 @@ export default function SubscriptionsPage() {
 
   const sourceSections = useMemo(
     () => groupBySource(visibleSubs, activeIds),
+    [visibleSubs, activeIds],
+  )
+
+  const syncAgeSections = useMemo(
+    () => groupBySyncAge(visibleSubs, activeIds),
     [visibleSubs, activeIds],
   )
 
@@ -893,6 +911,7 @@ export default function SubscriptionsPage() {
               [
                 ['group', FolderOpen, t('subscriptions.viewByGroup')],
                 ['source', Globe, t('subscriptions.viewBySource')],
+                ['time', Clock, t('subscriptions.viewBySyncAge')],
               ] as const
             ).map(([value, Icon, label]) => (
               <button
@@ -953,13 +972,24 @@ export default function SubscriptionsPage() {
           <Download size={40} className="mx-auto text-vault-text-muted mb-3" />
           <p className="text-sm text-vault-text-muted">{t('subscriptions.noDownloading')}</p>
         </div>
-      ) : view === 'source' ? (
+      ) : view === 'source' || view === 'time' ? (
         <div className="space-y-3">
-          {sourceSections.map((section) => (
+          {(view === 'source'
+            ? sourceSections.map((section) => ({
+                key: section.source ?? '__other',
+                title: sourceLabel(section.source),
+                subs: section.subs,
+              }))
+            : syncAgeSections.map((section) => ({
+                key: section.bucket,
+                title: syncAgeLabel(section.bucket),
+                subs: section.subs,
+              }))
+          ).map((section) => (
             <GroupCard
-              key={section.source ?? '__other'}
+              key={section.key}
               group={null}
-              title={sourceLabel(section.source)}
+              title={section.title}
               showSubGroup
               subs={section.subs}
               jobsData={jobsData ?? {}}
