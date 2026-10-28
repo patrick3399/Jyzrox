@@ -672,6 +672,76 @@ class TestConfigGeneration:
         assert "skip" not in config["extractor"]
         assert "archive-mode" not in config["extractor"]
 
+    @staticmethod
+    async def _build_with_params(tmp_path, svc, params_by_source, **kwargs):
+        from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+        config_file = tmp_path / "gallery-dl.json"
+        mock_settings = MagicMock()
+        mock_settings.data_gallery_path = str(tmp_path / "gallery")
+        mock_settings.gdl_archive_dsn = "postgresql://test/archive"
+        mock_settings.gallery_dl_config = str(config_file)
+        svc.get_all_download_params = AsyncMock(return_value=params_by_source)
+
+        with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+            path = await _build_gallery_dl_config({}, **kwargs)
+        return json.loads(path.read_text())
+
+    async def test_build_config_sleep_download_override_writes_extractor_sleep(
+        self, tmp_path, mock_site_config_for_source
+    ):
+        """sleep_download is the only knob that paces file downloads (sleep-request covers API/pages only)."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path,
+            mock_site_config_for_source,
+            {
+                "instagram": DownloadParams(sleep_download=(1.0, 3.0)),
+                "twitter": DownloadParams(sleep_download=2.0),
+            },
+        )
+
+        assert config["extractor"]["instagram"]["sleep"] == [1.0, 3.0]
+        assert config["extractor"]["twitter"]["sleep"] == 2.0
+
+    async def test_build_config_without_sleep_download_omits_sleep(self, tmp_path, mock_site_config_for_source):
+        """A null sleep_download must leave gallery-dl's own extractor default in force."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path, mock_site_config_for_source, {"instagram": DownloadParams(sleep_request=(2.0, 4.0))}
+        )
+
+        assert "sleep" not in config["extractor"]["instagram"]
+        assert "sleep" not in config["extractor"]
+
+    async def test_build_config_explicit_zero_sleep_download_is_written(self, tmp_path, mock_site_config_for_source):
+        """0 means 'explicitly no sleep' and must not be dropped as falsy."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path, mock_site_config_for_source, {"instagram": DownloadParams(sleep_download=0)}
+        )
+
+        assert config["extractor"]["instagram"]["sleep"] == 0
+
+    async def test_build_config_persona_job_keeps_per_extractor_sleep_download(
+        self, tmp_path, mock_site_config_for_source
+    ):
+        """ADR 0022 strips only proxy/browser/user-agent from per-extractor entries; pacing survives."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path,
+            mock_site_config_for_source,
+            {"instagram": DownloadParams(sleep_download=2.0, proxy_url="http://proxy:3128")},
+            persona={"proxy_url": "http://persona:3128", "browser_profile": "chrome"},
+        )
+
+        assert config["extractor"]["instagram"]["sleep"] == 2.0
+        assert "proxy" not in config["extractor"]["instagram"]
+
 
 # ---------------------------------------------------------------------------
 # TestProcessLifecycle

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from core.auth import require_role
-from core.site_config import DownloadParams, site_config_service
+from core.site_config import _DOWNLOAD_FIELDS, DownloadParams, site_config_service
 from db.models import SiteConfig
 from services.site_catalog import get_site_config
 
@@ -45,6 +45,18 @@ class UpdateFieldMappingRequest(BaseModel):
     field_mapping: dict[str, str | None]
 
 
+def _download_dict(params: DownloadParams) -> dict:
+    return {
+        "retries": params.retries,
+        "http_timeout": params.http_timeout,
+        "sleep_request": params.sleep_request,
+        "sleep_download": params.sleep_download,
+        "concurrency": params.concurrency,
+        "inactivity_timeout": params.inactivity_timeout,
+        "spread_personas": params.spread_personas,
+    }
+
+
 def _build_site_response(
     source_id: str,
     params: DownloadParams,
@@ -52,22 +64,28 @@ def _build_site_response(
 ) -> dict:
     """Build API response for a single source.
 
+    ``defaults`` is the Jyzrox layer (what a reset falls back to), ``overridden``
+    the keys an admin pinned, ``adaptive`` the auto-tuned keys not pinned, and
+    ``extractor_defaults`` gallery-dl's own pacing (used while a sleep is null).
     If a DB row is provided, field_mapping and auto_probe are included.
     """
     site = get_site_config(source_id)
+    overridden = [k for k in (row.overrides or {}).get("download", {}) if k in _DOWNLOAD_FIELDS] if row else []
+    adaptive = (
+        [k for k in (row.adaptive or {}).get("download", {}) if k in _DOWNLOAD_FIELDS and k not in overridden]
+        if row
+        else []
+    )
     resp: dict = {
         "source_id": source_id,
         "name": site.name,
         "domain": site.domain,
         "category": site.category,
-        "download": {
-            "retries": params.retries,
-            "http_timeout": params.http_timeout,
-            "sleep_request": params.sleep_request,
-            "concurrency": params.concurrency,
-            "inactivity_timeout": params.inactivity_timeout,
-            "spread_personas": params.spread_personas,
-        },
+        "download": _download_dict(params),
+        "defaults": _download_dict(site_config_service.defaults(source_id)),
+        "overridden": overridden,
+        "adaptive": adaptive,
+        "extractor_defaults": site_config_service.extractor_defaults(source_id),
     }
     if row is not None:
         resp["field_mapping"] = row.overrides.get("field_mapping") if row.overrides else None
@@ -109,7 +127,7 @@ async def update_site(source_id: str, req: UpdateOverridesRequest, _: dict = Dep
 
 @router.post("/{source_id}/reset")
 async def reset_field(source_id: str, req: ResetFieldRequest, _: dict = Depends(_admin)):
-    """Reset a specific override field to its _sites.py default."""
+    """Reset an override field ("download.retries") or a whole section ("download") to its default."""
     try:
         params, row = await site_config_service.reset(source_id, req.field_path)
     except ValueError as e:

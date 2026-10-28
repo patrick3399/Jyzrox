@@ -65,7 +65,8 @@ class GdlSiteConfig:
     # ── Download tuning ──
     retries: int = 4  # gallery-dl default
     http_timeout: int = 30  # seconds
-    sleep_request: float | tuple[float, float] | None = None  # seconds between requests
+    sleep_request: float | tuple[float, float] | None = None  # seconds between API/page requests
+    sleep_download: float | tuple[float, float] | None = None  # seconds between file downloads
     inactivity_timeout: int = 300  # seconds before killing process on no output
 
     # ── URL parsing ──

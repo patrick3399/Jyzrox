@@ -41,19 +41,26 @@ vi.mock('next/navigation', () => ({
 
 import AdminSitesPage from '@/app/admin/sites/page'
 
+const twitterDownload = {
+  retries: 4,
+  http_timeout: 30,
+  sleep_request: null,
+  sleep_download: null,
+  concurrency: 2,
+  inactivity_timeout: 300,
+  spread_personas: false,
+}
+
 const twitter = {
   source_id: 'twitter',
   name: 'Twitter',
   domain: 'x.com',
   category: 'social',
-  download: {
-    retries: 4,
-    http_timeout: 30,
-    sleep_request: null,
-    concurrency: 2,
-    inactivity_timeout: 300,
-    spread_personas: false,
-  },
+  download: twitterDownload,
+  defaults: twitterDownload,
+  overridden: [],
+  adaptive: [],
+  extractor_defaults: { sleep_request: null, sleep_download: null },
 }
 
 function Wrapper({ children }: { children: ReactNode }) {
@@ -105,14 +112,12 @@ describe('AdminSitesPage spread personas switch', () => {
     )
   })
 
-  it('test_sites_editor_save_without_toggle_keeps_spread_personas_false', async () => {
+  it('test_sites_editor_save_without_changes_sends_no_request', async () => {
     await openEditor()
     fireEvent.click(screen.getByRole('button', { name: 'admin.sites.save' }))
 
-    await waitFor(() =>
-      expect(m.update).toHaveBeenCalledWith('twitter', {
-        download: expect.objectContaining({ spread_personas: false }),
-      }),
-    )
+    // Diff save: an untouched form must not write a snapshot of every field.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(m.update).not.toHaveBeenCalled()
   })
 })

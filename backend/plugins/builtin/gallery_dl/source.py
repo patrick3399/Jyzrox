@@ -320,6 +320,12 @@ async def _build_gallery_dl_config(
                 list(params.sleep_request) if isinstance(params.sleep_request, tuple) else params.sleep_request
             )
 
+        # sleep-request only paces API/page requests; file downloads obey "sleep".
+        if params.sleep_download is not None:
+            entry["sleep"] = (
+                list(params.sleep_download) if isinstance(params.sleep_download, tuple) else params.sleep_download
+            )
+
         # N7: per-site browser profile for anti-bot defense
         if params.browser_profile:
             entry["browser"] = params.browser_profile

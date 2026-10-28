@@ -33,13 +33,7 @@ export interface Gallery {
   artist_id: string | null
   artist_name?: string | null
   download_status:
-    | 'proxy_only'
-    | 'partial'
-    | 'complete'
-    | 'downloading'
-    | 'importing'
-    | 'failed'
-    | 'missing'
+    'proxy_only' | 'partial' | 'complete' | 'downloading' | 'importing' | 'failed' | 'missing'
   import_mode: string | null
   tags_array: string[]
   cover_thumb?: string | null
@@ -736,7 +730,6 @@ export interface PluginInfo {
   enabled: boolean
 }
 
-
 // ── Pixiv Types ──────────────────────────────────────────────────────
 
 export interface PixivImageUrls {
@@ -1108,19 +1101,41 @@ export interface DownloadPreview {
 
 // ── Site Config (Admin) ──────────────────────────────────────────────
 
+/** Pacing value in seconds: fixed, a [min, max] range, or null (nothing set). */
+export type SiteSleepValue = number | [number, number] | null
+
+export interface SiteDownloadParams {
+  retries: number
+  http_timeout: number
+  /** Pause between gallery-dl API / page requests. */
+  sleep_request: SiteSleepValue
+  /** Pause between individual file downloads (gallery-dl `extractor.<cat>.sleep`). */
+  sleep_download: SiteSleepValue
+  concurrency: number
+  inactivity_timeout: number
+  /** ADR 0022: spread manual downloads across egress personas (concurrency becomes per-persona). */
+  spread_personas: boolean
+}
+
+export type SiteDownloadKey = keyof SiteDownloadParams
+
 export interface SiteConfigItem {
   source_id: string
   name: string
   domain: string
   category: string
-  download: {
-    retries: number
-    http_timeout: number
-    sleep_request: number | [number, number] | null
-    concurrency: number
-    inactivity_timeout: number
-    /** ADR 0022: spread manual downloads across egress personas (concurrency becomes per-persona). */
-    spread_personas: boolean
+  /** Effective values. */
+  download: SiteDownloadParams
+  /** Jyzrox-layer defaults (same keys as `download`). */
+  defaults: SiteDownloadParams
+  /** Keys present in the stored override. */
+  overridden: SiteDownloadKey[]
+  /** Keys auto-tuned by the adaptive layer (and not overridden). */
+  adaptive: SiteDownloadKey[]
+  /** gallery-dl built-in pacing, applies when the effective sleep value is null. */
+  extractor_defaults: {
+    sleep_request: SiteSleepValue
+    sleep_download: SiteSleepValue
   }
   field_mapping?: Record<string, string | null>
   auto_probe?: ProbeResult | null

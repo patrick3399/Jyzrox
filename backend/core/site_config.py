@@ -9,13 +9,14 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 
 from sqlalchemy import select
 
 from core.database import AsyncSessionLocal
 from core.redis_client import get_redis
 from db.models import SiteConfig
-from plugins.builtin.gallery_dl._sites import get_site_config
+from plugins.builtin.gallery_dl._sites import gdl_extractor_name, get_site_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ _DOWNLOAD_FIELDS = {
     "retries",
     "http_timeout",
     "sleep_request",
+    "sleep_download",
     "concurrency",
     "inactivity_timeout",
     "browser_profile",
@@ -33,6 +35,9 @@ _DOWNLOAD_FIELDS = {
     "rate_limit",
     "spread_personas",
 }
+
+# Sections of SiteConfig.overrides that a reset may clear as a whole
+_OVERRIDE_SECTIONS = frozenset({"download", "field_mapping"})
 
 # Jyzrox canonical field names allowed in overrides.field_mapping
 JYZROX_FIELDS = frozenset(
@@ -56,7 +61,8 @@ class DownloadParams:
 
     retries: int = 4
     http_timeout: int = 30
-    sleep_request: float | tuple[float, float] | None = None
+    sleep_request: float | tuple[float, float] | None = None  # API/page requests (gallery-dl sleep-request)
+    sleep_download: float | tuple[float, float] | None = None  # per file download (gallery-dl sleep)
     concurrency: int = 2
     inactivity_timeout: int = 300
     browser_profile: str | None = None
@@ -99,8 +105,7 @@ class SiteConfigService:
         async with AsyncSessionLocal() as session:
             row = await session.get(SiteConfig, source_id)
             if row is None:
-                row = SiteConfig(source_id=source_id, overrides=overrides)
-                session.add(row)
+                merged = overrides
             else:
                 # Deep merge: update nested dicts
                 merged = dict(row.overrides)
@@ -109,6 +114,14 @@ class SiteConfigService:
                         merged[key] = {**merged[key], **val}
                     else:
                         merged[key] = val
+            if _TIMING_FIELDS & overrides.get("download", {}).keys():
+                self._validate_sleep_fits_inactivity(
+                    self._compose(source_id, merged, row.adaptive if row is not None else None)
+                )
+            if row is None:
+                row = SiteConfig(source_id=source_id, overrides=merged)
+                session.add(row)
+            else:
                 row.overrides = merged
             await session.commit()
             result = self._merge(source_id, row)
@@ -118,23 +131,28 @@ class SiteConfigService:
         return result, row
 
     async def reset(self, source_id: str, field_path: str) -> tuple[DownloadParams, SiteConfig | None]:
-        """Remove a specific override field. E.g. field_path='download.retries'. Returns (params, row)."""
+        """Remove override(s). 'download' / 'field_mapping' drops a whole section;
+        'download.retries' drops one field. Returns (params, row)."""
         parts = field_path.split(".")
-        if len(parts) != 2:
-            raise ValueError(f"field_path must be 'section.field', got '{field_path}'")
+        if len(parts) not in (1, 2) or not all(parts) or (len(parts) == 1 and parts[0] not in _OVERRIDE_SECTIONS):
+            raise ValueError(f"field_path must be 'download', 'field_mapping' or 'section.field', got '{field_path}'")
 
-        section, field = parts
+        section = parts[0]
+        field = parts[1] if len(parts) == 2 else None
 
         async with AsyncSessionLocal() as session:
             row = await session.get(SiteConfig, source_id)
             if row is not None and section in row.overrides:
                 updated = dict(row.overrides)
-                section_dict = dict(updated.get(section, {}))
-                section_dict.pop(field, None)
-                if section_dict:
-                    updated[section] = section_dict
-                else:
+                if field is None:
                     updated.pop(section, None)
+                else:
+                    section_dict = dict(updated.get(section, {}))
+                    section_dict.pop(field, None)
+                    if section_dict:
+                        updated[section] = section_dict
+                    else:
+                        updated.pop(section, None)
                 row.overrides = updated
                 await session.commit()
             if row is not None:
@@ -255,6 +273,22 @@ class SiteConfigService:
         self._batch_cache = (output, time.time())
         return output
 
+    def defaults(self, source_id: str) -> DownloadParams:
+        """Jyzrox-layer defaults (no overrides, no adaptive): what a reset falls back to."""
+        return self._merge(source_id, None)
+
+    def extractor_defaults(self, source_id: str) -> dict:
+        """gallery-dl's built-in pacing for the source's extractor (informational hint).
+
+        Read from the in-process gallery-dl, which may differ from the venv one
+        that runs the jobs. A null sleep here means gallery-dl does not sleep.
+        """
+        try:
+            return dict(_extractor_defaults_for(gdl_extractor_name(source_id)))
+        except Exception:
+            logger.warning("[site_config] extractor default lookup failed for %s", source_id, exc_info=True)
+            return {"sleep_request": None, "sleep_download": None}
+
     # ── Pub/Sub Listener ──────────────────────────────────────────────
 
     async def start_listener(self) -> None:
@@ -319,6 +353,13 @@ class SiteConfigService:
 
     def _merge(self, source_id: str, row: SiteConfig | None) -> DownloadParams:
         """Merge DB row with _sites.py defaults. Pure function (no I/O)."""
+        if row is None:
+            return self._compose(source_id, None, None)
+        return self._compose(source_id, row.overrides, row.adaptive)
+
+    @staticmethod
+    def _compose(source_id: str, overrides: dict | None, adaptive: dict | None) -> DownloadParams:
+        """Layer overrides > adaptive > _sites.py defaults. Pure function (no I/O)."""
         site_defaults = get_site_config(source_id)
 
         # Start with _sites.py defaults
@@ -326,24 +367,42 @@ class SiteConfigService:
             "retries": site_defaults.retries,
             "http_timeout": site_defaults.http_timeout,
             "sleep_request": site_defaults.sleep_request,
+            "sleep_download": site_defaults.sleep_download,
             "concurrency": 2,  # not in GdlSiteConfig; default 2
             "inactivity_timeout": site_defaults.inactivity_timeout,
         }
 
-        if row is not None:
-            # Layer 2: adaptive (lower priority than override)
-            adaptive_dl = row.adaptive.get("download", {}) if row.adaptive else {}
-            for field in _DOWNLOAD_FIELDS:
-                if field in adaptive_dl:
-                    base[field] = adaptive_dl[field]
+        # Layer 2: adaptive (lower priority than override)
+        adaptive_dl = adaptive.get("download", {}) if adaptive else {}
+        for field in _DOWNLOAD_FIELDS:
+            if field in adaptive_dl:
+                base[field] = adaptive_dl[field]
 
-            # Layer 3: manual overrides (highest priority)
-            override_dl = row.overrides.get("download", {}) if row.overrides else {}
-            for field in _DOWNLOAD_FIELDS:
-                if field in override_dl:
-                    base[field] = override_dl[field]
+        # Layer 3: manual overrides (highest priority)
+        override_dl = overrides.get("download", {}) if overrides else {}
+        for field in _DOWNLOAD_FIELDS:
+            if field in override_dl:
+                base[field] = override_dl[field]
+
+        # JSON round-trips a [min, max] pair as a list; keep the dataclass shape stable.
+        for field in _SLEEP_FIELDS:
+            if isinstance(base[field], list):
+                base[field] = tuple(base[field])
 
         return DownloadParams(**base)
+
+    @staticmethod
+    def _validate_sleep_fits_inactivity(params: DownloadParams) -> None:
+        """A single sleep that outlasts the watchdog window would be killed as idle."""
+        for name in _SLEEP_FIELDS:
+            value = getattr(params, name)
+            if value is None:
+                continue
+            longest = max(value) if isinstance(value, tuple) else value
+            if longest >= params.inactivity_timeout:
+                raise ValueError(
+                    f"{name} ({longest}s) must be shorter than inactivity_timeout ({params.inactivity_timeout}s)"
+                )
 
     @staticmethod
     def _validate_overrides(overrides: dict) -> None:
@@ -367,17 +426,9 @@ class SiteConfigService:
             t = dl["inactivity_timeout"]
             if not isinstance(t, int) or t < 30 or t > 3600:
                 raise ValueError(f"inactivity_timeout must be 30-3600, got {t}")
-        if "sleep_request" in dl:
-            sr = dl["sleep_request"]
-            if sr is not None:
-                if isinstance(sr, int | float):
-                    if sr <= 0 or sr > 3600:
-                        raise ValueError(f"sleep_request must be 0 < value <= 3600, got {sr}")
-                elif isinstance(sr, list | tuple) and len(sr) == 2:
-                    if not all(isinstance(x, int | float) and 0 < x <= 3600 for x in sr):
-                        raise ValueError(f"sleep_request tuple values must be 0 < value <= 3600, got {sr}")
-                else:
-                    raise ValueError(f"sleep_request must be float or [min, max] pair, got {type(sr).__name__}")
+        for name in _SLEEP_FIELDS:
+            if name in dl:
+                _validate_sleep(name, dl[name])
         if "browser_profile" in dl:
             bp = dl["browser_profile"]
             if bp is not None and bp not in ("chrome", "firefox"):
@@ -395,6 +446,53 @@ class SiteConfigService:
 
 
 # ── Module-level helpers ──────────────────────────────────────────────
+
+_SLEEP_FIELDS = ("sleep_request", "sleep_download")
+# Fields whose cross-check (sleep < inactivity_timeout) must rerun when they change.
+_TIMING_FIELDS = frozenset({*_SLEEP_FIELDS, "inactivity_timeout"})
+_MAX_SLEEP_S = 3600
+
+
+def _is_seconds(x) -> bool:
+    return isinstance(x, int | float) and not isinstance(x, bool) and 0 <= x <= _MAX_SLEEP_S
+
+
+def _validate_sleep(name: str, value) -> None:
+    """Validate a sleep setting: null, seconds, or a [min, max] pair (0 = explicitly off)."""
+    if value is None:
+        return
+    if isinstance(value, list | tuple):
+        if len(value) != 2 or not all(_is_seconds(x) for x in value) or value[0] > value[1]:
+            raise ValueError(f"{name} pair must be [min, max] with 0 <= min <= max <= {_MAX_SLEEP_S}, got {value}")
+    elif not _is_seconds(value):
+        raise ValueError(f"{name} must be null, a number or [min, max] within 0..{_MAX_SLEEP_S}, got {value!r}")
+
+
+def _interval_hint(value) -> float | list[float] | None:
+    """Normalise a gallery-dl request_interval/download_interval; 0 (no sleep) is None."""
+    if isinstance(value, tuple | list) and len(value) == 2 and all(isinstance(x, int | float) for x in value):
+        return [float(value[0]), float(value[1])] if any(value) else None
+    if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+        return float(value)
+    return None
+
+
+@lru_cache(maxsize=256)
+def _extractor_defaults_for(category: str) -> dict:
+    """First in-process gallery-dl extractor class of `category` decides its built-in pacing."""
+    nulls = {"sleep_request": None, "sleep_download": None}
+    try:
+        from gallery_dl import extractor as gdl_extractor
+
+        for cls in gdl_extractor.extractors():
+            if getattr(cls, "category", None) == category:
+                return {
+                    "sleep_request": _interval_hint(getattr(cls, "request_interval", 0)),
+                    "sleep_download": _interval_hint(getattr(cls, "download_interval", 0)),
+                }
+    except Exception:
+        logger.warning("[site_config] gallery-dl extractor scan failed for %s", category, exc_info=True)
+    return nulls
 
 
 def _validate_field_mapping(field_mapping: dict) -> None:

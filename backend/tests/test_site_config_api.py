@@ -134,3 +134,83 @@ async def test_non_admin_cannot_access(make_client, db_session):
     async with make_client(user_id=2, role="member") as ac:
         resp = await ac.get("/api/admin/sites")
         assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reset_download_section_endpoint_returns_200(client):
+    """The PWA's 'reset all' posts field_path='download'; it used to 400 (needed 'section.field')."""
+    await client.put(
+        "/api/admin/sites/twitter",
+        json={"download": {"retries": 8, "concurrency": 3, "sleep_download": 2}},
+    )
+
+    resp = await client.post("/api/admin/sites/twitter/reset", json={"field_path": "download"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["download"]["retries"] == 4
+    assert data["download"]["concurrency"] == 2
+    assert data["download"]["sleep_download"] is None
+    assert data["overridden"] == []
+
+
+@pytest.mark.asyncio
+async def test_reset_unknown_section_endpoint_returns_400(client):
+    resp = await client.post("/api/admin/sites/twitter/reset", json={"field_path": "bogus"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_update_site_sleep_longer_than_inactivity_timeout_returns_400(client):
+    resp = await client.put("/api/admin/sites/instagram", json={"download": {"sleep_download": 400}})
+    assert resp.status_code == 400
+    assert "inactivity_timeout" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_site_response_lists_overridden_and_defaults(client):
+    """Response carries defaults (Jyzrox layer), overridden keys and the extractor_defaults hint."""
+    await client.put(
+        "/api/admin/sites/ehentai",
+        json={"download": {"retries": 8, "sleep_download": [1, 3]}},
+    )
+
+    data = (await client.get("/api/admin/sites/ehentai")).json()
+
+    assert data["download"]["retries"] == 8
+    assert data["download"]["sleep_download"] == [1, 3]
+    assert data["defaults"]["retries"] == 5  # _sites.py default, not the override
+    assert data["defaults"]["sleep_download"] is None
+    assert set(data["defaults"]) == set(data["download"])
+    assert sorted(data["overridden"]) == ["retries", "sleep_download"]
+    assert data["adaptive"] == []
+    assert set(data["extractor_defaults"]) == {"sleep_request", "sleep_download"}
+
+
+@pytest.mark.asyncio
+async def test_site_response_without_row_has_empty_overridden_and_adaptive(client):
+    data = (await client.get("/api/admin/sites/twitter")).json()
+
+    assert data["overridden"] == []
+    assert data["adaptive"] == []
+    assert data["defaults"] == data["download"]
+    assert "sleep_download" in data["download"]
+    for entry in (await client.get("/api/admin/sites")).json():
+        assert {"defaults", "overridden", "adaptive", "extractor_defaults"} <= set(entry)
+
+
+def test_site_response_adaptive_excludes_overridden_fields():
+    """'adaptive' = auto-tuned keys the admin has not pinned; an override wins and hides the marker."""
+    from core.site_config import DownloadParams
+    from db.models import SiteConfig
+    from routers.site_config import _build_site_response
+
+    row = SiteConfig(
+        source_id="twitter",
+        overrides={"download": {"retries": 8}},
+        adaptive={"download": {"retries": 6, "concurrency": 3}},
+    )
+    resp = _build_site_response("twitter", DownloadParams(retries=8, concurrency=3), row)
+
+    assert resp["overridden"] == ["retries"]
+    assert resp["adaptive"] == ["concurrency"]

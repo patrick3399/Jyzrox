@@ -343,3 +343,181 @@ def test_spread_personas_defaults_off_and_override_turns_it_on():
 def test_spread_personas_override_must_be_boolean():
     with pytest.raises(ValueError, match="spread_personas"):
         SiteConfigService._validate_overrides({"download": {"spread_personas": "yes"}})
+
+
+# ── Sleep validation (sleep_request / sleep_download) ────────────────
+
+
+def _mock_session_ctx(row):
+    """AsyncSessionLocal() replacement whose session.get() returns `row`."""
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=row)
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.expunge = MagicMock()
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return ctx, session
+
+
+def test_validate_sleep_accepts_zero_as_explicit_off():
+    """0 means 'no sleep' (distinct from null = gallery-dl default); it used to be rejected as <= 0."""
+    for field in ("sleep_request", "sleep_download"):
+        SiteConfigService._validate_overrides({"download": {field: 0}})
+        SiteConfigService._validate_overrides({"download": {field: 0.0}})
+        SiteConfigService._validate_overrides({"download": {field: [0, 0]}})
+        SiteConfigService._validate_overrides({"download": {field: [0, 2.5]}})
+        SiteConfigService._validate_overrides({"download": {field: None}})
+
+
+@pytest.mark.parametrize("field", ["sleep_request", "sleep_download"])
+@pytest.mark.parametrize("value", [-1, 3601, [3, 1], [-1, 2], [1, 3601], [1, 2, 3], [1], "2", True, [1, "2"]])
+def test_validate_sleep_rejects_out_of_range_or_malformed_values(field, value):
+    with pytest.raises(ValueError, match=field):
+        SiteConfigService._validate_overrides({"download": {field: value}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "download",
+    [
+        {"sleep_download": 300},
+        {"sleep_download": [1, 400]},
+        {"sleep_request": [10, 300]},
+        {"sleep_request": 301},
+    ],
+)
+async def test_update_rejects_sleep_longer_than_inactivity_timeout(download):
+    """A single sleep >= the watchdog window would be killed as idle (instagram default window: 300s)."""
+    svc = SiteConfigService()
+    ctx, session = _mock_session_ctx(None)
+
+    with (
+        patch("core.site_config.AsyncSessionLocal", return_value=ctx),
+        pytest.raises(ValueError, match="inactivity_timeout"),
+    ):
+        await svc.update("instagram", {"download": download})
+
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_inactivity_timeout_shorter_than_stored_sleep():
+    """Lowering the window below an already-stored sleep is the same hazard, checked on the merged result."""
+    from db.models import SiteConfig
+
+    svc = SiteConfigService()
+    row = SiteConfig(source_id="twitter", overrides={"download": {"sleep_download": 100}}, adaptive={})
+    ctx, session = _mock_session_ctx(row)
+
+    with (
+        patch("core.site_config.AsyncSessionLocal", return_value=ctx),
+        pytest.raises(ValueError, match="inactivity_timeout"),
+    ):
+        await svc.update("twitter", {"download": {"inactivity_timeout": 60}})
+
+    session.commit.assert_not_awaited()
+    assert row.overrides == {"download": {"sleep_download": 100}}
+
+
+@pytest.mark.asyncio
+async def test_update_accepts_sleep_below_inactivity_timeout_and_persists_it():
+    svc = SiteConfigService()
+    ctx, session = _mock_session_ctx(None)
+
+    with (
+        patch("core.site_config.AsyncSessionLocal", return_value=ctx),
+        patch("core.site_config.get_redis", return_value=AsyncMock()),
+    ):
+        params, row = await svc.update("twitter", {"download": {"sleep_download": [1, 3]}})
+
+    assert params.sleep_download == (1, 3)
+    assert row.overrides == {"download": {"sleep_download": [1, 3]}}
+    session.commit.assert_awaited_once()
+
+
+def test_merge_normalises_stored_sleep_lists_to_tuples():
+    from db.models import SiteConfig
+
+    row = SiteConfig(
+        source_id="twitter",
+        overrides={"download": {"sleep_request": [1.0, 2.0], "sleep_download": [3.0, 4.0]}},
+        adaptive={},
+    )
+    params = SiteConfigService()._merge("twitter", row)
+    assert params.sleep_request == (1.0, 2.0)
+    assert params.sleep_download == (3.0, 4.0)
+
+
+# ── Reset / defaults / extractor defaults ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_reset_section_path_clears_all_download_overrides():
+    """field_path='download' (one segment) drops the whole section and leaves other sections alone."""
+    from db.models import SiteConfig
+
+    svc = SiteConfigService()
+    row = SiteConfig(
+        source_id="twitter",
+        overrides={"download": {"retries": 8, "sleep_download": 2}, "field_mapping": {"title": "t"}},
+        adaptive={},
+    )
+    ctx, session = _mock_session_ctx(row)
+
+    with (
+        patch("core.site_config.AsyncSessionLocal", return_value=ctx),
+        patch.object(svc, "_invalidate", new_callable=AsyncMock),
+    ):
+        params, _ = await svc.reset("twitter", "download")
+
+    assert row.overrides == {"field_mapping": {"title": "t"}}
+    assert params.retries == 4  # _sites.py default
+    assert params.sleep_download is None
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field_path", ["", "bogus", "download.retries.extra", "a.b.c.d"])
+async def test_reset_rejects_unknown_or_overlong_field_path(field_path):
+    svc = SiteConfigService()
+    with pytest.raises(ValueError, match="field_path"):
+        await svc.reset("twitter", field_path)
+
+
+def test_defaults_ignore_overrides_and_adaptive():
+    """defaults() is the Jyzrox layer only: what a reset would fall back to."""
+    svc = SiteConfigService()
+    assert svc.defaults("ehentai") == svc._merge("ehentai", None)
+    assert svc.defaults("ehentai").retries == 5
+
+
+def test_extractor_defaults_instagram_request_interval():
+    """IG's extractor class declares request_interval = (6.0, 12.0); surfaced as an informational hint."""
+    pytest.importorskip("gallery_dl")
+    assert SiteConfigService().extractor_defaults("instagram") == {
+        "sleep_request": [6.0, 12.0],
+        "sleep_download": None,
+    }
+
+
+def test_extractor_defaults_unknown_source_returns_nulls():
+    assert SiteConfigService().extractor_defaults("no-such-site-xyz") == {
+        "sleep_request": None,
+        "sleep_download": None,
+    }
+
+
+def test_extractor_defaults_lookup_failure_returns_nulls():
+    from core import site_config
+
+    site_config._extractor_defaults_for.cache_clear()
+    try:
+        with patch("core.site_config.gdl_extractor_name", side_effect=RuntimeError("boom")):
+            assert SiteConfigService().extractor_defaults("instagram") == {
+                "sleep_request": None,
+                "sleep_download": None,
+            }
+    finally:
+        site_config._extractor_defaults_for.cache_clear()
