@@ -384,7 +384,7 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
         role="dialog"
         aria-modal="true"
         aria-labelledby="site-editor-dialog-title"
-        className="relative w-full max-w-2xl bg-vault-bg border-l border-vault-border flex flex-col overflow-hidden shadow-2xl"
+        className="relative w-full max-w-2xl pt-[var(--sat)] pb-[var(--sab)] bg-vault-bg border-l border-vault-border flex flex-col overflow-hidden shadow-2xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-vault-border shrink-0">

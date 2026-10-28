@@ -187,6 +187,16 @@ describe('AdminSitesPage download editor', () => {
     await waitFor(() => expect(screen.getByRole('spinbutton', { name: RETRIES })).toHaveValue(4))
   })
 
+  it('full-screen editor on iOS standalone pads the safe-area insets so the header clears the status bar', async () => {
+    await openEditor()
+
+    // viewport-fit=cover: without the --sat/--sab padding the header sits under
+    // the iOS status bar and the last buttons under the home indicator.
+    const panel = screen.getByRole('dialog')
+    expect(panel.className).toContain('pt-[var(--sat)]')
+    expect(panel.className).toContain('pb-[var(--sab)]')
+  })
+
   it('shows gallery-dl extractor default when sleep default is null', async () => {
     m.list.mockResolvedValue([
       { ...site, extractor_defaults: { sleep_request: [6, 12], sleep_download: null } },
