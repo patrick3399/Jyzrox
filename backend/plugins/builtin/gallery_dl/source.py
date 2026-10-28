@@ -419,6 +419,9 @@ class _DownloadState:
     last_activity: float = 0.0
     total_paused: float = 0.0
     cancelled: bool = False
+    # True while the pause watcher holds the process in SIGSTOP; a stopped
+    # process is silent by design, so the inactivity watchdog must not count it.
+    paused: bool = False
     last_progress_update: float = 0.0
     stderr_lines: list[str] = field(default_factory=list)
     html_response_count: int = 0
@@ -733,6 +736,10 @@ async def _inactivity_watchdog(
         await asyncio.sleep(poll_s)
         if state.cancelled:
             return "cancelled"
+        if state.paused:
+            # Restart the idle window so it is measured from resume, not pause start.
+            state.last_activity = asyncio.get_running_loop().time()
+            continue
         if watch_dir is not None:
             partial = await asyncio.to_thread(_partial_bytes, watch_dir)
             if partial != last_partial:
@@ -773,6 +780,7 @@ async def _pause_cancel_watcher(
             state.gdl_state = GDL_STATE_PAUSED
             _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] pausing process")
+            state.paused = True
             try:
                 proc.send_signal(signal.SIGSTOP)
             except ProcessLookupError, OSError:
@@ -783,6 +791,7 @@ async def _pause_cancel_watcher(
                     state.cancelled = True
                     state.gdl_state = GDL_STATE_CANCELLED
                     _sync_diagnostic(state, diagnostic_ctx)
+                    state.paused = False
                     try:
                         proc.send_signal(signal.SIGCONT)
                     except ProcessLookupError, OSError:
@@ -798,6 +807,7 @@ async def _pause_cancel_watcher(
             state.gdl_state = prev_state if prev_state != GDL_STATE_PAUSED else GDL_STATE_DOWNLOADING
             _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] resumed after %.1fs", paused_duration)
+            state.paused = False
             try:
                 proc.send_signal(signal.SIGCONT)
             except ProcessLookupError, OSError:

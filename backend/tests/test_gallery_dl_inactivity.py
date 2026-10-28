@@ -86,3 +86,78 @@ async def test_missing_staging_dir_falls_back_to_output_only_inactivity(tmp_path
         )
 
     assert result == "inactivity_timeout"
+
+
+@pytest.mark.asyncio
+async def test_inactivity_watchdog_does_not_kill_while_paused(tmp_path):
+    """A SIGSTOPped process prints nothing and grows no .part file; that is a pause, not a stall."""
+    state = _state()
+    state.paused = True
+    state.last_activity -= 1000  # idle far beyond the timeout
+
+    with patch.object(source, "_terminate_process_tree", new_callable=AsyncMock) as terminate:
+        watchdog = asyncio.create_task(
+            _inactivity_watchdog(state, _TIMEOUT_S, MagicMock(), watch_dir=tmp_path, poll_s=_POLL_S)
+        )
+        await asyncio.sleep(_TIMEOUT_S * 3)
+        still_running = not watchdog.done()
+        watchdog.cancel()
+
+    assert still_running
+    terminate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inactivity_watchdog_times_out_from_resume_not_pause_start(tmp_path):
+    """After resume the idle window starts over; time spent paused must not count."""
+    state = _state()
+    state.paused = True
+    state.last_activity -= 1000
+
+    with patch.object(source, "_terminate_process_tree", new_callable=AsyncMock) as terminate:
+        watchdog = asyncio.create_task(
+            _inactivity_watchdog(state, _TIMEOUT_S, MagicMock(), watch_dir=tmp_path, poll_s=_POLL_S)
+        )
+        await asyncio.sleep(_TIMEOUT_S * 2)
+        assert not watchdog.done()
+        resumed_at = asyncio.get_running_loop().time()
+        state.paused = False
+        result = await asyncio.wait_for(watchdog, timeout=5)
+        killed_at = asyncio.get_running_loop().time()
+
+    assert result == "inactivity_timeout"
+    terminate.assert_awaited_once()
+    # The watchdog stamps last_activity on every paused poll, so the window is
+    # measured from (at most one poll before) the resume, never from pause start.
+    assert killed_at - resumed_at >= _TIMEOUT_S - _POLL_S * 2
+
+
+@pytest.mark.asyncio
+async def test_pause_watcher_marks_state_paused_only_while_process_is_stopped():
+    """The watchdog trusts state.paused, so the watcher must set it around SIGSTOP/SIGCONT."""
+    state = _state()
+    proc = MagicMock()
+    seen: list[bool] = []
+    calls = {"n": 0}
+
+    async def pause_check() -> bool:
+        calls["n"] += 1
+        seen.append(state.paused)
+        return calls["n"] <= 2  # pause requested, held for one poll, then released
+
+    real_sleep = asyncio.sleep
+
+    async def fast_sleep(_delay):
+        await real_sleep(0)
+
+    with patch.object(source.asyncio, "sleep", fast_sleep):
+        watcher = asyncio.create_task(source._pause_cancel_watcher(state, proc, None, pause_check))
+        for _ in range(20):
+            await real_sleep(0)
+        watcher.cancel()
+
+    # 1st poll: not yet paused; 2nd poll (inside the pause loop): paused.
+    assert seen[:2] == [False, True]
+    assert state.paused is False
+    sent = [c.args[0] for c in proc.send_signal.call_args_list]
+    assert sent[:2] == [source.signal.SIGSTOP, source.signal.SIGCONT]
