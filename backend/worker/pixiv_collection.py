@@ -226,7 +226,6 @@ async def pixiv_collection_job(
                 source="pixiv",
                 source_id=f"user:{user_id}",
                 title=title,
-                category="pixiv",
                 uploader=title,
                 artist_id=f"pixiv:{user_id}",
             )

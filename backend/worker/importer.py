@@ -473,7 +473,8 @@ def _build_gallery(
             or f"{source}_{source_id}"
         ),
         "title_jpn": meta.get("title_jpn") or meta.get("title_original") or "",
-        "category": meta.get("category") or meta.get("type", ""),
+        # gallery-dl's "category" is the extractor name; the gallery type is "gallery_category".
+        "category": meta.get("gallery_category") or "",
         "language": meta.get("lang") or meta.get("language", ""),
         "pages": page_count,
         "posted_at": posted_at,

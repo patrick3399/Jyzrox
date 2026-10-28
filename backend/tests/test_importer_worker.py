@@ -246,6 +246,7 @@ class TestBuildGallery:
             "title": "Full Gallery",
             "title_jpn": "フルギャラリー",
             "category": "ehentai",
+            "gallery_category": "Doujinshi",
             "lang": "japanese",
             "uploader": "uploader_name",
             "date": 1_700_000_000,
@@ -256,7 +257,7 @@ class TestBuildGallery:
         assert result["source"] == "ehentai"
         assert result["title"] == "Full Gallery"
         assert result["title_jpn"] == "フルギャラリー"
-        assert result["category"] == "ehentai"
+        assert result["category"] == "Doujinshi"
         assert result["language"] == "japanese"
         assert result["uploader"] == "uploader_name"
         assert result["pages"] == 42

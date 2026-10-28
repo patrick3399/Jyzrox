@@ -169,3 +169,60 @@ async def test_incremental_anchor_after_complete_sync_is_the_newest_work(db_sess
     await _author_gallery(db_session, download_status="complete", item_ids=["300", "200"])
 
     assert await _gallery_resume_anchor(db_session, user_id=2587756, owner_user_id=1) == "300"
+
+
+@pytest.mark.asyncio
+async def test_author_collection_gallery_is_created_uncategorized_not_with_source_name():
+    """The source name "pixiv" is not a gallery category; a new author gallery stays uncategorized."""
+    from contextlib import asynccontextmanager
+
+    from worker.pixiv_collection import pixiv_collection_job
+
+    created = []
+
+    class _Importer:
+        def __init__(self, *_args):
+            self.skipped_trashed = True  # stop right after the gallery upsert
+            self.gallery_id = None
+
+        async def ensure_gallery_from_import_data(self, data):
+            created.append(data)
+
+    class _PixivClient:
+        def __init__(self, _token):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def user_detail(self, _user_id):
+            return {"name": "Some Artist"}
+
+    @asynccontextmanager
+    async def _session():
+        yield SimpleNamespace()
+
+    redis = SimpleNamespace(set=AsyncMock(return_value=True), get=AsyncMock(return_value=None), delete=AsyncMock())
+    with (
+        patch("worker.pixiv_collection.get_credential", AsyncMock(return_value="token")),
+        patch("worker.pixiv_collection._set_job_status", AsyncMock()),
+        patch("worker.pixiv_collection.PixivClient", _PixivClient),
+        patch("worker.pixiv_collection.AsyncSessionLocal", _session),
+        patch("worker.pixiv_collection._gallery_resume_anchor", AsyncMock(return_value=None)),
+        patch("worker.pixiv_collection._discover", AsyncMock(return_value=([], True))),
+        patch("worker.pixiv_collection.ProgressiveImporter", _Importer),
+    ):
+        await pixiv_collection_job(
+            {"redis": redis},
+            user_id=1960050,
+            owner_user_id=7,
+            db_job_id="00000000-0000-0000-0000-000000000001",
+        )
+
+    assert len(created) == 1
+    assert created[0].source == "pixiv"
+    assert created[0].source_id == "user:1960050"
+    assert created[0].category == ""

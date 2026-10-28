@@ -152,7 +152,8 @@ class TestWorkerBuildGallery:
         meta = {
             "title": "Test Title",
             "title_jpn": "テスト",
-            "category": "Doujinshi",
+            "category": "exhentai",
+            "gallery_category": "Doujinshi",
             "lang": "english",
             "uploader": "some_uploader",
         }
@@ -168,6 +169,13 @@ class TestWorkerBuildGallery:
         assert result["uploader"] == "some_uploader"
         assert result["download_status"] == "complete"
         assert result["tags_array"] == ["artist:foo"]
+
+    def test_build_gallery_does_not_use_gallery_dl_extractor_name_as_category(self):
+        """gallery-dl's "category" is the extractor name (and "type" the post type), not a gallery category."""
+        from worker import _build_gallery
+
+        result = _build_gallery("twitter", "1", {"category": "twitter", "type": "tweet"}, [], 1)
+        assert result["category"] == ""
 
     def test_build_gallery_unix_timestamp_date(self):
         """Integer 'date' field must be parsed to a datetime."""
