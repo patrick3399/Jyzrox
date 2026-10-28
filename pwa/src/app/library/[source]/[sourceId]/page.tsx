@@ -13,6 +13,7 @@ import { useGalleryEventRefresh } from '@/hooks/useGalleryEventRefresh'
 import { api } from '@/lib/api'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
+import { createRequestCoalescer } from '@/lib/requestCoalescer'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import { galleryStatusAction } from '@/lib/galleryUtils'
 import { detailHotkey } from '@/lib/detailHotkeys'
@@ -50,6 +51,8 @@ import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { estimateGalleryThumbRowHeight } from '@/lib/gridRowHeight'
+
+const DOWNLOAD_REFRESH_INTERVAL_MS = 3000
 
 function getSourceLink(sourceUrl: string, source: string): { href: string; external: boolean } {
   if (source === 'ehentai') {
@@ -397,13 +400,26 @@ export default function GalleryDetailPage() {
   // WS-driven refresh while downloading: progressive import sets
   // progress.gallery_id on job_update events (see worker/download.py) so a
   // matching update means new pages may have arrived for this gallery.
+  // A fast download sends several job_updates a second, so refreshes are
+  // coalesced. The effect keys on the gallery id, not the gallery object:
+  // each refetch returns a new object while pages grow, and re-running on it
+  // refetched again for the same job_update in a loop until nginx and the API
+  // rate-limited the client.
+  const downloadRefresh = useMemo(
+    () =>
+      createRequestCoalescer(async () => {
+        await Promise.all([mutateGallery(), mutateImages()])
+      }, DOWNLOAD_REFRESH_INTERVAL_MS),
+    [mutateGallery, mutateImages],
+  )
+  useEffect(() => () => downloadRefresh.cancel(), [downloadRefresh])
+  const galleryId = gallery?.id
   useEffect(() => {
-    if (!isDownloading || !gallery || !lastJobUpdate) return
+    if (!isDownloading || galleryId == null || !lastJobUpdate) return
     const progressGalleryId = lastJobUpdate.progress?.gallery_id
-    if (progressGalleryId !== gallery.id) return
-    mutateGallery()
-    mutateImages()
-  }, [lastJobUpdate, isDownloading, gallery, mutateGallery, mutateImages])
+    if (progressGalleryId !== galleryId) return
+    downloadRefresh.trigger()
+  }, [lastJobUpdate, isDownloading, galleryId, downloadRefresh])
 
   const { data: activeJob, mutate: mutateActiveJob } = useSWR(
     activeJobId ? ['download/job', activeJobId] : null,
