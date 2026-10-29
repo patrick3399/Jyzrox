@@ -14,6 +14,7 @@ from core.utils import normalize_download_url
 from db.models import DownloadJob, Subscription
 from plugins.models import NewWork
 from services.download_admission import admission_key_for
+from services.download_mode import subscription_mode
 from worker.constants import GROUP_MAX_DURATION, logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
@@ -59,6 +60,7 @@ async def _enqueue_discovered_works(ctx: dict, sub, subscriber, *, force_full_sc
     works, latest_id = result.works, result.latest_id
 
     options = {"job_context": "subscription", **result.job_options}
+    mode = subscription_mode(has_boundary=bool(sub.last_item_id), force_full_scan=force_full_scan)
     enqueued: list[tuple[uuid.UUID, NewWork]] = []
     async with AsyncSessionLocal() as session:
         for work in works:
@@ -86,6 +88,7 @@ async def _enqueue_discovered_works(ctx: dict, sub, subscriber, *, force_full_sc
                     status="queued",
                     progress={},
                     options=options,
+                    mode=mode,
                     user_id=sub.user_id,
                     subscription_id=sub.id,
                     admission_key=admission_key_for(source, canonical_url),
@@ -274,7 +277,13 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
             # must not advance gallery-dl incremental cutoffs after failed jobs.
             options["last_completed_at"] = sub.last_success_at.isoformat()
 
-        # Create download job
+        # Create download job. The mode is stamped here and never re-derived at
+        # run time, so retries and recovery replay it. force_full_scan stays in
+        # the options too so a not-yet-upgraded worker (rolling deploy) still
+        # runs a repair as before.
+        mode = subscription_mode(
+            has_boundary=bool(getattr(sub, "last_success_at", None)), force_full_scan=force_full_scan
+        )
         job_id = uuid.uuid4()
         async with AsyncSessionLocal() as session:
             session.add(
@@ -286,6 +295,7 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
                     status="queued",
                     progress={},
                     options=options,
+                    mode=mode,
                     user_id=sub.user_id,
                     subscription_id=sub.id,
                     admission_key=admission_key_for(sub.source or "gallery_dl", canonical_url),

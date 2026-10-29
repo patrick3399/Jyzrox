@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, update
+from sqlalchemy import delete, func, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import select
@@ -15,8 +15,10 @@ from sqlalchemy.sql import select
 import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
+from core.events import EventType, emit_safe
 from core.social_order import reorder_social_gallery_images
 from db.models import ExcludedBlob, Gallery, Image
+from plugins.builtin.gallery_dl._archive import drop_repair_archive, merge_repair_archive
 from plugins.models import GalleryImportData
 from services.cas import (
     create_library_symlink,
@@ -26,6 +28,7 @@ from services.cas import (
     store_blob,
     thumb_dir,
 )
+from services.download_mode import gallery_status_on_stop
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from services.tag_helpers import upsert_metadata_gallery_tags
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
@@ -180,9 +183,23 @@ async def _is_archive_table(session, table: str) -> bool:
 class ProgressiveImporter:
     """Imports files progressively during gallery-dl download."""
 
-    def __init__(self, db_job_id: str | None, user_id: int | None, *, page_num_from_filename: bool = False):
+    def __init__(
+        self,
+        db_job_id: str | None,
+        user_id: int | None,
+        *,
+        page_num_from_filename: bool = False,
+        include_excluded: bool = False,
+    ):
         self.db_job_id = db_job_id
         self.user_id = user_id
+        # Repair opt-in: a purged (excluded) blob is imported again and its
+        # ExcludedBlob row removed, instead of being skipped.
+        self.include_excluded = include_excluded
+        # (real, shadow) archive tables of a repair run, set by the worker. The
+        # shadow holds what the run archived; it is merged into the real table
+        # when the run is kept and dropped when it is discarded.
+        self.repair_archive: tuple[str, str] | None = None
         self.gallery_id: int | None = None
         self.title: str | None = None
         self.source: str | None = None
@@ -695,6 +712,22 @@ class ProgressiveImporter:
         await self._load_gallery_state()
         return self.gallery_id
 
+    def has_processed(self, path: Path) -> bool:
+        """Whether ``path`` was already handed to ``import_file`` in this run."""
+        return str(path) in self._processed or str(Path(path)) in self._processed
+
+    def is_known_filename(self, path: Path) -> bool:
+        """Whether ``path`` would be skipped as a name duplicate, without reading its bytes.
+
+        Lets a sweep of a large staging dir skip hashing files the gallery already
+        holds. Only where a known name decides on its own: a page-numbered plugin
+        (or Pixiv, whose item id comes from the name) may mean a replaced page, so
+        its files are always looked at.
+        """
+        if self._page_num_from_filename or self.source == "pixiv":
+            return False
+        return path.name in self._known_filenames
+
     async def import_file(self, file_path: Path, sha256: str | None = None) -> None:
         """Import a single media file with bounded concurrency.
 
@@ -761,10 +794,13 @@ class ProgressiveImporter:
             final_sha256 = sha256 or await asyncio.to_thread(_sha256, file_path)
             source_item_id = self._derive_source_item_id(file_path, page_num, final_sha256)
 
-            # Skip excluded blobs
+            # Skip excluded blobs, unless a repair asked for them back
+            restore_excluded = False
             if final_sha256 in self._excluded_set:
-                self._skip_excluded += 1
-                return
+                if not self.include_excluded:
+                    self._skip_excluded += 1
+                    return
+                restore_excluded = True
             existing_source_item = self._source_item_state.get(source_item_id) if source_item_id else None
             if final_sha256 in self._known_sha256s:
                 self._skip_duplicate += 1
@@ -845,6 +881,16 @@ class ProgressiveImporter:
                         )
                     if replacement_image is not None:
                         replacement_image.replaced_by_image_id = inserted
+                    if restore_excluded:
+                        # Same transaction as the image: the blob lock was taken
+                        # first (store_blob / ref count), the galleries side is
+                        # only an ExcludedBlob delete, so the lock order holds.
+                        await session.execute(
+                            delete(ExcludedBlob).where(
+                                ExcludedBlob.gallery_id == self.gallery_id,
+                                ExcludedBlob.blob_sha256 == final_sha256,
+                            )
+                        )
 
                     # Create library symlink before closing session (need blob data).
                     # Only when a row was actually inserted — a conflicting insert
@@ -853,6 +899,8 @@ class ProgressiveImporter:
                 await session.commit()
 
             if inserted is not None:
+                if restore_excluded:
+                    self._excluded_set.discard(final_sha256)
                 self._import_success_count += 1
                 self._pending_thumbnail_ids.append(inserted)
                 await self._publish_progress()
@@ -1050,8 +1098,51 @@ class ProgressiveImporter:
         except Exception as exc:
             logger.warning("[progressive] failed to discard archive entries of job %s: %s", job_uuid, exc)
 
-    async def finalize(self, dest_dir: Path, *, partial: bool = False) -> int | None:
-        """Wait for pending tasks, update gallery pages + status, clean up temp dir."""
+    async def discard_unlinked_archive_entries(self) -> None:
+        """Drop this run's archive rows that no gallery holds, for a stop that kept nothing.
+
+        The same rows ``cleanup()`` discards, without touching any gallery: a
+        stopped run with no gallery to keep must not leave archive rows that make
+        the next run skip files that were never imported. A repair shadow goes
+        too, unmerged.
+        """
+        await self._discard_run_archive_entries(since=self._run_started_at if self.pre_existing else None)
+        await self._drop_repair_shadow()
+
+    async def _merge_repair_archive(self, session) -> None:
+        """Copy the repair shadow into the real archive inside ``session``'s transaction."""
+        if self.repair_archive is None:
+            return
+        real, shadow = self.repair_archive
+        try:
+            async with session.begin_nested():  # SAVEPOINT: failure rolls back only the merge
+                copied = await merge_repair_archive(session, real, shadow)
+            if copied:
+                logger.info("[progressive] merged %d repair archive entries into %s", copied, real)
+        except Exception as exc:
+            logger.warning("[progressive] failed to merge repair archive %s into %s: %s", shadow, real, exc)
+
+    async def _drop_repair_shadow(self, *, merge: bool = False) -> None:
+        """Drop the repair shadow table, merging it into the real one first when asked.
+
+        Best effort: a table that survives is merged or dropped by the worker's
+        startup sweep. Runs once; later calls find ``repair_archive`` cleared.
+        """
+        if self.repair_archive is None:
+            return
+        real, shadow = self.repair_archive
+        try:
+            async with AsyncSessionLocal() as session:
+                if merge:
+                    await self._merge_repair_archive(session)
+                await drop_repair_archive(session, shadow)
+                await session.commit()
+            self.repair_archive = None
+        except Exception as exc:
+            logger.warning("[progressive] failed to drop repair archive %s: %s", shadow, exc)
+
+    async def _drain_tasks(self) -> None:
+        """Wait for in-flight imports to finish (never cancels them)."""
         if self._tasks:
             results = await asyncio.gather(*self._tasks, return_exceptions=True)
             for r in results:
@@ -1059,13 +1150,45 @@ class ProgressiveImporter:
                     logger.warning("[progressive] task error during finalize: %s", r)
             self._tasks.clear()
 
+    async def finalize_kept(self, dest_dir: Path, *, mode: str) -> int | None:
+        """Finalize a run the user stopped, keeping everything it imported.
+
+        The gallery status follows the mode (``gallery_status_on_stop``): a
+        subscription stop is ``complete`` (caught up to the boundary the user
+        chose), a manual or repair stop stays ``partial`` and resumable.
+        Per-file import failures still win, exactly as in ``finalize``.
+
+        Two cases keep nothing new, and neither may change a gallery:
+        - a gallery this run created that holds no image is not kept as an empty
+          shell: the run is rolled back like a cancel;
+        - a stopped manual/repair run that added nothing to a gallery that was
+          ``complete`` leaves it ``complete`` instead of demoting it.
+        """
+        await self._drain_tasks()
+        partial = gallery_status_on_stop(mode) == "partial"
+        if self.gallery_id and not self.skipped_trashed:
+            nothing_new = self._import_success_count == 0 and not self._import_failures
+            if nothing_new and not self.pre_existing:
+                await self.cleanup()
+                _rmtree_staging_dir(dest_dir)
+                return None
+            if partial and nothing_new and (self._prev_gallery_snapshot or {}).get("download_status") == "complete":
+                partial = False
+        return await self.finalize(dest_dir, partial=partial)
+
+    async def finalize(self, dest_dir: Path, *, partial: bool = False) -> int | None:
+        """Wait for pending tasks, update gallery pages + status, clean up temp dir."""
+        await self._drain_tasks()
+
         # Audit #8: trashed gallery — nothing was imported, so do not mutate the
         # gallery row or enqueue cover/thumbnail/tag jobs. Just drop the temp dir.
         if self.skipped_trashed:
+            await self._drop_repair_shadow()
             _rmtree_staging_dir(dest_dir)
             return None
 
         if not self.gallery_id:
+            await self._drop_repair_shadow()
             return None
 
         # HR-002: derive the terminal status from actual per-file outcomes
@@ -1095,6 +1218,8 @@ class ProgressiveImporter:
                 gallery.pages = count
                 gallery.download_status = resolved_status
                 gallery.metadata_updated_at = func.now()
+                # A repair's rows reach the real archive first, then link with the rest.
+                await self._merge_repair_archive(session)
                 await self._link_archive_entries(session)
                 # Capture before commit: attributes expire on commit
                 sidecar_source, sidecar_source_id = gallery.source, gallery.source_id
@@ -1102,6 +1227,9 @@ class ProgressiveImporter:
                 await session.commit()
                 # Disaster-recovery sidecar (best-effort)
                 await write_gallery_sidecar(sidecar_source, sidecar_source_id, sidecar_payload)
+
+        # Merged and committed above; the shadow only has to disappear now.
+        await self._drop_repair_shadow()
 
         from services.gallery_lifecycle import invalidate_sources_cache
 
@@ -1146,6 +1274,11 @@ class ProgressiveImporter:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
 
+        # What a repair fetched is archived for good even though the run failed;
+        # its rows stay unlinked and a retry (same job id) links them. A trashed
+        # target imported nothing, so its rows must not become holes.
+        await self._drop_repair_shadow(merge=not self.skipped_trashed)
+
         # Audit #8: never mutate a trashed gallery's status on abort.
         if self.skipped_trashed:
             return
@@ -1175,6 +1308,7 @@ class ProgressiveImporter:
                 else:
                     gallery.download_status = "partial" if count > 0 else "failed"
                 await session.commit()
+                await emit_safe(EventType.GALLERY_UPDATED, resource_type="gallery", resource_id=self.gallery_id)
 
     async def cleanup(self) -> None:
         """Cancel pending tasks and fully delete the gallery. Called on user-initiated cancel.
@@ -1197,6 +1331,7 @@ class ProgressiveImporter:
         # Every branch below drops what this run imported, so its archive rows
         # go too; a kept gallery keeps what an earlier attempt archived.
         await self._discard_run_archive_entries(since=self._run_started_at if self.pre_existing else None)
+        await self._drop_repair_shadow()
 
         # Audit #8 / #53: a skipped trashed gallery pre-existed this job and had
         # nothing imported into it — cancelling must never delete it.
@@ -1246,6 +1381,9 @@ class ProgressiveImporter:
             len(blob_sha256s),
             len(zero_ref_sha256s),
         )
+        # The row is gone for good: tell the library, or its grid keeps a stale
+        # "downloading" card until the next reload.
+        await emit_safe(EventType.GALLERY_DELETED, resource_type="gallery", resource_id=self.gallery_id)
 
         def _delete_filesystem() -> None:
             # Remove the entire library symlink directory for this gallery
@@ -1276,6 +1414,8 @@ class ProgressiveImporter:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
+
+        await self._drop_repair_shadow()
 
         if not self.gallery_id:
             return
@@ -1325,6 +1465,7 @@ class ProgressiveImporter:
             len(removed_names),
             len(zero_ref_sha256s),
         )
+        await emit_safe(EventType.GALLERY_UPDATED, resource_type="gallery", resource_id=self.gallery_id)
 
         lib_dir = library_dir(self.source, self.source_id) if self.source and self.source_id else None
 

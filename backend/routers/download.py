@@ -5,6 +5,7 @@ import os
 import signal
 import urllib.parse
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -14,15 +15,24 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import core.queue
-from core.auth import require_auth, require_role
+from core.auth import gallery_access_filter, has_gallery_write_access, require_auth, require_role
 from core.database import get_db
 from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
 from services.download_admission import next_admission_ticket
+from services.download_mode import (
+    DOWNLOAD,
+    REPAIR,
+    effective_mode,
+    find_gallery_subscription,
+    find_subscription_for_url,
+    stop_discards,
+)
 from services.download_policy import get_credential_policy, normalize_download_options
 from services.download_presenter import serialize_download_job
+from services.download_stop import StopNotAllowed, request_stop
 from services.egress_persona import resolve_admission_key
 from worker.helpers import compute_job_key, enqueue_download_job
 
@@ -43,10 +53,19 @@ class DownloadRequest(BaseModel):
     total: int | None = None
     filesize_min: str | None = None  # e.g. "100k", "1M"
     filesize_max: str | None = None  # e.g. "50M", "1G"
+    # The URL equals one of the user's subscriptions: enqueueing it anyway
+    # resumes history the user may have given up (stop), so it needs a yes.
+    confirm_subscribed: bool = False
 
 
 class QuickDownloadRequest(BaseModel):
     url: str
+
+
+class GalleryActionRequest(BaseModel):
+    action: Literal["repair", "update"]
+    # Repair only: let images the user purged (ExcludedBlob) back in.
+    include_excluded: bool = False
 
 
 class JobActionRequest(BaseModel):
@@ -148,6 +167,9 @@ async def _enqueue(
     options: dict | None = None,
     total: int | None = None,
     user_id: int | None = None,
+    mode: str = DOWNLOAD,
+    subscription_id: int | None = None,
+    gallery_id: int | None = None,
 ) -> dict:
     """Shared enqueue logic: DB record first, then queue.
 
@@ -155,6 +177,10 @@ async def _enqueue(
     fails the DB record is updated to "failed" so the user can see what
     happened.  This avoids the race where a worker picks up the SAQ job before
     the DB row exists.
+
+    ``mode`` is stamped on the row here and never re-derived at run time (see
+    services/download_mode.py); ``subscription_id`` / ``gallery_id`` link the
+    job to the subscription or gallery it repairs or updates.
 
     Returns a dict suitable for use as the HTTP response body.
     """
@@ -201,8 +227,11 @@ async def _enqueue(
             status="queued",
             progress=initial_progress or {},
             options=options or {},
+            mode=mode,
             user_id=user_id,
-            admission_key=await resolve_admission_key(source, canonical_url, subscription_id=None),
+            subscription_id=subscription_id,
+            gallery_id=gallery_id,
+            admission_key=await resolve_admission_key(source, canonical_url, subscription_id=subscription_id),
         )
         db.add(job)
         await db.commit()
@@ -252,6 +281,17 @@ async def enqueue_download(
         merged_options["filesize_min"] = req.filesize_min
     if req.filesize_max:
         merged_options["filesize_max"] = req.filesize_max
+    if not req.confirm_subscribed:
+        subscribed = await find_subscription_for_url(db, normalize_download_url(req.url), auth["user_id"])
+        if subscribed is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "subscribed",
+                    "subscription_id": subscribed.id,
+                    "name": subscribed.name or subscribed.url,
+                },
+            )
     result = await _enqueue(req.url, db, options=merged_options or None, total=req.total, user_id=auth["user_id"])
     from core.events import EventType, emit_safe
 
@@ -592,6 +632,14 @@ async def cancel_job(
     if job.status not in ("queued", "running", "paused"):
         raise HTTPException(status_code=400, detail=f"Cannot cancel: status={job.status}")
 
+    # A repair has nothing to roll back to: what it fetched is wanted, so cancel
+    # acts as stop (the worker keeps the repaired files).
+    if not stop_discards(effective_mode(job.mode, job.options)):
+        try:
+            return await request_stop(db, job)
+        except StopNotAllowed as exc:
+            raise HTTPException(status_code=400, detail=f"Cannot cancel: status={exc.status}") from exc
+
     # Kill the subprocess if it is running or paused
     redis = get_redis()
     pid_bytes = await redis.get(f"download:pid:{job_id}")
@@ -628,6 +676,34 @@ async def cancel_job(
     return {"status": "cancelled"}
 
 
+@router.post("/jobs/{job_id}/stop")
+async def stop_job(
+    job_id: uuid.UUID,
+    request: Request,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop a job and keep what it already fetched (cancel discards instead).
+
+    Records a durable intent; the worker (or ``finalize_stopped_job`` for a job
+    with no live execution) finishes it as ``done`` with ``outcome == "stopped"``
+    and, for a subscription, moves the boundary to the run start. The status
+    stays active until then.
+    """
+    job = await db.get(DownloadJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.user_id != auth["user_id"] and auth["role"] != "admin":
+        locale = parse_accept_language(request.headers.get("accept-language"))
+        raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
+
+    try:
+        return await request_stop(db, job)
+    except StopNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=f"Cannot stop: status={exc.status}") from exc
+
+
 @router.post("/jobs/{job_id}/retry")
 async def retry_job(
     job_id: uuid.UUID,
@@ -644,6 +720,11 @@ async def retry_job(
         locale = parse_accept_language(request.headers.get("accept-language"))
         raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
 
+    # A stopped job was ended on purpose; replaying it with its original
+    # options would fetch the history the user gave up (a first run has no
+    # incremental cutoff).
+    if getattr(job, "stop_requested_at", None) is not None:
+        raise HTTPException(status_code=409, detail="Cannot retry a stopped job")
     if job.status not in ("failed", "partial"):
         raise HTTPException(status_code=400, detail=f"Cannot retry: status={job.status}")
     if job.retry_count >= job.max_retries:
@@ -688,6 +769,89 @@ async def retry_job(
     await db.commit()
 
     return {"status": "queued", "retry_count": job.retry_count, "max_retries": job.max_retries}
+
+
+@router.post("/galleries/{gallery_id}/action")
+async def gallery_action(
+    gallery_id: int,
+    req: GalleryActionRequest,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Gallery page "repair" / "update" (outdated).
+
+    * ``update`` on a subscription's gallery triggers a subscription check
+      (incremental, honours the boundary); otherwise a plain re-download.
+    * ``repair`` re-fetches against an empty shadow archive so files that were
+      archived but never imported come back; on a subscription's gallery it
+      inherits the subscription's download options.
+    """
+    gallery = (
+        await db.execute(select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth)))
+    ).scalar_one_or_none()
+    if gallery is None:
+        raise HTTPException(status_code=404, detail="Gallery not found")
+    if not await has_gallery_write_access(db, gallery.id, gallery.created_by_user_id, auth):
+        raise HTTPException(status_code=403, detail="Gallery write access is required")
+    # The access filter already hides trashed galleries; keep the guard so a
+    # download can never mutate or resurrect one (BE-T17) if that ever changes.
+    if gallery.deleted_at is not None:
+        raise HTTPException(status_code=409, detail="Gallery is in the trash")
+
+    active_job = (
+        await db.execute(
+            select(DownloadJob.id)
+            .where(DownloadJob.gallery_id == gallery.id, DownloadJob.status.in_(ACTIVE_JOB_STATUSES))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if active_job is not None:
+        raise HTTPException(status_code=409, detail="Gallery already has an active download job")
+
+    sub = await find_gallery_subscription(db, gallery.id, auth["user_id"])
+
+    if req.action == "update" and sub is not None:
+        try:
+            await core.queue.enqueue("check_single_subscription", _timeout=600, sub_id=sub.id)
+        except Exception as exc:
+            logger.error("[gallery_action] failed to enqueue check_single_subscription for sub %d: %s", sub.id, exc)
+            raise HTTPException(status_code=503, detail="Failed to enqueue subscription check") from exc
+        return {"kind": "subscription_check", "subscription_id": sub.id, "status": "queued"}
+
+    url = sub.url if (sub is not None and req.action == "repair") else gallery.source_url
+    if not url or not url.strip():
+        raise HTTPException(status_code=422, detail="Gallery has no source URL to download from")
+
+    if req.action == "update":
+        # No gallery_id preset: an attached job skips the identity upsert in the
+        # importer, so the gallery's title/tags would stop refreshing. (Repair
+        # re-fetches missing files into an existing gallery, so it presets it.)
+        result = await _enqueue(url, db, mode=DOWNLOAD, user_id=auth["user_id"])
+        kind = "download"
+    else:
+        options = dict(sub.download_options or {}) if sub is not None else {}
+        if req.include_excluded:
+            options["include_excluded"] = True
+        result = await _enqueue(
+            url,
+            db,
+            options=options or None,
+            mode=REPAIR,
+            subscription_id=sub.id if sub is not None else None,
+            gallery_id=gallery.id,
+            user_id=auth["user_id"],
+        )
+        kind = "repair"
+
+    from core.events import EventType, emit_safe
+
+    await emit_safe(
+        EventType.DOWNLOAD_ENQUEUED,
+        actor_user_id=auth["user_id"],
+        resource_type="download_job",
+        resource_id=result.get("job_id"),
+    )
+    return {"kind": kind, **result}
 
 
 @router.get("/dashboard")

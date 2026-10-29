@@ -4,8 +4,24 @@ import type { DownloadJob, JobListParams, DownloadPreview, DashboardResponse } f
 
 // ── Download ──────────────────────────────────────────────────────────
 
+/** What `POST /api/download/galleries/{id}/action` queued. */
+export type GalleryActionResult =
+  | { kind: 'subscription_check'; subscription_id: number; status: string }
+  | { kind: 'download' | 'repair'; job_id: string; status: string; warning?: string }
+
 export const download = {
-  enqueue: (url: string, source?: string, options: Record<string, unknown> = {}, total?: number) =>
+  /**
+   * Queue a URL. Without `confirmSubscribed`, a URL the user already subscribes
+   * to is refused with 409 `{code: "subscribed"}` (an `ApiError` whose `detail`
+   * carries the subscription) so the caller can offer "check now" instead.
+   */
+  enqueue: (
+    url: string,
+    source?: string,
+    options: Record<string, unknown> = {},
+    total?: number,
+    flags: { confirmSubscribed?: boolean } = {},
+  ) =>
     apiFetch<{ job_id: string; status: string; warning?: string }>('/api/download/', {
       method: 'POST',
       body: JSON.stringify({
@@ -13,7 +29,20 @@ export const download = {
         ...(source && { source }),
         ...(total !== undefined && { total }),
         ...(Object.keys(options).length > 0 && { options }),
+        ...(flags.confirmSubscribed && { confirm_subscribed: true }),
       }),
+    }),
+
+  /**
+   * Gallery page "update" / "repair". The server decides what that means: an
+   * update of a subscription's gallery is a subscription check, a repair
+   * re-fetches against a shadow archive (and, with `includeExcluded`, lets
+   * purged images back in).
+   */
+  galleryAction: (galleryId: number, action: 'repair' | 'update', includeExcluded = false) =>
+    apiFetch<GalleryActionResult>(`/api/download/galleries/${galleryId}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action, include_excluded: includeExcluded }),
     }),
 
   quickDownload: (url: string) =>
@@ -29,9 +58,16 @@ export const download = {
 
   getJob: (id: string) => apiFetch<DownloadJob>(`/api/download/jobs/${id}`),
 
+  /** Discard: kill the job and delete what this run fetched. A repair job treats this as a stop. */
   cancelJob: (id: string) =>
-    apiFetch<{ status: string }>(`/api/download/jobs/${id}`, {
+    apiFetch<{ status: string; stopping?: boolean }>(`/api/download/jobs/${id}`, {
       method: 'DELETE',
+    }),
+
+  /** Stop and keep: end the job early, keeping everything it already imported. */
+  stopJob: (id: string) =>
+    apiFetch<{ status: string; stopping: boolean }>(`/api/download/jobs/${id}/stop`, {
+      method: 'POST',
     }),
 
   clearFinishedJobs: () =>

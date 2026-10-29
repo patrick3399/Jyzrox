@@ -362,6 +362,12 @@ class DownloadJob(Base):
         BigInteger, ForeignKey("egress_personas.id", ondelete="SET NULL"), nullable=True
     )
     persona_name: Mapped[str | None] = mapped_column(Text)
+    # How this job fetches (services/download_mode.py). Decided at enqueue and
+    # never at run time, so retries and recovery replay the same mode.
+    mode: Mapped[str] = mapped_column(Text, nullable=False, default="download", server_default=text("'download'"))
+    # Durable "stop and keep" intent. The status stays active until the worker
+    # (or finalize_stopped_job) finishes the keep path.
+    stop_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ReadProgress(Base):

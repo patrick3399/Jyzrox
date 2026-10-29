@@ -14,6 +14,7 @@ import {
   RotateCcw,
   RefreshCw,
   Network,
+  Square,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { galleryHref } from '@/lib/galleryRoutes'
@@ -21,6 +22,7 @@ import {
   useDownloadJobs,
   useEnqueueDownload,
   useCancelJob,
+  useStopJob,
   useClearFinishedJobs,
   usePauseJob,
   useRetryJob,
@@ -29,6 +31,11 @@ import {
   useDownloadPreview,
 } from '@/hooks/useDownloadQueue'
 import { api } from '@/lib/api'
+import {
+  SubscribedUrlDialog,
+  subscribedHint,
+  type SubscribedUrlHint,
+} from '@/components/download/DownloadActionDialogs'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
@@ -36,7 +43,13 @@ import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
 import { DEFAULT_MEDIA_POLICY, withMediaPolicy } from '@/lib/mediaPolicy'
 import { SUBSCRIPTION_ACTIVE_ANCHOR, isActiveJob } from '@/lib/downloadJobFilters'
 import { useWsConnection } from '@/lib/ws'
-import type { DownloadJob, DownloadPreview, JobListParams, MediaPolicy } from '@/lib/types'
+import type {
+  DownloadJob,
+  DownloadJobMode,
+  DownloadPreview,
+  JobListParams,
+  MediaPolicy,
+} from '@/lib/types'
 
 // Module-level so the SWR key stays referentially stable across renders.
 const MANUAL_JOBS_PARAMS: JobListParams = { exclude_subscription: true }
@@ -64,7 +77,15 @@ const STATUS_STYLES: Record<string, string> = {
   partial: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
 }
 
-function StatusBadge({ status, alreadySaved }: { status: string; alreadySaved?: boolean }) {
+function StatusBadge({
+  status,
+  alreadySaved,
+  stopped,
+}: {
+  status: string
+  alreadySaved?: boolean
+  stopped?: boolean
+}) {
   // A "done" run that fetched nothing new only confirmed what is stored.
   const shown = status === 'done' && alreadySaved ? 'cancelled' : status
   return (
@@ -78,7 +99,11 @@ function StatusBadge({ status, alreadySaved }: { status: string; alreadySaved?: 
           <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce [animation-delay:300ms]" />
         </span>
       )}
-      {status === 'done' && alreadySaved ? t('queue.statusAlreadySaved') : status}
+      {status === 'done' && alreadySaved
+        ? t('queue.statusAlreadySaved')
+        : status === 'done' && stopped
+          ? t('queue.stopped')
+          : status}
     </span>
   )
 }
@@ -89,6 +114,26 @@ function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   return `${h}h ${m}m`
+}
+
+const MODE_LABEL_KEY: Partial<Record<DownloadJobMode, string>> = {
+  subscription_initial: 'queue.modeInitial',
+  subscription_incremental: 'queue.modeIncremental',
+  repair: 'queue.modeRepair',
+}
+
+/** Plain downloads (and jobs from an API without modes) need no badge. */
+function ModeBadge({ mode }: { mode: DownloadJob['mode'] }) {
+  const labelKey = mode ? MODE_LABEL_KEY[mode] : undefined
+  if (!labelKey) return null
+  return (
+    <span
+      data-testid="job-mode-badge"
+      className="inline-flex items-center px-1.5 py-0.5 rounded border border-vault-border text-vault-text-secondary text-[11px] font-medium"
+    >
+      {t(labelKey)}
+    </span>
+  )
 }
 
 const GDL_STATE_KEY: Record<string, string> = {
@@ -201,22 +246,32 @@ function JobDetailPanel({ job }: { job: DownloadJob }) {
 
 function JobRow({
   job,
-  onCancel,
+  onStop,
+  onDiscard,
   onPause,
   onRetry,
-  isCancelling,
+  isStopping,
   expandedJobId,
   onToggleExpand,
 }: {
   job: DownloadJob
-  onCancel: (id: string) => void
+  onStop: (job: DownloadJob) => void
+  onDiscard: (job: DownloadJob) => void
   onPause: (id: string, action: 'pause' | 'resume') => void
   onRetry: (id: string) => void
-  isCancelling: boolean
+  /** A stop was just requested here and the list has not caught up yet. */
+  isStopping: boolean
   expandedJobId: string | null
   onToggleExpand: (id: string) => void
 }) {
-  const canCancel = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
+  const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
+  // The server keeps the job active until the worker has finished keeping what it fetched.
+  const stopping = isActive && (isStopping || !!job.stop_requested_at)
+  // A repair's files are wanted, so it has no discard: the server treats cancel as stop.
+  const canDiscard = job.mode !== 'repair'
+  const wasStopped = job.status === 'done' && job.progress?.outcome === 'stopped'
+  const stoppedText =
+    wasStopped && typeof job.progress?.status_text === 'string' ? job.progress.status_text : null
   const createdAt = new Date(job.created_at).toLocaleString()
   const finishedAt = job.finished_at ? new Date(job.finished_at).toLocaleString() : null
   const gallerySource = job.gallery_source
@@ -272,6 +327,7 @@ function JobRow({
                 {t('queue.subscription')}
               </span>
             )}
+            <ModeBadge mode={job.mode} />
             <span>
               {t('queue.source')}:{' '}
               <span className="text-vault-text-secondary">{job.source || t('common.auto')}</span>
@@ -296,6 +352,9 @@ function JobRow({
             )}
           </div>
           {job.error && <p className="mt-1 text-xs text-red-400 break-words">{job.error}</p>}
+          {stoppedText && (
+            <p className="mt-1 text-xs text-vault-text-muted break-words">{stoppedText}</p>
+          )}
           {isWaitingForSourceSlot && (
             <p className="mt-1 text-xs text-yellow-400">
               {t('queue.waitingForSourceSlot', { source: semaphoreKey })}
@@ -393,11 +452,13 @@ function JobRow({
           <StatusBadge
             status={job.status}
             alreadySaved={job.progress?.outcome === 'already_saved'}
+            stopped={job.progress?.outcome === 'stopped'}
           />
           {job.status === 'running' && (
             <button
               onClick={() => onPause(job.id, 'pause')}
-              className="p-1.5 rounded-lg bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 transition-colors"
+              disabled={stopping}
+              className="p-1.5 rounded-lg bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 transition-colors disabled:opacity-50"
               title={t('queue.pause')}
             >
               <Pause size={14} />
@@ -406,18 +467,36 @@ function JobRow({
           {job.status === 'paused' && (
             <button
               onClick={() => onPause(job.id, 'resume')}
-              className="p-1.5 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 text-green-400 transition-colors"
+              disabled={stopping}
+              className="p-1.5 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 text-green-400 transition-colors disabled:opacity-50"
               title={t('queue.resume')}
             >
               <Play size={14} />
             </button>
           )}
-          {canCancel && (
+          {isActive && (
             <button
-              onClick={() => onCancel(job.id)}
-              disabled={isCancelling}
+              data-testid="job-stop"
+              onClick={() => onStop(job)}
+              disabled={stopping}
+              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-vault-accent/10 border border-vault-accent/30 hover:bg-vault-accent/20 text-vault-accent text-xs font-medium transition-colors disabled:opacity-60"
+              title={t('queue.stop')}
+              aria-label={stopping ? t('queue.stopping') : t('queue.stop')}
+            >
+              <Square size={12} />
+              <span className="hidden sm:inline">
+                {stopping ? t('queue.stopping') : t('queue.stop')}
+              </span>
+            </button>
+          )}
+          {isActive && canDiscard && (
+            <button
+              data-testid="job-discard"
+              onClick={() => onDiscard(job)}
+              disabled={stopping}
               className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 transition-colors disabled:opacity-50"
-              title={t('queue.cancel')}
+              title={t('queue.discard')}
+              aria-label={t('queue.discard')}
             >
               <X size={14} />
             </button>
@@ -534,6 +613,7 @@ export default function QueuePage() {
   )
   const { trigger: enqueue, isMutating: isEnqueuing } = useEnqueueDownload()
   const { trigger: cancelJob } = useCancelJob()
+  const { trigger: stopJob } = useStopJob()
   const { trigger: clearJobs, isMutating: isClearing } = useClearFinishedJobs()
   const { trigger: pauseJob } = usePauseJob()
   const { trigger: retryJob } = useRetryJob()
@@ -556,44 +636,71 @@ export default function QueuePage() {
     [mutateManual, mutateSubActive],
   )
 
+  // A URL the user already subscribes to is refused until they choose: check the
+  // subscription (new posts only) or download anyway (may resume given-up history).
+  const [subscribedPrompt, setSubscribedPrompt] = useState<{
+    url: string
+    options: Record<string, unknown>
+    hint: SubscribedUrlHint
+  } | null>(null)
+  const [subscribedBusy, setSubscribedBusy] = useState(false)
+
+  const submitEnqueue = useCallback(
+    async (
+      url: string,
+      options: Record<string, unknown>,
+      confirmSubscribed: boolean,
+    ): Promise<boolean> => {
+      try {
+        const result = await enqueue({
+          url,
+          ...(Object.keys(options).length > 0 ? { options } : {}),
+          ...(confirmSubscribed ? { confirmSubscribed: true } : {}),
+        })
+        toast.success(t('queue.queuedSuccessWithJob', { id: result.job_id }))
+        setUrlInput('')
+        setMediaPolicy(DEFAULT_MEDIA_POLICY)
+        await mutate()
+        if (result.warning) {
+          const warningMap: Record<string, string> = {
+            eh_credentials_recommended: 'credential.ehRecommended',
+            pixiv_credentials_required: 'credential.pixivRequired',
+          }
+          const i18nKey = warningMap[result.warning] || result.warning
+          toast(t(i18nKey), { icon: '⚠️' })
+        }
+        return true
+      } catch (err) {
+        const hint = confirmSubscribed ? null : subscribedHint(err)
+        if (hint) {
+          setSubscribedPrompt({ url, options, hint })
+          return false
+        }
+        toast.error(err instanceof Error ? err.message : 'Failed to enqueue download')
+        return false
+      }
+    },
+    [enqueue, mutate],
+  )
+
   const handleEnqueue = useCallback(async () => {
     const url = urlInput.trim()
     if (!url) return
-    try {
-      const baseOptions: Record<string, unknown> = isFanboxUrl
-        ? {
-            fanbox: {
-              content: fanboxContent,
-              ...(fanboxFeeMin ? { fee_min: Number(fanboxFeeMin) } : {}),
-              ...(fanboxFeeMax ? { fee_max: Number(fanboxFeeMax) } : {}),
-            },
-          }
-        : {}
-      // The policy only applies to URLs the server says honour it.
-      const options = supportsMediaPolicy ? withMediaPolicy(baseOptions, mediaPolicy) : baseOptions
-      const result = await enqueue({
-        url,
-        ...(Object.keys(options).length > 0 ? { options } : {}),
-      })
-      toast.success(t('queue.queuedSuccessWithJob', { id: result.job_id }))
-      setUrlInput('')
-      setMediaPolicy(DEFAULT_MEDIA_POLICY)
-      await mutate()
-      if (result.warning) {
-        const warningMap: Record<string, string> = {
-          eh_credentials_recommended: 'credential.ehRecommended',
-          pixiv_credentials_required: 'credential.pixivRequired',
+    const baseOptions: Record<string, unknown> = isFanboxUrl
+      ? {
+          fanbox: {
+            content: fanboxContent,
+            ...(fanboxFeeMin ? { fee_min: Number(fanboxFeeMin) } : {}),
+            ...(fanboxFeeMax ? { fee_max: Number(fanboxFeeMax) } : {}),
+          },
         }
-        const i18nKey = warningMap[result.warning] || result.warning
-        toast(t(i18nKey), { icon: '⚠️' })
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to enqueue download')
-    }
+      : {}
+    // The policy only applies to URLs the server says honour it.
+    const options = supportsMediaPolicy ? withMediaPolicy(baseOptions, mediaPolicy) : baseOptions
+    await submitEnqueue(url, options, false)
   }, [
     urlInput,
-    enqueue,
-    mutate,
+    submitEnqueue,
     isFanboxUrl,
     fanboxContent,
     fanboxFeeMin,
@@ -602,10 +709,67 @@ export default function QueuePage() {
     mediaPolicy,
   ])
 
-  const handleCancel = useCallback(
-    async (id: string) => {
+  const handleCheckSubscribed = useCallback(async () => {
+    const subscriptionId = subscribedPrompt?.hint.subscriptionId
+    if (subscriptionId == null) return
+    setSubscribedBusy(true)
+    try {
+      await api.subscriptions.check(subscriptionId)
+      toast.success(t('queue.subscriptionCheckQueued'))
+      setSubscribedPrompt(null)
+      setUrlInput('')
+      setMediaPolicy(DEFAULT_MEDIA_POLICY)
+      await mutate()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('subscriptions.checkFailed'))
+    } finally {
+      setSubscribedBusy(false)
+    }
+  }, [subscribedPrompt, mutate])
+
+  const handleDownloadAnyway = useCallback(async () => {
+    if (!subscribedPrompt) return
+    setSubscribedBusy(true)
+    try {
+      const queued = await submitEnqueue(subscribedPrompt.url, subscribedPrompt.options, true)
+      if (queued) setSubscribedPrompt(null)
+    } finally {
+      setSubscribedBusy(false)
+    }
+  }, [subscribedPrompt, submitEnqueue])
+
+  // Jobs a stop was requested for this session; the server's `stop_requested_at` takes over on the next list refresh.
+  const [stoppingIds, setStoppingIds] = useState<ReadonlySet<string>>(new Set())
+
+  const handleStop = useCallback(
+    async (job: DownloadJob) => {
+      // Stopping a subscription run gives up the posts it has not reached yet, for good.
+      const givesUpHistory =
+        job.mode === 'subscription_initial' ||
+        job.mode === 'subscription_incremental' ||
+        (!job.mode && !!job.subscription_id)
+      if (givesUpHistory && !confirm(t('queue.stopConfirm'))) return
+      setStoppingIds((prev) => new Set(prev).add(job.id))
       try {
-        await cancelJob(id)
+        await stopJob(job.id)
+        await mutate()
+      } catch (err) {
+        setStoppingIds((prev) => {
+          const next = new Set(prev)
+          next.delete(job.id)
+          return next
+        })
+        toast.error(err instanceof Error ? err.message : t('queue.stopError'))
+      }
+    },
+    [stopJob, mutate],
+  )
+
+  const handleDiscard = useCallback(
+    async (job: DownloadJob) => {
+      if (!confirm(t('queue.discardConfirm'))) return
+      try {
+        await cancelJob(job.id)
         await mutate()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t('queue.cancelError'))
@@ -867,10 +1031,11 @@ export default function QueuePage() {
                 <JobRow
                   key={job.id}
                   job={job}
-                  onCancel={handleCancel}
+                  onStop={handleStop}
+                  onDiscard={handleDiscard}
                   onPause={handlePause}
                   onRetry={handleRetry}
-                  isCancelling={false}
+                  isStopping={stoppingIds.has(job.id)}
                   expandedJobId={expandedJobId}
                   onToggleExpand={(id) => setExpandedJobId((prev) => (prev === id ? null : id))}
                 />
@@ -902,10 +1067,11 @@ export default function QueuePage() {
               <JobRow
                 key={job.id}
                 job={job}
-                onCancel={handleCancel}
+                onStop={handleStop}
+                onDiscard={handleDiscard}
                 onPause={handlePause}
                 onRetry={handleRetry}
-                isCancelling={false}
+                isStopping={stoppingIds.has(job.id)}
                 expandedJobId={expandedJobId}
                 onToggleExpand={(id) => setExpandedJobId((prev) => (prev === id ? null : id))}
               />
@@ -936,16 +1102,28 @@ export default function QueuePage() {
               <JobRow
                 key={job.id}
                 job={job}
-                onCancel={handleCancel}
+                onStop={handleStop}
+                onDiscard={handleDiscard}
                 onPause={handlePause}
                 onRetry={handleRetry}
-                isCancelling={false}
+                isStopping={stoppingIds.has(job.id)}
                 expandedJobId={expandedJobId}
                 onToggleExpand={(id) => setExpandedJobId((prev) => (prev === id ? null : id))}
               />
             ))}
           </div>
         </div>
+      )}
+
+      {subscribedPrompt && (
+        <SubscribedUrlDialog
+          name={subscribedPrompt.hint.name || subscribedPrompt.url}
+          canCheck={subscribedPrompt.hint.subscriptionId !== null}
+          busy={subscribedBusy}
+          onCheck={() => void handleCheckSubscribed()}
+          onDownloadAnyway={() => void handleDownloadAnyway()}
+          onClose={() => setSubscribedPrompt(null)}
+        />
       )}
     </div>
   )

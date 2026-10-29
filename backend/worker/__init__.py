@@ -24,12 +24,19 @@ from worker.dedup_tier1 import dedup_tier1_job
 from worker.dedup_tier2 import dedup_tier2_job
 from worker.dedup_tier3 import dedup_tier3_job
 from worker.download import download_job
+from worker.download_stop import finalize_stopped_job, release_dead_collection_lock
 from worker.ehtag_sync import ehtag_sync_job
 from worker.explorer_stats import explorer_folder_stats_job
 from worker.gallery_dl_venv import ensure_venv, image_sync_loop
 from worker.gallery_dl_venv import rollback_job as gdl_rollback_job
 from worker.gallery_dl_venv import upgrade_job as gdl_upgrade_job
-from worker.helpers import _sha256, compute_job_key, enqueue_download_job, env_int
+from worker.helpers import (
+    _sha256,
+    compute_job_key,
+    enqueue_download_job,
+    enqueue_finalize_stopped_job,
+    env_int,
+)
 from worker.importer import (
     _build_gallery,
     _extract_tags,
@@ -261,6 +268,89 @@ async def _report_unclean_exit(r) -> None:
     )
 
 
+async def _finish_stop_requested(r, job) -> bool:
+    """Startup recovery for a job the user already stopped; True when it was handed over.
+
+    A stop is a durable intent. Re-running such a job would download again what
+    the user chose to keep, and failing it would drop the intent, so the job goes
+    to ``finalize_stopped_job`` (BE-T19: enqueued before the caller commits). On
+    an enqueue failure the job falls through to the normal recovery policy: the
+    re-run sees the intent before it starts and takes the keep path without
+    downloading, and the auto-retry selection never picks a stop-requested row.
+    """
+    from datetime import datetime
+
+    if not isinstance(job.stop_requested_at, datetime):
+        return False
+    try:
+        await release_dead_collection_lock(r, job)
+        await enqueue_finalize_stopped_job(job.id)
+    except Exception as exc:
+        logger.error("Failed to hand stop-requested job %s to finalize: %s", job.id, exc)
+        return False
+    logger.info("Handed stop-requested job %s (%s) to finalize_stopped_job", job.id, job.status)
+    return True
+
+
+async def _sweep_orphan_repair_archives() -> int:
+    """Merge or drop the repair shadow tables of jobs that are over.
+
+    A repair run's shadow archive is merged into the real table and dropped when
+    the run is kept, aborted or cleaned up. A worker killed in between leaves the
+    table behind, and nothing else would ever read it. A job that is still
+    queued, running or paused owns its shadow. Otherwise the rows are merged when
+    the run completed and its gallery still exists (they stay unlinked; a retry
+    links them by job id) and dropped when it was discarded: a cancel rolled the
+    imports back, so archiving them would leave holes.
+    """
+    from sqlalchemy import select
+
+    from core.database import AsyncSessionLocal
+    from db.models import DownloadJob, Gallery
+    from plugins.builtin.gallery_dl._archive import (
+        drop_repair_archive,
+        list_repair_archive_tables,
+        merge_repair_archive,
+        parse_repair_archive_name,
+    )
+
+    handled = 0
+    async with AsyncSessionLocal() as session:
+        for shadow in await list_repair_archive_tables(session):
+            parsed = parse_repair_archive_name(shadow)
+            if parsed is None:
+                continue
+            real, job_uuid = parsed
+            job = (
+                await session.execute(
+                    select(DownloadJob.status, DownloadJob.gallery_id).where(DownloadJob.id == job_uuid)
+                )
+            ).one_or_none()
+            if job is not None and job.status in ("queued", "running", "paused"):
+                continue
+            try:
+                keep_rows = False
+                if job is not None and job.status in ("done", "partial", "failed") and job.gallery_id is not None:
+                    keep_rows = (
+                        await session.execute(
+                            select(Gallery.id).where(Gallery.id == job.gallery_id, Gallery.deleted_at.is_(None))
+                        )
+                    ).scalar_one_or_none() is not None
+                if keep_rows:
+                    try:
+                        async with session.begin_nested():
+                            await merge_repair_archive(session, real, shadow)
+                    except Exception as exc:  # the real table may be gone or truncated out of the name
+                        logger.warning("[archive] could not merge orphan repair table %s: %s", shadow, exc)
+                await drop_repair_archive(session, shadow)
+                await session.commit()
+                handled += 1
+            except Exception as exc:
+                await session.rollback()
+                logger.warning("[archive] could not clear orphan repair table %s: %s", shadow, exc)
+    return handled
+
+
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
     # Fail fast if the DB is not migrated to this image's schema head (e.g. a
@@ -357,6 +447,7 @@ async def startup(ctx: dict) -> None:
         "paused_retried": 0,
         "paused_failed": 0,
         "queued_requeued": 0,
+        "stop_finalized": 0,
     }
 
     from datetime import UTC, datetime
@@ -401,6 +492,12 @@ async def startup(ctx: dict) -> None:
                 # Execution tokens are process-local fences. No owner survives
                 # a worker restart, regardless of the selected recovery policy.
                 job.admission_token = None
+                if await _finish_stop_requested(r, job):
+                    # The user already stopped it: keep what it fetched instead
+                    # of re-running or failing it. Status stays `running` until
+                    # finalize_stopped_job ends it.
+                    recovery_counts["stop_finalized"] += 1
+                    continue
                 if running_strategy == "auto_retry":
                     job.retry_count = (job.retry_count or 0) + 1
                     job_key = compute_job_key(job.id, job.retry_count)
@@ -432,6 +529,9 @@ async def startup(ctx: dict) -> None:
         if stale_queued:
             for job in stale_queued:
                 job.admission_token = None
+                if await _finish_stop_requested(r, job):
+                    recovery_counts["stop_finalized"] += 1
+                    continue
                 job_key = f"dispatch:{job.id}:{uuid.uuid4()}"
                 try:
                     await enqueue_download_job(job, job_key)
@@ -455,6 +555,10 @@ async def startup(ctx: dict) -> None:
         if paused_jobs:
             for job in paused_jobs:
                 job.admission_token = None
+                if await _finish_stop_requested(r, job):
+                    await r.delete(f"download:pause:{job.id}")
+                    recovery_counts["stop_finalized"] += 1
+                    continue
                 if paused_strategy == "keep_paused":
                     job_key = compute_job_key(job.id, job.retry_count)
                     try:
@@ -512,6 +616,14 @@ async def startup(ctx: dict) -> None:
             logger.info("Cleared %d stale download admission token(s)", cleared_tokens)
     except Exception as exc:
         logger.error("Failed to clear stale download admission tokens: %s", exc)
+
+    # A worker killed mid-repair leaves its shadow archive table behind.
+    try:
+        swept = await _sweep_orphan_repair_archives()
+        if swept:
+            logger.info("Cleared %d orphaned repair archive table(s)", swept)
+    except Exception as exc:
+        logger.error("Failed to sweep orphaned repair archive tables: %s", exc)
 
     # HR-019: a SIGKILL (container OOM) kills local_import_job before its
     # terminal-status write, leaving the gallery on `importing` with no queue
@@ -1129,6 +1241,7 @@ def build_workers() -> tuple:
         queues[QUEUE_INTERACTIVE],
         functions=[
             download_job,
+            finalize_stopped_job,
             pixiv_collection_job,
             import_job,
             batch_import_job,
@@ -1214,6 +1327,7 @@ build_worker = build_workers
 
 __all__ = [
     "download_job",
+    "finalize_stopped_job",
     "pixiv_collection_job",
     "import_job",
     "local_import_job",

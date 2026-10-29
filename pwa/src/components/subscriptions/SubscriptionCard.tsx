@@ -14,13 +14,16 @@ import {
   MoreHorizontal,
   Rss,
   ScanSearch,
+  Square,
   Trash2,
   Users,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useSWRConfig } from 'swr'
 import { t } from '@/lib/i18n'
 import { useCheckUrl } from '@/hooks/useDownloadQueue'
+import { useStopSubscription } from '@/hooks/useSubscriptions'
 import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
 import { isDefaultMediaPolicy, mediaPolicyFromOptions, withMediaPolicy } from '@/lib/mediaPolicy'
 import { CRON_PRESETS } from './constants'
@@ -85,10 +88,14 @@ function JobStatusBadge({ job }: { job: DownloadJob }) {
       </div>
     )
   } else if (job.status === 'done') {
+    // A user stop ends `done` too, but it kept only part of the run.
+    const stopped = job.progress?.outcome === 'stopped'
     status = (
       <div className="flex items-center gap-1.5 text-[10px]">
-        <CheckCircle size={12} className="text-green-400" />
-        <span className="text-green-400">{t('subscriptions.downloadComplete')}</span>
+        <CheckCircle size={12} className={stopped ? 'text-amber-400' : 'text-green-400'} />
+        <span className={stopped ? 'text-amber-400' : 'text-green-400'}>
+          {stopped ? t('queue.stopped') : t('subscriptions.downloadComplete')}
+        </span>
       </div>
     )
   } else if (job.status === 'failed') {
@@ -348,6 +355,30 @@ export function SubscriptionCard({
   const galleryHref = subscriptionGalleryHref(sub, latestJob)
   const galleryTitle = sub.gallery_title?.trim() || latestJob?.progress?.title?.trim()
   const isRunning = latestJob?.status === 'running'
+  // The card knows its latest job only; a subscription with a job in flight can be stopped.
+  const hasActiveJob =
+    latestJob?.status === 'queued' ||
+    latestJob?.status === 'running' ||
+    latestJob?.status === 'paused'
+  const { trigger: stopSubscription, isMutating: isStoppingSubscription } = useStopSubscription()
+  const { mutate: refreshLists } = useSWRConfig()
+  const isStopping = isStoppingSubscription || !!latestJob?.stop_requested_at
+
+  const handleStop = async () => {
+    if (!confirm(t('subscriptions.stopConfirm', { name: sub.name || sub.url }))) return
+    try {
+      await stopSubscription(sub.id)
+      toast.success(t('subscriptions.stopRequested'))
+      // Subscription list, per-card latest jobs and the queue lists all show the job.
+      await refreshLists(
+        (key: unknown) =>
+          Array.isArray(key) &&
+          (key[0] === 'subscriptions' || key[0] === 'sub-jobs' || key[0] === 'download/jobs'),
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('subscriptions.stopFailed'))
+    }
+  }
 
   return (
     <div className="bg-vault-bg border border-vault-border/50 rounded-lg p-3">
@@ -475,14 +506,29 @@ export function SubscriptionCard({
               ? 'text-emerald-400'
               : sub.last_status === 'failed'
                 ? 'text-red-400'
-                : 'text-vault-text-muted'
+                : sub.last_status === 'stopped'
+                  ? 'text-amber-400'
+                  : 'text-vault-text-muted'
           }`}
         >
           {sub.last_checked_at
             ? `${t('subscriptions.lastChecked')}: ${timeAgo(sub.last_checked_at)}`
             : t('settings.tasks.never')}
+          {sub.last_status === 'stopped' && ` · ${t('subscriptions.statusStopped')}`}
         </span>
         <div className="flex shrink-0 items-center gap-0.5">
+          {hasActiveJob && (
+            <button
+              data-testid="subscription-stop"
+              onClick={() => void handleStop()}
+              disabled={isStopping}
+              className="rounded p-1.5 text-vault-text-muted transition-colors hover:text-amber-400 disabled:opacity-60"
+              title={isStopping ? t('queue.stopping') : t('subscriptions.stop')}
+              aria-label={isStopping ? t('queue.stopping') : t('subscriptions.stop')}
+            >
+              <Square size={14} className={isStopping ? 'animate-pulse' : ''} />
+            </button>
+          )}
           <button
             onClick={() => onCheck(sub)}
             disabled={checkingId === sub.id}

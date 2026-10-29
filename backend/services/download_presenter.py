@@ -24,6 +24,8 @@ def serialize_download_job(j: DownloadJob, gallery: Gallery | None = None) -> di
         "gallery_id": j.gallery_id,
         "subscription_id": j.subscription_id,
         "persona": j.persona_name,
+        "mode": j.mode or "download",
+        "stop_requested_at": j.stop_requested_at.isoformat() if j.stop_requested_at else None,
     }
     if gallery:
         d["gallery_source"] = gallery.source

@@ -54,6 +54,12 @@ export const subscriptions = {
       method: 'POST',
     }),
 
+  /** Stop and keep every active job of this subscription; later checks only fetch newer posts. */
+  stop: (id: number) =>
+    apiFetch<{ status: string; stopped: number }>(`/api/subscriptions/${id}/stop`, {
+      method: 'POST',
+    }),
+
   backfill: (id: number) =>
     apiFetch<{ status: string; mode?: string }>(`/api/subscriptions/${id}/backfill`, {
       method: 'POST',

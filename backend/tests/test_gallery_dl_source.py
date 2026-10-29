@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import signal
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -914,8 +915,26 @@ class TestGalleryDlDownloadArchiveTable:
 
         assert calls == ["ensure:newsite", "exec"]
 
-    async def test_force_full_scan_has_no_archive_so_its_table_is_not_touched(self, tmp_path):
+    async def test_legacy_force_full_scan_maps_to_repair_and_archives_into_a_shadow_table(self, tmp_path):
+        """force_full_scan is a legacy alias of repair: the real table is prepared and the run uses a per-job shadow."""
+        job_id = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
         ensure = AsyncMock(return_value="created")
-        _, calls, _, _, _ = await self._download(tmp_path, ensure, options={"force_full_scan": True})
+        shadow_calls: list[tuple[str, str]] = []
 
-        assert calls == ["exec"]
+        async def _ensure_shadow(session, real, shadow):
+            shadow_calls.append((real, shadow))
+
+        with patch("plugins.builtin.gallery_dl.source.ensure_repair_archive_table", side_effect=_ensure_shadow):
+            _, calls, _, build_mock, session = await self._download(
+                tmp_path, ensure, options={"force_full_scan": True, "config_id": job_id}
+            )
+
+        expected_shadow = f"newsite__repair_{uuid.UUID(job_id).hex}"
+        # The real table is prepared first (repair no longer skips it), then the
+        # shadow is created like it, then gallery-dl starts.
+        assert calls == ["ensure:newsite", "exec"]
+        assert shadow_calls == [("newsite", expected_shadow)]
+        session.commit.assert_awaited()
+        kwargs = build_mock.await_args.kwargs
+        assert kwargs["mode"] == "repair"
+        assert kwargs["archive_table"] == expected_shadow

@@ -750,6 +750,10 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_enqueued INT DEFAULT 0;
 -- ── Progressive Import: link download_jobs to gallery ────────────
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE SET NULL;
 
+-- ── Download modes + stop-and-keep ───────────────────────────────
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'download';
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS stop_requested_at TIMESTAMPTZ;
+
 -- ── Source URL ──────────────────────────────────────────────────────
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_url TEXT;
 

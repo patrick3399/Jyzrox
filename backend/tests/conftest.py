@@ -528,7 +528,9 @@ _SQLITE_SCHEMA = [
         gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
         subscription_id INTEGER,
         persona_id INTEGER REFERENCES egress_personas(id) ON DELETE SET NULL,
-        persona_name TEXT
+        persona_name TEXT,
+        mode TEXT NOT NULL DEFAULT 'download',
+        stop_requested_at TIMESTAMP
     )
     """,
     """

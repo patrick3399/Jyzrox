@@ -19,7 +19,13 @@ from pathlib import Path
 from core.config import settings
 from core.version import __version__
 from plugins.base import SourcePlugin
-from plugins.builtin.gallery_dl._archive import ArchiveTableConflict, archive_dsn_for_job, ensure_archive_table
+from plugins.builtin.gallery_dl._archive import (
+    ArchiveTableConflict,
+    archive_dsn_for_job,
+    ensure_archive_table,
+    ensure_repair_archive_table,
+    repair_archive_tables,
+)
 from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
 from plugins.builtin.gallery_dl._metadata import _resolve_source_id
 from plugins.builtin.gallery_dl._subprocess_env import gdl_subprocess_env
@@ -32,6 +38,7 @@ from plugins.models import (
     PluginMeta,
     SiteInfo,
 )
+from services.download_mode import REPAIR, SUBSCRIPTION_INCREMENTAL, effective_mode
 from services.download_policy import MediaPolicy, media_policy_from_options
 from services.media_formats import VIDEO_EXTENSIONS
 
@@ -43,6 +50,7 @@ _PRINT_PREPARE_PREFIX = "JYZROX_PREPARE\t"
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
 _PROGRESS_PULSE_S = 5.0
+_READER_DRAIN_TIMEOUT_S = 10
 _MAX_STDERR_LINES = 10000
 _RECENT_LOG_SIZE = 5
 _SLEEP_VISIBLE_THRESHOLD = 2.0
@@ -151,6 +159,34 @@ async def _ensure_job_archive_table(url: str) -> str | None:
     return None
 
 
+async def _prepare_repair_archive(url: str, job_id: str | None) -> str | None:
+    """Create the per-job shadow archive a repair run reads and writes; returns its name.
+
+    A repair fetches files the real archive already lists, so gallery-dl is
+    pointed at an empty copy of that table instead. Its rows are merged into
+    the real table when the run is kept (``ProgressiveImporter``).
+
+    ``None`` means no shadow: the URL names no category, the job id is not a
+    UUID, or the database refused. The run then has no archive at all, which is
+    what a forced re-scan did before shadows existed; the importer's merge and
+    drop find nothing to act on.
+    """
+    pair = repair_archive_tables(url, job_id)
+    if pair is None:
+        return None
+    real, shadow = pair
+    try:
+        from core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            await ensure_repair_archive_table(session, real, shadow)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("[gallery_dl] could not prepare repair archive %r for %s: %s", shadow, url, exc)
+        return None
+    return shadow
+
+
 FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
 
 
@@ -182,22 +218,29 @@ async def _build_gallery_dl_config(
     target_source_id: str | None = None,
     media: MediaPolicy | None = None,
     persona: dict | None = None,
+    mode: str | None = None,
+    archive_table: str | None = None,
 ) -> Path:
     """Write gallery-dl config with v3.0 features: PG archive, native rate-limiting, postprocessors.
 
     Args:
         credentials: Dict mapping source name -> credential value string.
         config_id: Per-job config isolation key.
-        job_context: "manual" or "subscription" — controls skip and date-after behavior.
-        last_completed_at: For subscription context, enables date-after optimization.
-        force_full_scan: Subscription force re-scan mode. Disables both
-            date-after and gallery-dl's archive so remote items are fetched
-            again and the importer can repair missing DB/library rows.
-            Mutually exclusive with ``last_completed_at`` — caller
-            (worker.subscription) drops last_completed_at when this is True.
+        job_context: Legacy: with ``last_completed_at`` and ``force_full_scan`` it
+            only decides the mode when ``mode`` is not given.
+        last_completed_at: Boundary of a ``subscription_incremental`` run; sets
+            ``date-after`` and ``skip: abort:10``.
+        force_full_scan: Legacy alias for ``mode="repair"``.
         target_source_id: The site this job actually downloads from. Global
             downloader options (rate) are only applied from this site's
             params — other sites' settings must not leak into the job.
+        mode: The job's download mode (``services/download_mode.py``). Decides the
+            scan range and the archive: ``subscription_incremental`` stops at the
+            boundary, ``repair`` reads and writes ``archive_table`` (a per-job
+            shadow) with no boundary, everything else uses the real archive
+            with no boundary.
+        archive_table: The shadow archive table of a repair run. A repair without
+            one runs with no archive at all (the pre-shadow forced re-scan).
         media: Per-job media policy (newest-N files, videos on/off); ``None``
             leaves the config exactly as it was before the option existed.
         persona: ADR 0022 network identity of a persona job — proxy and browser/UA
@@ -266,29 +309,34 @@ async def _build_gallery_dl_config(
             "sleep-retries": "exp:2:0:300=10",
         }
 
-    # N2: subscription optimization
-    if job_context == "subscription":
-        if force_full_scan:
-            # Force re-scan is a repair path for archive/import mismatches:
-            # gallery-dl must fetch every currently visible remote item even if
-            # it was already archived. The ProgressiveImporter keeps existing
-            # local images and reorders the combined set, so remote-deleted
-            # local-only images remain in the gallery sequence.
+    # The mode decides the scan range and which archive table gallery-dl reads.
+    # No archive-mode "memory": it only flushes on an error-free exit, so a
+    # single failed file or a killed process dropped every entry of the run.
+    mode = effective_mode(
+        mode,
+        {"job_context": job_context, "last_completed_at": last_completed_at, "force_full_scan": force_full_scan},
+    )
+    if mode == REPAIR:
+        # A repair must fetch every currently visible remote item even if it is
+        # already archived, so that the importer can restore missing DB/library
+        # rows. It reads an empty per-job shadow table, which still records what
+        # it fetches and is merged into the real archive when the run is kept.
+        # The ProgressiveImporter keeps existing local images and reorders the
+        # combined set, so remote-deleted local-only images remain in the gallery.
+        if archive_table:
+            config["extractor"]["archive-table"] = archive_table
+        else:
             config["extractor"].pop("archive", None)
             config["extractor"].pop("archive-table", None)
-        # No archive-mode "memory": it only flushes on an error-free exit, so a
-        # single failed file or a killed process dropped every entry of the run.
+    elif mode == SUBSCRIPTION_INCREMENTAL and last_completed_at:
+        # Incremental mode: a full download was confirmed before.
+        # abort:10 is safe here — 10 consecutive archive hits means we've caught up.
+        # An initial run (no boundary) must not abort early: it has to fetch everything.
+        config["extractor"]["skip"] = "abort:10"
+        from datetime import timedelta
 
-        if not force_full_scan and last_completed_at:
-            # Incremental mode: a full download was confirmed before.
-            # abort:10 is safe here — 10 consecutive archive hits means we've caught up.
-            # For initial downloads (no last_completed_at), abort:10 would prematurely stop
-            # before all images are fetched, so we skip it.
-            config["extractor"]["skip"] = "abort:10"
-            from datetime import timedelta
-
-            cutoff = last_completed_at - timedelta(days=1)
-            config["extractor"]["date-after"] = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+        cutoff = last_completed_at - timedelta(days=1)
+        config["extractor"]["date-after"] = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
 
     # Per-job media policy (options.media). The config file is per job, so
     # root-level extractor keys cannot leak into other jobs.
@@ -965,21 +1013,25 @@ class GalleryDlPlugin(SourcePlugin):
         except ValueError as exc:
             return DownloadResult(status="failed", downloaded=0, total=0, error=f"Invalid media options: {exc}")
 
-        # A force-full-scan run has no archive (see _build_gallery_dl_config).
-        if not (options or {}).get("force_full_scan"):
-            if archive_error := await _ensure_job_archive_table(url):
-                logger.error("[gallery_dl] refusing download of %s: %s", url, archive_error)
-                return DownloadResult(status="failed", downloaded=0, total=0, error=archive_error)
+        # The worker stamps the job's mode into options; a caller that does not
+        # falls back to the legacy flags (force_full_scan -> repair).
+        mode = effective_mode((options or {}).get("mode"), options)
+
+        if archive_error := await _ensure_job_archive_table(url):
+            logger.error("[gallery_dl] refusing download of %s: %s", url, archive_error)
+            return DownloadResult(status="failed", downloaded=0, total=0, error=archive_error)
+        archive_table = await _prepare_repair_archive(url, (options or {}).get("config_id")) if mode == REPAIR else None
 
         config_path = await _build_gallery_dl_config(
             credentials,
             config_id=options.get("config_id") if options else None,
             job_context=options.get("job_context", "manual") if options else "manual",
             last_completed_at=options.get("last_completed_at") if options else None,
-            force_full_scan=bool(options.get("force_full_scan", False)) if options else False,
             target_source_id=_site_cfg.source_id,
             media=media,
             persona=(options or {}).get("persona"),
+            mode=mode,
+            archive_table=archive_table,
         )
 
         from worker.gallery_dl_venv import get_gdl_exec_cmd
@@ -1142,18 +1194,37 @@ class GalleryDlPlugin(SourcePlugin):
                     except Exception:
                         pass
 
-        # Cancel all remaining tasks (sentinels + background)
-        remaining = pending | {t for t in bg_tasks if not t.done()}
-        for t in remaining:
+        # Cancel the sentinels and the pulse task. The stdout/stderr readers are
+        # NOT cancelled yet: gallery-dl records a file in the archive before its
+        # `after` hook prints JYZROX_FILE, so a line still buffered in the pipe
+        # when the process exits names a file that is archived and must reach
+        # on_file, or the archive keeps a row for a file that was never imported.
+        stoppable = pending | ({pulse_task} if not pulse_task.done() else set())
+        for t in stoppable:
             t.cancel()
-        if remaining:
-            await asyncio.wait(remaining, timeout=5)
+        if stoppable:
+            await asyncio.wait(stoppable, timeout=5)
 
         # Wait for process to actually finish
         try:
             await asyncio.wait_for(proc.wait(), timeout=10)
         except TimeoutError:
             await _terminate_process_tree(proc)
+
+        # The process is gone, so its pipes reach EOF and the readers finish
+        # their buffered lines. The timeout only guards a descendant that
+        # inherited the pipe and outlived gallery-dl.
+        readers = {t for t in (stdout_task, stderr_task) if not t.done()}
+        if readers:
+            await asyncio.wait(readers, timeout=_READER_DRAIN_TIMEOUT_S)
+            stuck = {t for t in readers if not t.done()}
+            for t in stuck:
+                t.cancel()
+            if stuck:
+                logger.warning(
+                    "[gallery_dl] output readers still open %ds after exit; cancelled", _READER_DRAIN_TIMEOUT_S
+                )
+                await asyncio.wait(stuck, timeout=5)
 
         # Capture unsupported + error URLs
         unsupported_urls: list[str] = []

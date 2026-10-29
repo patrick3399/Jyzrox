@@ -165,7 +165,7 @@ export default function SubscriptionsPage() {
       },
       { revalidate: false },
     )
-    if (['done', 'failed', 'partial'].includes(lastJobUpdate.status)) {
+    if (['done', 'failed', 'partial', 'cancelled'].includes(lastJobUpdate.status)) {
       mutateJobs()
     }
   }, [lastJobUpdate, mutateJobs])

@@ -9,6 +9,22 @@ import type { SearchGalleriesResponse } from '@/lib/api'
 
 // ── Library ───────────────────────────────────────────────────────────
 
+/**
+ * Job states after which a library list may be stale. `cancelled` and `failed`
+ * matter as much as `done`/`partial`: the worker rolls back the gallery a run
+ * created, so a list that keeps showing it leaves a "downloading" card behind.
+ */
+const GALLERY_CHANGING_JOB_STATUSES: ReadonlySet<string> = new Set([
+  'done',
+  'partial',
+  'cancelled',
+  'failed',
+])
+
+function isGalleryChangingJobStatus(status: string): boolean {
+  return GALLERY_CHANGING_JOB_STATUSES.has(status)
+}
+
 export function useLibrarySources() {
   return useSWR('library/sources', () => api.library.getSources(), {
     revalidateOnFocus: false,
@@ -56,8 +72,10 @@ export function useInfiniteLibraryGalleries(
 
   useEffect(() => {
     if (!lastJobUpdate) return
-    // Only refresh when a download finishes (gallery added/updated)
-    if (lastJobUpdate.status !== 'done' && lastJobUpdate.status !== 'partial') return
+    // Refresh when a job ends in any state that can change a gallery: finished
+    // or partial (added/updated), cancelled or failed (the run's gallery was
+    // rolled back, so its "downloading" card would otherwise linger).
+    if (!isGalleryChangingJobStatus(lastJobUpdate.status)) return
 
     const now = Date.now()
     const elapsed = now - lastFiredRef.current
@@ -456,7 +474,7 @@ export function useSearchGalleries(
 
   useEffect(() => {
     if (!lastJobUpdate) return
-    if (lastJobUpdate.status !== 'done' && lastJobUpdate.status !== 'partial') return
+    if (!isGalleryChangingJobStatus(lastJobUpdate.status)) return
 
     const now = Date.now()
     const elapsed = now - lastFiredRef.current

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from datetime import UTC, datetime
@@ -12,8 +13,21 @@ from core.config import settings
 from core.events import EventType, emit_safe
 from services.credential import get_credential
 from services.download_admission import DownloadAdmission, admission_key_for
-from worker.constants import _IMAGE_EXTS, DISK_LOW_KEY, logger
-from worker.helpers import _set_job_progress, _set_job_status, _validate_image_magic, check_disk_space
+from services.download_mode import REPAIR, effective_mode
+from services.download_stop import read_stop_intent
+from worker.constants import _IMAGE_EXTS, _MEDIA_EXTS, DISK_LOW_KEY, logger
+from worker.helpers import (
+    _set_job_progress,
+    _set_job_status,
+    _validate_image_magic,
+    check_disk_space,
+    enqueue_finalize_stopped_job,
+)
+
+# Names gallery-dl and its post-processors leave while a file is still being written.
+_STAGING_TEMP_SUFFIXES = (".part", ".ytdl", ".tmp")
+# yt-dlp intermediates: `name.temp.mp4` and per-format fragments `name.f137.mp4`.
+_STAGING_YTDLP_FRAGMENT_RE = re.compile(r"\.f\d+\.")
 
 
 def _postprocess_failure_status(downloaded: int) -> str:
@@ -190,6 +204,7 @@ async def _set_subscription_result(
     error: str | None = None,
     *,
     advance_success: bool = True,
+    boundary: datetime | None = None,
 ) -> None:
     """Update subscription status after the associated download reaches a terminal state.
 
@@ -197,11 +212,20 @@ async def _set_subscription_result(
     Use this when gallery-dl returned 0 downloaded + 0 skipped: the run produced no
     evidence the source was actually checked (date-after may have filtered everything),
     so advancing the cutoff would self-poison the next incremental check.
+
+    status="stopped" is a user ending the run early and keeping what it fetched.
+    ``boundary`` (the run's start) becomes the new ``last_success_at`` unless the
+    subscription already has a later one, so the next check fetches only what is
+    newer and the history the user gave up is not pulled back. Without a boundary
+    a stop leaves ``last_success_at`` alone.
+
+    A repair job never moves ``last_success_at`` whatever its status: it re-fetches
+    what a subscription already covers and owns no boundary.
     """
     if not db_job_id:
         return
     try:
-        from sqlalchemy import update
+        from sqlalchemy import func, update
 
         from core.database import AsyncSessionLocal
         from db.models import DownloadJob, Subscription
@@ -211,11 +235,22 @@ async def _set_subscription_result(
             if not job or not job.subscription_id:
                 return
             subscription_id = job.subscription_id
+            job_mode = effective_mode(
+                job.mode if isinstance(job.mode, str) else None,
+                job.options if isinstance(job.options, dict) else None,
+            )
             values = {
                 "last_status": status,
                 "last_error": error[:500] if error else None,
             }
-            if status == "done" and advance_success:
+            if job_mode == REPAIR:
+                pass
+            elif status == "stopped":
+                if boundary is not None:
+                    values["last_success_at"] = func.greatest(
+                        func.coalesce(Subscription.last_success_at, boundary), boundary
+                    )
+            elif status == "done" and advance_success:
                 values["last_success_at"] = datetime.now(UTC)
             await session.execute(update(Subscription).where(Subscription.id == subscription_id).values(**values))
             await session.commit()
@@ -294,6 +329,206 @@ async def _admission_token_valid(job_id: str, token: uuid.UUID) -> bool:
 
     async with AsyncSessionLocal() as session:
         return await DownloadAdmission(session).token_is_valid(job_id, token)
+
+
+async def _stop_intent(db_job_id: str | None) -> str | None:
+    """Durable intent of the job (``"cancel"``, ``"stop"`` or ``None``); never raises."""
+    if not db_job_id:
+        return None
+    return await read_stop_intent(db_job_id)
+
+
+def _list_staged_media(target_dir: Path) -> list[Path]:
+    """Finished media files in a staging dir, skipping what is still being written."""
+    if not target_dir.exists():
+        return []
+    found: list[Path] = []
+    for path in sorted(target_dir.rglob("*")):
+        name = path.name
+        if name.startswith(".") or name.endswith(_STAGING_TEMP_SUFFIXES):
+            continue
+        if ".temp." in name or _STAGING_YTDLP_FRAGMENT_RE.search(name):
+            continue
+        if path.suffix.lower() not in _MEDIA_EXTS:
+            continue
+        if path.is_file():
+            found.append(path)
+    return found
+
+
+async def _import_staged_leftovers(importer, target_dir: Path, on_file) -> int:
+    """Import the finished files in staging that never reached the importer.
+
+    gallery-dl records a file in the archive before its ``after`` hook prints
+    ``JYZROX_FILE``, so a run ended between the two leaves a file that is archived,
+    on disk and unknown to the importer. Importing it here keeps the archive and
+    the gallery in agreement. ``on_file`` creates the gallery when none exists
+    yet. Returns how many files were handed over.
+    """
+    handed = 0
+    for path in await asyncio.to_thread(_list_staged_media, target_dir):
+        # Both checks are cheap and skip a file before it is hashed. A known name
+        # means the gallery already holds it (`is True`: loose test doubles).
+        if importer.has_processed(path) or importer.is_known_filename(path) is True:
+            continue
+        try:
+            await on_file(path)
+            handed += 1
+        except Exception as exc:
+            logger.warning("[download] could not import staged leftover %s: %s", path.name, exc)
+    if handed:
+        logger.info("[download] imported %d staged leftover file(s) from %s", handed, target_dir)
+    return handed
+
+
+def _count(value) -> int:
+    """An int counter, or 0 for anything else (loose test doubles)."""
+    return value if type(value) is int else 0
+
+
+async def _finish_stopped(
+    *,
+    importer,
+    target_dir: Path,
+    url: str,
+    plugin,
+    on_file,
+    db_job_id: str | None,
+    mode: str,
+    started_at: datetime,
+    credentials,
+    credential_accounts: dict[str, str] | None,
+    result,
+) -> dict:
+    """Keep what a user-stopped run fetched and end the job ``done``.
+
+    A failure here must not leave the job running with nobody to finish it, so it
+    hands the job to ``finalize_stopped_job``: once this execution releases its
+    admission token that task redoes the keep path from the database state.
+    """
+    try:
+        return await _finish_stopped_inner(
+            importer=importer,
+            target_dir=target_dir,
+            url=url,
+            plugin=plugin,
+            on_file=on_file,
+            db_job_id=db_job_id,
+            mode=mode,
+            started_at=started_at,
+            credentials=credentials,
+            credential_accounts=credential_accounts,
+            result=result,
+        )
+    except Exception as exc:
+        logger.error("[download] keep path failed for stopped job %s: %s", db_job_id, exc, exc_info=True)
+        if db_job_id:
+            try:
+                await enqueue_finalize_stopped_job(db_job_id)
+            except Exception as enqueue_exc:
+                logger.error("[download] could not hand stopped job %s to finalize: %s", db_job_id, enqueue_exc)
+        return {"status": "stopping", "error": str(exc)}
+
+
+async def _finish_stopped_inner(
+    *,
+    importer,
+    target_dir: Path,
+    url: str,
+    plugin,
+    on_file,
+    db_job_id: str | None,
+    mode: str,
+    started_at: datetime,
+    credentials,
+    credential_accounts: dict[str, str] | None,
+    result,
+) -> dict:
+    # 1. Files gallery-dl archived and left in staging without printing them (B1).
+    await _import_staged_leftovers(importer, target_dir, on_file)
+
+    # 2. A cancel that arrived after the stop wins (HR-005, A2): discard the run.
+    if await _is_job_cancelled_in_db(db_job_id):
+        await importer.cleanup()
+        await _set_job_status(db_job_id, "cancelled")
+        await _set_subscription_result(db_job_id, "cancelled")
+        logger.info("[download] cancelled after stop (keep-path DB guard): %s", url)
+        return {"status": "cancelled"}
+
+    # 3. Keep. No gallery (stopped before anything imported) or a trashed one
+    # (BE-T17) leaves nothing to keep, and the archive rows this run wrote would
+    # make the next run skip files that were never imported (E5).
+    gallery_id = None
+    if importer.gallery_id and getattr(importer, "skipped_trashed", False) is not True:
+        gallery_id = await importer.finalize_kept(target_dir, mode=mode)
+    else:
+        from worker.progressive import _rmtree_staging_dir
+
+        if getattr(plugin.meta, "source_id", None) == "gallery_dl" and not importer.source:
+            # The archive table is named after the source; a run that never created
+            # a gallery has none yet, so without it the discard would find no table.
+            try:
+                from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+                identity = resolve_url_identity(url)
+                if identity is not None:
+                    importer.source = identity.source
+            except Exception as exc:
+                logger.warning("[download] could not resolve archive source for %s: %s", url, exc)
+        await importer.discard_unlinked_archive_entries()
+        _rmtree_staging_dir(target_dir)
+
+    # 4. Cookie writeback, as for a finished run.
+    if db_job_id:
+        try:
+            await _writeback_cookies(credentials, db_job_id, credential_accounts)
+        except Exception as exc:
+            logger.warning("[download] cookie writeback failed: %s", exc)
+
+    # 5. A stop always ends `done` (never failed/partial, which auto-retry would
+    # resume — A10); progress.outcome tells the UI what happened.
+    import_failures, kept = _import_outcome(importer)
+    fetched = _count(getattr(result, "downloaded", None)) or kept
+    skipped = max(_count(getattr(result, "total", None)) - _count(getattr(result, "downloaded", None)), 0)
+    progress: dict = {
+        "total": fetched,
+        "downloaded": fetched,
+        "skipped": skipped,
+        "started_at": started_at.isoformat(),
+        "last_update_at": datetime.now(UTC).isoformat(),
+        "status_text": f"Stopped — kept {kept}",
+        "gdl_state": "done",
+        "outcome": "stopped",
+    }
+    importer_skip = {
+        "duplicate": _count(importer.skipped_duplicate_count),
+        "excluded": _count(importer.skipped_excluded_count),
+        "invalid": _count(importer.skipped_invalid_count),
+    }
+    if any(importer_skip.values()):
+        progress["import_skipped"] = importer_skip
+    if isinstance(importer.title, str) and importer.title:
+        progress["title"] = importer.title
+    if gallery_id:
+        progress["gallery_id"] = gallery_id
+    if import_failures:
+        progress["import_failures"] = {
+            "count": len(import_failures),
+            "success": kept,
+            "details": list(import_failures[:10]),
+        }
+    await _set_job_progress(db_job_id, progress)
+    await _set_job_status(db_job_id, "done")
+
+    # 6. The subscription boundary moves to the run start, never backwards.
+    await _set_subscription_result(db_job_id, "stopped", boundary=started_at)
+
+    # 7. Library refresh.
+    if gallery_id:
+        await emit_safe(EventType.GALLERY_UPDATED, resource_type="gallery", resource_id=gallery_id)
+
+    logger.info("[download] stopped: %s (kept=%d, gallery_id=%s)", url, kept, gallery_id)
+    return {"status": "done", "outcome": "stopped", "downloaded": fetched}
 
 
 async def download_job(
@@ -491,6 +726,9 @@ async def _run_download_job(
     # ── 6. Progressive Importer (ALL sources) ───────────────────────
     import_user_id = None
     existing_gallery_id = None
+    row_mode = None
+    row_options = None
+    stop_already_requested = False
     if db_job_id:
         from sqlalchemy.sql import select as sa_select
 
@@ -500,23 +738,51 @@ async def _run_download_job(
         try:
             async with asyncio.timeout(2):
                 async with AsyncSessionLocal() as _sess:
-                    _result = await _sess.execute(sa_select(_DJ.user_id, _DJ.gallery_id).where(_DJ.id == db_job_id))
+                    _result = await _sess.execute(
+                        sa_select(_DJ.user_id, _DJ.gallery_id, _DJ.mode, _DJ.options, _DJ.stop_requested_at).where(
+                            _DJ.id == db_job_id
+                        )
+                    )
                     _row = _result.one_or_none()
                     if _row:
                         import_user_id = _row.user_id
                         existing_gallery_id = _row.gallery_id
+                        row_mode = _row.mode
+                        row_options = _row.options
+                        # A stop requested while the job waited for its slot: it never starts.
+                        stop_already_requested = isinstance(_row.stop_requested_at, datetime)
         except Exception as exc:
             # Admission already verified the durable row. Keep this lookup
             # defensive for isolated unit execution and transient read errors.
+            # (A stop missed here is still caught by the Redis flag the plugin polls.)
             logger.warning("[download] could not load persisted gallery attachment: %s", exc)
 
-    from worker.constants import _MEDIA_EXTS
+    # The mode was decided when the job was enqueued; rows from before the column
+    # existed are mapped from their options (services/download_mode.py).
+    mode_options = row_options if isinstance(row_options, dict) else options
+    mode = effective_mode(row_mode if isinstance(row_mode, str) else None, mode_options)
+
     from worker.progressive import ProgressiveImporter
 
     # Use filename-based page numbering for plugins with parallel downloads
     page_from_filename = plugin.meta.concurrency > 1
-    importer = ProgressiveImporter(db_job_id, import_user_id, page_num_from_filename=page_from_filename)
+    importer = ProgressiveImporter(
+        db_job_id,
+        import_user_id,
+        page_num_from_filename=page_from_filename,
+        # Only a repair may bring purged images back.
+        include_excluded=bool((mode_options or {}).get("include_excluded")) and mode == REPAIR,
+    )
     importer.source_url = url
+    if mode == REPAIR and source_id == "gallery_dl" and db_job_id:
+        # The repair reads and writes a per-job shadow of the real archive table;
+        # the importer merges it back when the run is kept (source.py creates it).
+        try:
+            from plugins.builtin.gallery_dl._archive import repair_archive_tables
+
+            importer.repair_archive = repair_archive_tables(url, db_job_id)
+        except Exception as exc:
+            logger.warning("[download] could not resolve repair archive tables for %s: %s", url, exc)
     if isinstance(existing_gallery_id, int):
         attached = await importer.attach_existing_gallery(existing_gallery_id)
         if not attached:
@@ -526,7 +792,7 @@ async def _run_download_job(
             )
 
     # ── 7. Pre-download metadata (native plugins) ──────────────────
-    if hasattr(plugin, "resolve_metadata"):
+    if hasattr(plugin, "resolve_metadata") and not stop_already_requested:
         try:
             import_data = await plugin.resolve_metadata(url, credentials)
             if import_data:
@@ -715,7 +981,29 @@ async def _run_download_job(
                         )
         await importer.import_file(file_path, sha256=sha256)
 
+    async def _stop_and_keep(run_result) -> dict:
+        return await _finish_stopped(
+            importer=importer,
+            target_dir=target_dir,
+            url=url,
+            plugin=plugin,
+            on_file=on_file,
+            db_job_id=db_job_id,
+            mode=mode,
+            started_at=started_at,
+            credentials=credentials,
+            credential_accounts=credential_accounts,
+            result=run_result,
+        )
+
     # ── 11. Execute download ────────────────────────────────────────
+    # A stop that arrived before the job started: nothing to download, only the
+    # keep path (leftover staging from an earlier attempt, archive rows, boundary).
+    # Ahead of the pause gate, or a paused job would sit there with its stop unserved.
+    if stop_already_requested:
+        logger.info("[download] stop requested before start: %s", db_job_id)
+        return await _stop_and_keep(None)
+
     # ── Pre-download pause gate (for keep_paused recovery) ─────────
     if db_job_id:
         pause_val = await redis.get(f"download:pause:{db_job_id}")
@@ -745,6 +1033,7 @@ async def _run_download_job(
         if persona_identity is not None:
             opts["persona"] = persona_identity.network_options()
         opts["job_context"] = (options or {}).get("job_context", "manual")
+        opts["mode"] = mode
         # last_completed_at travels through SAQ as ISO string (JSON-safe);
         # source.py expects a datetime, so reify here.
         _lca_raw = (options or {}).get("last_completed_at")
@@ -782,6 +1071,10 @@ async def _run_download_job(
     except Exception as exc:
         err = f"Download failed: {exc}"
         logger.error("[download] %s", err, exc_info=True)
+        # The user stopped the job and the plugin then failed (or was torn down):
+        # the stop still wins, and what was fetched is kept.
+        if await _stop_intent(db_job_id) == "stop":
+            return await _stop_and_keep(None)
         await importer.abort()
         await _set_job_status(db_job_id, "failed", err)
         await _set_subscription_result(db_job_id, "failed", err)
@@ -805,8 +1098,18 @@ async def _run_download_job(
         if signal:
             await mark_persona_cooldown(persona_identity.persona_id, site_source_id, signal)
 
-    # ── 12. Post-download: cancel guard ─────────────────────────────
+    # ── 12. Post-download: stop / cancel guards ─────────────────────
+    # A stop keeps the run whatever the plugin reported: the process was killed
+    # (cancelled), or died/timed out at the same moment (failed/partial, A9). A
+    # run that finished (`done`) before the stop landed is simply finished (A1).
+    if result.status != "done" and await _stop_intent(db_job_id) == "stop":
+        return await _stop_and_keep(result)
+
     if result.status == "cancelled":
+        # The Redis flag that ended the process is only a signal: re-read the
+        # durable intent before throwing the run away.
+        if await _stop_intent(db_job_id) == "stop":
+            return await _stop_and_keep(result)
         await importer.cleanup()
         await _set_job_status(db_job_id, "cancelled")
         await _set_subscription_result(db_job_id, "cancelled")
@@ -832,11 +1135,17 @@ async def _run_download_job(
             return {"status": "failed", "error": err}
 
     if await cancel_check():
-        await importer.cleanup()
-        await _set_job_status(db_job_id, "cancelled")
-        await _set_subscription_result(db_job_id, "cancelled")
-        logger.info("[download] cancelled (post-download guard): %s", url)
-        return {"status": "cancelled"}
+        # The stop flag shares the key with cancel. A stop landing after the plugin
+        # finished changes nothing (A1); otherwise it keeps the run.
+        intent = await _stop_intent(db_job_id)
+        if intent == "stop" and result.status != "done":
+            return await _stop_and_keep(result)
+        if intent != "stop":
+            await importer.cleanup()
+            await _set_job_status(db_job_id, "cancelled")
+            await _set_subscription_result(db_job_id, "cancelled")
+            logger.info("[download] cancelled (post-download guard): %s", url)
+            return {"status": "cancelled"}
 
     try:
         # ── 13. Image validation ────────────────────────────────────────
@@ -915,6 +1224,8 @@ async def _run_download_job(
         # where the Redis cancel flag was evicted (allkeys-lru) or set
         # after the earlier post-download guards already passed (HR-005).
         if await _is_job_cancelled_in_db(db_job_id):
+            if await _stop_intent(db_job_id) == "stop":
+                return await _stop_and_keep(result)
             await importer.cleanup()
             await _set_job_status(db_job_id, "cancelled")
             await _set_subscription_result(db_job_id, "cancelled")

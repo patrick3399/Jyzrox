@@ -232,11 +232,25 @@ export interface EhImageMap {
 
 // ── Download ──────────────────────────────────────────────────────────
 
+/**
+ * What a job is for, decided when it is enqueued. Only the subscription modes and
+ * `repair` change what the user can do with a job (a repair is never discarded).
+ */
+export type DownloadJobMode =
+  | 'download'
+  | 'subscription_initial'
+  | 'subscription_incremental'
+  | 'repair'
+
 export interface DownloadJob {
   id: string
   url: string
   source: string
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused' | 'partial'
+  /** Absent on an API that predates download modes; treat as `download`. */
+  mode?: DownloadJobMode
+  /** Set once the user asked to stop and keep; the job still runs until the worker finishes it. */
+  stop_requested_at?: string | null
   gallery_id?: number | null
   gallery_source?: string
   gallery_source_id?: string
@@ -247,7 +261,7 @@ export interface DownloadJob {
     downloaded?: number
     total?: number
     skipped?: number
-    outcome?: 'already_saved'
+    outcome?: 'already_saved' | 'stopped'
     existing_pages?: number | null
     status_text?: string
     speed?: number

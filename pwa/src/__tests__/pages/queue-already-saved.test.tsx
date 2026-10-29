@@ -29,6 +29,7 @@ vi.mock('@/hooks/useDownloadQueue', () => {
     }),
     useEnqueueDownload: () => trigger,
     useCancelJob: () => trigger,
+    useStopJob: () => trigger,
     useClearFinishedJobs: () => trigger,
     usePauseJob: () => trigger,
     useRetryJob: () => trigger,

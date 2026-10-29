@@ -12,6 +12,7 @@ import {
   Pause,
   X,
   Play,
+  Square,
   ChevronDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -227,16 +228,24 @@ function JobTimingChips({
   )
 }
 
+const MODE_LABEL_KEY: Partial<Record<NonNullable<DownloadJob['mode']>, string>> = {
+  subscription_initial: 'queue.modeInitial',
+  subscription_incremental: 'queue.modeIncremental',
+  repair: 'queue.modeRepair',
+}
+
 function ActiveJobCard({
   job,
   onPause,
   onResume,
-  onCancel,
+  onStop,
+  onDiscard,
 }: {
   job: DownloadJob
   onPause: (id: string) => void
   onResume: (id: string) => void
-  onCancel: (id: string) => void
+  onStop: (job: DownloadJob) => void
+  onDiscard: (job: DownloadJob) => void
 }) {
   const timing = job.progress?.timing as Partial<DashboardTiming> | undefined
 
@@ -253,6 +262,11 @@ function ActiveJobCard({
   const speed = job.progress?.speed ?? 0
   const title = job.progress?.title ?? job.url
   const isPaused = job.status === 'paused'
+  // The job stays active until the worker has kept what it fetched.
+  const isStopping = !!job.stop_requested_at
+  // A repair's files are wanted, so it has no discard (the server treats cancel as stop).
+  const canDiscard = job.mode !== 'repair'
+  const modeLabelKey = job.mode ? MODE_LABEL_KEY[job.mode] : undefined
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl p-4">
@@ -260,6 +274,16 @@ function ActiveJobCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-vault-text truncate">{title}</span>
+            {modeLabelKey && (
+              <span className="text-[11px] font-medium text-vault-text-secondary border border-vault-border px-1.5 py-0.5 rounded">
+                {t(modeLabelKey)}
+              </span>
+            )}
+            {isStopping && (
+              <span className="text-[11px] font-medium text-vault-accent bg-vault-accent/10 px-1.5 py-0.5 rounded">
+                {t('queue.stopping')}
+              </span>
+            )}
             {isStalling && (
               <span className="flex items-center gap-1 text-[11px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded-full">
                 <AlertTriangle size={10} />
@@ -273,7 +297,8 @@ function ActiveJobCard({
           {isPaused ? (
             <button
               onClick={() => onResume(job.id)}
-              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-green-400 hover:bg-green-500/10 transition-colors"
+              disabled={isStopping}
+              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
               title={t('downloadDashboard.resume')}
             >
               <Play size={14} />
@@ -281,19 +306,33 @@ function ActiveJobCard({
           ) : (
             <button
               onClick={() => onPause(job.id)}
-              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
+              disabled={isStopping}
+              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
               title={t('downloadDashboard.pause')}
             >
               <Pause size={14} />
             </button>
           )}
           <button
-            onClick={() => onCancel(job.id)}
-            className="p-1.5 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            title={t('downloadDashboard.cancel')}
+            onClick={() => onStop(job)}
+            disabled={isStopping}
+            className="p-1.5 rounded-lg text-vault-accent hover:bg-vault-accent/10 transition-colors disabled:opacity-50"
+            title={isStopping ? t('queue.stopping') : t('queue.stop')}
+            aria-label={isStopping ? t('queue.stopping') : t('queue.stop')}
           >
-            <X size={14} />
+            <Square size={14} />
           </button>
+          {canDiscard && (
+            <button
+              onClick={() => onDiscard(job)}
+              disabled={isStopping}
+              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+              title={t('queue.discard')}
+              aria-label={t('queue.discard')}
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -526,15 +565,39 @@ export default function DownloadDashboardPage() {
     }
   }
 
-  const handleJobAction = async (id: string, action: 'pause' | 'resume' | 'cancel') => {
+  const handleJobAction = async (id: string, action: 'pause' | 'resume' | 'stop' | 'cancel') => {
     try {
       if (action === 'pause') await api.download.pauseJob(id)
       else if (action === 'resume') await api.download.resumeJob(id)
+      else if (action === 'stop') await api.download.stopJob(id)
       else await api.download.cancelJob(id)
       await mutate()
     } catch {
-      toast.error(t(action === 'cancel' ? 'queue.cancelError' : 'queue.pauseError'))
+      toast.error(
+        t(
+          action === 'cancel'
+            ? 'queue.cancelError'
+            : action === 'stop'
+              ? 'queue.stopError'
+              : 'queue.pauseError',
+        ),
+      )
     }
+  }
+
+  const handleStop = (job: DownloadJob) => {
+    // Stopping a subscription run gives up the posts it has not reached yet, for good.
+    const givesUpHistory =
+      job.mode === 'subscription_initial' ||
+      job.mode === 'subscription_incremental' ||
+      (!job.mode && !!job.subscription_id)
+    if (givesUpHistory && !confirm(t('queue.stopConfirm'))) return
+    void handleJobAction(job.id, 'stop')
+  }
+
+  const handleDiscard = (job: DownloadJob) => {
+    if (!confirm(t('queue.discardConfirm'))) return
+    void handleJobAction(job.id, 'cancel')
   }
 
   if (isLoading || profileLoading) {
@@ -593,7 +656,8 @@ export default function DownloadDashboardPage() {
                 job={job}
                 onPause={(id) => handleJobAction(id, 'pause')}
                 onResume={(id) => handleJobAction(id, 'resume')}
-                onCancel={(id) => handleJobAction(id, 'cancel')}
+                onStop={handleStop}
+                onDiscard={handleDiscard}
               />
             ))}
           </div>

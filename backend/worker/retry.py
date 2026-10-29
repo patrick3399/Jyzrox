@@ -14,7 +14,13 @@ from db.models import DownloadJob
 from services.download_admission import next_admission_ticket
 from services.egress_persona import resolve_admission_key
 from worker.constants import DISK_LOW_KEY
-from worker.helpers import _cron_record, _cron_should_run, compute_job_key, enqueue_download_job
+from worker.helpers import (
+    _cron_record,
+    _cron_should_run,
+    compute_job_key,
+    enqueue_download_job,
+    enqueue_finalize_stopped_job,
+)
 
 logger = logging.getLogger("worker")
 
@@ -71,6 +77,7 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
 
     retried = 0
     skipped = 0
+    stop_handed = 0
 
     try:
         async with AsyncSessionLocal() as session:
@@ -115,6 +122,18 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                         "[stale-reaper] preserving running job %s with active admission token",
                         job.id,
                     )
+                    continue
+                if isinstance(getattr(job, "stop_requested_at", None), datetime):
+                    # The user stopped it and its execution is gone: finish it as
+                    # stopped (keep what it fetched) rather than failing the
+                    # intent away, which auto-retry would then re-run.
+                    try:
+                        await enqueue_finalize_stopped_job(job.id)
+                        stop_handed += 1
+                        logger.info("[stale-reaper] handed stop-requested job %s to finalize", job.id)
+                    except Exception as exc:
+                        skipped += 1
+                        logger.error("[stale-reaper] failed to hand stop-requested job %s to finalize: %s", job.id, exc)
                     continue
                 job.status = "failed"
                 job.error = "Stale: no progress for 60+ minutes"
@@ -174,6 +193,9 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 .where(
                     DownloadJob.status.in_(["failed", "partial"]),
                     DownloadJob.retry_count < max_retries,
+                    # A stopped job is finished by the user's choice; re-running it
+                    # would fetch again what they chose to keep as it is.
+                    DownloadJob.stop_requested_at.is_(None),
                 )
                 .where(
                     (DownloadJob.next_retry_at == None) | (DownloadJob.next_retry_at <= now)  # noqa: E711
@@ -226,7 +248,7 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
         await _cron_record(
             ctx,
             "retry_downloads",
-            "ok" if retried > 0 or stale_count > 0 or repaired_queued > 0 else "idle",
+            "ok" if retried > 0 or stale_count > 0 or repaired_queued > 0 or stop_handed > 0 else "idle",
             None,
         )
         logger.info("[retry] done: %s", status_msg)

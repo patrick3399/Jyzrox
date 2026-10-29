@@ -22,6 +22,7 @@ import { GalleryTagSection } from '@/components/library/GalleryTagSection'
 import { ThumbPlaceholder } from '@/components/library/ThumbPlaceholder'
 import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
 import { GalleryActionsSheet, type GalleryAction } from '@/components/library/GalleryActionsSheet'
+import { RepairGalleryDialog } from '@/components/download/DownloadActionDialogs'
 import { useProfile } from '@/hooks/useProfile'
 import { AppImage } from '@/components/AppImage'
 import type { GalleryImage } from '@/lib/types'
@@ -168,6 +169,7 @@ export default function GalleryDetailPage() {
   const [pagesOutdated, setPagesOutdated] = useState<{ old: number; new: number } | null>(null)
   const updateCheckedRef = useRef<boolean>(false)
   const [isEnqueueingUpdate, setIsEnqueueingUpdate] = useState(false)
+  const [repairDialogOpen, setRepairDialogOpen] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [tagData, setTagData] = useState<
@@ -310,20 +312,40 @@ export default function GalleryDetailPage() {
       })
   }, [gallery, featureSettings, mutateGallery])
 
-  const handleEnqueueUpdate = useCallback(async () => {
-    if (!gallery?.source_url || isEnqueueingUpdate || activeJobId) return
-    setIsEnqueueingUpdate(true)
-    try {
-      const result = await api.download.enqueue(gallery.source_url)
-      toast.success(t('library.updateEnqueued'))
-      setPagesOutdated(null)
-      setActiveJobId(result.job_id)
-    } catch {
-      toast.error(t('library.updateFailed'))
-    } finally {
-      setIsEnqueueingUpdate(false)
-    }
-  }, [gallery?.source_url, isEnqueueingUpdate, activeJobId])
+  // "Update" (outdated) and "repair" go through the gallery action endpoint: the
+  // server knows whether this gallery belongs to a subscription (an update is
+  // then a subscription check, a repair inherits its download options).
+  const handleEnqueueUpdate = useCallback(
+    async (kind: 'repair' | 'update', includeExcluded = false) => {
+      const galleryId = gallery?.id
+      if (galleryId === undefined || !gallery?.source_url || isEnqueueingUpdate || activeJobId) {
+        return
+      }
+      setIsEnqueueingUpdate(true)
+      try {
+        const result = await api.download.galleryAction(galleryId, kind, includeExcluded)
+        toast.success(
+          t(
+            result.kind === 'subscription_check'
+              ? 'library.subscriptionCheckQueued'
+              : result.kind === 'repair'
+                ? 'library.repairQueued'
+                : 'library.updateEnqueued',
+          ),
+        )
+        setPagesOutdated(null)
+        setRepairDialogOpen(false)
+        // A subscription check enqueues its job later, so there is no job to follow yet;
+        // the gallery's own download status takes over once that job starts.
+        if (result.kind !== 'subscription_check') setActiveJobId(result.job_id)
+      } catch (err) {
+        toast.error(err instanceof Error && err.message ? err.message : t('library.updateFailed'))
+      } finally {
+        setIsEnqueueingUpdate(false)
+      }
+    },
+    [gallery?.id, gallery?.source_url, isEnqueueingUpdate, activeJobId],
+  )
 
   const refetchTagData = useCallback(() => {
     if (!source || !sourceId) return
@@ -359,6 +381,7 @@ export default function GalleryDetailPage() {
   const overlayOpen =
     selectMode ||
     moreOpen ||
+    repairDialogOpen ||
     tagPopoverOpen ||
     collectionMenuOpen ||
     imageMenu !== null ||
@@ -1006,7 +1029,16 @@ export default function GalleryDetailPage() {
                 )}
                 {statusAction.canEnqueue && canEdit && (
                   <button
-                    onClick={handleEnqueueUpdate}
+                    onClick={() => {
+                      if (statusAction.kind !== 'repair') {
+                        void handleEnqueueUpdate('update')
+                      } else if (excludedBlobs.length > 0) {
+                        // Purged images stay out of a repair unless the user asks for them back.
+                        setRepairDialogOpen(true)
+                      } else {
+                        void handleEnqueueUpdate('repair')
+                      }
+                    }}
                     disabled={isEnqueueingUpdate || !!activeJobId}
                     className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -1254,6 +1286,15 @@ export default function GalleryDetailPage() {
       </div>
 
       <GalleryActionsSheet open={moreOpen} onClose={closeMoreSheet} groups={moreActionGroups} />
+
+      {repairDialogOpen && (
+        <RepairGalleryDialog
+          excludedCount={excludedBlobs.length}
+          busy={isEnqueueingUpdate}
+          onConfirm={(includeExcluded) => void handleEnqueueUpdate('repair', includeExcluded)}
+          onClose={() => setRepairDialogOpen(false)}
+        />
+      )}
 
       {isCheckingUpdate && (
         <p className="text-xs text-vault-text-muted animate-pulse mb-2">

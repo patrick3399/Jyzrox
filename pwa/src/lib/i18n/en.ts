@@ -663,6 +663,13 @@ const en: Record<string, string> = {
   'library.updateNow': 'Update',
   'library.repairNow': 'Repair',
   'library.updateEnqueued': 'Download queued for update',
+  'library.repairIncludeExcluded': 'Also restore {count} purged images',
+  'library.repairDialogTitle': 'Repair gallery',
+  'library.repairDialogBody':
+    'Re-checks every file against the source and downloads whatever is missing.',
+  'library.repairStart': 'Start repair',
+  'library.repairQueued': 'Repair queued',
+  'library.subscriptionCheckQueued': 'Checking the subscription for new posts',
   'library.checkingMetadata': 'Checking for updates...',
   'library.editTags': 'Edit Tags',
   'library.doneEditingTags': 'Done',
@@ -744,6 +751,23 @@ const en: Record<string, string> = {
 
   // ── Queue (extra) ──
   'queue.cancelError': 'Failed to cancel job',
+  'queue.stop': 'Stop',
+  'queue.stopping': 'Stopping…',
+  'queue.stopped': 'Stopped',
+  'queue.stopConfirm':
+    'Stop this download? Everything already downloaded is kept. Posts it has not reached yet are skipped for good, and later checks only fetch newer posts.',
+  'queue.stopError': 'Failed to stop job',
+  'queue.discard': 'Discard',
+  'queue.discardConfirm': 'Discard this download? Files it has already downloaded will be deleted.',
+  'queue.modeInitial': 'Initial',
+  'queue.modeIncremental': 'Incremental',
+  'queue.modeRepair': 'Repair',
+  'queue.subscribedTitle': 'Already subscribed',
+  'queue.subscribedBody':
+    'You already subscribe to "{name}". A check only fetches new posts. Downloading anyway may pull in older posts you chose to skip.',
+  'queue.checkSubscriptionNow': 'Check subscription now',
+  'queue.downloadAnyway': 'Download anyway',
+  'queue.subscriptionCheckQueued': 'Subscription check queued',
   'queue.pause': 'Pause',
   'queue.resume': 'Resume',
   'queue.pauseError': 'Failed to pause/resume job',
@@ -1152,6 +1176,12 @@ const en: Record<string, string> = {
   'subscriptions.updated': 'Subscription updated',
   'subscriptions.updateFailed': 'Failed to update subscription',
   'subscriptions.checkFailed': 'Failed to check subscription',
+  'subscriptions.stop': 'Stop',
+  'subscriptions.stopConfirm':
+    'Stop the running download for "{name}"? Everything already downloaded is kept. Older posts not reached yet are skipped, and later checks only fetch newer posts.',
+  'subscriptions.stopRequested': 'Stopping — keeping what was downloaded',
+  'subscriptions.stopFailed': 'Failed to stop download',
+  'subscriptions.statusStopped': 'Stopped',
   'subscriptions.backfill': 'Force re-scan',
   'subscriptions.backfillTitle': 'Force re-scan all posts',
   'subscriptions.backfillConfirm':
@@ -2062,7 +2092,6 @@ const en: Record<string, string> = {
   'downloadDashboard.waitingForSlot': 'Waiting for {source} slot ({used}/{max})',
   'downloadDashboard.pagesPerSec': '{speed} pages/s',
   'downloadDashboard.elapsed': 'Elapsed',
-  'downloadDashboard.cancel': 'Cancel',
   'downloadDashboard.pause': 'Pause',
   'downloadDashboard.resume': 'Resume',
   'downloadDashboard.toggleBoostOn': 'Enable Boost',

@@ -93,6 +93,13 @@ export function useCheckSubscription() {
   )
 }
 
+/** Stop and keep every active job of a subscription. */
+export function useStopSubscription() {
+  return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
+    api.subscriptions.stop(arg),
+  )
+}
+
 export function useBackfillSubscription() {
   return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
     api.subscriptions.backfill(arg),

@@ -21,6 +21,14 @@ import { useWsConnection, useWsJobs } from '@/lib/ws'
 
 const PAGE_SIZE = 24
 const LIBRARY_REFRESH_THROTTLE_MS = 2_000
+// A cancelled or failed run rolls back the gallery it created, so those end
+// states stale the list just like a finished run does.
+const GALLERY_CHANGING_JOB_STATUSES: ReadonlySet<string> = new Set([
+  'done',
+  'partial',
+  'cancelled',
+  'failed',
+])
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>()
@@ -142,11 +150,7 @@ export function useLibraryBrowseSession({
     // covered by that load and by the revalidation probe; replaying it in the
     // restore commit refreshes at a depth of one and truncates the snapshot.
     if (!seen.ready || seen.update === lastJobUpdate) return
-    if (
-      !scopeReady ||
-      !lastJobUpdate ||
-      (lastJobUpdate.status !== 'done' && lastJobUpdate.status !== 'partial')
-    ) {
+    if (!scopeReady || !lastJobUpdate || !GALLERY_CHANGING_JOB_STATUSES.has(lastJobUpdate.status)) {
       return
     }
     const elapsed = Date.now() - lastRefreshAtRef.current

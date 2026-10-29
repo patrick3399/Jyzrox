@@ -22,8 +22,13 @@ from core.redis_client import get_typed_download_delay
 from db.models import DownloadJob, Gallery, GallerySourceItem, Image, ReadProgress, Subscription
 from plugins.models import GalleryImportData
 from services.credential import get_credential
+from services.download_mode import REPAIR, effective_mode
+from services.download_stop import read_stop_intent
 from services.pixiv_client import PixivClient
 from services.pixiv_downloader import download_pixiv_illust
+from worker.constants import logger
+from worker.download import _set_subscription_result
+from worker.download_stop import finalize_stopped_job
 from worker.helpers import _set_job_progress, _set_job_status
 from worker.progressive import ProgressiveImporter
 
@@ -179,6 +184,56 @@ async def _reorder_author_gallery(gallery_id: int) -> None:
         await session.commit()
 
 
+async def _finish_collection_stopped(
+    *,
+    importer: ProgressiveImporter,
+    target_dir: Path,
+    mode: str,
+    db_job_id: str,
+    subscription_id: int | None,
+    user_id: int,
+    started_at: datetime,
+    works: list[dict],
+    title: str,
+    done_count: int,
+) -> dict:
+    """Keep the works a user-stopped collection run finished and end the job ``done``.
+
+    The subscription's boundary moves to what this run discovered
+    (``last_item_id`` = newest work) and to the run start (``last_success_at``),
+    so the next check fetches only newer works. A repair owns no boundary.
+    """
+    kept_gallery_id = await importer.finalize_kept(target_dir, mode=mode)
+    progress: dict = {
+        "downloaded": done_count,
+        "total": len(works),
+        "status_text": f"Stopped — kept {done_count}",
+        "outcome": "stopped",
+        "gdl_state": "done",
+    }
+    if kept_gallery_id:
+        progress["gallery_id"] = kept_gallery_id
+        progress["title"] = title
+    await _set_job_progress(db_job_id, progress)
+    await _set_job_status(db_job_id, "done")
+    if subscription_id:
+        async with AsyncSessionLocal() as session:
+            sub = await session.get(Subscription, subscription_id)
+            if sub:
+                sub.source_id = str(user_id)
+                if not sub.name or sub.name == f"Pixiv user {user_id}":
+                    sub.name = title
+                sub.last_checked_at = datetime.now(UTC)
+                if works and mode != REPAIR:
+                    sub.last_item_id = str(works[0]["id"])
+                await session.commit()
+        # last_status, last_success_at = max(existing, run start), failure counter.
+        await _set_subscription_result(db_job_id, "stopped", boundary=started_at)
+    if kept_gallery_id:
+        await emit_safe(EventType.GALLERY_UPDATED, resource_type="gallery", resource_id=kept_gallery_id)
+    return {"status": "done", "outcome": "stopped", "completed": done_count}
+
+
 async def pixiv_collection_job(
     ctx: dict,
     user_id: int,
@@ -189,6 +244,31 @@ async def pixiv_collection_job(
 ) -> dict:
     """Create or incrementally synchronize one Pixiv author gallery."""
     job_uuid = uuid.UUID(db_job_id)
+    started_at = datetime.now(UTC)
+
+    # The mode was stamped when the job was enqueued; rows from before the column
+    # existed are mapped from their options.
+    mode = effective_mode(None, None)
+    stop_requested_early = False
+    try:
+        async with AsyncSessionLocal() as session:
+            job_row = (
+                await session.execute(
+                    select(DownloadJob.mode, DownloadJob.options, DownloadJob.stop_requested_at).where(
+                        DownloadJob.id == job_uuid
+                    )
+                )
+            ).one_or_none()
+        if job_row is not None:
+            mode = effective_mode(job_row.mode, job_row.options)
+            stop_requested_early = job_row.stop_requested_at is not None
+    except Exception as exc:
+        logger.warning("[pixiv_collection] could not read job %s mode: %s", db_job_id, exc)
+    if stop_requested_early:
+        # Stopped while queued: nothing has run, so the detached finalize ends it
+        # without creating a gallery shell.
+        return await finalize_stopped_job(ctx, db_job_id)
+
     await _set_job_status(db_job_id, "running")
     credential = await get_credential("pixiv")
     token = credential if isinstance(credential, str) else (credential or {}).get("refresh_token", "")
@@ -208,6 +288,9 @@ async def pixiv_collection_job(
     importer.source_url = source_url
     seen_ids: set[str] = set()
     completed = 0
+    # Read by the exception path too, which can fire before discovery finishes.
+    works: list[dict] = []
+    title = f"Pixiv user {user_id}"
     try:
         async with PixivClient(token) as client:
             profile = await client.user_detail(user_id)
@@ -241,13 +324,40 @@ async def pixiv_collection_job(
         async def _is_paused() -> bool:
             return await redis.get(f"download:pause:{db_job_id}") is not None
 
+        async def _end_cancelled(done_count: int) -> dict:
+            """The run was told to end: a stop keeps it and moves the boundary, a cancel does not."""
+            if await read_stop_intent(db_job_id) == "stop":
+                return await _end_stopped(done_count)
+            await importer.finalize(target_dir, partial=True)
+            await _set_job_status(db_job_id, "cancelled")
+            # The finished works stay, but the subscription must still learn the check ended.
+            await _set_subscription_result(db_job_id, "cancelled")
+            return {"status": "cancelled", "completed": done_count}
+
+        async def _end_stopped(done_count: int) -> dict:
+            return await _finish_collection_stopped(
+                importer=importer,
+                target_dir=target_dir,
+                mode=mode,
+                db_job_id=db_job_id,
+                subscription_id=subscription_id,
+                user_id=user_id,
+                started_at=started_at,
+                works=works,
+                title=title,
+                done_count=done_count,
+            )
+
         for index, illust in enumerate(works):
             if await _is_cancelled():
-                await importer.finalize(target_dir, partial=True)
-                await _set_job_status(db_job_id, "cancelled")
-                return {"status": "cancelled", "completed": completed}
+                return await _end_cancelled(completed)
             while await redis.get(f"download:pause:{db_job_id}") is not None:
+                # A paused run must still be stoppable/cancellable: both set the cancel flag.
+                if await _is_cancelled():
+                    break
                 await asyncio.sleep(0.5)
+            if await _is_cancelled():
+                return await _end_cancelled(completed)
 
             illust_id = int(illust["id"])
             source_item_id = f"pixiv:{illust_id}"
@@ -294,9 +404,7 @@ async def pixiv_collection_job(
                 pause_check=_is_paused,
             )
             if result["status"] == "cancelled":
-                await importer.finalize(target_dir, partial=True)
-                await _set_job_status(db_job_id, "cancelled")
-                return {"status": "cancelled", "completed": completed}
+                return await _end_cancelled(completed)
             if result["status"] != "done":
                 raise RuntimeError(result.get("error") or f"Failed to download artwork {illust_id}")
             completed += 1
@@ -345,11 +453,14 @@ async def pixiv_collection_job(
                     if not sub.name or sub.name == f"Pixiv user {user_id}":
                         sub.name = title
                     sub.last_checked_at = datetime.now(UTC)
-                    sub.last_success_at = datetime.now(UTC)
                     sub.last_status = "up_to_date" if not works else "done"
                     sub.last_error = None
-                    if works:
-                        sub.last_item_id = str(works[0]["id"])
+                    # A repair re-fetches what the subscription already covers and
+                    # owns no boundary.
+                    if mode != REPAIR:
+                        sub.last_success_at = datetime.now(UTC)
+                        if works:
+                            sub.last_item_id = str(works[0]["id"])
             await session.commit()
 
         await _reorder_author_gallery(gallery_id)
@@ -365,6 +476,24 @@ async def pixiv_collection_job(
         )
         return {"status": "done", "gallery_id": gallery_id, "completed": completed}
     except Exception as exc:
+        # The user stopped the job and the run then failed: the stop still wins and
+        # keeps what was fetched. If the keep itself fails, fall back to `failed`.
+        if await read_stop_intent(db_job_id) == "stop":
+            try:
+                return await _finish_collection_stopped(
+                    importer=importer,
+                    target_dir=target_dir,
+                    mode=mode,
+                    db_job_id=db_job_id,
+                    subscription_id=subscription_id,
+                    user_id=user_id,
+                    started_at=started_at,
+                    works=works,
+                    title=title,
+                    done_count=completed,
+                )
+            except Exception as stop_exc:
+                logger.error("[pixiv_collection] keep path failed for stopped job %s: %s", db_job_id, stop_exc)
         await importer.finalize(target_dir, partial=True) if importer.gallery_id else importer.cleanup()
         await _set_job_status(db_job_id, "failed", str(exc))
         await emit_safe(

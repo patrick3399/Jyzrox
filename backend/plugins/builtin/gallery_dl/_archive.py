@@ -139,3 +139,136 @@ async def ensure_archive_table(session, category: str) -> str:
     await session.execute(text(f"ALTER TABLE {_quoted(table)} {adds}"))
     await session.execute(text(index))
     return "upgraded"
+
+
+# ── Repair shadow archive ────────────────────────────────────────────
+#
+# A repair run must fetch files gallery-dl's archive already lists (archived but
+# never imported, or imported and since lost), yet the new rows it writes still
+# have to land in the real archive. gallery-dl has no write-only archive mode, so
+# the run reads and writes an empty per-job shadow table instead
+# (``"archive-table": "<real>__repair_<jobhex>"``). The importer merges the shadow
+# into the real table when the run is kept and drops it when the run is discarded.
+
+REPAIR_TABLE_MARKER = "__repair_"
+_REPAIR_MERGE_COLUMNS = ("job_id", "created_at")
+
+
+def repair_archive_tables(url: str, job_id: str | None) -> tuple[str, str] | None:
+    """``(real, shadow)`` archive tables a repair job for ``url`` uses.
+
+    ``None`` when there is nothing to shadow: the URL names no gallery-dl
+    category, or ``job_id`` is not a UUID.
+    """
+    if not job_id:
+        return None
+    from plugins.builtin.gallery_dl._identity import resolve_url_identity
+    from services.download_mode import repair_archive_table
+
+    identity = resolve_url_identity(url)
+    if identity is None:
+        return None
+    real = archive_table_name(identity.category)
+    try:
+        return real, repair_archive_table(real, job_id)
+    except ValueError:
+        return None
+
+
+def parse_repair_archive_name(table: str) -> tuple[str, uuid.UUID] | None:
+    """Split ``<real>__repair_<jobhex>`` into the real table prefix and the job id.
+
+    The prefix is the real table's name unless ``repair_archive_table`` had to
+    truncate a long one; callers must check that it exists before using it.
+    """
+    real, marker, tail = table.rpartition(REPAIR_TABLE_MARKER)
+    if not marker or not real or len(tail) != 32:
+        return None
+    try:
+        return real, uuid.UUID(hex=tail)
+    except ValueError:
+        return None
+
+
+def _require_repair_table(shadow: str) -> None:
+    # DROP/merge must never be pointed at a real archive table by a bad caller.
+    if REPAIR_TABLE_MARKER not in shadow:
+        raise ValueError(f"{shadow!r} is not a repair archive table")
+
+
+async def ensure_repair_archive_table(session, real: str, shadow: str) -> None:
+    """Create ``shadow`` shaped like ``real``: empty, with its primary key and defaults.
+
+    ``INCLUDING DEFAULTS`` keeps the ``job_id`` default that stamps each row with
+    the job's id; foreign keys are not copied, so shadow rows never reference a
+    gallery and never cascade. The caller commits.
+    """
+    from sqlalchemy import text
+
+    _require_repair_table(shadow)
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"{ARCHIVE_JOB_SETTING}:{shadow}"},
+    )
+    await session.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_quoted(shadow)} (LIKE {_quoted(real)} INCLUDING DEFAULTS INCLUDING INDEXES)"
+        )
+    )
+
+
+async def merge_repair_archive(session, real: str, shadow: str) -> int:
+    """Copy the shadow's rows into ``real``; a row the real table already has wins.
+
+    No-op (returns 0) when the shadow no longer exists. The rows arrive with
+    ``gallery_id`` NULL: the importer links them by ``job_id`` afterwards. The
+    caller commits.
+    """
+    from sqlalchemy import text
+
+    _require_repair_table(shadow)
+    columns = set(
+        (
+            await session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = :t"
+                ),
+                {"t": shadow},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if "entry" not in columns:
+        return 0
+    copied = ", ".join(["entry", *(c for c in _REPAIR_MERGE_COLUMNS if c in columns)])
+    result = await session.execute(
+        text(
+            f"INSERT INTO {_quoted(real)} ({copied}) SELECT {copied} FROM {_quoted(shadow)} "
+            f"ON CONFLICT (entry) DO NOTHING"
+        )
+    )
+    return result.rowcount or 0
+
+
+async def drop_repair_archive(session, shadow: str) -> None:
+    """Drop the shadow table (no merge). The caller commits."""
+    from sqlalchemy import text
+
+    _require_repair_table(shadow)
+    await session.execute(text(f"DROP TABLE IF EXISTS {_quoted(shadow)}"))
+
+
+async def list_repair_archive_tables(session) -> list[str]:
+    """Names of every repair shadow table that currently exists."""
+    from sqlalchemy import text
+
+    rows = await session.execute(
+        text(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = current_schema() AND tablename LIKE '%\\_\\_repair\\_%' "
+            "ORDER BY tablename"
+        )
+    )
+    return [name for name in rows.scalars().all() if parse_repair_archive_name(name) is not None]
