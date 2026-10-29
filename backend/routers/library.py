@@ -60,10 +60,10 @@ from db.models import (
 from services.cas import (
     cas_url,
     decrement_ref_count,
+    existing_base_thumbs,
     image_file_url,
     library_dir,
     library_url,
-    thumb_dir,
 )
 from services.cas import thumb_srcset as cas_thumb_srcset
 from services.cas import thumb_url as cas_thumb_url
@@ -513,7 +513,7 @@ def _decode_image_cursor(cursor: str) -> dict:
     return json.loads(payload)
 
 
-def _i_browse(img: Image) -> dict:
+def _i_browse(img: Image, thumbs: set[str]) -> dict:
     blob = img.blob
     gallery = img.gallery
     return {
@@ -522,8 +522,7 @@ def _i_browse(img: Image) -> dict:
         "page_num": img.page_num,
         "width": blob.width if blob else None,
         "height": blob.height if blob else None,
-        "thumb_path": _thumb_url(blob),
-        "thumb_srcset": _thumb_srcset(blob),
+        **_thumb_fields(blob, thumbs),
         "file_path": image_file_url(blob, img.external_path),
         "thumbhash": blob.thumbhash if blob else None,
         "media_type": _media_type(img),
@@ -739,9 +738,10 @@ async def browse_images(
         next_cursor = _encode_image_cursor(last)
 
     fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images_out])
+    thumbs = await existing_base_thumbs(img.blob_sha256 for img in images_out)
 
     return {
-        "images": [_i_browse(img) for img in images_out],
+        "images": [_i_browse(img, thumbs) for img in images_out],
         "next_cursor": next_cursor,
         "has_next": has_next,
         "favorited_image_ids": sorted(fav_ids),
@@ -939,6 +939,7 @@ async def list_artist_images(
         .options(selectinload(Image.blob))
     )
     rows = (await db.execute(stmt)).all()
+    thumbs = await existing_base_thumbs(row[0].blob_sha256 for row in rows)
 
     images = []
     for row in rows:
@@ -956,8 +957,7 @@ async def list_artist_images(
                 "width": blob.width if blob else None,
                 "height": blob.height if blob else None,
                 "file_path": image_file_url(blob, img.external_path),
-                "thumb_path": _thumb_url(blob),
-                "thumb_srcset": _thumb_srcset(blob),
+                **_thumb_fields(blob, thumbs),
                 "file_size": _file_size(img),
                 "file_hash": blob.sha256 if blob else None,
                 "media_type": _media_type(img),
@@ -1150,6 +1150,7 @@ async def list_gallery_files(
         )
         db_images = (await db.execute(img_stmt)).scalars().all()
         img_map = {img.filename: img for img in db_images if img.filename is not None}
+    thumbs = await existing_base_thumbs(img.blob_sha256 for img in img_map.values())
 
     files = []
     for f in sorted(raw_files, key=lambda x: x["filename"]):
@@ -1163,8 +1164,7 @@ async def list_gallery_files(
                 "height": blob.height if blob else None,
                 "file_size": f["file_size"],
                 "media_type": _media_type(img) if img else "image",
-                "thumb_path": _thumb_url(blob),
-                "thumb_srcset": _thumb_srcset(blob),
+                **_thumb_fields(blob, thumbs),
                 "file_path": image_file_url(blob, img.external_path if img else None),
                 "is_symlink": f["is_symlink"],
                 "is_broken": f["is_broken"],
@@ -1705,7 +1705,12 @@ async def list_hidden_images(
         .all()
     )
     fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
-    return {"gallery_id": g.id, "images": [_i(img) for img in images], "favorited_image_ids": sorted(fav_ids)}
+    thumbs = await existing_base_thumbs(img.blob_sha256 for img in images)
+    return {
+        "gallery_id": g.id,
+        "images": [_i(img, thumbs) for img in images],
+        "favorited_image_ids": sorted(fav_ids),
+    }
 
 
 @router.post("/images/{image_id}/favorite")
@@ -2742,18 +2747,15 @@ def _file_size(img: Image) -> int | None:
     return blob.file_size if blob else img.source_size
 
 
-def _thumb_url(blob) -> str | None:
-    """Return the 160px thumbnail URL for a blob."""
-    if not blob or not blob.sha256:
-        return None
-    if not (thumb_dir(blob.sha256) / "thumb_160.webp").exists():
-        return None
-    return cas_thumb_url(blob.sha256)
+def _thumb_fields(blob, thumbs: set[str]) -> dict:
+    """Return a blob's thumbnail URLs, or None when its base thumb is missing.
 
-
-def _thumb_srcset(blob) -> str | None:
-    """Return all responsive thumbnail candidates when a base thumb exists."""
-    return cas_thumb_srcset(blob.sha256) if _thumb_url(blob) else None
+    ``thumbs`` comes from ``existing_base_thumbs`` for the whole response, so
+    serializing a page does no filesystem I/O.
+    """
+    if blob is None or blob.sha256 not in thumbs:
+        return {"thumb_path": None, "thumb_srcset": None}
+    return {"thumb_path": cas_thumb_url(blob.sha256), "thumb_srcset": cas_thumb_srcset(blob.sha256)}
 
 
 async def _get_or_404_by_source(db: AsyncSession, source: str, source_id: str, auth: dict | None = None) -> Gallery:
@@ -2830,7 +2832,7 @@ def _g(
     }
 
 
-def _i(img: Image) -> dict:
+def _i(img: Image, thumbs: set[str]) -> dict:
     blob = img.blob
     return {
         "id": img.id,
@@ -2840,8 +2842,7 @@ def _i(img: Image) -> dict:
         "width": blob.width if blob else None,
         "height": blob.height if blob else None,
         "file_path": image_file_url(blob, img.external_path),
-        "thumb_path": _thumb_url(blob),
-        "thumb_srcset": _thumb_srcset(blob),
+        **_thumb_fields(blob, thumbs),
         "file_size": _file_size(img),
         "file_hash": blob.sha256 if blob else None,
         "media_type": _media_type(img),
@@ -2877,9 +2878,10 @@ async def _images_with_source_items(db: AsyncSession, images: list[Image]) -> li
     if row_ids:
         items = (await db.execute(select(GallerySourceItem).where(GallerySourceItem.id.in_(row_ids)))).scalars().all()
         item_map = {item.id: item for item in items}
+    thumbs = await existing_base_thumbs(image.blob_sha256 for image in images)
     result = []
     for image in images:
-        data = _i(image)
+        data = _i(image, thumbs)
         item = item_map.get(image.source_item_row_id)
         if item:
             match = _re.search(r":p(\d+)$", image.source_item_id or "")
