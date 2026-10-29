@@ -337,6 +337,11 @@ async def _build_gallery_dl_config(
 
         cutoff = last_completed_at - timedelta(days=1)
         config["extractor"]["date-after"] = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+        # date-after raises StopExtraction at the first post older than the
+        # cutoff. Instagram lists pinned posts (usually old) ahead of the feed,
+        # so with them included the run stops before reaching anything new.
+        # The initial full run already fetched them.
+        config["extractor"].setdefault("instagram", {})["pinned"] = False
 
     # Per-job media policy (options.media). The config file is per job, so
     # root-level extractor keys cannot leak into other jobs.

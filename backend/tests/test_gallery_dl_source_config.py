@@ -33,6 +33,28 @@ async def test_incremental_mode_sets_date_after_and_abort(tmp_path):
     assert ext["date-after"] == "2026-10-09T12:00:00"  # one day before the boundary
 
 
+async def test_incremental_instagram_run_skips_pinned_posts_so_date_after_does_not_stop_at_them(tmp_path):
+    """date-after raises StopExtraction at the first post older than the cutoff.
+
+    Instagram lists pinned posts (usually old) ahead of the feed, so with pinned
+    posts included an incremental run stops before reaching anything new.
+    """
+    ext = await _config(tmp_path, mode="subscription_incremental", last_completed_at=datetime(2026, 10, 10, 12, 0, 0))
+
+    assert ext["instagram"]["pinned"] is False
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["subscription_initial", "download", "repair"],
+)
+async def test_non_incremental_instagram_run_keeps_pinned_posts(tmp_path, mode):
+    """Without a date cutoff nothing stops at a pinned post, so a full run keeps them."""
+    ext = await _config(tmp_path, mode=mode, last_completed_at=datetime(2026, 10, 10, 12, 0, 0))
+
+    assert "pinned" not in ext.get("instagram", {})
+
+
 @pytest.mark.parametrize(
     "mode",
     ["subscription_initial", "download", "repair"],
