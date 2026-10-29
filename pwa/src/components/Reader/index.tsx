@@ -662,7 +662,6 @@ function WebtoonView({
 }: WebtoonViewProps) {
   const elRefs = useRef<Map<number, HTMLElement>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
   const lastPage = images.length > 0 ? images[images.length - 1].pageNum : 0
   // Tracks the last page number reported by the IntersectionObserver (i.e. from scrolling).
   const lastReportedPage = useRef<number>(0)
@@ -734,12 +733,10 @@ function WebtoonView({
     return () => clearTimeout(programmaticScrollTimerRef.current)
   }, [])
 
-  const handleImageLoaded = useCallback((pageNum: number) => {
-    setLoadedPages((prev) => new Set([...prev, pageNum]))
+  const registerPage = useCallback((pageNum: number, el: HTMLElement | null) => {
+    if (el) elRefs.current.set(pageNum, el)
+    else elRefs.current.delete(pageNum)
   }, [])
-
-  // Show spinner if the last visible image hasn't loaded yet
-  const showBottomSpinner = lastPage > 0 && !loadedPages.has(lastPage)
 
   const scaleClass = (() => {
     switch (scaleMode) {
@@ -769,37 +766,95 @@ function WebtoonView({
         }
       }}
     >
-      {images.map((img) => {
-        const lpHandlers =
-          imageLongPress && img.url ? imageLongPress(img.pageNum, img.url) : undefined
-        return (
-          <div
-            key={img.pageNum}
-            onTouchStart={lpHandlers?.onTouchStart}
-            onTouchMove={lpHandlers?.onTouchMove}
-            onTouchEnd={lpHandlers?.onTouchEnd}
-            onContextMenu={lpHandlers?.onContextMenu}
-          >
-            <MediaElement
-              innerRef={(el: HTMLImageElement | HTMLVideoElement | null) => {
-                if (el) elRefs.current.set(img.pageNum, el)
-                else elRefs.current.delete(img.pageNum)
-              }}
-              image={img}
-              className={scaleClass}
-              dataPage={img.pageNum}
-              onLoad={() => handleImageLoaded(img.pageNum)}
-              onError={() => handleImageLoaded(img.pageNum)}
-            />
-          </div>
-        )
-      })}
-      {showBottomSpinner && (
+      {images.map((img) => (
+        <WebtoonPage
+          key={img.pageNum}
+          image={img}
+          isLast={img.pageNum === lastPage}
+          scaleMode={scaleMode}
+          scaleClass={scaleClass}
+          register={registerPage}
+          imageLongPress={imageLongPress}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Space an unloaded webtoon image takes. Lazy loading only works when pages
+ * below the fold have a height: as 0px boxes they all sit in the viewport and
+ * the browser fetches every original in the gallery.
+ */
+function webtoonPlaceholderStyle(image: ReaderImage, scaleMode: ScaleMode): React.CSSProperties {
+  const { width, height } = image
+  if (!width || !height) return { width: '100%', height: '100vh' }
+  switch (scaleMode) {
+    case 'fit-height':
+      return { width: '100%', height: '100vh' }
+    case 'original':
+      return { width: '100%', height: `${height}px` }
+    case 'fit-width':
+      return { width: '100%', aspectRatio: `${width} / ${height}` }
+    case 'fit-both':
+    default:
+      return { width: '100%', aspectRatio: `${width} / ${height}`, maxHeight: '100vh' }
+  }
+}
+
+interface WebtoonPageProps {
+  image: ReaderImage
+  isLast: boolean
+  scaleMode: ScaleMode
+  scaleClass: string
+  register: (pageNum: number, el: HTMLElement | null) => void
+  imageLongPress?: (pageNum: number, imageUrl: string) => ImageLongPressHandlers
+}
+
+/**
+ * One webtoon page. Its load state is its own, so a settling image re-renders
+ * this page only, not the whole list.
+ */
+function WebtoonPage({
+  image,
+  isLast,
+  scaleMode,
+  scaleClass,
+  register,
+  imageLongPress,
+}: WebtoonPageProps) {
+  const [settled, setSettled] = useState(false)
+  const settle = useCallback(() => setSettled(true), [])
+  const lpHandlers =
+    imageLongPress && image.url ? imageLongPress(image.pageNum, image.url) : undefined
+  // Videos and still-downloading pages size themselves.
+  const reserve = !settled && image.url != null && image.mediaType !== 'video'
+  return (
+    <>
+      <div
+        ref={(el) => register(image.pageNum, el)}
+        data-page={image.pageNum}
+        style={reserve ? webtoonPlaceholderStyle(image, scaleMode) : undefined}
+        onTouchStart={lpHandlers?.onTouchStart}
+        onTouchMove={lpHandlers?.onTouchMove}
+        onTouchEnd={lpHandlers?.onTouchEnd}
+        onContextMenu={lpHandlers?.onContextMenu}
+      >
+        <MediaElement
+          image={image}
+          className={scaleClass}
+          loading="lazy"
+          onLoad={settle}
+          onError={settle}
+        />
+      </div>
+      {/* Spinner if the last page hasn't loaded yet */}
+      {isLast && !settled && (
         <div className="flex justify-center py-8">
           <Spinner />
         </div>
       )}
-    </div>
+    </>
   )
 }
 
