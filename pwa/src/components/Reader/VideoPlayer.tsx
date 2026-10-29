@@ -56,32 +56,46 @@ export default function VideoPlayer({
   // Playback follows visibility instead of the `autoPlay` attribute. Webtoon
   // mode mounts every loaded page at once, so autoplaying players buffer whole
   // videos off-screen — a screenful of those is enough for iOS Safari to kill
-  // the tab. Together with `preload="metadata"` an off-screen player costs only
-  // its metadata.
+  // the tab.
   const [visible, setVisible] = useState(false)
+  // The source follows a wider zone: about a screen above and below. A player
+  // that only got its source on entering the screen showed its 160px poster,
+  // then a blank frame, then the video, so a fast scroll flickered.
+  const [near, setNear] = useState(false)
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
     if (typeof IntersectionObserver === 'undefined') {
       setVisible(true)
+      setNear(true)
       return
     }
     // Any visible part counts: a video taller than the viewport (fit-height or
     // original scale in webtoon mode) never reaches a fractional threshold even
     // while it fills the screen, and would then never start.
-    const observer = new IntersectionObserver((entries) =>
+    const visibleObserver = new IntersectionObserver((entries) =>
       setVisible(entries.some((entry) => entry.isIntersecting)),
     )
-    observer.observe(container)
-    return () => observer.disconnect()
+    // The margin has to apply to the webtoon scroller: against the viewport it
+    // is clipped away by the scroller's own overflow.
+    const nearObserver = new IntersectionObserver(
+      (entries) => setNear(entries.some((entry) => entry.isIntersecting)),
+      { root: container.closest('[data-reader-scroll]'), rootMargin: '100% 0px' },
+    )
+    visibleObserver.observe(container)
+    nearObserver.observe(container)
+    return () => {
+      visibleObserver.disconnect()
+      nearObserver.disconnect()
+    }
   }, [])
 
-  // An off-screen player holds no source at all. iOS Safari answers
+  // A player away from the screen holds no source at all. iOS Safari answers
   // preload="metadata" with a run of Range requests per video, so webtoon mode
   // with every page mounted fetched every video in the gallery (nginx: 103
   // videos, 1,661 requests, 4.5 GB in two minutes from one iPhone).
-  const src = visible ? (image.url ?? undefined) : undefined
+  const src = near || visible ? (image.url ?? undefined) : undefined
   const hasSourceRef = useRef(false)
 
   // Also re-runs when the source changes: in single-page view React reuses this
@@ -89,18 +103,21 @@ export default function VideoPlayer({
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
-    if (visible) {
-      hasSourceRef.current = true
-      v.play().catch(() => undefined)
-    } else {
-      v.pause()
-      // Dropping src alone does not stop a download in flight; load() does.
-      if (hasSourceRef.current) {
-        hasSourceRef.current = false
-        v.load()
-      }
-    }
+    if (visible) v.play().catch(() => undefined)
+    else v.pause()
   }, [visible, image.url])
+
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    if (src) {
+      hasSourceRef.current = true
+    } else if (hasSourceRef.current) {
+      // Dropping src alone does not stop a download in flight; load() does.
+      hasSourceRef.current = false
+      v.load()
+    }
+  }, [src])
 
   // Unmounting does not abort the download either, and Safari kept fetching
   // after the reader was left, piling up across re-entries.

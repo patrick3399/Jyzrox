@@ -755,6 +755,7 @@ function WebtoonView({
   return (
     <div
       ref={scrollRef}
+      data-reader-scroll
       className="reader-webtoon-scroll flex flex-col items-center w-full h-full overflow-y-auto"
       onClick={(e) => {
         // Toggle overlay when clicking in the center zone (middle 50% width, middle 33% height)
@@ -828,8 +829,11 @@ function WebtoonPage({
   const lpHandlers =
     imageLongPress && image.url ? imageLongPress(image.pageNum, image.url) : undefined
   // Still-downloading pages size themselves. A video settles on its metadata,
-  // which it only fetches once it is on screen.
-  const reserve = !settled && image.url != null
+  // which it only fetches near the screen, and keeps its box afterwards: away
+  // from the screen it drops its source and would shrink to its poster, or to
+  // 300x150 before the poster decodes. iOS Safari has no scroll anchoring, so
+  // each shrink above the viewport jumped the page during a fast scroll.
+  const reserve = image.url != null && (!settled || image.mediaType === 'video')
   return (
     <>
       <div

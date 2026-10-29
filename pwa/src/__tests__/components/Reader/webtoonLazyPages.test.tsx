@@ -121,6 +121,19 @@ describe('Reader webtoon pages', () => {
     expect(pageBox(container, 3).style.aspectRatio).toBe('800 / 1200')
   })
 
+  // Regression: once loaded, a video page sized itself from the <video>. Away
+  // from the screen the player drops its source and shrank to its poster (or
+  // 300x150), and with no scroll anchoring in iOS Safari a fast scroll jumped.
+  it('keeps the box of a webtoon video page reserved after its metadata loads', () => {
+    const images = makeGalleryImages(5)
+    images[2] = { ...images[2], file_path: '/data/test/3.mp4', media_type: 'video' }
+    const { container } = renderWebtoon(images)
+
+    fireEvent.loadedMetadata(pageBox(container, 3).querySelector('video') as HTMLVideoElement)
+
+    expect(pageBox(container, 3).style.aspectRatio).toBe('800 / 1200')
+  })
+
   it('releases the reserved box once that webtoon page has loaded or failed', () => {
     const { container } = renderWebtoon(makeGalleryImages(5))
 
