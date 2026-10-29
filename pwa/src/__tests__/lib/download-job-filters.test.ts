@@ -6,6 +6,7 @@ import {
   dashboardQueueHref,
   isActiveJob,
   sortActiveFirst,
+  withActiveSubscriptionJobs,
 } from '@/lib/downloadJobFilters'
 import type { DownloadJob } from '@/lib/types'
 
@@ -122,5 +123,64 @@ describe('dashboardQueueHref', () => {
 
   it('treats subscription id 0 as a subscription job', () => {
     expect(dashboardQueueHref([{ subscription_id: 0 }])).toBe(ANCHOR_HREF)
+  })
+})
+
+describe('withActiveSubscriptionJobs', () => {
+  const full = (
+    id: string,
+    status: Status,
+    created_at: string,
+    subscription_id: number | null = 1,
+  ): DownloadJob => ({
+    id,
+    url: 'https://example.com',
+    source: 'pixiv',
+    status,
+    subscription_id,
+    progress: {},
+    error: null,
+    created_at,
+    finished_at: null,
+    retry_count: 0,
+    max_retries: 3,
+    next_retry_at: null,
+  })
+
+  it('replaces a finished latest job with a newer active run of the same subscription', () => {
+    // The stale latest-job fetch still shows the previous run; the card must see the new one.
+    const merged = withActiveSubscriptionJobs({ 1: full('old', 'done', '2026-10-01T00:00:00Z') }, [
+      full('new', 'running', '2026-10-02T00:00:00Z'),
+    ])
+    expect(merged[1].id).toBe('new')
+  })
+
+  it('adds an active job for a subscription with no fetched latest job', () => {
+    const merged = withActiveSubscriptionJobs({}, [full('new', 'queued', '2026-10-02T00:00:00Z', 7)])
+    expect(merged[7].id).toBe('new')
+  })
+
+  it('keeps the latest-job entry for the same job because it has the fresher WS status', () => {
+    const merged = withActiveSubscriptionJobs({ 1: full('j', 'done', '2026-10-02T00:00:00Z') }, [
+      full('j', 'running', '2026-10-02T00:00:00Z'),
+    ])
+    expect(merged[1].status).toBe('done')
+  })
+
+  it('keeps a newer active latest job over an older active one', () => {
+    const merged = withActiveSubscriptionJobs(
+      { 1: full('newer', 'running', '2026-10-03T00:00:00Z') },
+      [full('older', 'queued', '2026-10-01T00:00:00Z')],
+    )
+    expect(merged[1].id).toBe('newer')
+  })
+
+  it('ignores non-subscription and inactive jobs', () => {
+    const latest = { 1: full('old', 'done', '2026-10-01T00:00:00Z') }
+    const merged = withActiveSubscriptionJobs(latest, [
+      full('manual', 'running', '2026-10-02T00:00:00Z', null),
+      full('finished', 'done', '2026-10-02T00:00:00Z'),
+    ])
+    expect(merged).toEqual(latest)
   })
 })

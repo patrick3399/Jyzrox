@@ -12,6 +12,8 @@ import {
   ExternalLink,
   SlidersHorizontal,
   MoreHorizontal,
+  Pause,
+  Play,
   Rss,
   ScanSearch,
   Square,
@@ -22,7 +24,7 @@ import {
 import { toast } from 'sonner'
 import { useSWRConfig } from 'swr'
 import { t } from '@/lib/i18n'
-import { useCheckUrl } from '@/hooks/useDownloadQueue'
+import { useCheckUrl, usePauseJob } from '@/hooks/useDownloadQueue'
 import { useStopSubscription } from '@/hooks/useSubscriptions'
 import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
 import { isDefaultMediaPolicy, mediaPolicyFromOptions, withMediaPolicy } from '@/lib/mediaPolicy'
@@ -308,6 +310,12 @@ function DownloadOptionsRow({
   )
 }
 
+// Footer actions: a 40px touch target on phones, compact from `sm` up.
+const FOOTER_ACTION =
+  'flex size-10 items-center justify-center rounded-lg transition-colors sm:size-auto sm:rounded sm:p-1.5'
+const FOOTER_ICON = 18
+const FOOTER_ICON_CLASS = 'sm:size-3.5'
+
 function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
   const source = latestJob?.gallery_source ?? sub.gallery_source
   const sourceId = latestJob?.gallery_source_id ?? sub.gallery_source_id
@@ -361,20 +369,33 @@ export function SubscriptionCard({
     latestJob?.status === 'running' ||
     latestJob?.status === 'paused'
   const { trigger: stopSubscription, isMutating: isStoppingSubscription } = useStopSubscription()
+  const { trigger: pauseJob, isMutating: isPausing } = usePauseJob()
   const { mutate: refreshLists } = useSWRConfig()
   const isStopping = isStoppingSubscription || !!latestJob?.stop_requested_at
+  // Subscription list, per-card latest jobs and the queue lists all show the job.
+  const refreshJobLists = () =>
+    refreshLists(
+      (key: unknown) =>
+        Array.isArray(key) &&
+        (key[0] === 'subscriptions' || key[0] === 'sub-jobs' || key[0] === 'download/jobs'),
+    )
+
+  const handlePause = async (action: 'pause' | 'resume') => {
+    if (!latestJob) return
+    try {
+      await pauseJob({ id: latestJob.id, action })
+      await refreshJobLists()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('queue.pauseError'))
+    }
+  }
 
   const handleStop = async () => {
     if (!confirm(t('subscriptions.stopConfirm', { name: sub.name || sub.url }))) return
     try {
       await stopSubscription(sub.id)
       toast.success(t('subscriptions.stopRequested'))
-      // Subscription list, per-card latest jobs and the queue lists all show the job.
-      await refreshLists(
-        (key: unknown) =>
-          Array.isArray(key) &&
-          (key[0] === 'subscriptions' || key[0] === 'sub-jobs' || key[0] === 'download/jobs'),
-      )
+      await refreshJobLists()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('subscriptions.stopFailed'))
     }
@@ -516,37 +537,67 @@ export function SubscriptionCard({
             : t('settings.tasks.never')}
           {sub.last_status === 'stopped' && ` · ${t('subscriptions.statusStopped')}`}
         </span>
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-0.5">
+          {latestJob?.status === 'running' && !isStopping && (
+            <button
+              data-testid="subscription-pause"
+              onClick={() => void handlePause('pause')}
+              disabled={isPausing}
+              className={`${FOOTER_ACTION} text-vault-text-muted hover:text-orange-400 disabled:opacity-60`}
+              title={t('queue.pause')}
+              aria-label={t('queue.pause')}
+            >
+              <Pause size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
+            </button>
+          )}
+          {latestJob?.status === 'paused' && !isStopping && (
+            <button
+              data-testid="subscription-resume"
+              onClick={() => void handlePause('resume')}
+              disabled={isPausing}
+              className={`${FOOTER_ACTION} text-vault-text-muted hover:text-green-400 disabled:opacity-60`}
+              title={t('queue.resume')}
+              aria-label={t('queue.resume')}
+            >
+              <Play size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
+            </button>
+          )}
           {hasActiveJob && (
             <button
               data-testid="subscription-stop"
               onClick={() => void handleStop()}
               disabled={isStopping}
-              className="rounded p-1.5 text-vault-text-muted transition-colors hover:text-amber-400 disabled:opacity-60"
+              className={`${FOOTER_ACTION} text-vault-text-muted hover:text-amber-400 disabled:opacity-60`}
               title={isStopping ? t('queue.stopping') : t('subscriptions.stop')}
               aria-label={isStopping ? t('queue.stopping') : t('subscriptions.stop')}
             >
-              <Square size={14} className={isStopping ? 'animate-pulse' : ''} />
+              <Square
+                size={FOOTER_ICON}
+                className={`${FOOTER_ICON_CLASS} ${isStopping ? 'animate-pulse' : ''}`}
+              />
             </button>
           )}
           <button
             onClick={() => onCheck(sub)}
             disabled={checkingId === sub.id}
-            className="rounded p-1.5 text-vault-text-muted transition-colors hover:text-emerald-400 disabled:opacity-60"
+            className={`${FOOTER_ACTION} text-vault-text-muted hover:text-emerald-400 disabled:opacity-60`}
             title={t('subscriptions.downloadNow')}
             aria-label={t('subscriptions.downloadNow')}
           >
-            <Download size={14} className={checkingId === sub.id ? 'animate-pulse' : ''} />
+            <Download
+              size={FOOTER_ICON}
+              className={`${FOOTER_ICON_CLASS} ${checkingId === sub.id ? 'animate-pulse' : ''}`}
+            />
           </button>
           <button
             type="button"
             onClick={() => setShowActions((value) => !value)}
-            className={`rounded p-1.5 transition-colors ${showActions ? 'bg-vault-border text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+            className={`${FOOTER_ACTION} ${showActions ? 'bg-vault-border text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
             title={t('common.more')}
             aria-label={t('common.more')}
             aria-expanded={showActions}
           >
-            <MoreHorizontal size={14} />
+            <MoreHorizontal size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
           </button>
         </div>
       </div>

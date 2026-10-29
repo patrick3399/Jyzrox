@@ -41,3 +41,32 @@ export function dashboardQueueHref(jobs: Pick<DownloadJob, 'subscription_id'>[])
   }
   return '/queue'
 }
+
+/**
+ * Per-subscription card job: the fetched latest job, replaced by a newer active job.
+ *
+ * The latest-job map is fetched per subscription and only patched by id from WS
+ * updates, so a run that started after the fetch is missing from it and the card
+ * would show the previous (finished) run with no stop / pause controls. When both
+ * name the same job the latest-job entry wins: it carries the fresher WS status.
+ */
+export function withActiveSubscriptionJobs(
+  latest: Record<number, DownloadJob>,
+  activeJobs: DownloadJob[],
+): Record<number, DownloadJob> {
+  const merged = { ...latest }
+  for (const job of activeJobs) {
+    const subId = job.subscription_id
+    if (subId == null || !isActiveJob(job)) continue
+    const current = merged[subId]
+    if (!current) {
+      merged[subId] = job
+    } else if (current.id !== job.id) {
+      // ISO timestamps compare lexically; the newer run belongs on the card.
+      if (!isActiveJob(current) || (job.created_at ?? '') > (current.created_at ?? '')) {
+        merged[subId] = job
+      }
+    }
+  }
+  return merged
+}

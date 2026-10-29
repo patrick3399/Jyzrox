@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { DownloadJob, Subscription } from '@/lib/types'
 import { SubscriptionCard } from '@/components/subscriptions/SubscriptionCard'
+
+const h = vi.hoisted(() => ({
+  pauseJob: vi.fn(async () => ({ status: 'paused' })),
+  resumeJob: vi.fn(async () => ({ status: 'running' })),
+}))
+
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>()
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      download: { ...actual.api.download, pauseJob: h.pauseJob, resumeJob: h.resumeJob },
+    },
+  }
+})
 
 vi.mock('next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -120,4 +136,48 @@ describe('SubscriptionCard job gallery title', () => {
     expect(screen.getByRole('button', { name: 'Subscription Feed' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
   })
+})
+
+describe('SubscriptionCard active job controls', () => {
+  it('offers pause and stop while the subscription job is running', () => {
+    renderCard(makeJob('running'))
+
+    expect(screen.getByTestId('subscription-pause')).toBeInTheDocument()
+    expect(screen.getByTestId('subscription-stop')).toBeInTheDocument()
+    expect(screen.queryByTestId('subscription-resume')).not.toBeInTheDocument()
+  })
+
+  it('offers resume instead of pause while the subscription job is paused', async () => {
+    renderCard(makeJob('paused'))
+
+    expect(screen.queryByTestId('subscription-pause')).not.toBeInTheDocument()
+    expect(screen.getByTestId('subscription-stop')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('subscription-resume'))
+    await waitFor(() => expect(h.resumeJob).toHaveBeenCalledWith('job-1'))
+  })
+
+  it('pauses the latest job by id', async () => {
+    renderCard(makeJob('running'))
+
+    fireEvent.click(screen.getByTestId('subscription-pause'))
+    await waitFor(() => expect(h.pauseJob).toHaveBeenCalledWith('job-1'))
+  })
+
+  it('hides pause once a stop was requested so the stop is not undone', () => {
+    renderCard({ ...makeJob('running'), stop_requested_at: '2026-07-23T00:00:30Z' })
+
+    expect(screen.queryByTestId('subscription-pause')).not.toBeInTheDocument()
+    expect(screen.getByTestId('subscription-stop')).toBeDisabled()
+  })
+
+  it.each(['done', 'failed', 'cancelled'] as const)(
+    'shows no job controls when the latest job is %s',
+    (status) => {
+      renderCard(makeJob(status))
+
+      expect(screen.queryByTestId('subscription-pause')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('subscription-resume')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('subscription-stop')).not.toBeInTheDocument()
+    },
+  )
 })

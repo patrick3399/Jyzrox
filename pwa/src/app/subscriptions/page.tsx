@@ -40,7 +40,11 @@ import {
 import { useDownloadJobs, useCheckUrl } from '@/hooks/useDownloadQueue'
 import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
 import { DEFAULT_MEDIA_POLICY, withMediaPolicy } from '@/lib/mediaPolicy'
-import { activeSubscriptionIds, sortActiveFirst } from '@/lib/downloadJobFilters'
+import {
+  activeSubscriptionIds,
+  sortActiveFirst,
+  withActiveSubscriptionJobs,
+} from '@/lib/downloadJobFilters'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { api } from '@/lib/api'
 import type {
@@ -198,6 +202,11 @@ export default function SubscriptionsPage() {
     [activeJobsData?.jobs],
   )
   const activeCount = activeIds.size
+  // A run that started after the latest-job fetch only shows up in the active list.
+  const cardJobs = useMemo(
+    () => withActiveSubscriptionJobs(jobsData ?? {}, activeJobsData?.jobs ?? []),
+    [jobsData, activeJobsData?.jobs],
+  )
   const [downloadingOnly, setDownloadingOnly] = useState(false)
 
   // Nothing is downloading any more: drop the filter so the list does not look empty.
@@ -877,8 +886,8 @@ export default function SubscriptionsPage() {
 
       {/* Search + downloading filter */}
       {(data?.subscriptions?.length ?? 0) > 0 && (
-        <div className="flex items-center gap-2 mb-4">
-          <div className="relative flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 mb-4 sm:flex-nowrap">
+          <div className="relative w-full min-w-0 sm:w-auto sm:flex-1">
             <Search
               size={16}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-vault-text-muted"
@@ -905,7 +914,7 @@ export default function SubscriptionsPage() {
           <div
             role="group"
             aria-label={t('subscriptions.viewLabel')}
-            className="shrink-0 flex rounded-lg border border-vault-border bg-vault-input p-0.5"
+            className="flex min-w-0 flex-1 rounded-lg border border-vault-border bg-vault-input p-0.5 sm:flex-none sm:shrink-0"
           >
             {(
               [
@@ -921,13 +930,15 @@ export default function SubscriptionsPage() {
                 aria-pressed={view === value}
                 title={label}
                 aria-label={label}
-                className={`rounded-md p-1.5 transition-colors ${
+                // Phones get a labelled segment with a 40px tap target; icons only from `sm` up.
+                className={`flex min-h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs transition-colors sm:min-h-0 sm:flex-none sm:p-1.5 ${
                   view === value
                     ? 'bg-vault-accent/20 text-vault-accent'
                     : 'text-vault-text-muted hover:text-vault-text'
                 }`}
               >
-                <Icon size={15} />
+                <Icon size={15} className="shrink-0" />
+                <span className="truncate sm:hidden">{label}</span>
               </button>
             ))}
           </div>
@@ -936,7 +947,7 @@ export default function SubscriptionsPage() {
               type="button"
               onClick={() => setDownloadingOnly((on) => !on)}
               aria-pressed={showDownloadingOnly}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+              className={`shrink-0 flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors sm:min-h-0 ${
                 showDownloadingOnly
                   ? 'bg-vault-accent/20 border-vault-accent/40 text-vault-accent'
                   : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
@@ -992,7 +1003,7 @@ export default function SubscriptionsPage() {
               title={section.title}
               showSubGroup
               subs={section.subs}
-              jobsData={jobsData ?? {}}
+              jobsData={cardJobs}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}
@@ -1024,7 +1035,7 @@ export default function SubscriptionsPage() {
                 key={group.id}
                 group={group}
                 subs={groupedSubs.byGroup[group.id] ?? []}
-                jobsData={jobsData ?? {}}
+                jobsData={cardJobs}
                 groups={groups}
                 onEdit={openEditGroup}
                 onRun={handleGroupRun}
@@ -1049,7 +1060,7 @@ export default function SubscriptionsPage() {
             <GroupCard
               group={null}
               subs={groupedSubs.ungrouped}
-              jobsData={jobsData ?? {}}
+              jobsData={cardJobs}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}
