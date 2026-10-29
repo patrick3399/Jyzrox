@@ -77,14 +77,41 @@ export default function VideoPlayer({
     return () => observer.disconnect()
   }, [])
 
+  // An off-screen player holds no source at all. iOS Safari answers
+  // preload="metadata" with a run of Range requests per video, so webtoon mode
+  // with every page mounted fetched every video in the gallery (nginx: 103
+  // videos, 1,661 requests, 4.5 GB in two minutes from one iPhone).
+  const src = visible ? (image.url ?? undefined) : undefined
+  const hasSourceRef = useRef(false)
+
   // Also re-runs when the source changes: in single-page view React reuses this
   // element across page turns, and a new src starts out paused.
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
-    if (visible) v.play().catch(() => undefined)
-    else v.pause()
+    if (visible) {
+      hasSourceRef.current = true
+      v.play().catch(() => undefined)
+    } else {
+      v.pause()
+      // Dropping src alone does not stop a download in flight; load() does.
+      if (hasSourceRef.current) {
+        hasSourceRef.current = false
+        v.load()
+      }
+    }
   }, [visible, image.url])
+
+  // Unmounting does not abort the download either, and Safari kept fetching
+  // after the reader was left, piling up across re-entries.
+  useEffect(() => {
+    const v = videoRef.current
+    return () => {
+      if (!v?.hasAttribute('src')) return
+      v.removeAttribute('src')
+      v.load()
+    }
+  }, [])
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current
@@ -134,7 +161,8 @@ export default function VideoPlayer({
     >
       <video
         ref={setVideoRef}
-        src={image.url ?? undefined}
+        src={src}
+        poster={image.thumbUrl ?? undefined}
         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         loop
         muted={muted}

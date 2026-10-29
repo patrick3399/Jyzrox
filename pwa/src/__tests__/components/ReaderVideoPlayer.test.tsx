@@ -61,12 +61,14 @@ const video: ReaderImage = {
 describe('VideoPlayer', () => {
   let play: ReturnType<typeof vi.spyOn>
   let pause: ReturnType<typeof vi.spyOn>
+  let load: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     observers.length = 0
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
     play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
   })
 
   afterEach(() => {
@@ -165,5 +167,52 @@ describe('VideoPlayer', () => {
 
     expect(element.muted).toBe(false)
     expect(getByLabelText('Mute')).toBeTruthy()
+  })
+
+  // Regression: webtoon mounts every page, and iOS Safari answers
+  // preload="metadata" with a run of Range requests per video. One switch to
+  // webtoon on a gallery with 103 videos fetched all of them (1,661 requests,
+  // 4.5 GB in two minutes) and froze the tab.
+  it('should not give an off-screen player a source so webtoon does not fetch every video', () => {
+    const { container } = render(<VideoPlayer image={video} />)
+
+    expect(container.querySelector('video')?.hasAttribute('src')).toBe(false)
+
+    setVisible(true)
+
+    expect(container.querySelector('video')?.getAttribute('src')).toBe(video.url)
+  })
+
+  it('should show the thumbnail as poster while an off-screen player has no source', () => {
+    const { container } = render(
+      <VideoPlayer image={{ ...video, thumbUrl: '/media/thumbs/2b/ff/2bff/thumb_360.webp' }} />,
+    )
+
+    expect(container.querySelector('video')?.getAttribute('poster')).toBe(
+      '/media/thumbs/2b/ff/2bff/thumb_360.webp',
+    )
+  })
+
+  it('should drop the source and abort its download when the player scrolls out of view', () => {
+    const { container } = render(<VideoPlayer image={video} />)
+    setVisible(true)
+    load.mockClear()
+
+    setVisible(false)
+
+    expect(container.querySelector('video')?.hasAttribute('src')).toBe(false)
+    expect(load).toHaveBeenCalled()
+  })
+
+  it('should abort the download when a player with a source unmounts', () => {
+    const { container, unmount } = render(<VideoPlayer image={video} />)
+    setVisible(true)
+    const element = container.querySelector('video') as HTMLVideoElement
+    load.mockClear()
+
+    unmount()
+
+    expect(element.hasAttribute('src')).toBe(false)
+    expect(load).toHaveBeenCalled()
   })
 })

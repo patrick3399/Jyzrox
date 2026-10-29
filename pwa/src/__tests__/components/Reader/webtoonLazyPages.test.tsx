@@ -6,7 +6,7 @@
  * 5,723 originals for one Instagram gallery. Each settled load also rebuilt a
  * Set of every loaded page and re-rendered the whole list.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import Reader from '@/components/Reader'
 import type { GalleryImage } from '@/lib/types'
@@ -76,11 +76,19 @@ describe('Reader webtoon pages', () => {
   beforeEach(() => {
     // jsdom has no layout, so it does not implement scrollIntoView.
     Element.prototype.scrollIntoView = vi.fn()
+    // jsdom does not implement media playback.
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
     localStorage.clear()
     localStorage.setItem(
       'reader_settings',
       JSON.stringify({ defaultViewMode: 'webtoon', defaultScaleMode: 'fit-width' }),
     )
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('leaves every webtoon page image to the browser lazy loader', () => {
@@ -103,6 +111,14 @@ describe('Reader webtoon pages', () => {
     const { container } = renderWebtoon(makeGalleryImages(5, false))
 
     expect(pageBox(container, 3).style.height).toBe('100vh')
+  })
+
+  it('reserves the box of an unloaded webtoon video page too', () => {
+    const images = makeGalleryImages(5)
+    images[2] = { ...images[2], file_path: '/data/test/3.mp4', media_type: 'video' }
+    const { container } = renderWebtoon(images)
+
+    expect(pageBox(container, 3).style.aspectRatio).toBe('800 / 1200')
   })
 
   it('releases the reserved box once that webtoon page has loaded or failed', () => {

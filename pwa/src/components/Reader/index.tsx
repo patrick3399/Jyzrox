@@ -827,8 +827,9 @@ function WebtoonPage({
   const settle = useCallback(() => setSettled(true), [])
   const lpHandlers =
     imageLongPress && image.url ? imageLongPress(image.pageNum, image.url) : undefined
-  // Videos and still-downloading pages size themselves.
-  const reserve = !settled && image.url != null && image.mediaType !== 'video'
+  // Still-downloading pages size themselves. A video settles on its metadata,
+  // which it only fetches once it is on screen.
+  const reserve = !settled && image.url != null
   return (
     <>
       <div
