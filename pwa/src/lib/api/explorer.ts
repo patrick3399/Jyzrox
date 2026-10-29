@@ -3,7 +3,7 @@ import { apiFetch, qs } from './client'
 // ── Library Workbench ────────────────────────────────────────────────
 
 export interface ExplorerQuery {
-  node_kind?: 'all' | 'source' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash'
+  node_kind?: 'all' | 'source' | 'category' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash'
   node_id?: string | null
   query?: string
   sort?: 'added_at' | 'posted_at' | 'title' | 'rating' | 'pages' | 'size'
@@ -42,6 +42,10 @@ export interface ExplorerRoots {
       logical_bytes: number
       unique_cas_bytes: number
     }>
+    categories?: {
+      uncategorized: number
+      items: Array<{ id: string; label: string; gallery_count: number; registered: boolean }>
+    }
     collections: {
       count: number
       items: Array<{ id: number; name: string; gallery_count: number }>

@@ -58,7 +58,7 @@ import { SelectionMarquee } from './SelectionMarquee'
 import { galleryName, type ContentView, type QuerySelection } from './shared'
 
 type LayoutMode = 'xnview' | 'finder'
-type NodeKind = 'root' | 'source' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash' | 'physical' | 'gallery'
+type NodeKind = 'root' | 'source' | 'category' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash' | 'physical' | 'gallery'
 
 interface WorkbenchNode {
   kind: NodeKind
@@ -112,7 +112,7 @@ function galleryQuery(
   direction: NonNullable<ExplorerQuery['direction']>,
 ): ExplorerQuery | null {
   const kind = node.kind
-  if (kind !== 'source' && kind !== 'collection' && kind !== 'artist' && kind !== 'saved_search' && kind !== 'smart' && kind !== 'trash') return null
+  if (kind !== 'source' && kind !== 'category' && kind !== 'collection' && kind !== 'artist' && kind !== 'saved_search' && kind !== 'smart' && kind !== 'trash') return null
   return {
     node_kind: kind,
     node_id: node.id,
@@ -133,27 +133,77 @@ function NavButton({
   icon: Icon,
   label,
   count,
+  emphasize,
+  muted,
+  title,
   onClick,
 }: {
   active?: boolean
   icon: typeof Folder
   label: string
   count?: number
+  emphasize?: boolean
+  muted?: boolean
+  title?: string
   onClick: () => void
 }) {
   return (
     <button
       type="button"
       aria-current={active ? 'page' : undefined}
+      title={title}
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
         active ? 'bg-vault-accent/15 text-vault-accent' : 'text-vault-text hover:bg-vault-card-hover'
       }`}
     >
       <Icon size={15} className="shrink-0" />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count !== undefined && <span className="text-xs text-vault-text-muted">{count}</span>}
+      <span className={`min-w-0 flex-1 truncate ${muted ? 'italic text-vault-text-muted' : ''}`}>{label}</span>
+      {count !== undefined && <span className={`text-xs ${emphasize ? 'font-semibold text-vault-accent' : 'text-vault-text-muted'}`}>{count}</span>}
     </button>
+  )
+}
+
+const UNCATEGORIZED_ID = '__uncategorized__'
+
+function categoryNodeLabel(id: string | undefined): string {
+  return id === UNCATEGORIZED_ID ? t('explorer.uncategorized') : id ?? ''
+}
+
+function CategoryNavItems({
+  roots,
+  node,
+  navigate,
+}: {
+  roots: ExplorerRoots
+  node: WorkbenchNode
+  navigate: (node: WorkbenchNode) => void
+}) {
+  const categories = roots.virtual.categories
+  if (!categories) return null
+  return (
+    <>
+      <NavButton
+        active={node.kind === 'category' && node.id === UNCATEGORIZED_ID}
+        icon={Tags}
+        label={t('explorer.uncategorized')}
+        count={categories.uncategorized}
+        emphasize={categories.uncategorized > 0}
+        onClick={() => navigate({ kind: 'category', id: UNCATEGORIZED_ID, label: t('explorer.uncategorized') })}
+      />
+      {categories.items.map((item) => (
+        <NavButton
+          key={item.id}
+          active={node.kind === 'category' && node.id === item.id}
+          icon={Tags}
+          label={item.label}
+          count={item.gallery_count}
+          muted={!item.registered}
+          title={item.registered ? undefined : t('explorer.unregisteredCategory')}
+          onClick={() => navigate({ kind: 'category', id: item.id, label: item.label })}
+        />
+      ))}
+    </>
   )
 }
 
@@ -243,6 +293,12 @@ function NavigationTree({
           onClick={() => navigate({ kind: 'saved_search', id: String(search.id), label: search.name })}
         />
       ))}
+      {roots.virtual.categories && (
+        <>
+          <p className="mb-1 mt-4 px-2 text-[11px] font-semibold uppercase tracking-wider text-vault-text-muted">{t('explorer.categories')}</p>
+          <CategoryNavItems roots={roots} node={node} navigate={navigate} />
+        </>
+      )}
       <p className="mb-1 mt-4 px-2 text-[11px] font-semibold uppercase tracking-wider text-vault-text-muted">{t('explorer.smartViews')}</p>
       <NavButton
         active={node.kind === 'smart' && node.id === 'missing_metadata'}
@@ -299,6 +355,8 @@ function FinderColumns({
         ? 'artists'
         : node.kind === 'saved_search'
           ? 'searches'
+          : node.kind === 'category'
+            ? 'categories'
           : node.kind === 'physical'
             ? 'physical'
             : node.kind === 'smart' || node.kind === 'trash'
@@ -309,6 +367,7 @@ function FinderColumns({
     { id: 'collections', label: t('explorer.collections'), Icon: Layers3 },
     { id: 'artists', label: t('explorer.artists'), Icon: Users },
     { id: 'searches', label: t('explorer.savedSearches'), Icon: Search },
+    ...(roots.virtual.categories ? [{ id: 'categories', label: t('explorer.categories'), Icon: Tags }] : []),
     { id: 'smart', label: t('explorer.smartViews'), Icon: AlertTriangle },
     { id: 'physical', label: t('explorer.physicalLibraries'), Icon: HardDrive },
   ]
@@ -321,6 +380,7 @@ function FinderColumns({
             else if (id === 'collections' && roots.virtual.collections.items[0]) navigate({ kind: 'collection', id: String(roots.virtual.collections.items[0].id), label: roots.virtual.collections.items[0].name })
             else if (id === 'artists' && roots.virtual.artists.items[0]) navigate({ kind: 'artist', id: roots.virtual.artists.items[0].id, label: roots.virtual.artists.items[0].name })
             else if (id === 'searches' && roots.virtual.saved_searches.items[0]) navigate({ kind: 'saved_search', id: String(roots.virtual.saved_searches.items[0].id), label: roots.virtual.saved_searches.items[0].name })
+            else if (id === 'categories') navigate({ kind: 'category', id: UNCATEGORIZED_ID, label: t('explorer.uncategorized') })
             else if (id === 'smart') navigate({ kind: 'smart', id: 'missing_metadata', label: t('explorer.missingMetadata') })
             else if (id === 'physical' && roots.physical[0]) navigate({ kind: 'physical', id: String(roots.physical[0].id), label: roots.physical[0].label })
           }} className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm ${section === id ? 'bg-vault-accent/15 text-vault-accent' : 'text-vault-text hover:bg-vault-card-hover'}`}>
@@ -333,6 +393,7 @@ function FinderColumns({
         {section === 'collections' && roots.virtual.collections.items.map((item) => <NavButton key={item.id} active={node.id === String(item.id)} icon={Layers3} label={item.name} count={item.gallery_count} onClick={() => navigate({ kind: 'collection', id: String(item.id), label: item.name })} />)}
         {section === 'artists' && roots.virtual.artists.items.map((item) => <NavButton key={item.id} active={node.id === item.id} icon={Users} label={item.name.replace(/^[^:]+:/, '')} count={item.gallery_count} onClick={() => navigate({ kind: 'artist', id: item.id, label: item.name })} />)}
         {section === 'searches' && roots.virtual.saved_searches.items.map((item) => <NavButton key={item.id} active={node.id === String(item.id)} icon={Search} label={item.name} onClick={() => navigate({ kind: 'saved_search', id: String(item.id), label: item.name })} />)}
+        {section === 'categories' && <CategoryNavItems roots={roots} node={node} navigate={navigate} />}
         {section === 'smart' && <><NavButton active={node.id === 'missing_metadata'} icon={AlertTriangle} label={t('explorer.missingMetadata')} onClick={() => navigate({ kind: 'smart', id: 'missing_metadata', label: t('explorer.missingMetadata') })} /><NavButton active={node.id === 'duplicates'} icon={Merge} label={t('explorer.duplicates')} onClick={() => navigate({ kind: 'smart', id: 'duplicates', label: t('explorer.duplicates') })} /><NavButton active={node.id === 'hidden_images'} icon={EyeOff} label={t('explorer.hiddenImages')} count={roots.virtual.smart_views.hidden_images ?? 0} onClick={() => navigate({ kind: 'smart', id: 'hidden_images', label: t('explorer.hiddenImages') })} /><NavButton active={node.kind === 'trash'} icon={Trash2} label={t('explorer.trash')} onClick={() => navigate({ kind: 'trash', label: t('explorer.trash') })} /></>}
         {section === 'physical' && roots.physical.map((item) => <NavButton key={item.id} active={node.id === String(item.id)} icon={HardDrive} label={item.label} onClick={() => navigate({ kind: 'physical', id: String(item.id), label: item.label })} />)}
       </div>
@@ -933,7 +994,11 @@ export function ExplorerWorkbench() {
     )
   }
 
-  const currentLabel = node.kind === 'root' ? t('explorer.library') : node.label || node.id || t('explorer.library')
+  const currentLabel = node.kind === 'root'
+    ? t('explorer.library')
+    : node.kind === 'category'
+      ? categoryNodeLabel(node.id)
+      : node.label || node.id || t('explorer.library')
   const finderCrumbs: Array<{ label: string; target: WorkbenchNode }> = [
     { label: t('explorer.library'), target: { kind: 'root' } },
   ]
@@ -975,6 +1040,7 @@ export function ExplorerWorkbench() {
             if (kind === 'root') navigate({ kind: 'root' })
             else if (kind === 'trash') navigate({ kind: 'trash', label: t('explorer.trash') })
             else if (kind === 'physical') navigate({ kind: 'physical', id, label: roots.physical.find((item) => String(item.id) === id)?.label })
+            else if (kind === 'category') navigate({ kind: 'category', id, label: categoryNodeLabel(id) })
             else navigate({ kind: kind as WorkbenchNode['kind'], id })
           }}
           className="w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text lg:hidden"
@@ -984,6 +1050,12 @@ export function ExplorerWorkbench() {
           <optgroup label={t('explorer.collections')}>{roots.virtual.collections.items.map((item) => <option key={item.id} value={`collection:${item.id}`}>{item.name}</option>)}</optgroup>
           <optgroup label={t('explorer.artists')}>{roots.virtual.artists.items.map((item) => <option key={item.id} value={`artist:${item.id}`}>{item.name.replace(/^[^:]+:/, '')}</option>)}</optgroup>
           <optgroup label={t('explorer.savedSearches')}>{roots.virtual.saved_searches.items.map((item) => <option key={item.id} value={`saved_search:${item.id}`}>{item.name}</option>)}</optgroup>
+          {roots.virtual.categories && (
+            <optgroup label={t('explorer.categories')}>
+              <option value={`category:${UNCATEGORIZED_ID}`}>{t('explorer.uncategorized')} ({roots.virtual.categories.uncategorized})</option>
+              {roots.virtual.categories.items.map((item) => <option key={item.id} value={`category:${item.id}`}>{item.label} ({item.gallery_count})</option>)}
+            </optgroup>
+          )}
           <optgroup label={t('explorer.smartViews')}><option value="smart:missing_metadata">{t('explorer.missingMetadata')}</option><option value="smart:duplicates">{t('explorer.duplicates')}</option><option value="smart:hidden_images">{t('explorer.hiddenImages')}</option><option value="trash:">{t('explorer.trash')}</option></optgroup>
           {roots.physical.length > 0 && <optgroup label={t('explorer.physicalLibraries')}>{roots.physical.map((item) => <option key={item.id} value={`physical:${item.id}`}>{item.label}</option>)}</optgroup>}
         </select>

@@ -685,3 +685,175 @@ async def test_roots_smart_views_report_hidden_images_galleries_and_bytes(client
     smart = response.json()["virtual"]["smart_views"]
     assert smart["hidden_images"] == 2
     assert smart["hidden_bytes"] == 50 + 99999
+
+
+# ── Category registry: bulk metadata validation, category node, /roots ───────
+
+
+async def _seed_registry(db_session) -> None:
+    await db_session.execute(
+        text(
+            "INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES "
+            "('Manga', 'orange', 2, 1), ('Doujinshi', 'pink', 1, 1), ('Cosplay', 'red', 3, 1)"
+        )
+    )
+    await db_session.commit()
+
+
+async def _categories(db_session, ids) -> dict[int, str | None]:
+    db_session.expire_all()
+    rows = (await db_session.execute(select(Gallery.id, Gallery.category).where(Gallery.id.in_(ids)))).all()
+    return {row.id: row.category for row in rows}
+
+
+async def test_bulk_metadata_unknown_category_returns_400_and_keeps_existing_values(client, db_session):
+    await _seed_user_and_galleries(db_session)
+    await _seed_registry(db_session)
+    await db_session.execute(text("UPDATE galleries SET category='Doujinshi' WHERE id=102"))
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/explorer/operations/metadata",
+        json={
+            "gallery_ids": [101, 102],
+            "fields": {
+                "title": {"mode": "set", "value": "Should not be written"},
+                "category": {"mode": "set", "value": "Mnaga"},
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unknown category: Mnaga"
+    assert await _categories(db_session, [101, 102]) == {101: "Manga", 102: "Doujinshi"}
+    titles = (await db_session.execute(select(Gallery.title).where(Gallery.id.in_([101, 102])))).scalars().all()
+    assert sorted(titles) == ["Old one", "Old two"]
+    assert (await db_session.execute(select(GalleryMetadataChange))).scalars().all() == []
+    assert (await db_session.execute(select(GalleryMetadataFieldState))).scalars().all() == []
+
+
+async def test_bulk_metadata_category_value_matches_registry_case_insensitively_and_stores_canonical_name(
+    client, db_session
+):
+    await _seed_user_and_galleries(db_session)
+    await _seed_registry(db_session)
+
+    response = await client.post(
+        "/api/explorer/operations/metadata",
+        json={"gallery_ids": [101, 102], "fields": {"category": {"mode": "set", "value": "  cOsPlAy "}}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert await _categories(db_session, [101, 102]) == {101: "Cosplay", 102: "Cosplay"}
+
+
+async def test_bulk_metadata_blank_category_value_with_set_mode_clears_category(client, db_session):
+    await _seed_user_and_galleries(db_session)
+    await _seed_registry(db_session)
+
+    response = await client.post(
+        "/api/explorer/operations/metadata",
+        json={"gallery_ids": [101, 102], "fields": {"category": {"mode": "set", "value": "   "}}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert await _categories(db_session, [101, 102]) == {101: None, 102: None}
+
+    empty = await client.post(
+        "/api/explorer/operations/metadata",
+        json={"gallery_ids": [101], "fields": {"category": {"mode": "set", "value": ""}}},
+    )
+    assert empty.status_code == 200, empty.text
+
+
+async def test_gallery_patch_unknown_category_returns_400_and_keeps_existing_category(client, db_session):
+    await _seed_user_and_galleries(db_session)
+    await _seed_registry(db_session)
+
+    response = await client.patch(
+        "/api/library/galleries/local/one",
+        json={"title": "Renamed", "category": "Not A Category"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unknown category: Not A Category"
+    assert await _categories(db_session, [101]) == {101: "Manga"}
+    db_session.expire_all()
+    assert (await db_session.get(Gallery, 101)).title == "Old one"
+
+
+async def _seed_category_galleries(db_session) -> None:
+    await _seed_user_and_galleries(db_session)
+    await _seed_registry(db_session)
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries "
+            "(id, source, source_id, title, category, visibility, created_by_user_id) VALUES "
+            "(103, 'local', 'three', 'Three', NULL, 'public', 1), "
+            "(104, 'local', 'four', 'Four', '', 'public', 1), "
+            "(105, 'local', 'five', 'Five', 'Legacy', 'public', 1), "
+            "(106, 'local', 'six', 'Six', 'Doujinshi', 'public', 1)"
+        )
+    )
+    await db_session.commit()
+
+
+async def test_query_category_node_filters_by_exact_category_name(client, db_session):
+    await _seed_category_galleries(db_session)
+
+    response = await client.post("/api/explorer/query", json={"node_kind": "category", "node_id": "Manga"})
+
+    assert response.status_code == 200, response.text
+    assert sorted(item["id"] for item in response.json()["items"]) == [101, 102]
+    assert response.json()["total"] == 2
+
+
+async def test_query_category_node_uncategorized_sentinel_matches_null_and_empty_category(client, db_session):
+    await _seed_category_galleries(db_session)
+
+    response = await client.post("/api/explorer/query", json={"node_kind": "category", "node_id": "__uncategorized__"})
+
+    assert response.status_code == 200, response.text
+    assert sorted(item["id"] for item in response.json()["items"]) == [103, 104]
+
+
+async def test_roots_categories_report_counts_zero_count_registry_entry_and_unregistered_legacy_value(
+    client, db_session
+):
+    await _seed_category_galleries(db_session)
+    await db_session.execute(text("UPDATE galleries SET deleted_at='2026-01-01 00:00:00' WHERE id=102"))
+    await db_session.commit()
+
+    response = await client.get("/api/explorer/roots")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["virtual"]["categories"] == {
+        "uncategorized": 2,
+        "items": [
+            {"id": "Doujinshi", "label": "Doujinshi", "gallery_count": 1, "registered": True},
+            {"id": "Manga", "label": "Manga", "gallery_count": 1, "registered": True},
+            {"id": "Cosplay", "label": "Cosplay", "gallery_count": 0, "registered": True},
+            {"id": "Legacy", "label": "Legacy", "gallery_count": 1, "registered": False},
+        ],
+    }
+
+
+async def test_roots_categories_exclude_other_users_private_galleries(make_client, db_session):
+    await _seed_category_galleries(db_session)
+    await db_session.execute(text("UPDATE galleries SET visibility='private' WHERE id IN (101, 103, 105)"))
+    await db_session.execute(
+        text("INSERT INTO users (id, username, password_hash, role) VALUES (2, 'u2', 'x', 'member')")
+    )
+    await db_session.commit()
+
+    # Members also get the physical roots, which touches Redis; there are no
+    # enabled library paths here so a bare mock is enough.
+    with patch("routers.explorer.get_redis", return_value=AsyncMock()):
+        async with make_client(user_id=2, role="member") as ac:
+            response = await ac.get("/api/explorer/roots")
+
+    assert response.status_code == 200, response.text
+    categories = response.json()["virtual"]["categories"]
+    assert categories["uncategorized"] == 1  # only 104; private 103 is hidden
+    counts = {item["id"]: item["gallery_count"] for item in categories["items"]}
+    assert counts == {"Doujinshi": 1, "Manga": 1, "Cosplay": 0}  # private 101 and legacy 105 not counted

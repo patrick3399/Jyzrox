@@ -114,6 +114,34 @@ async def apply_manual_scalar_changes(
     changed_count = 0
     field_names = list(changes)
     category_map = await load_category_map(db) if "category" in changes else {}
+
+    # Validate and resolve every requested value up front so a bad value cannot
+    # leave a partial write behind. The resolved value is the same for every
+    # selected gallery.
+    resolved: dict[str, Any] = {}
+    for field_name, (mode, requested_value) in changes.items():
+        if mode == "keep":
+            continue
+        value = None if mode == "clear" else requested_value
+        if field_name == "visibility":
+            if mode == "clear" or value not in {"public", "private"}:
+                raise HTTPException(status_code=400, detail="visibility must be public or private")
+        elif value is not None and not isinstance(value, str):
+            raise HTTPException(status_code=400, detail=f"{field_name} must be a string or null")
+        if field_name == "category" and value is not None:
+            # Manual input is limited to the category registry. An empty or
+            # whitespace-only value clears the category; any other value that
+            # is not registered is rejected rather than silently stored as NULL
+            # (which would wipe the category of every selected gallery).
+            if not value.strip():
+                value = None
+            else:
+                canonical = resolve_with_map(value, category_map)
+                if canonical is None:
+                    raise HTTPException(status_code=400, detail=f"Unknown category: {value}")
+                value = canonical
+        resolved[field_name] = value
+
     gallery_ids = [gallery.id for gallery in galleries]
     existing_states = {
         (state.gallery_id, state.field_name): state
@@ -127,20 +155,7 @@ async def apply_manual_scalar_changes(
         ).scalars()
     }
     for gallery in galleries:
-        for field_name, (mode, requested_value) in changes.items():
-            if mode == "keep":
-                continue
-            value = None if mode == "clear" else requested_value
-            if field_name == "visibility":
-                if mode == "clear" or value not in {"public", "private"}:
-                    raise HTTPException(status_code=400, detail="visibility must be public or private")
-            elif value is not None and not isinstance(value, str):
-                raise HTTPException(status_code=400, detail=f"{field_name} must be a string or null")
-            if field_name == "category" and value is not None:
-                # Manual input is limited to the category registry; a miss
-                # (or an empty string) is stored as NULL, i.e. uncategorized.
-                value = resolve_with_map(value, category_map)
-
+        for field_name, value in resolved.items():
             old_value = getattr(gallery, field_name)
             state = existing_states.get((gallery.id, field_name))
             source_value = state.source_value if state else metadata_json_value(old_value)

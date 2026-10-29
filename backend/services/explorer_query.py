@@ -99,6 +99,12 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
         )
     elif spec.node_kind == "artist" and spec.node_id:
         filters.append(Gallery.artist_id == spec.node_id)
+    elif spec.node_kind == "category" and spec.node_id:
+        filters.append(
+            or_(Gallery.category.is_(None), Gallery.category == "")
+            if spec.node_id == "__uncategorized__"
+            else Gallery.category == spec.node_id
+        )
     elif spec.node_kind == "smart" and spec.node_id:
         if spec.node_id == "missing_metadata":
             filters.append(or_(Gallery.title.is_(None), Gallery.pages.is_(None)))
@@ -113,7 +119,7 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
             filters.append(Gallery.id.in_(select(Image.gallery_id).where(Image.blob_sha256.in_(related_hashes))))
         else:
             raise HTTPException(status_code=400, detail="Unknown smart view")
-    elif spec.node_kind not in {"all", "trash", "source", "collection", "artist"}:
+    elif spec.node_kind not in {"all", "trash", "source", "collection", "artist", "category"}:
         raise HTTPException(status_code=400, detail="Unknown Explorer node")
 
     for token in _tokens(spec.query):

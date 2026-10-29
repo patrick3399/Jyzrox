@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { api } from '@/lib/api'
 import type { ExplorerGalleryItem } from '@/lib/api'
 import { t } from '@/lib/i18n'
@@ -46,6 +47,11 @@ export function MetadataDialog({
   const [modes, setModes] = useState<Record<string, 'keep' | 'set' | 'clear'>>({})
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const { data: categoryRegistry } = useCategoryRegistry()
+  const categoryNames = useMemo(
+    () => [...(categoryRegistry?.categories ?? [])].sort((a, b) => a.sort_order - b.sort_order).map((item) => item.name),
+    [categoryRegistry],
+  )
   const commonValues = useMemo(
     () => Object.fromEntries(
       METADATA_FIELDS.map((field) => [
@@ -58,11 +64,16 @@ export function MetadataDialog({
     [selection],
   )
 
+  const categoryMixed = selection.length > 0 && !selection.every((item) => (item.category ?? '') === (selection[0].category ?? ''))
+  const categoryValue = values.category ?? (categoryNames.includes(commonValues.category) ? commonValues.category : '')
+  const categoryInvalid = (modes.category || 'keep') === 'set' && !categoryNames.includes(categoryValue)
+
   const submit = async () => {
+    if (categoryInvalid) return
     const fields: Record<string, { mode: 'set' | 'clear'; value?: string }> = {}
     for (const field of METADATA_FIELDS) {
       const mode = modes[field] || 'keep'
-      if (mode === 'set') fields[field] = { mode, value: values[field] ?? commonValues[field] }
+      if (mode === 'set') fields[field] = { mode, value: field === 'category' ? categoryValue : values[field] ?? commonValues[field] }
       if (mode === 'clear') fields[field] = { mode }
     }
     if (Object.keys(fields).length === 0) return
@@ -113,6 +124,19 @@ export function MetadataDialog({
                 >
                   <option value="public">{t('explorer.visibilityPublic')}</option><option value="private">{t('explorer.visibilityPrivate')}</option>
                 </select>
+              ) : field === 'category' ? (
+                <select
+                  aria-label={field}
+                  disabled={(modes[field] || 'keep') !== 'set'}
+                  value={categoryValue}
+                  onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
+                  className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text disabled:opacity-50"
+                >
+                  {!categoryNames.includes(categoryValue) && (
+                    <option value="" disabled>{categoryMixed ? t('explorer.mixedValues') : t('explorer.chooseCategory')}</option>
+                  )}
+                  {categoryNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
               ) : (
                 <input
                   aria-label={field}
@@ -129,7 +153,7 @@ export function MetadataDialog({
       </div>
       <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
         <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button type="button" disabled={saving} onClick={submit} className="rounded-md bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? t('common.loading') : t('common.save')}</button>
+        <button type="button" disabled={saving || categoryInvalid} onClick={submit} className="rounded-md bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? t('common.loading') : t('common.save')}</button>
       </footer>
     </Modal>
   )

@@ -31,6 +31,7 @@ from db.models import (
     CollectionGallery,
     DownloadJob,
     Gallery,
+    GalleryCategory,
     GalleryMetadataChange,
     GalleryMetadataFieldState,
     GalleryTag,
@@ -132,7 +133,7 @@ class MergeRequest(BaseModel):
 
 
 class ExplorerQueryRequest(BaseModel):
-    node_kind: Literal["all", "source", "collection", "artist", "saved_search", "smart", "trash"] = "all"
+    node_kind: Literal["all", "source", "collection", "artist", "category", "saved_search", "smart", "trash"] = "all"
     node_id: str | None = None
     query: str = Field(default="", max_length=1000)
     sort: Literal["added_at", "posted_at", "title", "rating", "pages", "size"] = "added_at"
@@ -411,6 +412,40 @@ async def explorer_roots(
             .limit(500)
         )
     ).all()
+    # ``gallery_access_filter`` already excludes trashed galleries.
+    visible = [accessible]
+    uncategorized_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Gallery)
+            .where(*visible, or_(Gallery.category.is_(None), Gallery.category == ""))
+        )
+    ).scalar_one()
+    category_counts = {
+        row.category: int(row.count)
+        for row in (
+            await db.execute(
+                select(Gallery.category, func.count(Gallery.id).label("count"))
+                .where(*visible, Gallery.category.is_not(None), Gallery.category != "")
+                .group_by(Gallery.category)
+            )
+        ).all()
+    }
+    registry_names = (
+        (await db.execute(select(GalleryCategory.name).order_by(GalleryCategory.sort_order, GalleryCategory.id)))
+        .scalars()
+        .all()
+    )
+    category_items = [
+        {"id": name, "label": name, "gallery_count": category_counts.get(name, 0), "registered": True}
+        for name in registry_names
+    ]
+    registered = set(registry_names)
+    category_items.extend(
+        {"id": name, "label": name, "gallery_count": count, "registered": False}
+        for name, count in sorted(category_counts.items())
+        if name not in registered
+    )
     missing_metadata_count = (
         await db.execute(
             select(func.count())
@@ -489,6 +524,7 @@ async def explorer_roots(
                     {"id": row.artist_id, "name": row.artist_id, "gallery_count": row.count} for row in artist_rows
                 ],
             },
+            "categories": {"uncategorized": uncategorized_count, "items": category_items},
             "saved_searches": {
                 "count": saved_search_count,
                 "items": [{"id": row.id, "name": row.name, "query": row.query} for row in saved_search_rows],

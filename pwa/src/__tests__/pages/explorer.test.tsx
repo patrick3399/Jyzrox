@@ -720,4 +720,110 @@ describe('ExplorerWorkbench', () => {
     fireEvent.keyDown(window, { key: 'Backspace' })
     expect(replace).toHaveBeenCalledWith('/explorer?view=grid')
   })
+
+  const categoryRoots = {
+    ...roots,
+    virtual: {
+      ...roots.virtual,
+      categories: {
+        uncategorized: 3,
+        items: [
+          { id: 'Cosplay', label: 'Cosplay', gallery_count: 5, registered: true },
+          { id: 'Legacy', label: 'Legacy', gallery_count: 1, registered: false },
+        ],
+      },
+    },
+  }
+  const categoryRegistry = {
+    categories: [
+      { id: 2, name: 'Manga', color: '#fff', sort_order: 2, is_builtin: true, gallery_count: 2 },
+      { id: 1, name: 'Cosplay', color: '#000', sort_order: 1, is_builtin: true, gallery_count: 5 },
+    ],
+    palette: [],
+    uncategorized_count: 3,
+  }
+
+  async function openMetadataForTwoGalleries(categories: [string | null, string | null]) {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-roots'] = { data: categoryRoots, error: undefined, isLoading: false, mutate }
+    swrResponses['gallery-categories'] = { data: categoryRegistry, error: undefined, isLoading: false, mutate }
+    swrResponses['explorer-query'] = {
+      data: { ...galleries, items: galleries.items.map((item, index) => ({ ...item, category: categories[index] })) },
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    fireEvent.keyDown(window, { key: ' ' })
+    fireEvent.keyDown(window, { key: 'ArrowRight', shiftKey: true })
+    fireEvent.keyDown(window, { key: 'F2' })
+    return await screen.findByRole('dialog', { name: 'explorer.editMetadata' })
+  }
+
+  it('renders the Categories section with counts and the Uncategorized entry from roots', async () => {
+    swrResponses['explorer-roots'] = { data: categoryRoots, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    const tree = screen.getByRole('navigation', { name: 'explorer.libraryTree' })
+    expect(within(tree).getByText('explorer.categories')).toBeDefined()
+    const uncategorized = within(tree).getByText('explorer.uncategorized').closest('button')!
+    expect(within(uncategorized).getByText('3')).toBeDefined()
+    expect(within(tree).getByText('Cosplay').closest('button')!.textContent).toContain('5')
+    expect(within(tree).getByText('Legacy').closest('button')!.getAttribute('title')).toBe('explorer.unregisteredCategory')
+  })
+
+  it('clicking Uncategorized queries node_kind category with the __uncategorized__ sentinel', async () => {
+    swrResponses['explorer-roots'] = { data: categoryRoots, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    const view = render(<ExplorerPage />)
+
+    const tree = screen.getByRole('navigation', { name: 'explorer.libraryTree' })
+    fireEvent.click(within(tree).getByText('explorer.uncategorized'))
+    const url = replace.mock.calls.at(-1)?.[0] as string
+    expect(url).toContain('kind=category')
+    expect(url).toContain('id=__uncategorized__')
+
+    view.unmount()
+    currentParams = url.split('?')[1]
+    swrCalls = []
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    render(<ExplorerPage />)
+    const last = swrCalls.findLast((entry) => entry.name === 'explorer-query' && entry.key)!
+    expect(JSON.parse((last.key as string[])[1])).toMatchObject({ node_kind: 'category', node_id: '__uncategorized__' })
+  })
+
+  it('metadata dialog category is a select of registry names and submits mode set with the chosen value', async () => {
+    vi.mocked(api.explorer.bulkMetadata).mockResolvedValue({ operation_id: 'op', status: 'done', selection_count: 2, changed_fields: 2 })
+    const dialog = await openMetadataForTwoGalleries(['Manga', 'Manga'])
+    const select = within(dialog).getByLabelText('category') as HTMLSelectElement
+    expect(select.tagName).toBe('SELECT')
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['Cosplay', 'Manga'])
+    expect(select.value).toBe('Manga')
+
+    fireEvent.change(within(dialog).getByLabelText('category mode'), { target: { value: 'set' } })
+    fireEvent.change(select, { target: { value: 'Cosplay' } })
+    fireEvent.click(within(dialog).getByText('common.save'))
+
+    await waitFor(() => expect(api.explorer.bulkMetadata).toHaveBeenCalled())
+    expect(vi.mocked(api.explorer.bulkMetadata).mock.calls[0][0].fields.category).toEqual({ mode: 'set', value: 'Cosplay' })
+  })
+
+  it('metadata dialog cannot submit an empty category with mode set when the selection has mixed categories', async () => {
+    const dialog = await openMetadataForTwoGalleries(['Manga', 'Cosplay'])
+    const select = within(dialog).getByLabelText('category') as HTMLSelectElement
+    expect(select.value).toBe('')
+    expect(within(dialog).getByText('explorer.mixedValues')).toBeDefined()
+
+    fireEvent.change(within(dialog).getByLabelText('category mode'), { target: { value: 'set' } })
+    const save = within(dialog).getByText('common.save').closest('button') as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    fireEvent.click(save)
+    expect(api.explorer.bulkMetadata).not.toHaveBeenCalled()
+
+    fireEvent.change(select, { target: { value: 'Cosplay' } })
+    expect(save.disabled).toBe(false)
+  })
 })

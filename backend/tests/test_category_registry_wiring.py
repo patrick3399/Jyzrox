@@ -31,14 +31,14 @@ async def test_patch_category_case_insensitive_hit_stores_registry_name(client, 
     assert await _category_of(db_session, gid) == "Cosplay"
 
 
-async def test_patch_category_miss_stores_null_instead_of_free_text(client, db_session):
+async def test_patch_category_miss_returns_400_and_keeps_existing_category(client, db_session):
     await _seed(db_session, "Cosplay")
     gid = await _insert_gallery(db_session, source="local", source_id="g1", category="Cosplay")
 
     resp = await client.patch("/api/library/galleries/local/g1", json={"category": "Not In Registry"})
 
-    assert resp.status_code == 200
-    assert await _category_of(db_session, gid) is None
+    assert resp.status_code == 400
+    assert await _category_of(db_session, gid) == "Cosplay"
 
 
 async def test_patch_empty_category_clears_to_null(client, db_session):
@@ -68,10 +68,10 @@ async def test_bulk_metadata_category_set_resolves_through_registry(client, db_s
         "/api/explorer/operations/metadata",
         json={"gallery_ids": [miss], "fields": {"category": {"mode": "set", "value": "Nope"}}},
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 400, resp.text
 
     assert await _category_of(db_session, hit) == "Cosplay"
-    assert await _category_of(db_session, miss) is None
+    assert await _category_of(db_session, miss) == "Cosplay"
 
 
 # ── batch scan preview / batch start ────────────────────────────────────
