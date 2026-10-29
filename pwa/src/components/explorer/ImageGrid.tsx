@@ -7,6 +7,9 @@ import { toast } from 'sonner'
 
 import { SkeletonGrid } from '@/components/Skeleton'
 import { useExplorerSelection } from '@/hooks/useExplorerSelection'
+import { markSelectionEntry } from '@/hooks/explorerHistory'
+import { useExplorerScrollRestore } from '@/hooks/useExplorerScrollRestore'
+import { useExplorerUrlState } from '@/hooks/useExplorerUrlState'
 import { useWorkbenchKeyboard, type WorkbenchGlobalShortcuts } from '@/hooks/useWorkbenchKeyboard'
 import { api } from '@/lib/api'
 import type {
@@ -65,11 +68,8 @@ export function GalleryImagePane({
   onChanged,
   onInspect,
 }: GalleryImagePaneProps) {
-  const [visibility, setVisibility] = useState<ExplorerImageVisibility>('active')
-  const [media, setMedia] = useState<ExplorerImageMedia>('all')
-  const [sort, setSort] = useState<ExplorerImageSort>('page')
-  const [direction, setDirection] = useState<'asc' | 'desc'>('asc')
-  const [offset, setOffset] = useState(0)
+  // Filters and page live in the URL so a Reader round trip (or reload) restores them.
+  const { ivis: visibility, imedia: media, isort: sort, idir: direction, ioffset: offset, urlKey, refine } = useExplorerUrlState()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [purge, setPurge] = useState<{ imageIds?: number[]; allHidden?: boolean } | null>(null)
   const [columns, setColumns] = useState(1)
@@ -172,16 +172,14 @@ export function GalleryImagePane({
     selection.clear()
     focusIndex(null)
   }
-  const changeVisibility = (next: ExplorerImageVisibility) => { setVisibility(next); setOffset(0); resetView() }
-  const changeMedia = (next: ExplorerImageMedia) => { setMedia(next); setOffset(0); resetView() }
+  const changeVisibility = (next: ExplorerImageVisibility) => { refine({ ivis: next, ioffset: 0 }); resetView() }
+  const changeMedia = (next: ExplorerImageMedia) => { refine({ imedia: next, ioffset: 0 }); resetView() }
   const changeSort = (next: ExplorerImageSort) => {
-    setSort(next)
-    setDirection(next === 'size' ? 'desc' : 'asc')
-    setOffset(0)
+    refine({ isort: next, idir: next === 'size' ? 'desc' : 'asc', ioffset: 0 })
     resetView()
   }
-  const toggleDirection = () => { setDirection((current) => (current === 'asc' ? 'desc' : 'asc')); setOffset(0); resetView() }
-  const goToOffset = (next: number) => { setOffset(next); resetView() }
+  const toggleDirection = () => { refine({ idir: direction === 'asc' ? 'desc' : 'asc', ioffset: 0 }); resetView() }
+  const goToOffset = (next: number) => { refine({ ioffset: next }); resetView() }
 
   useEffect(() => {
     const element = gridRef.current
@@ -198,11 +196,14 @@ export function GalleryImagePane({
     return () => observer.disconnect()
   }, [items.length, view])
 
+  useExplorerScrollRestore(scrollRef, urlKey, Boolean(data) && items.length > 0)
+
   const selectionActive = selection.selectedKeys.size > 0
   const clearSelection = selection.clear
   useEffect(() => {
     if (!coarse || !selectionActive) return
     window.history.pushState({ explorerSelection: true }, '')
+    markSelectionEntry()
     window.addEventListener('popstate', clearSelection, { once: true })
     return () => window.removeEventListener('popstate', clearSelection)
   }, [coarse, selectionActive, clearSelection])

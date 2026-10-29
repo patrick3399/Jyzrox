@@ -2,7 +2,7 @@
 
 import { CategoryFilter } from './CategoryFilter'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
   AlertTriangle,
@@ -40,6 +40,9 @@ import { SkeletonGrid } from '@/components/Skeleton'
 import { AppImage } from '@/components/AppImage'
 import { useExplorerSelection } from '@/hooks/useExplorerSelection'
 import { useLongPress } from '@/hooks/useLongPress'
+import { markSelectionEntry, saveExplorerScroll } from '@/hooks/explorerHistory'
+import { useExplorerScrollRestore } from '@/hooks/useExplorerScrollRestore'
+import { useExplorerUrlState, type ExplorerNode } from '@/hooks/useExplorerUrlState'
 import { useWorkbenchKeyboard, type WorkbenchGlobalShortcuts } from '@/hooks/useWorkbenchKeyboard'
 import { api } from '@/lib/api'
 import type {
@@ -59,16 +62,7 @@ import { SelectionMarquee } from './SelectionMarquee'
 import { galleryName, type ContentView, type QuerySelection } from './shared'
 
 type LayoutMode = 'xnview' | 'finder'
-type NodeKind = 'root' | 'source' | 'category' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash' | 'physical' | 'gallery'
-
-interface WorkbenchNode {
-  kind: NodeKind
-  id?: string
-  path?: string
-  source?: string
-  sourceId?: string
-  label?: string
-}
+type WorkbenchNode = ExplorerNode
 
 function useCoarsePointer(): boolean {
   const [coarse, setCoarse] = useState(false)
@@ -91,18 +85,6 @@ function cycleExplorerPane() {
   if (active instanceof HTMLElement && active.closest('[data-explorer-navigation]')) content?.focus()
   else if (active instanceof HTMLElement && active.closest('[data-explorer-item]')) inspector?.focus()
   else (navigation?.querySelector<HTMLButtonElement>('button[aria-current="page"]') ?? navigation?.querySelector<HTMLButtonElement>('button'))?.focus()
-}
-
-function nodeFromParams(params: URLSearchParams): WorkbenchNode {
-  const kind = (params.get('kind') || 'root') as NodeKind
-  return {
-    kind,
-    id: params.get('id') || undefined,
-    path: params.get('path') || undefined,
-    source: params.get('source') || undefined,
-    sourceId: params.get('sourceId') || undefined,
-    label: params.get('label') || undefined,
-  }
 }
 
 function galleryQuery(
@@ -600,19 +582,19 @@ function Inspector({
 
 export function ExplorerWorkbench() {
   const router = useRouter()
-  const params = useSearchParams()
   const coarse = useCoarsePointer()
-  const node = useMemo(() => nodeFromParams(new URLSearchParams(params.toString())), [params])
-  const viewParam = params.get('view')
+  const urlState = useExplorerUrlState()
+  const { node, viewParam, urlKey, refine } = urlState
   const [layout, setLayout] = useState<LayoutMode>('xnview')
   const [view, setView] = useState<ContentView>(() => viewParam === 'list' ? 'list' : 'grid')
-  const [query, setQuery] = useState(params.get('q') || '')
-  const [debouncedQuery, setDebouncedQuery] = useState(query)
-  const [offset, setOffset] = useState(Number(params.get('offset') || 0))
-  const [category, setCategory] = useState<string | null>(params.get('cat') || null)
-  const categoryDirtyRef = useRef(false)
-  const [sortField, setSortField] = useState<NonNullable<ExplorerQuery['sort']>>('added_at')
-  const [sortDirection, setSortDirection] = useState<NonNullable<ExplorerQuery['direction']>>('desc')
+  // Only the live text of the search box is local; the committed query is the URL's `q`.
+  const [searchText, setSearchText] = useState(urlState.q)
+  const writtenQueryRef = useRef(urlState.q)
+  // A category node already is the category, so a carried-over `cat` must not narrow it.
+  const category = node.kind === 'category' ? null : urlState.cat
+  const sortField = urlState.sort
+  const sortDirection = urlState.dir
+  const offset = urlState.offset
   const [querySelection, setQuerySelection] = useState<QuerySelection | null>(null)
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -634,31 +616,24 @@ export function ExplorerWorkbench() {
     else if (savedView) setView(savedView)
   }, [coarse, viewParam])
 
+  // The URL changed under us (browser back/forward, node change): follow it.
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedQuery(query), 250)
-    return () => window.clearTimeout(timer)
-  }, [query])
+    if (urlState.q === writtenQueryRef.current) return
+    writtenQueryRef.current = urlState.q
+    setSearchText(urlState.q)
+  }, [urlState.q])
 
   useEffect(() => {
-    const currentQuery = params.get('q') || ''
-    const currentOffset = Number(params.get('offset') || 0)
-    const categoryChanged = categoryDirtyRef.current && (params.get('cat') || null) !== category
-    if (currentQuery === debouncedQuery && currentOffset === offset && !categoryChanged) return
-    categoryDirtyRef.current = false
-    const next = new URLSearchParams(params.toString())
-    if (categoryChanged) {
-      if (category) next.set('cat', category)
-      else next.delete('cat')
-    }
-    if (debouncedQuery) next.set('q', debouncedQuery)
-    else next.delete('q')
-    if (offset) next.set('offset', String(offset))
-    else next.delete('offset')
-    router.replace(`/explorer${next.size ? `?${next}` : ''}`)
-  }, [debouncedQuery, offset, category, params, router])
+    if (searchText === writtenQueryRef.current) return
+    const timer = window.setTimeout(() => {
+      writtenQueryRef.current = searchText
+      refine({ q: searchText, offset: 0 })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [searchText, refine])
 
   const { data: roots, error: rootsError, isLoading: rootsLoading, mutate: mutateRoots } = useSWR('explorer-roots', api.explorer.roots)
-  const querySpec = galleryQuery(node, debouncedQuery, offset, sortField, sortDirection, category)
+  const querySpec = galleryQuery(node, urlState.q, offset, sortField, sortDirection, category)
   const { data: galleries, error: galleryError, isLoading: galleryLoading, mutate: mutateGalleries } = useSWR(
     querySpec ? ['explorer-query', JSON.stringify(querySpec)] : null,
     () => api.explorer.query(querySpec ?? {}),
@@ -725,27 +700,30 @@ export function ExplorerWorkbench() {
   useEffect(() => {
     if (!coarse || !selectionModeActive) return
     window.history.pushState({ explorerSelection: true }, '')
+    markSelectionEntry()
     const clear = () => { clearSelection(); setQuerySelection(null) }
     window.addEventListener('popstate', clear, { once: true })
     return () => window.removeEventListener('popstate', clear)
   }, [coarse, selectionModeActive, clearSelection])
 
+  const { pushNode, stepBack } = urlState
   const navigate = useCallback((next: WorkbenchNode) => {
-    const nextParams = new URLSearchParams()
-    nextParams.set('view', view)
-    if (next.kind !== 'root') nextParams.set('kind', next.kind)
-    if (next.id) nextParams.set('id', next.id)
-    if (next.path) nextParams.set('path', next.path)
-    if (next.source) nextParams.set('source', next.source)
-    if (next.sourceId) nextParams.set('sourceId', next.sourceId)
-    if (next.label) nextParams.set('label', next.label)
-    router.replace(`/explorer${nextParams.size ? `?${nextParams}` : ''}`)
     clearSelection()
     setQuerySelection(null)
-    setOffset(0)
-    setQuery('')
-    setCategory(null)
-  }, [router, view, clearSelection])
+    pushNode(next, view)
+  }, [pushNode, view, clearSelection])
+
+  const nodeKey = `${node.kind}|${node.id ?? ''}|${node.path ?? ''}`
+  const previousNodeKeyRef = useRef(nodeKey)
+  useEffect(() => {
+    if (previousNodeKeyRef.current === nodeKey) return
+    previousNodeKeyRef.current = nodeKey
+    // A different node starts with no selection and the search box shows that URL's query.
+    clearSelection()
+    setQuerySelection(null)
+    writtenQueryRef.current = urlState.q
+    setSearchText(urlState.q)
+  }, [nodeKey, urlState.q, clearSelection])
 
   const selectedGalleries = useMemo(
     () => contentItems.filter((item): item is ExplorerGalleryItem => 'id' in item && item.id > 0 && selectedKeys.has(itemKey(item))),
@@ -883,9 +861,7 @@ export function ExplorerWorkbench() {
   const changeView = (next: ContentView) => {
     setView(next)
     localStorage.setItem(`explorer_content_view:${coarse ? 'mobile' : 'desktop'}`, next)
-    const nextParams = new URLSearchParams(params.toString())
-    nextParams.set('view', next)
-    router.replace(`/explorer?${nextParams.toString()}`)
+    refine({ view: next })
   }
 
   useEffect(() => {
@@ -908,16 +884,15 @@ export function ExplorerWorkbench() {
 
   const goBack = useCallback(() => {
     if (node.kind === 'root') return
+    let parent: WorkbenchNode = { kind: 'root' }
     if (node.kind === 'physical' && node.path) {
-      navigate({ ...node, path: node.path.split('/').slice(0, -1).join('/') })
-      return
+      parent = { ...node, path: node.path.split('/').slice(0, -1).join('/') }
+    } else if (node.kind === 'gallery' && node.source) {
+      const sourceLabel = roots?.virtual.sources.find((item) => item.id === node.source)?.label
+      parent = { kind: 'source', id: node.source, label: sourceLabel ?? node.source }
     }
-    if (node.kind === 'gallery' && node.source) {
-      navigate({ kind: 'source', id: node.source, label: node.source })
-      return
-    }
-    navigate({ kind: 'root' })
-  }, [navigate, node])
+    stepBack(parent, view)
+  }, [node, roots, stepBack, view])
 
   const keyboardEnabled = !coarse && !metadataOpen && !mergeOpen && organizeOpen === null && !shortcutsOpen
   const shortcuts: WorkbenchGlobalShortcuts = {
@@ -975,6 +950,7 @@ export function ExplorerWorkbench() {
 
   const error = rootsError || galleryError || physicalError
   const loading = rootsLoading || galleryLoading || physicalLoading
+  useExplorerScrollRestore(contentScrollRef, urlKey, Boolean(roots) && node.kind !== 'gallery' && !loading && contentItems.length > 0)
   const refresh = () => Promise.all([mutateRoots(), mutateGalleries(), mutatePhysical()])
 
   if (error) {
@@ -1035,7 +1011,7 @@ export function ExplorerWorkbench() {
         </div>
         <div className="relative min-w-[180px] flex-1 sm:max-w-md">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-vault-text-muted" />
-          <input ref={searchInputRef} aria-keyshortcuts="/" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('explorer.searchPlaceholder')} className="w-full rounded-md border border-vault-border bg-vault-bg py-2 pl-9 pr-3 text-sm text-vault-text" />
+          <input ref={searchInputRef} aria-keyshortcuts="/" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={t('explorer.searchPlaceholder')} className="w-full rounded-md border border-vault-border bg-vault-bg py-2 pl-9 pr-3 text-sm text-vault-text" />
         </div>
         <div role="group" aria-label={t('explorer.layoutMode')} className="hidden rounded-md border border-vault-border p-0.5 sm:flex">
           <button type="button" aria-label={t('explorer.treeLayout')} title={t('explorer.treeLayout')} aria-pressed={layout === 'xnview'} onClick={() => changeLayout('xnview')} className={`rounded p-1.5 ${layout === 'xnview' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:bg-vault-card-hover'}`}><FolderTree size={17} /></button>
@@ -1092,7 +1068,7 @@ export function ExplorerWorkbench() {
             <span className="ml-auto text-xs text-vault-text-muted">{node.kind === 'physical' ? physical?.total ?? 0 : node.kind === 'root' ? rootItems.length : galleries?.total ?? imageInspect?.summary.active_count ?? 0}</span>
             {querySpec && (
               <>
-                <select aria-label={t('explorer.sortBy')} value={sortField} onChange={(event) => { setSortField(event.target.value as NonNullable<ExplorerQuery['sort']>); setOffset(0) }} className="rounded-md border border-vault-border bg-vault-bg px-2 py-1 text-xs text-vault-text">
+                <select aria-label={t('explorer.sortBy')} value={sortField} onChange={(event) => refine({ sort: event.target.value as NonNullable<ExplorerQuery['sort']>, offset: 0 })} className="rounded-md border border-vault-border bg-vault-bg px-2 py-1 text-xs text-vault-text">
                   <option value="added_at">{t('explorer.sortAdded')}</option>
                   <option value="posted_at">{t('explorer.sortPosted')}</option>
                   <option value="title">{t('explorer.sortTitle')}</option>
@@ -1104,10 +1080,10 @@ export function ExplorerWorkbench() {
                   <CategoryFilter
                     value={category}
                     counts={galleries?.category_counts}
-                    onChange={(next) => { categoryDirtyRef.current = true; setCategory(next); setOffset(0); clearSelection(); setQuerySelection(null) }}
+                    onChange={(next) => { refine({ cat: next, offset: 0 }); clearSelection(); setQuerySelection(null) }}
                   />
                 )}
-                <button type="button" aria-label={t('explorer.sortDirection')} title={sortDirection === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={() => { setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc')); setOffset(0) }} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{sortDirection === 'asc' ? '↑' : '↓'}</button>
+                <button type="button" aria-label={t('explorer.sortDirection')} title={sortDirection === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={() => refine({ dir: sortDirection === 'asc' ? 'desc' : 'asc', offset: 0 })} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{sortDirection === 'asc' ? '↑' : '↓'}</button>
               </>
             )}
             {querySpec && (galleries?.total || 0) > 0 && (
@@ -1138,7 +1114,7 @@ export function ExplorerWorkbench() {
               coarse={coarse}
               keyboardEnabled={keyboardEnabled}
               shortcuts={shortcuts}
-              onOpenImage={(image) => router.push(readerHref(gallerySource, gallerySourceId, image.page_num || undefined))}
+              onOpenImage={(image) => { saveExplorerScroll(); router.push(readerHref(gallerySource, gallerySourceId, image.page_num || undefined)) }}
               onChanged={() => void mutateRoots()}
               onInspect={setImageInspect}
             />
@@ -1155,9 +1131,9 @@ export function ExplorerWorkbench() {
             )}
             {querySpec && galleries && galleries.total > galleries.limit && (
               <div className="flex items-center justify-center gap-3 p-4">
-                <button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - galleries.limit))} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.prev')}</button>
+                <button type="button" disabled={offset === 0} onClick={() => refine({ offset: Math.max(0, offset - galleries.limit) })} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.prev')}</button>
                 <span className="text-sm text-vault-text-muted">{offset + 1}–{Math.min(offset + galleries.limit, galleries.total)} / {galleries.total}</span>
-                <button type="button" disabled={offset + galleries.limit >= galleries.total} onClick={() => setOffset(offset + galleries.limit)} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.next')}</button>
+                <button type="button" disabled={offset + galleries.limit >= galleries.total} onClick={() => refine({ offset: offset + galleries.limit })} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.next')}</button>
               </div>
             )}
             <SelectionMarquee rect={selection.marquee} />

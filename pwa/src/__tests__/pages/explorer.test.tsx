@@ -1,15 +1,38 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useSyncExternalStore } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { api } from '@/lib/api'
 
 const replace = vi.fn()
 const push = vi.fn()
+const commit = vi.fn()
 let currentParams = ''
+const paramListeners = new Set<() => void>()
+
+/** Mirrors what the App Router does after pushState/replaceState: useSearchParams follows the new URL. */
+function setUrl(url: string) {
+  currentParams = url.split('?')[1] ?? ''
+  act(() => paramListeners.forEach((listener) => listener()))
+}
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, replace }),
-  useSearchParams: () => new URLSearchParams(currentParams),
+  useSearchParams: () => {
+    useSyncExternalStore(
+      (listener) => { paramListeners.add(listener); return () => { paramListeners.delete(listener) } },
+      () => currentParams,
+      () => currentParams,
+    )
+    return new URLSearchParams(currentParams)
+  },
+}))
+
+vi.mock('@/lib/browse/browseHistory', () => ({
+  commitBrowseUrl: (url: string, mode: string) => {
+    commit(url, mode)
+    setUrl(url)
+  },
 }))
 
 vi.mock('@/lib/i18n', () => ({
@@ -230,6 +253,8 @@ describe('ExplorerWorkbench', () => {
     swrCalls = []
     currentParams = ''
     localStorage.clear()
+    sessionStorage.clear()
+    window.dispatchEvent(new PopStateEvent('popstate'))
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: vi.fn(() => ({
@@ -278,7 +303,7 @@ describe('ExplorerWorkbench', () => {
     expect(rows[0].className).toContain('w-full')
     expect(screen.getByText('#1 · 1200 × 1800 · 2000 B')).toBeDefined()
     expect(rows[0].querySelector('img')?.className).toContain('object-contain')
-    expect(replace).toHaveBeenCalledWith(expect.stringContaining('view=list'))
+    expect(commit).toHaveBeenCalledWith(expect.stringContaining('view=list'), 'replace')
   })
 
   it('renders a URL-persisted list view on the first frame after returning from Reader', async () => {
@@ -513,7 +538,7 @@ describe('ExplorerWorkbench', () => {
     expect(screen.getByText('explorer.selectedCount')).toBeDefined()
 
     fireEvent.doubleClick(contentCardLabel)
-    expect(replace).toHaveBeenCalledWith(expect.stringContaining('kind=source'))
+    expect(commit).toHaveBeenCalledWith(expect.stringContaining('kind=source'), 'push')
   })
 
   it('coarse pointer body tap enters a folder without starting selection', async () => {
@@ -528,7 +553,7 @@ describe('ExplorerWorkbench', () => {
     const localCards = screen.getAllByText('Local')
 
     fireEvent.click(localCards[localCards.length - 1])
-    await waitFor(() => expect(replace).toHaveBeenCalledWith(expect.stringContaining('kind=source')))
+    await waitFor(() => expect(commit).toHaveBeenCalledWith(expect.stringContaining('kind=source'), 'push'))
     expect(screen.queryByText('explorer.selectedCount')).toBeNull()
   })
 
@@ -544,7 +569,7 @@ describe('ExplorerWorkbench', () => {
 
     fireEvent.click(screen.getByLabelText('explorer.toggleSelection'))
     expect(screen.getByText('explorer.selectedCount')).toBeDefined()
-    expect(replace).not.toHaveBeenCalledWith(expect.stringContaining('kind=source'))
+    expect(commit).not.toHaveBeenCalledWith(expect.stringContaining('kind=source'), expect.anything())
   })
 
   it('supports Gallery multi-selection from the item icon in mobile list view', async () => {
@@ -561,7 +586,7 @@ describe('ExplorerWorkbench', () => {
 
     fireEvent.click(screen.getAllByLabelText('explorer.toggleSelection')[0])
     expect(screen.getByText('explorer.selectedCount')).toBeDefined()
-    expect(replace).not.toHaveBeenCalledWith(expect.stringContaining('kind=gallery'))
+    expect(commit).not.toHaveBeenCalledWith(expect.stringContaining('kind=gallery'), expect.anything())
   })
 
   it('persists the column layout per device', async () => {
@@ -600,7 +625,7 @@ describe('ExplorerWorkbench', () => {
     fireEvent.keyDown(window, { key: 'ArrowRight' })
     await waitFor(() => expect(document.activeElement?.textContent).toContain('Gallery Two'))
     fireEvent.keyDown(window, { key: 'Enter' })
-    expect(replace).toHaveBeenCalledWith(expect.stringContaining('kind=gallery'))
+    expect(commit).toHaveBeenCalledWith(expect.stringContaining('kind=gallery'), 'push')
   })
 
   it('toggles and extends keyboard selection independently from focus', async () => {
@@ -718,7 +743,7 @@ describe('ExplorerWorkbench', () => {
     render(<ExplorerPage />)
 
     fireEvent.keyDown(window, { key: 'Backspace' })
-    expect(replace).toHaveBeenCalledWith('/explorer?view=grid')
+    expect(commit).toHaveBeenCalledWith('/explorer?view=grid', 'push')
   })
 
   const categoryRoots = {
@@ -782,7 +807,8 @@ describe('ExplorerWorkbench', () => {
 
     const tree = screen.getByRole('navigation', { name: 'explorer.libraryTree' })
     fireEvent.click(within(tree).getByText('explorer.uncategorized'))
-    const url = replace.mock.calls.at(-1)?.[0] as string
+    const url = commit.mock.calls.at(-1)?.[0] as string
+    expect(commit.mock.calls.at(-1)?.[1]).toBe('push')
     expect(url).toContain('kind=category')
     expect(url).toContain('id=__uncategorized__')
 
@@ -816,7 +842,8 @@ describe('ExplorerWorkbench', () => {
       const last = swrCalls.findLast((entry) => entry.name === 'explorer-query')!
       expect(JSON.parse((last.key as string[])[1])).toMatchObject({ category: '__uncategorized__', facets: true, offset: 0 })
     })
-    await waitFor(() => expect(replace.mock.calls.at(-1)?.[0] as string).toContain('cat=__uncategorized__'))
+    await waitFor(() => expect(commit.mock.calls.at(-1)?.[0] as string).toContain('cat=__uncategorized__'))
+    expect(commit.mock.calls.at(-1)?.[1]).toBe('replace')
   })
 
   it('renders category_counts in the filter options in registry sort order with unregistered keys appended', async () => {
@@ -892,5 +919,260 @@ describe('ExplorerWorkbench', () => {
 
     fireEvent.change(select, { target: { value: 'Cosplay' } })
     expect(save.disabled).toBe(false)
+  })
+
+  describe('URL-backed navigation state', () => {
+    const SOURCE_PARAMS = 'kind=source&id=local&label=Local'
+    const FILTERED_SOURCE = `${SOURCE_PARAMS}&cat=__uncategorized__&q=foo&offset=60&sort=title&dir=asc`
+
+    function showSourceList(params: string) {
+      currentParams = params
+      swrResponses['explorer-roots'] = { data: roots, error: undefined, isLoading: false, mutate }
+      swrResponses['gallery-categories'] = { data: categoryRegistry, error: undefined, isLoading: false, mutate }
+      swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    }
+
+    async function renderExplorer() {
+      const { default: ExplorerPage } = await import('@/app/explorer/page')
+      return render(<ExplorerPage />)
+    }
+
+    function lastQuerySpec() {
+      const last = swrCalls.findLast((entry) => entry.name === 'explorer-query' && entry.key)!
+      return JSON.parse((last.key as string[])[1]) as Record<string, unknown>
+    }
+
+    function lastCommit() {
+      return commit.mock.calls.at(-1) as [string, string]
+    }
+
+    it('explorer_gallery_round_trip_keeps_category_query_offset_and_sort', async () => {
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+      showSourceList(FILTERED_SOURCE)
+      await renderExplorer()
+
+      // Opening a gallery pushes, carries cat/sort/dir and drops q and offset.
+      fireEvent.doubleClick(screen.getByText('Gallery One'))
+      const [openedUrl, openedMode] = lastCommit()
+      expect(openedMode).toBe('push')
+      const opened = new URLSearchParams(openedUrl.split('?')[1])
+      expect(opened.get('kind')).toBe('gallery')
+      expect(opened.get('cat')).toBe('__uncategorized__')
+      expect(opened.get('sort')).toBe('title')
+      expect(opened.get('dir')).toBe('asc')
+      expect(opened.has('q')).toBe(false)
+      expect(opened.has('offset')).toBe(false)
+
+      // The workbench back control returns through history to the exact list entry.
+      commit.mockClear()
+      fireEvent.click(screen.getByText('explorer.backToRoot'))
+      expect(back).toHaveBeenCalledTimes(1)
+      expect(commit).not.toHaveBeenCalled()
+      back.mockRestore()
+    })
+
+    it('explorer_back_from_gallery_without_pushed_history_returns_to_source_keeping_category_sort_and_direction', async () => {
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+      swrResponses['explorer-roots'] = { data: roots, error: undefined, isLoading: false, mutate }
+      currentParams = `${GALLERY_PARAMS}&cat=__uncategorized__&sort=title&dir=asc`
+      swrResponses['explorer-gallery-images'] = { data: galleryImages(), error: undefined, isLoading: false, mutate }
+      await renderExplorer()
+
+      fireEvent.click(screen.getByText('explorer.backToRoot'))
+      expect(back).not.toHaveBeenCalled()
+      const [url, mode] = lastCommit()
+      expect(mode).toBe('push')
+      const next = new URLSearchParams(url.split('?')[1])
+      expect(next.get('kind')).toBe('source')
+      expect(next.get('id')).toBe('local')
+      expect(next.get('cat')).toBe('__uncategorized__')
+      expect(next.get('sort')).toBe('title')
+      expect(next.get('dir')).toBe('asc')
+      back.mockRestore()
+    })
+
+    it('explorer_back_from_gallery_opened_from_category_node_returns_to_category_node', async () => {
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+      showSourceList('kind=category&id=Cosplay&label=Cosplay')
+      await renderExplorer()
+
+      fireEvent.doubleClick(screen.getByText('Gallery One'))
+      expect(lastCommit()[1]).toBe('push')
+      commit.mockClear()
+      fireEvent.keyDown(window, { key: 'Backspace' })
+
+      // Not pushed to the gallery's Source: history goes back to the category list.
+      expect(back).toHaveBeenCalledTimes(1)
+      expect(commit).not.toHaveBeenCalled()
+      back.mockRestore()
+    })
+
+    it('explorer_node_change_pushes_history_and_refinements_replace', async () => {
+      showSourceList(`${SOURCE_PARAMS}&cat=Cosplay`)
+      await renderExplorer()
+
+      fireEvent.change(screen.getByTestId('category-filter'), { target: { value: 'Manga' } })
+      expect(lastCommit()[1]).toBe('replace')
+      fireEvent.change(screen.getByLabelText('explorer.sortBy'), { target: { value: 'size' } })
+      expect(lastCommit()[1]).toBe('replace')
+      fireEvent.click(screen.getByLabelText('explorer.sortDirection'))
+      expect(lastCommit()[1]).toBe('replace')
+      fireEvent.click(screen.getByLabelText('explorer.listView'))
+      expect(lastCommit()[1]).toBe('replace')
+      fireEvent.change(screen.getByPlaceholderText('explorer.searchPlaceholder'), { target: { value: 'abc' } })
+      await waitFor(() => expect(new URLSearchParams(lastCommit()[0].split('?')[1]).get('q')).toBe('abc'))
+      expect(lastCommit()[1]).toBe('replace')
+      expect(commit.mock.calls.every(([, mode]) => mode === 'replace')).toBe(true)
+      expect(replace).not.toHaveBeenCalled()
+
+      // Node change: push, q/offset cleared, cat/sort/dir carried.
+      const tree = screen.getByRole('navigation', { name: 'explorer.libraryTree' })
+      fireEvent.click(within(tree).getByText('explorer.trash'))
+      const [url, mode] = lastCommit()
+      expect(mode).toBe('push')
+      const next = new URLSearchParams(url.split('?')[1])
+      expect(next.get('kind')).toBe('trash')
+      expect(next.get('cat')).toBe('Manga')
+      expect(next.get('sort')).toBe('size')
+      expect(next.get('dir')).toBe('asc')
+      expect(next.has('q')).toBe(false)
+      expect(next.has('offset')).toBe(false)
+      expect(replace).not.toHaveBeenCalled()
+    })
+
+    it('explorer_node_change_during_coarse_selection_replaces_the_selection_history_entry', async () => {
+      vi.mocked(window.matchMedia).mockReturnValue({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      } as unknown as MediaQueryList)
+      showSourceList(SOURCE_PARAMS)
+      await renderExplorer()
+      await waitFor(() => expect(window.matchMedia).toHaveBeenCalled())
+
+      fireEvent.click(screen.getAllByLabelText('explorer.toggleSelection')[0])
+      expect(screen.getByText('explorer.selectedCount')).toBeDefined()
+      const tree = screen.getByRole('navigation', { name: 'explorer.libraryTree' })
+      fireEvent.click(within(tree).getByText('explorer.trash'))
+
+      // The duplicate entry selection mode pushed is reused, so one back leaves the list.
+      expect(lastCommit()).toEqual([expect.stringContaining('kind=trash'), 'replace'])
+    })
+
+    it('explorer_url_change_from_browser_back_updates_category_and_query_state', async () => {
+      showSourceList(`${SOURCE_PARAMS}&cat=Cosplay&q=abc`)
+      await renderExplorer()
+      const input = screen.getByPlaceholderText('explorer.searchPlaceholder') as HTMLInputElement
+      const filter = screen.getByTestId('category-filter') as HTMLSelectElement
+      expect(input.value).toBe('abc')
+      expect(filter.value).toBe('Cosplay')
+
+      setUrl(`/explorer?${SOURCE_PARAMS}`)
+      await waitFor(() => expect(input.value).toBe(''))
+      expect(filter.value).toBe('')
+      expect(lastQuerySpec()).toMatchObject({ query: '', category: null, offset: 0 })
+
+      setUrl(`/explorer?${SOURCE_PARAMS}&cat=Manga&q=zzz&offset=60`)
+      await waitFor(() => expect(input.value).toBe('zzz'))
+      expect(filter.value).toBe('Manga')
+      expect(lastQuerySpec()).toMatchObject({ query: 'zzz', category: 'Manga', offset: 60 })
+    })
+
+    it('explorer_stale_cat_param_does_not_filter_a_category_node', async () => {
+      showSourceList('kind=category&id=Cosplay&label=Cosplay&cat=Manga')
+      await renderExplorer()
+      expect(lastQuerySpec()).toMatchObject({ node_kind: 'category', node_id: 'Cosplay', category: null })
+    })
+
+    it('explorer_sort_and_direction_persist_in_url_across_reload', async () => {
+      showSourceList(SOURCE_PARAMS)
+      const first = await renderExplorer()
+
+      fireEvent.change(screen.getByLabelText('explorer.sortBy'), { target: { value: 'title' } })
+      fireEvent.click(screen.getByLabelText('explorer.sortDirection'))
+      const params = new URLSearchParams(currentParams)
+      expect(params.get('sort')).toBe('title')
+      expect(params.get('dir')).toBe('asc')
+
+      first.unmount()
+      swrCalls = []
+      await renderExplorer()
+      expect((screen.getByLabelText('explorer.sortBy') as HTMLSelectElement).value).toBe('title')
+      expect(screen.getByLabelText('explorer.sortDirection').textContent).toBe('↑')
+      expect(lastQuerySpec()).toMatchObject({ sort: 'title', direction: 'asc' })
+
+      // Defaults are omitted from the URL.
+      fireEvent.change(screen.getByLabelText('explorer.sortBy'), { target: { value: 'added_at' } })
+      fireEvent.click(screen.getByLabelText('explorer.sortDirection'))
+      expect(new URLSearchParams(currentParams).has('sort')).toBe(false)
+      expect(new URLSearchParams(currentParams).has('dir')).toBe(false)
+    })
+
+    it('explorer_image_pane_filters_restore_from_url_after_reader_round_trip', async () => {
+      swrResponses['explorer-roots'] = { data: roots, error: undefined, isLoading: false, mutate }
+      swrResponses['explorer-gallery-images'] = { data: galleryImages(), error: undefined, isLoading: false, mutate }
+      currentParams = `${GALLERY_PARAMS}&ivis=hidden&imedia=video&isort=size&idir=desc&ioffset=200`
+      await renderExplorer()
+
+      expect((screen.getByLabelText('explorer.filterVisibility') as HTMLSelectElement).value).toBe('hidden')
+      expect((screen.getByLabelText('explorer.filterMedia') as HTMLSelectElement).value).toBe('video')
+      const call = swrCalls.findLast((entry) => entry.name === 'explorer-gallery-images')!
+      expect((call.key as unknown[]).slice(2)).toEqual(['hidden', 'video', 'size', 'desc', 200])
+
+      // A filter change replaces the entry the Reader will return to; defaults leave the URL.
+      fireEvent.change(screen.getByLabelText('explorer.filterVisibility'), { target: { value: 'active' } })
+      expect(lastCommit()[1]).toBe('replace')
+      const params = new URLSearchParams(currentParams)
+      expect(params.has('ivis')).toBe(false)
+      expect(params.has('ioffset')).toBe(false)
+      expect(params.get('imedia')).toBe('video')
+      expect(params.get('isort')).toBe('size')
+    })
+
+    describe('scroll restoration', () => {
+      const scrollTops = new WeakMap<object, number>()
+
+      beforeEach(() => {
+        Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+          configurable: true,
+          get() { return scrollTops.get(this) ?? 0 },
+          set(value: number) { scrollTops.set(this, value) },
+        })
+      })
+
+      afterEach(() => {
+        delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop
+      })
+
+      it('explorer_scroll_position_restored_when_returning_to_list_url', async () => {
+        const listUrl = `/explorer?${new URLSearchParams(FILTERED_SOURCE).toString()}`
+        sessionStorage.setItem('explorer:scroll', JSON.stringify([[listUrl, 480]]))
+        showSourceList(FILTERED_SOURCE)
+        await renderExplorer()
+
+        const container = document.querySelector<HTMLElement>('[data-explorer-content-pane] .overflow-y-auto')!
+        expect(container.scrollTop).toBe(480)
+      })
+
+      it('explorer_scroll_position_saved_before_opening_a_gallery_from_a_list', async () => {
+        showSourceList(FILTERED_SOURCE)
+        await renderExplorer()
+        const listUrl = `/explorer?${new URLSearchParams(FILTERED_SOURCE).toString()}`
+        const container = document.querySelector<HTMLElement>('[data-explorer-content-pane] .overflow-y-auto')!
+        container.scrollTop = 321
+
+        fireEvent.doubleClick(screen.getByText('Gallery One'))
+        const saved = JSON.parse(sessionStorage.getItem('explorer:scroll') ?? '[]') as Array<[string, number]>
+        expect(saved).toContainEqual([listUrl, 321])
+      })
+
+      it('explorer_scroll_entries_are_capped_to_the_most_recent_thirty', async () => {
+        const { saveScroll } = await import('@/hooks/explorerHistory')
+        for (let index = 1; index <= 45; index += 1) saveScroll(`/explorer?offset=${index}`, 10 * index)
+        const saved = JSON.parse(sessionStorage.getItem('explorer:scroll') ?? '[]') as Array<[string, number]>
+        expect(saved).toHaveLength(30)
+        expect(saved[0][0]).toBe('/explorer?offset=16')
+      })
+    })
   })
 })
