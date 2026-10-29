@@ -113,7 +113,10 @@ export function GroupCard({
 
         {/* Group meta */}
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] text-vault-text-muted hidden sm:block">
+          <span
+            data-testid="group-sub-count"
+            className="text-[10px] text-vault-text-muted whitespace-nowrap"
+          >
             {t('subscriptions.groupSubCount', { count: String(subs.length) })}
           </span>
 
