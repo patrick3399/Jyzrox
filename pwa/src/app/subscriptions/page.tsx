@@ -1008,7 +1008,7 @@ export default function SubscriptionsPage() {
               onCronChangeSub={handleCronChange}
               onDownloadOptionsChangeSub={handleDownloadOptionsChange}
               checkingId={checkingId}
-              defaultExpanded={true}
+              defaultExpanded={view !== 'source'}
             />
           ))}
         </div>
