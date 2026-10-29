@@ -2225,6 +2225,8 @@ const zhCN: Record<string, string> = {
   'explorer.organize': '整理',
   'explorer.categories': '分类',
   'explorer.uncategorized': '未分类',
+  'explorer.filterCategory': '按分类筛选',
+  'explorer.allCategories': '所有分类',
   'explorer.unregisteredCategory': '不在分类登记表中',
   'explorer.chooseCategory': '选择分类',
   'explorer.smartViews': '智能视图',

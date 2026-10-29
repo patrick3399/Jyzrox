@@ -2227,6 +2227,8 @@ const zhTW: Record<string, string> = {
   'explorer.organize': '整理',
   'explorer.categories': '分類',
   'explorer.uncategorized': '未分類',
+  'explorer.filterCategory': '依分類篩選',
+  'explorer.allCategories': '所有分類',
   'explorer.unregisteredCategory': '不在分類登錄表中',
   'explorer.chooseCategory': '選擇分類',
   'explorer.smartViews': '智慧檢視',

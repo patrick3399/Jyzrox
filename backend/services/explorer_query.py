@@ -19,6 +19,8 @@ from db.models import (
     UserReadingList,
 )
 
+UNCATEGORIZED = "__uncategorized__"
+
 
 @dataclass(slots=True)
 class ExplorerQuerySpec:
@@ -27,6 +29,8 @@ class ExplorerQuerySpec:
     query: str = ""
     sort: str = "added_at"
     direction: str = "desc"
+    # None = no filter, "__uncategorized__" = NULL or "", otherwise exact match.
+    category: str | None = None
 
 
 def _tokens(query: str) -> list[str]:
@@ -77,6 +81,7 @@ async def normalize_explorer_query(
         query=saved.query or spec.query,
         sort=str(params.get("sort") or spec.sort),
         direction=str(params.get("direction") or spec.direction),
+        category=spec.category,
     )
 
 
@@ -177,6 +182,13 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
                     Gallery.source_id.ilike(pattern),
                 )
             )
+
+    if spec.category is not None:
+        filters.append(
+            or_(Gallery.category.is_(None), Gallery.category == "")
+            if spec.category == UNCATEGORIZED
+            else Gallery.category == spec.category
+        )
 
     sort_columns = {
         "added_at": Gallery.added_at,

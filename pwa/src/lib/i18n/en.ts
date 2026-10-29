@@ -2289,6 +2289,8 @@ const en: Record<string, string> = {
   'explorer.organize': 'Organize',
   'explorer.categories': 'Categories',
   'explorer.uncategorized': 'Uncategorized',
+  'explorer.filterCategory': 'Filter by category',
+  'explorer.allCategories': 'All categories',
   'explorer.unregisteredCategory': 'Not in the category registry',
   'explorer.chooseCategory': 'Choose a category',
   'explorer.smartViews': 'Smart Views',

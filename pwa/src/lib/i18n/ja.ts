@@ -2272,6 +2272,8 @@ const ja: Record<string, string> = {
   'explorer.organize': '整理',
   'explorer.categories': 'カテゴリ',
   'explorer.uncategorized': '未分類',
+  'explorer.filterCategory': 'カテゴリで絞り込み',
+  'explorer.allCategories': 'すべてのカテゴリ',
   'explorer.unregisteredCategory': 'カテゴリ登録にありません',
   'explorer.chooseCategory': 'カテゴリを選択',
   'explorer.smartViews': 'スマートビュー',

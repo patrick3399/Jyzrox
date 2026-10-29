@@ -795,6 +795,73 @@ describe('ExplorerWorkbench', () => {
     expect(JSON.parse((last.key as string[])[1])).toMatchObject({ node_kind: 'category', node_id: '__uncategorized__' })
   })
 
+  const facetGalleries = {
+    ...galleries,
+    category_counts: { __uncategorized__: 3, Cosplay: 5, Manga: 0, Legacy: 1 },
+  }
+
+  async function renderSourceWithFacets() {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['gallery-categories'] = { data: categoryRegistry, error: undefined, isLoading: false, mutate }
+    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+  }
+
+  it('choosing Uncategorized in a source node sends category and facets in the query and writes cat to the URL', async () => {
+    await renderSourceWithFacets()
+    fireEvent.change(screen.getByTestId('category-filter'), { target: { value: '__uncategorized__' } })
+
+    await waitFor(() => {
+      const last = swrCalls.findLast((entry) => entry.name === 'explorer-query')!
+      expect(JSON.parse((last.key as string[])[1])).toMatchObject({ category: '__uncategorized__', facets: true, offset: 0 })
+    })
+    await waitFor(() => expect(replace.mock.calls.at(-1)?.[0] as string).toContain('cat=__uncategorized__'))
+  })
+
+  it('renders category_counts in the filter options in registry sort order with unregistered keys appended', async () => {
+    await renderSourceWithFacets()
+    const select = screen.getByTestId('category-filter') as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+      'explorer.allCategories',
+      'explorer.uncategorized (3)',
+      'Cosplay (5)',
+      'Manga (0)',
+      'Legacy (1)',
+    ])
+  })
+
+  it('restores the category filter from the cat URL param on load', async () => {
+    currentParams = 'kind=source&id=local&label=Local&cat=Cosplay'
+    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    expect((screen.getByTestId('category-filter') as HTMLSelectElement).value).toBe('Cosplay')
+    const last = swrCalls.findLast((entry) => entry.name === 'explorer-query')!
+    expect(JSON.parse((last.key as string[])[1])).toMatchObject({ category: 'Cosplay' })
+  })
+
+  it('hides the category filter in a category node', async () => {
+    currentParams = 'kind=category&id=Cosplay&label=Cosplay'
+    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    expect(screen.getByLabelText('explorer.sortBy')).toBeDefined()
+    expect(screen.queryByTestId('category-filter')).toBeNull()
+  })
+
+  it('query-wide select-all passes the active category to createSelection', async () => {
+    currentParams = 'kind=source&id=local&label=Local&cat=Cosplay'
+    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({ selection_token: 'token-1', count: 2, expires_in: 1800 })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(screen.getByText('explorer.selectAllResults'))
+    await waitFor(() => expect(api.explorer.createSelection).toHaveBeenCalled())
+    expect(vi.mocked(api.explorer.createSelection).mock.calls[0][0]).toMatchObject({ category: 'Cosplay' })
+  })
+
   it('metadata dialog category is a select of registry names and submits mode set with the chosen value', async () => {
     vi.mocked(api.explorer.bulkMetadata).mockResolvedValue({ operation_id: 'op', status: 'done', selection_count: 2, changed_fields: 2 })
     const dialog = await openMetadataForTwoGalleries(['Manga', 'Manga'])

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -55,6 +56,7 @@ from services.explorer_filesystem import (
     resolve_library_relative,
 )
 from services.explorer_query import (
+    UNCATEGORIZED,
     ExplorerQuerySpec,
     build_explorer_gallery_query,
     normalize_explorer_query,
@@ -138,6 +140,8 @@ class ExplorerQueryRequest(BaseModel):
     query: str = Field(default="", max_length=1000)
     sort: Literal["added_at", "posted_at", "title", "rating", "pages", "size"] = "added_at"
     direction: Literal["asc", "desc"] = "desc"
+    category: str | None = Field(default=None, max_length=200)
+    facets: bool = False
     offset: int = Field(default=0, ge=0, le=100_000)
     limit: int = Field(default=60, ge=1, le=200)
 
@@ -195,6 +199,7 @@ async def query_explorer(
             query=request.query,
             sort=request.sort,
             direction=request.direction,
+            category=request.category,
         ),
         auth,
     )
@@ -239,7 +244,7 @@ async def query_explorer(
             ).all()
         }
 
-    return {
+    response: dict[str, Any] = {
         "total": total,
         "offset": request.offset,
         "limit": request.limit,
@@ -267,6 +272,17 @@ async def query_explorer(
             for gallery in galleries
         ],
     }
+    if request.facets:
+        # Same node + search filters, but ignoring the active category so every
+        # dropdown option keeps its count while one is selected.
+        facet_ids = build_explorer_gallery_query(replace(spec, category=None), auth).order_by(None).subquery()
+        facet_key = case(
+            (or_(facet_ids.c.category.is_(None), facet_ids.c.category == ""), UNCATEGORIZED),
+            else_=facet_ids.c.category,
+        ).label("facet_key")
+        rows = (await db.execute(select(facet_key, func.count().label("count")).group_by(facet_key))).all()
+        response["category_counts"] = {row.facet_key: int(row.count) for row in rows}
+    return response
 
 
 @router.post("/selections", status_code=201)
@@ -284,6 +300,7 @@ async def create_query_selection(
             query=request.query.query,
             sort=request.query.sort,
             direction=request.query.direction,
+            category=request.query.category,
         ),
         auth,
     )

@@ -10,6 +10,10 @@ export interface ExplorerQuery {
   direction?: 'asc' | 'desc'
   offset?: number
   limit?: number
+  /** Category filter on top of the node; '__uncategorized__' means no category. */
+  category?: string | null
+  /** Ask for per-category counts (ignoring the category filter). */
+  facets?: boolean
 }
 
 export interface ExplorerGalleryItem {
@@ -164,7 +168,7 @@ export interface ExplorerPhysicalEntry {
 export const explorer = {
   roots: () => apiFetch<ExplorerRoots>('/api/explorer/roots'),
   query: (query: ExplorerQuery) =>
-    apiFetch<{ total: number; offset: number; limit: number; items: ExplorerGalleryItem[] }>(
+    apiFetch<{ total: number; offset: number; limit: number; items: ExplorerGalleryItem[]; category_counts?: Record<string, number> }>(
       '/api/explorer/query',
       { method: 'POST', body: JSON.stringify(query) },
     ),

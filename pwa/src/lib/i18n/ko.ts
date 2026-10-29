@@ -2253,6 +2253,8 @@ const ko: Record<string, string> = {
   'explorer.organize': '정리',
   'explorer.categories': '카테고리',
   'explorer.uncategorized': '미분류',
+  'explorer.filterCategory': '분류별 필터',
+  'explorer.allCategories': '모든 분류',
   'explorer.unregisteredCategory': '카테고리 등록부에 없음',
   'explorer.chooseCategory': '카테고리 선택',
   'explorer.smartViews': '스마트 보기',

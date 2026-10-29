@@ -857,3 +857,198 @@ async def test_roots_categories_exclude_other_users_private_galleries(make_clien
     assert categories["uncategorized"] == 1  # only 104; private 103 is hidden
     counts = {item["id"]: item["gallery_count"] for item in categories["items"]}
     assert counts == {"Doujinshi": 1, "Manga": 1, "Cosplay": 0}  # private 101 and legacy 105 not counted
+
+
+# ── Category filter + facet counts inside a gallery-list node ────────────────
+
+
+async def _seed_category_filter_galleries(db_session) -> None:
+    """Local: 101/102 Manga, 103 NULL, 104 '', 105 Legacy, 106 Doujinshi.
+
+    Plus an ehentai set (201 Manga 'alpha', 202 NULL 'beta', 203 Cosplay, 204
+    Manga trashed) so source scoping is observable.
+    """
+    await _seed_category_galleries(db_session)
+    await db_session.execute(
+        text("INSERT INTO users (id, username, password_hash, role) VALUES (2, 'u2', 'x', 'member')")
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries "
+            "(id, source, source_id, title, category, visibility, created_by_user_id, deleted_at) VALUES "
+            "(201, 'ehentai', 'e1', 'alpha one', 'Manga', 'public', 1, NULL), "
+            "(202, 'ehentai', 'e2', 'beta two', NULL, 'public', 1, NULL), "
+            "(203, 'ehentai', 'e3', 'alpha three', 'Cosplay', 'public', 1, NULL), "
+            "(204, 'ehentai', 'e4', 'alpha four', 'Manga', 'public', 1, '2026-01-01 00:00:00'), "
+            "(205, 'ehentai', 'e5', 'private five', NULL, 'private', 2, NULL)"
+        )
+    )
+    await db_session.commit()
+
+
+async def _query_ids(client, **body) -> list[int]:
+    response = await client.post("/api/explorer/query", json=body)
+    assert response.status_code == 200, response.text
+    return sorted(item["id"] for item in response.json()["items"])
+
+
+async def test_query_source_node_with_uncategorized_category_filter_returns_only_uncategorized_in_that_source(
+    client, db_session
+):
+    await _seed_category_filter_galleries(db_session)
+
+    assert await _query_ids(client, node_kind="source", node_id="local", category="__uncategorized__") == [103, 104]
+    assert await _query_ids(client, node_kind="source", node_id="ehentai", category="__uncategorized__") == [
+        202,
+        205,  # admin also sees the other user's private gallery
+    ]
+
+
+async def test_query_source_node_with_named_category_filter_returns_exact_matches_in_that_source(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    assert await _query_ids(client, node_kind="source", node_id="local", category="Manga") == [101, 102]
+    assert await _query_ids(client, node_kind="source", node_id="ehentai", category="Manga") == [201]
+    assert await _query_ids(client, node_kind="source", node_id="local", category="manga") == []
+
+
+async def test_query_without_category_filter_is_unchanged_by_category_support(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    assert await _query_ids(client, node_kind="source", node_id="ehentai") == [201, 202, 203, 205]
+
+
+async def test_query_category_filter_combines_with_search_token(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    ids = await _query_ids(client, node_kind="source", node_id="ehentai", query="alpha", category="Manga")
+    assert ids == [201]
+    assert await _query_ids(client, node_kind="all", query="alpha", category="Cosplay") == [203]
+
+
+async def test_query_saved_search_node_keeps_category_filter_after_expansion(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+    await db_session.execute(
+        text("INSERT INTO saved_searches (id, user_id, name, query, params) VALUES (7, 1, 'alphas', 'alpha', '{}')")
+    )
+    await db_session.commit()
+
+    assert await _query_ids(client, node_kind="saved_search", node_id="7") == [201, 203]
+    assert await _query_ids(client, node_kind="saved_search", node_id="7", category="Cosplay") == [203]
+    assert await _query_ids(client, node_kind="saved_search", node_id="7", category="__uncategorized__") == []
+
+
+async def test_query_trash_node_with_category_filter_returns_only_matching_trashed_galleries(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    assert await _query_ids(client, node_kind="trash", category="Manga") == [204]
+    assert await _query_ids(client, node_kind="trash", category="Cosplay") == []
+
+
+async def test_query_category_filter_composes_with_category_node(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    assert await _query_ids(client, node_kind="category", node_id="Manga", category="Manga") == [101, 102, 201]
+    assert await _query_ids(client, node_kind="category", node_id="Manga", category="Cosplay") == []
+
+
+async def test_selection_with_category_filter_materializes_only_matching_ids(client, db_session, mock_redis):
+    await _seed_category_filter_galleries(db_session)
+    saved: dict[str, str] = {}
+
+    async def remember_setex(key, _ttl, value):
+        saved[key] = value
+        return True
+
+    mock_redis.setex.side_effect = remember_setex
+
+    response = await client.post(
+        "/api/explorer/selections",
+        json={"query": {"node_kind": "source", "node_id": "local", "category": "Manga"}},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["count"] == 2
+    import json
+
+    payload = json.loads(next(iter(saved.values())))
+    assert sorted(payload["gallery_ids"]) == [101, 102]
+    assert payload["created_from"]["category"] == "Manga"
+
+
+async def test_selection_saved_search_node_with_category_filter_materializes_only_matching_ids(
+    client, db_session, mock_redis
+):
+    await _seed_category_filter_galleries(db_session)
+    await db_session.execute(
+        text("INSERT INTO saved_searches (id, user_id, name, query, params) VALUES (7, 1, 'alphas', 'alpha', '{}')")
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/explorer/selections",
+        json={"query": {"node_kind": "saved_search", "node_id": "7", "category": "Cosplay"}},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["count"] == 1
+
+
+async def test_query_facets_counts_ignore_active_category_filter_and_scope_to_node(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    response = await client.post(
+        "/api/explorer/query",
+        json={"node_kind": "source", "node_id": "local", "category": "Manga", "facets": True},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert sorted(item["id"] for item in body["items"]) == [101, 102]
+    assert body["total"] == 2
+    assert body["category_counts"] == {"Manga": 2, "__uncategorized__": 2, "Legacy": 1, "Doujinshi": 1}
+
+
+async def test_query_facets_counts_respect_search_token_and_exclude_trashed(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    response = await client.post(
+        "/api/explorer/query",
+        json={"node_kind": "source", "node_id": "ehentai", "query": "alpha", "facets": True},
+    )
+
+    assert response.status_code == 200, response.text
+    # 204 is a trashed Manga; 202/205 do not match "alpha".
+    assert response.json()["category_counts"] == {"Manga": 1, "Cosplay": 1}
+
+
+async def test_query_facets_counts_respect_access_filter(make_client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    async with make_client(user_id=2, role="viewer") as ac:
+        response = await ac.post(
+            "/api/explorer/query",
+            json={"node_kind": "source", "node_id": "ehentai", "facets": True},
+        )
+
+    assert response.status_code == 200, response.text
+    # user 2 sees public 201-203 plus own private 205 (uncategorized).
+    assert response.json()["category_counts"] == {"Manga": 1, "Cosplay": 1, "__uncategorized__": 2}
+
+
+async def test_query_facets_on_trash_node_counts_trashed_galleries_only(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    response = await client.post("/api/explorer/query", json={"node_kind": "trash", "facets": True})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["category_counts"] == {"Manga": 1}
+
+
+async def test_query_without_facets_flag_omits_category_counts(client, db_session):
+    await _seed_category_filter_galleries(db_session)
+
+    response = await client.post("/api/explorer/query", json={"node_kind": "all"})
+
+    assert response.status_code == 200, response.text
+    assert "category_counts" not in response.json()

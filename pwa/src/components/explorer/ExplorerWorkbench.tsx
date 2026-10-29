@@ -1,5 +1,6 @@
 'use client'
 
+import { CategoryFilter } from './CategoryFilter'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
@@ -110,6 +111,7 @@ function galleryQuery(
   offset: number,
   sort: NonNullable<ExplorerQuery['sort']>,
   direction: NonNullable<ExplorerQuery['direction']>,
+  category: string | null,
 ): ExplorerQuery | null {
   const kind = node.kind
   if (kind !== 'source' && kind !== 'category' && kind !== 'collection' && kind !== 'artist' && kind !== 'saved_search' && kind !== 'smart' && kind !== 'trash') return null
@@ -121,6 +123,8 @@ function galleryQuery(
     direction,
     offset,
     limit: 60,
+    category,
+    facets: true,
   }
 }
 
@@ -605,6 +609,8 @@ export function ExplorerWorkbench() {
   const [query, setQuery] = useState(params.get('q') || '')
   const [debouncedQuery, setDebouncedQuery] = useState(query)
   const [offset, setOffset] = useState(Number(params.get('offset') || 0))
+  const [category, setCategory] = useState<string | null>(params.get('cat') || null)
+  const categoryDirtyRef = useRef(false)
   const [sortField, setSortField] = useState<NonNullable<ExplorerQuery['sort']>>('added_at')
   const [sortDirection, setSortDirection] = useState<NonNullable<ExplorerQuery['direction']>>('desc')
   const [querySelection, setQuerySelection] = useState<QuerySelection | null>(null)
@@ -636,17 +642,23 @@ export function ExplorerWorkbench() {
   useEffect(() => {
     const currentQuery = params.get('q') || ''
     const currentOffset = Number(params.get('offset') || 0)
-    if (currentQuery === debouncedQuery && currentOffset === offset) return
+    const categoryChanged = categoryDirtyRef.current && (params.get('cat') || null) !== category
+    if (currentQuery === debouncedQuery && currentOffset === offset && !categoryChanged) return
+    categoryDirtyRef.current = false
     const next = new URLSearchParams(params.toString())
+    if (categoryChanged) {
+      if (category) next.set('cat', category)
+      else next.delete('cat')
+    }
     if (debouncedQuery) next.set('q', debouncedQuery)
     else next.delete('q')
     if (offset) next.set('offset', String(offset))
     else next.delete('offset')
     router.replace(`/explorer${next.size ? `?${next}` : ''}`)
-  }, [debouncedQuery, offset, params, router])
+  }, [debouncedQuery, offset, category, params, router])
 
   const { data: roots, error: rootsError, isLoading: rootsLoading, mutate: mutateRoots } = useSWR('explorer-roots', api.explorer.roots)
-  const querySpec = galleryQuery(node, debouncedQuery, offset, sortField, sortDirection)
+  const querySpec = galleryQuery(node, debouncedQuery, offset, sortField, sortDirection, category)
   const { data: galleries, error: galleryError, isLoading: galleryLoading, mutate: mutateGalleries } = useSWR(
     querySpec ? ['explorer-query', JSON.stringify(querySpec)] : null,
     () => api.explorer.query(querySpec ?? {}),
@@ -732,6 +744,7 @@ export function ExplorerWorkbench() {
     setQuerySelection(null)
     setOffset(0)
     setQuery('')
+    setCategory(null)
   }, [router, view, clearSelection])
 
   const selectedGalleries = useMemo(
@@ -1087,6 +1100,13 @@ export function ExplorerWorkbench() {
                   <option value="pages">{t('explorer.sortPages')}</option>
                   <option value="size">{t('explorer.sortSize')}</option>
                 </select>
+                {node.kind !== 'category' && (
+                  <CategoryFilter
+                    value={category}
+                    counts={galleries?.category_counts}
+                    onChange={(next) => { categoryDirtyRef.current = true; setCategory(next); setOffset(0); clearSelection(); setQuerySelection(null) }}
+                  />
+                )}
                 <button type="button" aria-label={t('explorer.sortDirection')} title={sortDirection === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={() => { setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc')); setOffset(0) }} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{sortDirection === 'asc' ? '↑' : '↓'}</button>
               </>
             )}
