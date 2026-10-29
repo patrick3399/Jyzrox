@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import asc, desc, exists, or_, select
+from sqlalchemy import asc, desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import gallery_access_filter
 from db.models import (
+    Blob,
     BlobRelationship,
     CollectionGallery,
     Gallery,
@@ -103,6 +104,10 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
             filters.append(or_(Gallery.title.is_(None), Gallery.pages.is_(None)))
         elif spec.node_id == "empty_galleries":
             filters.append(~exists(select(Image.id).where(Image.gallery_id == Gallery.id)))
+        elif spec.node_id == "hidden_images":
+            filters.append(
+                exists(select(Image.id).where(Image.gallery_id == Gallery.id, Image.visibility == "user_hidden"))
+            )
         elif spec.node_id == "duplicates":
             related_hashes = select(BlobRelationship.sha_a).union(select(BlobRelationship.sha_b))
             filters.append(Gallery.id.in_(select(Image.gallery_id).where(Image.blob_sha256.in_(related_hashes))))
@@ -174,6 +179,18 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
         "rating": Gallery.rating,
         "pages": Gallery.pages,
     }
+    if spec.sort == "size":
+        # Total bytes of the gallery's active images (logical, duplicates within
+        # the gallery counted per page), computed per row so the order matches
+        # the ``logical_bytes`` the list shows for active pages.
+        sort_columns["size"] = (
+            select(func.coalesce(func.sum(Blob.file_size), 0))
+            .select_from(Image)
+            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .where(Image.gallery_id == Gallery.id, Image.visibility == "active")
+            .correlate(Gallery)
+            .scalar_subquery()
+        )
     sort_column = sort_columns.get(spec.sort, Gallery.added_at)
     order = asc(sort_column) if spec.direction == "asc" else desc(sort_column)
     return select(Gallery).where(*filters).order_by(order, desc(Gallery.id))

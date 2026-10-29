@@ -33,8 +33,10 @@ vi.mock('@/lib/api', () => ({
       physicalPreviewUrl: vi.fn(),
       refreshPhysicalSize: vi.fn(),
       importPhysicalFolder: vi.fn(),
+      galleryImages: vi.fn(),
+      purgeImages: vi.fn(),
     },
-    library: { listGalleryFiles: vi.fn() },
+    library: { hideImagesBatch: vi.fn(), restoreImagesBatch: vi.fn() },
     collections: { list: vi.fn() },
   },
 }))
@@ -44,10 +46,12 @@ vi.mock('@/components/Skeleton', () => ({ SkeletonGrid: () => <div data-testid="
 
 const mutate = vi.fn()
 let swrResponses: Record<string, Record<string, unknown>> = {}
+let swrCalls: Array<{ name: string; key: unknown; fetcher: unknown }> = []
 
 vi.mock('swr', () => ({
-  default: (key: unknown) => {
+  default: (key: unknown, fetcher: unknown) => {
     const name = Array.isArray(key) ? String(key[0]) : key === null ? '__null__' : String(key)
+    swrCalls.push({ name, key, fetcher })
     return swrResponses[name] ?? { data: undefined, error: undefined, isLoading: false, mutate }
   },
 }))
@@ -113,46 +117,117 @@ const galleries = {
   ],
 }
 
-const galleryFiles = {
-  gallery_id: 1,
-  source: 'local',
-  source_id: 'one',
-  title: 'Gallery One',
-  category: 'Manga',
-  total_files: 2,
-  files: [
-    {
-      filename: '001.webp',
-      page_num: 1,
-      width: 1200,
-      height: 1800,
-      file_size: 2000,
-      media_type: 'image/webp',
-      thumb_path: '/thumbs/001.webp',
-      file_path: null,
-      is_symlink: false,
-      is_broken: false,
-      symlink_target: null,
-    },
-    {
-      filename: '002.mp4',
-      page_num: 2,
-      width: 1920,
-      height: 1080,
-      file_size: 3000,
-      media_type: 'video/mp4',
-      thumb_path: '/thumbs/002.webp',
-      file_path: null,
-      is_symlink: false,
-      is_broken: false,
-      symlink_target: null,
-    },
-  ],
+const imageSummary = {
+  active_count: 2,
+  hidden_count: 1,
+  active_bytes: 5000,
+  hidden_bytes: 700,
+  hidden_reclaimable_bytes: 700,
+}
+
+function galleryImages(overrides: Record<string, unknown> = {}) {
+  return {
+    gallery_id: 1,
+    source: 'local',
+    source_id: 'one',
+    total: 3,
+    offset: 0,
+    limit: 200,
+    can_edit: true,
+    summary: imageSummary,
+    items: [
+      {
+        image_id: 11,
+        page_num: 1,
+        source_position: 1,
+        filename: '001.webp',
+        visibility: 'active',
+        hidden_at: null,
+        media_type: 'image',
+        file_size: 2000,
+        width: 1200,
+        height: 1800,
+        duration: null,
+        storage: 'cas',
+        shared: false,
+        thumb_path: '/thumbs/001.webp',
+        thumb_srcset: null,
+        file_path: '/media/001.webp',
+      },
+      {
+        image_id: 12,
+        page_num: 2,
+        source_position: 2,
+        filename: '002.mp4',
+        visibility: 'active',
+        hidden_at: null,
+        media_type: 'video',
+        file_size: 3000,
+        width: 1920,
+        height: 1080,
+        duration: 12,
+        storage: 'cas',
+        shared: true,
+        thumb_path: '/thumbs/002.webp',
+        thumb_srcset: null,
+        file_path: '/media/002.mp4',
+      },
+      {
+        image_id: 13,
+        page_num: null,
+        source_position: 3,
+        filename: '003.png',
+        visibility: 'hidden',
+        hidden_at: '2026-10-29T00:00:00Z',
+        media_type: 'image',
+        file_size: 700,
+        width: 800,
+        height: 600,
+        duration: null,
+        storage: 'cas',
+        shared: false,
+        thumb_path: '/thumbs/003.webp',
+        thumb_srcset: null,
+        file_path: '/media/003.png',
+      },
+    ],
+    ...overrides,
+  }
+}
+
+const GALLERY_PARAMS = 'kind=gallery&id=1&source=local&sourceId=one&label=Gallery%20One'
+
+function showGalleryImages(data: unknown = galleryImages()) {
+  currentParams = GALLERY_PARAMS
+  swrResponses['explorer-gallery-images'] = { data, error: undefined, isLoading: false, mutate }
+}
+
+function imageTiles() {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-testid="explorer-image-tile"]'))
+}
+
+function purgeResult(overrides: Record<string, unknown> = {}) {
+  return {
+    gallery_id: 1,
+    dry_run: true,
+    purgeable: 1,
+    purged: 0,
+    reclaim_bytes: 700,
+    shared_kept: 0,
+    skipped_external: 0,
+    skipped_not_hidden: 0,
+    skipped_pending: 0,
+    skipped_missing: 0,
+    blobs_deleted: 0,
+    operation_id: null,
+    ...overrides,
+  }
 }
 
 describe('ExplorerWorkbench', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    swrCalls = []
     currentParams = ''
     localStorage.clear()
     Object.defineProperty(window, 'matchMedia', {
@@ -187,17 +262,19 @@ describe('ExplorerWorkbench', () => {
     expect(contentPane?.parentElement?.className).toContain('overflow-hidden')
   })
 
-  it('renders Gallery files as compact full-width rows in list view', async () => {
-    currentParams = 'kind=gallery&id=1&source=local&sourceId=one&label=Gallery%20One'
-    swrResponses['explorer-gallery-files'] = { data: galleryFiles, error: undefined, isLoading: false, mutate }
+  it('renders Gallery images as compact full-width rows in list view', async () => {
+    showGalleryImages()
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
-    expect(document.querySelectorAll('[data-explorer-file-view="grid"]')).toHaveLength(2)
+    // Grid first: tiles carry "#page · filename"; the list-only meta line is absent.
+    expect(imageTiles()).toHaveLength(3)
+    expect(screen.getByText('#1 · 001.webp')).toBeDefined()
+    expect(screen.queryByText('#1 · 1200 × 1800 · 2000 B')).toBeNull()
     fireEvent.click(screen.getByLabelText('explorer.listView'))
 
-    const rows = document.querySelectorAll<HTMLElement>('[data-explorer-file-view="list"]')
-    expect(rows).toHaveLength(2)
+    const rows = imageTiles()
+    expect(rows).toHaveLength(3)
     expect(rows[0].className).toContain('w-full')
     expect(screen.getByText('#1 · 1200 × 1800 · 2000 B')).toBeDefined()
     expect(rows[0].querySelector('img')?.className).toContain('object-contain')
@@ -205,18 +282,20 @@ describe('ExplorerWorkbench', () => {
   })
 
   it('renders a URL-persisted list view on the first frame after returning from Reader', async () => {
-    currentParams = 'kind=gallery&id=1&source=local&sourceId=one&label=Gallery%20One&view=list'
-    swrResponses['explorer-gallery-files'] = { data: galleryFiles, error: undefined, isLoading: false, mutate }
+    showGalleryImages()
+    currentParams += '&view=list'
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
-    expect(document.querySelectorAll('[data-explorer-file-view="list"]')).toHaveLength(2)
-    expect(document.querySelector('[data-explorer-file-view="grid"]')).toBeNull()
+    const rows = imageTiles()
+    expect(rows).toHaveLength(3)
+    expect(rows.every((row) => row.className.includes('w-full'))).toBe(true)
+    expect(screen.getByText('#1 · 1200 × 1800 · 2000 B')).toBeDefined()
+    expect(screen.queryByText('#1 · 001.webp')).toBeNull()
   })
 
-  it('opens a Gallery file with one tap on coarse pointers', async () => {
-    currentParams = 'kind=gallery&id=1&source=local&sourceId=one&label=Gallery%20One'
-    swrResponses['explorer-gallery-files'] = { data: galleryFiles, error: undefined, isLoading: false, mutate }
+  it('opens a Gallery image in Reader with one tap on coarse pointers', async () => {
+    showGalleryImages()
     vi.mocked(window.matchMedia).mockReturnValue({
       matches: true,
       addEventListener: vi.fn(),
@@ -226,8 +305,179 @@ describe('ExplorerWorkbench', () => {
     render(<ExplorerPage />)
     await waitFor(() => expect(window.matchMedia).toHaveBeenCalled())
 
-    fireEvent.click(document.querySelectorAll<HTMLElement>('[data-explorer-file-view="grid"]')[0])
+    fireEvent.click(imageTiles()[1])
     expect(push).toHaveBeenCalledWith(expect.stringContaining('/reader/'))
+    expect(push).toHaveBeenCalledWith(expect.stringContaining('2'))
+  })
+
+  it('requests the Gallery images from the explorer images endpoint with the default filters', async () => {
+    showGalleryImages()
+    vi.mocked(api.explorer.galleryImages).mockResolvedValue(galleryImages() as never)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    const call = swrCalls.findLast((entry) => entry.name === 'explorer-gallery-images')!
+    await (call.fetcher as (key: unknown) => Promise<unknown>)(call.key)
+    expect(api.explorer.galleryImages).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ visibility: 'active', media: 'all', sort: 'page', direction: 'asc', offset: 0 }),
+    )
+  })
+
+  it('opens the context menu with Hide when right-clicking an active image tile', async () => {
+    showGalleryImages()
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    expect(screen.queryByTestId('explorer-context-menu')).toBeNull()
+
+    fireEvent.contextMenu(imageTiles()[0])
+
+    const menu = screen.getByTestId('explorer-context-menu')
+    expect(within(menu).getByTestId('context-menu-hide')).toBeEnabled()
+    expect(within(menu).getByTestId('context-menu-purge')).toBeDisabled()
+    // Right-click on an unselected tile selects it first.
+    expect(imageTiles()[0].getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('hides the selected images with the batch hide API', async () => {
+    showGalleryImages()
+    vi.mocked(api.library.hideImagesBatch).mockResolvedValue({ status: 'ok', hidden: 2, remaining_pages: 0 })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(imageTiles()[0])
+    fireEvent.click(imageTiles()[1], { ctrlKey: true })
+    fireEvent.click(screen.getByTestId('action-hide'))
+
+    await waitFor(() => expect(api.library.hideImagesBatch).toHaveBeenCalledWith('local', 'one', [11, 12]))
+    await waitFor(() => expect(mutate).toHaveBeenCalled())
+  })
+
+  it('hides an image from the context menu', async () => {
+    showGalleryImages()
+    vi.mocked(api.library.hideImagesBatch).mockResolvedValue({ status: 'ok', hidden: 1, remaining_pages: 1 })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.contextMenu(imageTiles()[1])
+    fireEvent.click(screen.getByTestId('context-menu-hide'))
+
+    await waitFor(() => expect(api.library.hideImagesBatch).toHaveBeenCalledWith('local', 'one', [12]))
+  })
+
+  it('keeps Purge disabled when the selection includes an active image', async () => {
+    showGalleryImages()
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(imageTiles()[0])
+    fireEvent.click(imageTiles()[2], { ctrlKey: true })
+
+    expect(screen.getByTestId('action-purge')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('action-purge'))
+    expect(api.explorer.purgeImages).not.toHaveBeenCalled()
+  })
+
+  it('previews with a dry run and then purges the selected hidden images', async () => {
+    showGalleryImages()
+    vi.mocked(api.explorer.purgeImages)
+      .mockResolvedValueOnce(purgeResult() as never)
+      .mockResolvedValueOnce(purgeResult({ dry_run: false, purged: 1, purgeable: 1, blobs_deleted: 1 }) as never)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(imageTiles()[2])
+    expect(screen.getByTestId('action-purge')).toBeEnabled()
+    fireEvent.click(screen.getByTestId('action-purge'))
+
+    await waitFor(() => expect(screen.getByTestId('purge-purgeable').textContent).toBe('1'))
+    expect(screen.getByTestId('purge-reclaim').textContent).toBe('700 B')
+    expect(api.explorer.purgeImages).toHaveBeenCalledTimes(1)
+    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(1, 1, { image_ids: [13], dry_run: true })
+
+    fireEvent.click(screen.getByTestId('purge-confirm'))
+    await waitFor(() => expect(api.explorer.purgeImages).toHaveBeenCalledTimes(2))
+    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(2, 1, { image_ids: [13], dry_run: false })
+    await waitFor(() => expect(screen.queryByTestId('purge-dialog')).toBeNull())
+    expect(mutate).toHaveBeenCalled()
+  })
+
+  it('does not enable the purge confirmation when the dry run finds nothing purgeable', async () => {
+    showGalleryImages()
+    vi.mocked(api.explorer.purgeImages).mockResolvedValue(purgeResult({ purgeable: 0, skipped_external: 1 }) as never)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(imageTiles()[2])
+    fireEvent.click(screen.getByTestId('action-purge'))
+
+    await waitFor(() => expect(screen.getByTestId('purge-external').textContent).toBe('1'))
+    expect(screen.getByTestId('purge-confirm')).toBeDisabled()
+    expect(api.explorer.purgeImages).toHaveBeenCalledTimes(1)
+  })
+
+  it('empties all hidden images with an all_hidden purge', async () => {
+    showGalleryImages()
+    vi.mocked(api.explorer.purgeImages)
+      .mockResolvedValueOnce(purgeResult({ purgeable: 4, reclaim_bytes: 1400 }) as never)
+      .mockResolvedValueOnce(purgeResult({ dry_run: false, purged: 4 }) as never)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(screen.getByTestId('empty-hidden'))
+
+    await waitFor(() => expect(screen.getByTestId('purge-purgeable').textContent).toBe('4'))
+    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(1, 1, { all_hidden: true, dry_run: true })
+    fireEvent.click(screen.getByTestId('purge-confirm'))
+    await waitFor(() => expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(2, 1, { all_hidden: true, dry_run: false }))
+  })
+
+  it('offers no hide or purge controls to a read-only collaborator', async () => {
+    showGalleryImages(galleryImages({ can_edit: false }))
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(screen.queryByTestId('empty-hidden')).toBeNull()
+    fireEvent.click(imageTiles()[2])
+    expect(screen.queryByTestId('action-hide')).toBeNull()
+    expect(screen.queryByTestId('action-purge')).toBeNull()
+    fireEvent.contextMenu(imageTiles()[2])
+    expect(screen.queryByTestId('context-menu-purge')).toBeNull()
+  })
+
+  it('offers sorting Galleries by size and sends sort size to the query', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    const select = screen.getByLabelText('explorer.sortBy') as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => option.value)).toContain('size')
+    fireEvent.change(select, { target: { value: 'size' } })
+
+    await waitFor(() => {
+      const last = swrCalls.findLast((entry) => entry.name === 'explorer-query')!
+      expect(JSON.parse((last.key as string[])[1])).toMatchObject({ sort: 'size' })
+    })
+  })
+
+  it('offers sorting Gallery images by size and requests sort size from the images endpoint', async () => {
+    showGalleryImages()
+    vi.mocked(api.explorer.galleryImages).mockResolvedValue(galleryImages() as never)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    const select = screen.getByLabelText('explorer.sortBy') as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['page', 'size'])
+    fireEvent.change(select, { target: { value: 'size' } })
+
+    await waitFor(() => {
+      const last = swrCalls.findLast((entry) => entry.name === 'explorer-gallery-images')!
+      expect((last.key as unknown[])[4]).toBe('size')
+    })
+    const last = swrCalls.findLast((entry) => entry.name === 'explorer-gallery-images')!
+    await (last.fetcher as (key: unknown) => Promise<unknown>)(last.key)
+    expect(api.explorer.galleryImages).toHaveBeenCalledWith(1, expect.objectContaining({ sort: 'size', direction: 'desc' }))
   })
 
   it('renders the empty inspector without requesting metadata history', async () => {

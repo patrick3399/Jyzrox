@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-interface WorkbenchKeyboardOptions {
+export interface WorkbenchKeyboardOptions {
   itemCount: number
   columnCount: number
   listMode: boolean
@@ -15,6 +15,8 @@ interface WorkbenchKeyboardOptions {
   onBack: () => void
   onFocusSearch: () => void
   onDelete: () => void
+  /** Shift+Delete: permanent deletion (image workbench); ignored when omitted. */
+  onPurge?: () => void
   onEditMetadata: () => void
   onTreeLayout: () => void
   onColumnLayout: () => void
@@ -23,6 +25,20 @@ interface WorkbenchKeyboardOptions {
   onShowShortcuts: () => void
   onCyclePane: () => void
 }
+
+/** Shortcuts that are the same in every content pane (layout, view, search, help, pane cycling). */
+export type WorkbenchGlobalShortcuts = Pick<
+  WorkbenchKeyboardOptions,
+  | 'onBack'
+  | 'onFocusSearch'
+  | 'onEditMetadata'
+  | 'onTreeLayout'
+  | 'onColumnLayout'
+  | 'onGridView'
+  | 'onListView'
+  | 'onShowShortcuts'
+  | 'onCyclePane'
+>
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
@@ -56,6 +72,7 @@ export function useWorkbenchKeyboard({
   onBack,
   onFocusSearch,
   onDelete,
+  onPurge,
   onEditMetadata,
   onTreeLayout,
   onColumnLayout,
@@ -75,6 +92,7 @@ export function useWorkbenchKeyboard({
     onBack,
     onFocusSearch,
     onDelete,
+    onPurge,
     onEditMetadata,
     onTreeLayout,
     onColumnLayout,
@@ -94,6 +112,7 @@ export function useWorkbenchKeyboard({
       onBack,
       onFocusSearch,
       onDelete,
+      onPurge,
       onEditMetadata,
       onTreeLayout,
       onColumnLayout,
@@ -111,6 +130,7 @@ export function useWorkbenchKeyboard({
     onBack,
     onFocusSearch,
     onDelete,
+    onPurge,
     onEditMetadata,
     onTreeLayout,
     onColumnLayout,
@@ -208,6 +228,11 @@ export function useWorkbenchKeyboard({
       if (event.key === 'Backspace' && !commandKey && !event.altKey) {
         event.preventDefault()
         callbacks.onBack()
+        return
+      }
+      if (event.key === 'Delete' && event.shiftKey && callbacks.onPurge) {
+        event.preventDefault()
+        callbacks.onPurge()
         return
       }
       if (event.key === 'Delete') {

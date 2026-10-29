@@ -67,14 +67,8 @@ async def test_r18_filter_blocks_shared_gallery(client, db_session):
     assert response.status_code == 451
 
 
-async def test_link_versions_and_merge_preserves_user_state(client, db_session):
+async def test_link_versions_lists_both_galleries_and_legacy_merge_route_is_gone(client, db_session):
     await _seed_galleries(db_session)
-    await db_session.execute(text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (2, 9102)"))
-    await db_session.execute(text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (2, 9102, 4)"))
-    await db_session.execute(
-        text("INSERT INTO read_progress (user_id, gallery_id, last_page, last_image_id) VALUES (2, 9102, 1, 9202)")
-    )
-    await db_session.commit()
 
     linked = await client.post("/api/gallery-management/galleries/9101/versions", json={"gallery_id": 9102})
     versions = await client.get("/api/gallery-management/galleries/9101/versions")
@@ -82,46 +76,11 @@ async def test_link_versions_and_merge_preserves_user_state(client, db_session):
 
     assert linked.status_code == 200, linked.text
     assert len(versions.json()["versions"]) == 2
-    assert merged.status_code == 200, merged.text
-    assert merged.json()["pages"] == 2
-    image_page = (await db_session.execute(text("SELECT page_num FROM images WHERE id=9202"))).scalar_one()
-    favorite = (
-        await db_session.execute(text("SELECT count(*) FROM user_favorites WHERE user_id=2 AND gallery_id=9101"))
-    ).scalar_one()
-    rating = (
-        await db_session.execute(text("SELECT rating FROM user_ratings WHERE user_id=2 AND gallery_id=9101"))
-    ).scalar_one()
-    progress = (
-        await db_session.execute(text("SELECT last_page FROM read_progress WHERE user_id=2 AND gallery_id=9101"))
-    ).scalar_one()
-    assert image_page == 2
-    assert favorite == 1
-    assert rating == 4
-    assert progress == 2
+    assert merged.status_code in (404, 405), merged.text
+    still_there = (await db_session.execute(text("SELECT gallery_id FROM images WHERE id=9202"))).scalar_one()
+    assert still_there == 9102
 
 
 async def test_gallery_management_requires_auth(unauthed_client):
     response = await unauthed_client.get("/api/gallery-management/galleries/1/sharing")
     assert response.status_code == 401
-
-
-async def test_legacy_merge_with_pending_pages_is_rejected_with_409(client, db_session):
-    """A pending link page has no blob; merging would move rows the hash job is
-    still working on."""
-    await _seed_galleries(db_session)
-    await db_session.execute(
-        text(
-            "INSERT INTO images (id, gallery_id, page_num, filename, blob_sha256, external_path) "
-            "VALUES (9203, 9102, 2, 'pending.jpg', NULL, '/mnt/lib/second/pending.jpg')"
-        )
-    )
-    await db_session.commit()
-
-    merged = await client.post("/api/gallery-management/galleries/9101/merge", json={"source_gallery_id": 9102})
-
-    assert merged.status_code == 409, merged.text
-    assert merged.json()["detail"] == "Wait for pages to finish processing before merging galleries"
-    still_there = (await db_session.execute(text("SELECT gallery_id FROM images WHERE id=9203"))).scalar_one()
-    assert still_there == 9102
-    deleted_at = (await db_session.execute(text("SELECT deleted_at FROM galleries WHERE id=9102"))).scalar_one()
-    assert deleted_at is None

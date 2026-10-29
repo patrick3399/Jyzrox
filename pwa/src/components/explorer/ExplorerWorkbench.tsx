@@ -11,6 +11,7 @@ import {
   Columns3,
   Database,
   Edit3,
+  ExternalLink,
   FileImage,
   Folder,
   FolderOpen,
@@ -19,9 +20,9 @@ import {
   HardDrive,
   Image as ImageIcon,
   Keyboard,
+  EyeOff,
   Layers3,
   List,
-  Loader2,
   Merge,
   MoreHorizontal,
   RefreshCw,
@@ -36,8 +37,9 @@ import { toast } from 'sonner'
 
 import { SkeletonGrid } from '@/components/Skeleton'
 import { AppImage } from '@/components/AppImage'
+import { useExplorerSelection } from '@/hooks/useExplorerSelection'
 import { useLongPress } from '@/hooks/useLongPress'
-import { useWorkbenchKeyboard } from '@/hooks/useWorkbenchKeyboard'
+import { useWorkbenchKeyboard, type WorkbenchGlobalShortcuts } from '@/hooks/useWorkbenchKeyboard'
 import { api } from '@/lib/api'
 import type {
   ExplorerGalleryItem,
@@ -47,10 +49,15 @@ import type {
 } from '@/lib/api'
 import { readerHref } from '@/lib/galleryRoutes'
 import { formatBytes, t } from '@/lib/i18n'
-import type { LibraryFile } from '@/lib/types'
+
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu'
+import { MergeDialog, MetadataDialog, Modal, OrganizeDialog } from './ExplorerDialogs'
+import { GalleryImagePane, type ImageInspectData } from './ImageGrid'
+import { ImageInspector } from './ImageInspector'
+import { SelectionMarquee } from './SelectionMarquee'
+import { galleryName, type ContentView, type QuerySelection } from './shared'
 
 type LayoutMode = 'xnview' | 'finder'
-type ContentView = 'grid' | 'list'
 type NodeKind = 'root' | 'source' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash' | 'physical' | 'gallery'
 
 interface WorkbenchNode {
@@ -60,12 +67,6 @@ interface WorkbenchNode {
   source?: string
   sourceId?: string
   label?: string
-}
-
-interface QuerySelection {
-  token: string
-  count: number
-  excluded: Set<number>
 }
 
 function useCoarsePointer(): boolean {
@@ -81,6 +82,16 @@ function useCoarsePointer(): boolean {
   return coarse
 }
 
+function cycleExplorerPane() {
+  const navigation = document.querySelector<HTMLElement>('[data-explorer-navigation]')
+  const content = document.querySelector<HTMLElement>('[data-explorer-item][tabindex="0"]')
+  const inspector = document.querySelector<HTMLElement>('[data-explorer-inspector]')
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active.closest('[data-explorer-navigation]')) content?.focus()
+  else if (active instanceof HTMLElement && active.closest('[data-explorer-item]')) inspector?.focus()
+  else (navigation?.querySelector<HTMLButtonElement>('button[aria-current="page"]') ?? navigation?.querySelector<HTMLButtonElement>('button'))?.focus()
+}
+
 function nodeFromParams(params: URLSearchParams): WorkbenchNode {
   const kind = (params.get('kind') || 'root') as NodeKind
   return {
@@ -93,15 +104,21 @@ function nodeFromParams(params: URLSearchParams): WorkbenchNode {
   }
 }
 
-function galleryQuery(node: WorkbenchNode, query: string, offset: number): ExplorerQuery | null {
+function galleryQuery(
+  node: WorkbenchNode,
+  query: string,
+  offset: number,
+  sort: NonNullable<ExplorerQuery['sort']>,
+  direction: NonNullable<ExplorerQuery['direction']>,
+): ExplorerQuery | null {
   const kind = node.kind
   if (kind !== 'source' && kind !== 'collection' && kind !== 'artist' && kind !== 'saved_search' && kind !== 'smart' && kind !== 'trash') return null
   return {
     node_kind: kind,
     node_id: node.id,
     query,
-    sort: 'added_at',
-    direction: 'desc',
+    sort,
+    direction,
     offset,
     limit: 60,
   }
@@ -109,10 +126,6 @@ function galleryQuery(node: WorkbenchNode, query: string, offset: number): Explo
 
 function itemKey(item: ExplorerGalleryItem | ExplorerPhysicalEntry): string {
   return 'id' in item ? `gallery:${item.id}` : `physical:${item.path}`
-}
-
-function galleryName(item: ExplorerGalleryItem): string {
-  return item.title || item.title_jpn || item.source_id
 }
 
 function NavButton({
@@ -245,6 +258,13 @@ function NavigationTree({
         count={roots.virtual.smart_views.duplicate_pairs}
         onClick={() => navigate({ kind: 'smart', id: 'duplicates', label: t('explorer.duplicates') })}
       />
+      <NavButton
+        active={node.kind === 'smart' && node.id === 'hidden_images'}
+        icon={EyeOff}
+        label={t('explorer.hiddenImages')}
+        count={roots.virtual.smart_views.hidden_images ?? 0}
+        onClick={() => navigate({ kind: 'smart', id: 'hidden_images', label: t('explorer.hiddenImages') })}
+      />
       <NavButton active={node.kind === 'trash'} icon={Trash2} label={t('explorer.trash')} onClick={() => navigate({ kind: 'trash', label: t('explorer.trash') })} />
       {roots.physical.length > 0 && (
         <p className="mb-1 mt-4 px-2 text-[11px] font-semibold uppercase tracking-wider text-vault-text-muted">{t('explorer.physicalLibraries')}</p>
@@ -313,7 +333,7 @@ function FinderColumns({
         {section === 'collections' && roots.virtual.collections.items.map((item) => <NavButton key={item.id} active={node.id === String(item.id)} icon={Layers3} label={item.name} count={item.gallery_count} onClick={() => navigate({ kind: 'collection', id: String(item.id), label: item.name })} />)}
         {section === 'artists' && roots.virtual.artists.items.map((item) => <NavButton key={item.id} active={node.id === item.id} icon={Users} label={item.name.replace(/^[^:]+:/, '')} count={item.gallery_count} onClick={() => navigate({ kind: 'artist', id: item.id, label: item.name })} />)}
         {section === 'searches' && roots.virtual.saved_searches.items.map((item) => <NavButton key={item.id} active={node.id === String(item.id)} icon={Search} label={item.name} onClick={() => navigate({ kind: 'saved_search', id: String(item.id), label: item.name })} />)}
-        {section === 'smart' && <><NavButton active={node.id === 'missing_metadata'} icon={AlertTriangle} label={t('explorer.missingMetadata')} onClick={() => navigate({ kind: 'smart', id: 'missing_metadata', label: t('explorer.missingMetadata') })} /><NavButton active={node.id === 'duplicates'} icon={Merge} label={t('explorer.duplicates')} onClick={() => navigate({ kind: 'smart', id: 'duplicates', label: t('explorer.duplicates') })} /><NavButton active={node.kind === 'trash'} icon={Trash2} label={t('explorer.trash')} onClick={() => navigate({ kind: 'trash', label: t('explorer.trash') })} /></>}
+        {section === 'smart' && <><NavButton active={node.id === 'missing_metadata'} icon={AlertTriangle} label={t('explorer.missingMetadata')} onClick={() => navigate({ kind: 'smart', id: 'missing_metadata', label: t('explorer.missingMetadata') })} /><NavButton active={node.id === 'duplicates'} icon={Merge} label={t('explorer.duplicates')} onClick={() => navigate({ kind: 'smart', id: 'duplicates', label: t('explorer.duplicates') })} /><NavButton active={node.id === 'hidden_images'} icon={EyeOff} label={t('explorer.hiddenImages')} count={roots.virtual.smart_views.hidden_images ?? 0} onClick={() => navigate({ kind: 'smart', id: 'hidden_images', label: t('explorer.hiddenImages') })} /><NavButton active={node.kind === 'trash'} icon={Trash2} label={t('explorer.trash')} onClick={() => navigate({ kind: 'trash', label: t('explorer.trash') })} /></>}
         {section === 'physical' && roots.physical.map((item) => <NavButton key={item.id} active={node.id === String(item.id)} icon={HardDrive} label={item.label} onClick={() => navigate({ kind: 'physical', id: String(item.id), label: item.label })} />)}
       </div>
     </nav>
@@ -331,8 +351,10 @@ function SelectableCard({
   tabIndex,
   focused,
   onSelect,
+  onToggle,
   onOpen,
   onFocus,
+  onContextMenuAt,
 }: {
   item: ExplorerGalleryItem | ExplorerPhysicalEntry
   selected: boolean
@@ -344,8 +366,10 @@ function SelectableCard({
   tabIndex: number
   focused: boolean
   onSelect: (event?: React.MouseEvent) => void
+  onToggle: () => void
   onOpen: () => void
   onFocus: () => void
+  onContextMenuAt: (x: number, y: number) => void
 }) {
   const isGallery = 'id' in item
   const isFolder = isGallery || item.kind === 'folder'
@@ -353,7 +377,21 @@ function SelectableCard({
   const size = isGallery ? item.logical_bytes : item.kind === 'folder' ? item.physical_bytes : item.size
   const preview = isGallery ? item.cover_thumb : previewUrl
   const isVideo = !isGallery && item.kind === 'media' && /\.(mp4|webm)$/i.test(item.name)
-  const longPress = useLongPress({ onLongPress: () => onSelect() })
+  const longPress = useLongPress({ onLongPress: () => onToggle() })
+  // Fine pointers get the context menu; coarse pointers keep long-press selection.
+  const interaction = {
+    ...longPress,
+    onContextMenu: coarse
+      ? longPress.onContextMenu
+      : (event: React.MouseEvent) => { event.preventDefault(); onContextMenuAt(event.clientX, event.clientY) },
+    onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (event.target !== event.currentTarget) return
+      if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+      event.preventDefault()
+      const rect = event.currentTarget.getBoundingClientRect()
+      onContextMenuAt(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    },
+  }
 
   const handleClick = (event: React.MouseEvent) => {
     if (coarse) {
@@ -376,13 +414,13 @@ function SelectableCard({
         onFocus={onFocus}
         onClick={handleClick}
         onDoubleClick={() => !coarse && onOpen()}
-        {...longPress}
+        {...interaction}
         className={`group grid grid-cols-[36px_minmax(0,1fr)_110px_100px] items-center gap-3 border-b border-vault-border px-3 py-2 text-sm outline-none ${selected ? 'bg-vault-accent/15 ring-1 ring-inset ring-vault-accent' : 'hover:bg-vault-card-hover'} ${focused ? 'ring-2 ring-inset ring-vault-accent' : ''}`}
       >
         <button
           type="button"
           aria-label={t('explorer.toggleSelection')}
-          onClick={(event) => { event.stopPropagation(); onSelect(event) }}
+          onClick={(event) => { event.stopPropagation(); onToggle() }}
           className="flex h-8 w-8 items-center justify-center rounded text-vault-text-muted hover:bg-vault-border"
         >
           {selected ? <Check size={18} className="text-vault-accent" /> : isFolder ? <Folder size={20} /> : <FileImage size={20} />}
@@ -404,7 +442,7 @@ function SelectableCard({
       onFocus={onFocus}
       onClick={handleClick}
       onDoubleClick={() => !coarse && onOpen()}
-      {...longPress}
+      {...interaction}
       className={`group relative overflow-hidden rounded-lg border bg-vault-card outline-none transition ${selected ? 'border-vault-accent ring-2 ring-vault-accent/40' : 'border-vault-border hover:border-vault-accent/50'} ${focused ? 'ring-2 ring-vault-accent ring-offset-2 ring-offset-vault-bg' : ''}`}
     >
       <div className="relative aspect-[4/3] bg-vault-bg-secondary">
@@ -420,7 +458,7 @@ function SelectableCard({
         <button
           type="button"
           aria-label={t('explorer.toggleSelection')}
-          onClick={(event) => { event.stopPropagation(); onSelect(event) }}
+          onClick={(event) => { event.stopPropagation(); onToggle() }}
           className={`absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${selected ? 'border-vault-accent bg-vault-accent text-white' : 'border-vault-border bg-vault-card/90 text-vault-text-muted opacity-100 lg:opacity-0 lg:group-hover:opacity-100'}`}
         >
           {selected ? <Check size={15} /> : isFolder ? <Folder size={15} /> : <MoreHorizontal size={15} />}
@@ -434,74 +472,6 @@ function SelectableCard({
         </div>
       </div>
     </div>
-  )
-}
-
-function GalleryFileItem({
-  file,
-  view,
-  coarse,
-  focused,
-  tabIndex,
-  elementRef,
-  onFocus,
-  onOpen,
-}: {
-  file: LibraryFile
-  view: ContentView
-  coarse: boolean
-  focused: boolean
-  tabIndex: number
-  elementRef: (element: HTMLButtonElement | null) => void
-  onFocus: () => void
-  onOpen: () => void
-}) {
-  const dimensions = file.width && file.height ? `${file.width} × ${file.height}` : null
-  const meta = [file.page_num != null ? `#${file.page_num}` : null, dimensions, file.file_size != null ? formatBytes(file.file_size) : null]
-    .filter(Boolean)
-    .join(' · ')
-
-  if (view === 'list') {
-    return (
-      <button
-        ref={elementRef}
-        data-explorer-item
-        data-explorer-file-view="list"
-        type="button"
-        tabIndex={tabIndex}
-        onFocus={onFocus}
-        onClick={coarse ? onOpen : undefined}
-        onDoubleClick={coarse ? undefined : onOpen}
-        className={`flex w-full items-center gap-3 border-b border-vault-border px-3 py-2 text-left outline-none transition-colors hover:bg-vault-card-hover ${focused ? 'bg-vault-accent/10 ring-2 ring-inset ring-vault-accent' : ''}`}
-      >
-        <span className="flex h-16 w-24 shrink-0 overflow-hidden rounded-md bg-vault-bg-secondary sm:h-20 sm:w-28">
-          {file.thumb_path ? <AppImage src={file.thumb_path} alt="" loading="lazy" className="h-full w-full object-contain" sizes="112px" /> : <span className="flex h-full w-full items-center justify-center text-vault-text-muted"><FileImage size={28} /></span>}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-vault-text" title={file.filename}>{file.filename}</span>
-          {meta && <span className="mt-1 block truncate text-xs text-vault-text-muted">{meta}</span>}
-          <span className="mt-1 block truncate text-[11px] uppercase tracking-wide text-vault-text-muted/80">{file.media_type}</span>
-        </span>
-        <ChevronRight size={18} className="shrink-0 text-vault-text-muted" aria-hidden="true" />
-      </button>
-    )
-  }
-
-  return (
-    <button
-      ref={elementRef}
-      data-explorer-item
-      data-explorer-file-view="grid"
-      type="button"
-      tabIndex={tabIndex}
-      onFocus={onFocus}
-      onClick={coarse ? onOpen : undefined}
-      onDoubleClick={coarse ? undefined : onOpen}
-      className={`overflow-hidden rounded-lg border border-vault-border bg-vault-card text-left outline-none ${focused ? 'ring-2 ring-vault-accent ring-offset-2 ring-offset-vault-bg' : ''}`}
-    >
-      {file.thumb_path ? <AppImage src={file.thumb_path} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" /> : <span className="flex aspect-[4/3] items-center justify-center"><FileImage size={40} /></span>}
-      <span className="block truncate p-2 text-xs text-vault-text" title={file.filename}>{file.filename}</span>
-    </button>
   )
 }
 
@@ -563,266 +533,6 @@ function Inspector({
   )
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
-  return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={title} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-t-xl border border-vault-border bg-vault-card shadow-2xl sm:rounded-xl" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="sticky top-0 flex items-center justify-between border-b border-vault-border bg-vault-card px-5 py-4">
-          <h2 className="font-semibold text-vault-text">{title}</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 text-vault-text-muted hover:bg-vault-card-hover"><X size={18} /></button>
-        </header>
-        {children}
-      </section>
-    </div>
-  )
-}
-
-const METADATA_FIELDS = ['title', 'title_jpn', 'category', 'language', 'artist_id', 'uploader', 'visibility'] as const
-
-function MetadataDialog({
-  selection,
-  querySelection,
-  onClose,
-  onDone,
-}: {
-  selection: ExplorerGalleryItem[]
-  querySelection: QuerySelection | null
-  onClose: () => void
-  onDone: () => void
-}) {
-  const [modes, setModes] = useState<Record<string, 'keep' | 'set' | 'clear'>>({})
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [saving, setSaving] = useState(false)
-  const commonValues = useMemo(
-    () => Object.fromEntries(
-      METADATA_FIELDS.map((field) => [
-        field,
-        selection.length > 0 && selection.every((item) => String(item[field] ?? '') === String(selection[0][field] ?? ''))
-          ? String(selection[0][field] ?? '')
-          : '',
-      ]),
-    ),
-    [selection],
-  )
-
-  const submit = async () => {
-    const fields: Record<string, { mode: 'set' | 'clear'; value?: string }> = {}
-    for (const field of METADATA_FIELDS) {
-      const mode = modes[field] || 'keep'
-      if (mode === 'set') fields[field] = { mode, value: values[field] ?? commonValues[field] }
-      if (mode === 'clear') fields[field] = { mode }
-    }
-    if (Object.keys(fields).length === 0) return
-    setSaving(true)
-    try {
-      await api.explorer.bulkMetadata({
-        ...(querySelection
-          ? { selection_token: querySelection.token, excluded_ids: [...querySelection.excluded] }
-          : { gallery_ids: selection.map((item) => item.id) }),
-        fields,
-        lock_fields: true,
-      })
-      toast.success(t('explorer.metadataUpdated'))
-      onDone()
-      onClose()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('common.errorOccurred'))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal title={t('explorer.editMetadata')} onClose={onClose}>
-      <div className="space-y-4 p-5">
-        <p className="text-sm text-vault-text-muted">{t('explorer.manualFieldsLocked')}</p>
-        {METADATA_FIELDS.map((field) => {
-          const common = commonValues[field]
-          return (
-            <div key={field} className="grid grid-cols-[110px_minmax(0,1fr)] gap-3">
-              <select
-                aria-label={`${field} mode`}
-                value={modes[field] || 'keep'}
-                onChange={(event) => setModes((current) => ({ ...current, [field]: event.target.value as 'keep' | 'set' | 'clear' }))}
-                className="rounded-md border border-vault-border bg-vault-bg px-2 py-2 text-sm text-vault-text"
-              >
-                <option value="keep">{t('explorer.keep')}</option>
-                <option value="set">{t('explorer.set')}</option>
-                {field !== 'visibility' && <option value="clear">{t('explorer.clear')}</option>}
-              </select>
-              {field === 'visibility' ? (
-                <select
-                  aria-label={field}
-                  disabled={(modes[field] || 'keep') !== 'set'}
-                  value={values[field] || common || 'public'}
-                  onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
-                  className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text disabled:opacity-50"
-                >
-                  <option value="public">{t('explorer.visibilityPublic')}</option><option value="private">{t('explorer.visibilityPrivate')}</option>
-                </select>
-              ) : (
-                <input
-                  aria-label={field}
-                  disabled={(modes[field] || 'keep') !== 'set'}
-                  defaultValue={common}
-                  placeholder={common ? undefined : t('explorer.mixedValues')}
-                  onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
-                  className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text disabled:opacity-50"
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
-      <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
-        <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button type="button" disabled={saving} onClick={submit} className="rounded-md bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? t('common.loading') : t('common.save')}</button>
-      </footer>
-    </Modal>
-  )
-}
-
-function MergeDialog({ selection, onClose, onDone }: { selection: ExplorerGalleryItem[]; onClose: () => void; onDone: () => void }) {
-  const [targetId, setTargetId] = useState(selection[0]?.id ?? 0)
-  const [preview, setPreview] = useState<Awaited<ReturnType<typeof api.explorer.mergePreview>> | null>(null)
-  const [scalarSources, setScalarSources] = useState<Record<string, number>>({})
-  const [working, setWorking] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    setPreview(null)
-    api.explorer.mergePreview({ gallery_ids: selection.map((item) => item.id), target_id: targetId })
-      .then((value) => {
-        if (!active) return
-        setPreview(value)
-        setScalarSources(Object.fromEntries(Object.keys(value.scalar_conflicts).map((field) => [field, targetId])))
-      })
-      .catch((error) => toast.error(error instanceof Error ? error.message : t('common.errorOccurred')))
-    return () => { active = false }
-  }, [selection, targetId])
-
-  const merge = async () => {
-    setWorking(true)
-    try {
-      await api.explorer.merge({ gallery_ids: selection.map((item) => item.id), target_id: targetId, scalar_sources: scalarSources })
-      toast.success(t('explorer.mergeComplete'))
-      onDone()
-      onClose()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('common.errorOccurred'))
-    } finally {
-      setWorking(false)
-    }
-  }
-
-  return (
-    <Modal title={t('explorer.mergeGalleries')} onClose={onClose}>
-      <div className="space-y-5 p-5">
-        <label className="block text-sm text-vault-text">{t('explorer.mergeTarget')}
-          <select value={targetId} onChange={(event) => setTargetId(Number(event.target.value))} className="mt-2 w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2">
-            {selection.map((item) => <option key={item.id} value={item.id}>{galleryName(item)}</option>)}
-          </select>
-        </label>
-        {preview ? (
-          <>
-            <div className="grid grid-cols-3 gap-3 rounded-lg border border-vault-border p-4 text-center">
-              <div><p className="text-xl font-semibold text-vault-text">{preview.images.add}</p><p className="text-xs text-vault-text-muted">{t('explorer.imagesAdded')}</p></div>
-              <div><p className="text-xl font-semibold text-vault-text">{preview.images.exact_sha_skipped}</p><p className="text-xs text-vault-text-muted">{t('explorer.exactSkipped')}</p></div>
-              <div><p className="text-xl font-semibold text-vault-text">{preview.images.similar_kept_for_review}</p><p className="text-xs text-vault-text-muted">{t('explorer.similarReview')}</p></div>
-            </div>
-            {Object.entries(preview.scalar_conflicts).length > 0 && (
-              <div className="space-y-3">
-                <p className="text-sm font-medium text-vault-text">{t('explorer.resolveConflicts')}</p>
-                {Object.entries(preview.scalar_conflicts).map(([field, choices]) => (
-                  <label key={field} className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-3 text-sm text-vault-text-muted">
-                    <span>{field}</span>
-                    <select value={scalarSources[field] || targetId} onChange={(event) => setScalarSources((current) => ({ ...current, [field]: Number(event.target.value) }))} className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-vault-text">
-                      {choices.map((choice) => <option key={choice.gallery_id} value={choice.gallery_id}>{String(choice.value ?? '—')}</option>)}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            )}
-          </>
-        ) : <div className="flex justify-center p-6"><Loader2 className="animate-spin" /></div>}
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
-          {t('explorer.merge404Warning')}
-        </div>
-      </div>
-      <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
-        <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button type="button" disabled={!preview || working} onClick={merge} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{working ? t('common.loading') : t('explorer.mergeGalleries')}</button>
-      </footer>
-    </Modal>
-  )
-}
-
-function OrganizeDialog({
-  kind,
-  selectionBody,
-  onClose,
-  onDone,
-}: {
-  kind: 'tags' | 'collections'
-  selectionBody: { gallery_ids?: number[]; selection_token?: string; excluded_ids?: number[] }
-  onClose: () => void
-  onDone: () => void
-}) {
-  const [operation, setOperation] = useState<'add' | 'remove'>('add')
-  const [tagsValue, setTagsValue] = useState('')
-  const [collectionId, setCollectionId] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
-  const { data: collectionData } = useSWR(kind === 'collections' ? 'explorer-action-collections' : null, api.collections.list)
-
-  const submit = async () => {
-    setSaving(true)
-    try {
-      if (kind === 'tags') {
-        const tags = tagsValue.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean)
-        await api.explorer.bulkAction({ ...selectionBody, action: operation === 'add' ? 'add_tags' : 'remove_tags', tags })
-      } else {
-        if (collectionId === null) return
-        await api.explorer.bulkAction({ ...selectionBody, action: operation === 'add' ? 'add_collection' : 'remove_collection', collection_id: collectionId })
-      }
-      toast.success(t('explorer.bulkActionComplete'))
-      onDone()
-      onClose()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('common.errorOccurred'))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal title={kind === 'tags' ? t('explorer.manageTags') : t('explorer.manageCollections')} onClose={onClose}>
-      <div className="space-y-4 p-5">
-        <div className="flex rounded-md border border-vault-border p-1">
-          <button type="button" onClick={() => setOperation('add')} className={`flex-1 rounded px-3 py-2 text-sm ${operation === 'add' ? 'bg-vault-accent text-white' : 'text-vault-text-muted'}`}>{t('explorer.add')}</button>
-          <button type="button" onClick={() => setOperation('remove')} className={`flex-1 rounded px-3 py-2 text-sm ${operation === 'remove' ? 'bg-vault-accent text-white' : 'text-vault-text-muted'}`}>{t('explorer.remove')}</button>
-        </div>
-        {kind === 'tags' ? (
-          <textarea value={tagsValue} onChange={(event) => setTagsValue(event.target.value)} placeholder="artist:name, language:english" rows={5} className="w-full rounded-md border border-vault-border bg-vault-bg p-3 text-sm text-vault-text" />
-        ) : (
-          <select value={collectionId ?? ''} onChange={(event) => setCollectionId(Number(event.target.value))} className="w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text">
-            <option value="">{t('explorer.chooseCollection')}</option>
-            {(collectionData?.collections || []).map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
-          </select>
-        )}
-      </div>
-      <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
-        <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button type="button" disabled={saving} onClick={submit} className="rounded-md bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? t('common.loading') : t('common.save')}</button>
-      </footer>
-    </Modal>
-  )
-}
-
 export function ExplorerWorkbench() {
   const router = useRouter()
   const params = useSearchParams()
@@ -834,17 +544,19 @@ export function ExplorerWorkbench() {
   const [query, setQuery] = useState(params.get('q') || '')
   const [debouncedQuery, setDebouncedQuery] = useState(query)
   const [offset, setOffset] = useState(Number(params.get('offset') || 0))
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [sortField, setSortField] = useState<NonNullable<ExplorerQuery['sort']>>('added_at')
+  const [sortDirection, setSortDirection] = useState<NonNullable<ExplorerQuery['direction']>>('desc')
   const [querySelection, setQuerySelection] = useState<QuerySelection | null>(null)
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [organizeOpen, setOrganizeOpen] = useState<'tags' | 'collections' | null>(null)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
-  const anchorRef = useRef<number | null>(null)
+  const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null)
+  const [imageInspect, setImageInspect] = useState<ImageInspectData | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const contentGridRef = useRef<HTMLDivElement | null>(null)
+  const contentScrollRef = useRef<HTMLDivElement | null>(null)
   const [contentColumnCount, setContentColumnCount] = useState(1)
-  const selectionModeActive = selectedKeys.size > 0 || querySelection !== null
 
   useEffect(() => {
     const device = coarse ? 'mobile' : 'desktop'
@@ -872,32 +584,8 @@ export function ExplorerWorkbench() {
     router.replace(`/explorer${next.size ? `?${next}` : ''}`)
   }, [debouncedQuery, offset, params, router])
 
-  useEffect(() => {
-    if (!coarse || !selectionModeActive) return
-    window.history.pushState({ explorerSelection: true }, '')
-    const clear = () => { setSelectedKeys(new Set()); setQuerySelection(null) }
-    window.addEventListener('popstate', clear, { once: true })
-    return () => window.removeEventListener('popstate', clear)
-  }, [coarse, selectionModeActive])
-
-  const navigate = useCallback((next: WorkbenchNode) => {
-    const nextParams = new URLSearchParams()
-    nextParams.set('view', view)
-    if (next.kind !== 'root') nextParams.set('kind', next.kind)
-    if (next.id) nextParams.set('id', next.id)
-    if (next.path) nextParams.set('path', next.path)
-    if (next.source) nextParams.set('source', next.source)
-    if (next.sourceId) nextParams.set('sourceId', next.sourceId)
-    if (next.label) nextParams.set('label', next.label)
-    router.replace(`/explorer${nextParams.size ? `?${nextParams}` : ''}`)
-    setSelectedKeys(new Set())
-    setQuerySelection(null)
-    setOffset(0)
-    setQuery('')
-  }, [router, view])
-
   const { data: roots, error: rootsError, isLoading: rootsLoading, mutate: mutateRoots } = useSWR('explorer-roots', api.explorer.roots)
-  const querySpec = galleryQuery(node, debouncedQuery, offset)
+  const querySpec = galleryQuery(node, debouncedQuery, offset, sortField, sortDirection)
   const { data: galleries, error: galleryError, isLoading: galleryLoading, mutate: mutateGalleries } = useSWR(
     querySpec ? ['explorer-query', JSON.stringify(querySpec)] : null,
     () => api.explorer.query(querySpec ?? {}),
@@ -909,10 +597,6 @@ export function ExplorerWorkbench() {
   )
   const gallerySource = node.source ?? ''
   const gallerySourceId = node.sourceId ?? ''
-  const { data: galleryFiles, error: filesError, isLoading: filesLoading } = useSWR(
-    node.kind === 'gallery' && gallerySource && gallerySourceId ? ['explorer-gallery-files', gallerySource, gallerySourceId] : null,
-    () => api.library.listGalleryFiles(gallerySource, gallerySourceId),
-  )
 
   const rootItems = useMemo(() => {
     if (!roots || node.kind !== 'root') return []
@@ -953,6 +637,42 @@ export function ExplorerWorkbench() {
     return galleries?.items || []
   }, [node.kind, rootItems, physical?.entries, galleries?.items])
 
+  const contentKeys = useMemo(() => contentItems.map(itemKey), [contentItems])
+  const selection = useExplorerSelection({
+    keys: contentKeys,
+    scrollRef: contentScrollRef,
+    marqueeEnabled: !coarse,
+    toggleOnClick: coarse,
+    onMarqueeStart: () => setQuerySelection(null),
+    onBackgroundClick: () => setQuerySelection(null),
+  })
+  const { selectedKeys, clear: clearSelection } = selection
+  const selectionModeActive = selectedKeys.size > 0 || querySelection !== null
+
+  useEffect(() => {
+    if (!coarse || !selectionModeActive) return
+    window.history.pushState({ explorerSelection: true }, '')
+    const clear = () => { clearSelection(); setQuerySelection(null) }
+    window.addEventListener('popstate', clear, { once: true })
+    return () => window.removeEventListener('popstate', clear)
+  }, [coarse, selectionModeActive, clearSelection])
+
+  const navigate = useCallback((next: WorkbenchNode) => {
+    const nextParams = new URLSearchParams()
+    nextParams.set('view', view)
+    if (next.kind !== 'root') nextParams.set('kind', next.kind)
+    if (next.id) nextParams.set('id', next.id)
+    if (next.path) nextParams.set('path', next.path)
+    if (next.source) nextParams.set('source', next.source)
+    if (next.sourceId) nextParams.set('sourceId', next.sourceId)
+    if (next.label) nextParams.set('label', next.label)
+    router.replace(`/explorer${nextParams.size ? `?${nextParams}` : ''}`)
+    clearSelection()
+    setQuerySelection(null)
+    setOffset(0)
+    setQuery('')
+  }, [router, view, clearSelection])
+
   const selectedGalleries = useMemo(
     () => contentItems.filter((item): item is ExplorerGalleryItem => 'id' in item && item.id > 0 && selectedKeys.has(itemKey(item))),
     [contentItems, selectedKeys],
@@ -970,37 +690,44 @@ export function ExplorerWorkbench() {
     return selectedKeys.has(itemKey(item))
   }
 
+  const toggleQueryExclusion = (galleryId: number) => {
+    setQuerySelection((current) => {
+      if (!current) return current
+      const excluded = new Set(current.excluded)
+      if (excluded.has(galleryId)) excluded.delete(galleryId)
+      else excluded.add(galleryId)
+      return { ...current, excluded }
+    })
+  }
+
   const selectItem = (item: ExplorerGalleryItem | ExplorerPhysicalEntry, index: number, event?: React.MouseEvent) => {
     focusIndex(index)
-    const key = itemKey(item)
     if (querySelection && 'id' in item && item.id > 0) {
-      setQuerySelection((current) => {
-        if (!current) return current
-        const excluded = new Set(current.excluded)
-        if (excluded.has(item.id)) excluded.delete(item.id)
-        else excluded.add(item.id)
-        return { ...current, excluded }
-      })
+      toggleQueryExclusion(item.id)
       return
     }
     setQuerySelection(null)
-    setSelectedKeys((current) => {
-      const next = new Set(current)
-      if (event?.shiftKey && anchorRef.current !== null) {
-        const start = Math.min(anchorRef.current, index)
-        const end = Math.max(anchorRef.current, index)
-        for (let position = start; position <= end; position += 1) next.add(itemKey(contentItems[position]))
-      } else if (event?.ctrlKey || event?.metaKey || coarse || current.has(key)) {
-        if (next.has(key)) next.delete(key)
-        else next.add(key)
-        anchorRef.current = index
-      } else {
-        next.clear()
-        next.add(key)
-        anchorRef.current = index
-      }
-      return next
-    })
+    selection.onItemClick(index, event)
+  }
+
+  const toggleItem = (item: ExplorerGalleryItem | ExplorerPhysicalEntry, index: number) => {
+    focusIndex(index)
+    if (querySelection && 'id' in item && item.id > 0) {
+      toggleQueryExclusion(item.id)
+      return
+    }
+    setQuerySelection(null)
+    selection.toggle(index)
+  }
+
+  // Right-click on an unselected item selects only it, like Windows Explorer.
+  const openContextMenu = (item: ExplorerGalleryItem | ExplorerPhysicalEntry, index: number, x: number, y: number) => {
+    focusIndex(index)
+    if (!isItemSelected(item)) {
+      setQuerySelection(null)
+      selection.selectOnly(index)
+    }
+    setMenuPoint({ x, y })
   }
 
   const openItem = (item: ExplorerGalleryItem | ExplorerPhysicalEntry) => {
@@ -1023,7 +750,7 @@ export function ExplorerWorkbench() {
     try {
       const result = await api.explorer.createSelection(querySpec)
       setQuerySelection({ token: result.selection_token, count: result.count, excluded: new Set() })
-      setSelectedKeys(new Set())
+      clearSelection()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.errorOccurred'))
     }
@@ -1038,7 +765,7 @@ export function ExplorerWorkbench() {
           : { gallery_ids: selectedGalleries.map((item) => item.id) },
       )
       toast.success(t('explorer.galleriesDeleted', { count: result.affected }))
-      setSelectedKeys(new Set())
+      clearSelection()
       setQuerySelection(null)
       await Promise.all([mutateGalleries(), mutateRoots()])
     } catch (error) {
@@ -1069,7 +796,7 @@ export function ExplorerWorkbench() {
     try {
       await api.explorer.importPhysicalFolder(physicalId, folder.path)
       toast.success(t('explorer.importQueued'))
-      setSelectedKeys(new Set())
+      clearSelection()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.errorOccurred'))
     }
@@ -1103,7 +830,7 @@ export function ExplorerWorkbench() {
     const observer = new ResizeObserver(update)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [contentItems.length, galleryFiles?.files.length, layout, view])
+  }, [contentItems.length, layout, view])
 
   const goBack = useCallback(() => {
     if (node.kind === 'root') return
@@ -1118,77 +845,10 @@ export function ExplorerWorkbench() {
     navigate({ kind: 'root' })
   }, [navigate, node])
 
-  const keyboardItemCount = node.kind === 'gallery' ? galleryFiles?.files.length ?? 0 : contentItems.length
   const keyboardEnabled = !coarse && !metadataOpen && !mergeOpen && organizeOpen === null && !shortcutsOpen
-  const { focusedIndex, focusIndex, registerElement } = useWorkbenchKeyboard({
-    itemCount: keyboardItemCount,
-    columnCount: contentColumnCount,
-    listMode: view === 'list',
-    enabled: keyboardEnabled,
-    onOpen: (index) => {
-      if (node.kind === 'gallery') {
-        const file = galleryFiles?.files[index]
-        if (file) router.push(readerHref(gallerySource, gallerySourceId, file.page_num || undefined))
-        return
-      }
-      const item = contentItems[index]
-      if (item) openItem(item)
-    },
-    onToggleSelection: (index) => {
-      if (node.kind === 'gallery') return
-      const item = contentItems[index]
-      if (!item) return
-      if (querySelection && 'id' in item && item.id > 0) {
-        setQuerySelection((current) => {
-          if (!current) return current
-          const excluded = new Set(current.excluded)
-          if (excluded.has(item.id)) excluded.delete(item.id)
-          else excluded.add(item.id)
-          return { ...current, excluded }
-        })
-        return
-      }
-      setQuerySelection(null)
-      setSelectedKeys((current) => {
-        const next = new Set(current)
-        const key = itemKey(item)
-        if (next.has(key)) next.delete(key)
-        else next.add(key)
-        return next
-      })
-      anchorRef.current = index
-    },
-    onExtendSelection: (fromIndex, toIndex) => {
-      if (node.kind === 'gallery') return
-      const anchor = anchorRef.current ?? fromIndex
-      anchorRef.current = anchor
-      const start = Math.min(anchor, toIndex)
-      const end = Math.max(anchor, toIndex)
-      const next = new Set<string>()
-      for (let position = start; position <= end; position += 1) {
-        const item = contentItems[position]
-        if (item) next.add(itemKey(item))
-      }
-      setQuerySelection(null)
-      setSelectedKeys(next)
-    },
-    onSelectAll: () => {
-      if (node.kind === 'gallery') return
-      if (querySpec) void selectAllQuery()
-      else setSelectedKeys(new Set(contentItems.map(itemKey)))
-    },
-    onClearSelection: () => {
-      if (!selectionModeActive) return false
-      setSelectedKeys(new Set())
-      setQuerySelection(null)
-      anchorRef.current = null
-      return true
-    },
+  const shortcuts: WorkbenchGlobalShortcuts = {
     onBack: goBack,
     onFocusSearch: () => searchInputRef.current?.focus(),
-    onDelete: () => {
-      if (querySelection || selectedGalleries.length > 0) void deleteSelection()
-    },
     onEditMetadata: () => {
       if (querySelection || selectedGalleries.length > 0) setMetadataOpen(true)
     },
@@ -1197,14 +857,39 @@ export function ExplorerWorkbench() {
     onGridView: () => changeView('grid'),
     onListView: () => changeView('list'),
     onShowShortcuts: () => setShortcutsOpen(true),
-    onCyclePane: () => {
-      const navigation = document.querySelector<HTMLElement>('[data-explorer-navigation]')
-      const content = document.querySelector<HTMLElement>('[data-explorer-item][tabindex="0"]')
-      const inspector = document.querySelector<HTMLElement>('[data-explorer-inspector]')
-      const active = document.activeElement
-      if (active instanceof HTMLElement && active.closest('[data-explorer-navigation]')) content?.focus()
-      else if (active instanceof HTMLElement && active.closest('[data-explorer-item]')) inspector?.focus()
-      else (navigation?.querySelector<HTMLButtonElement>('button[aria-current="page"]') ?? navigation?.querySelector<HTMLButtonElement>('button'))?.focus()
+    onCyclePane: cycleExplorerPane,
+  }
+  const { focusedIndex, focusIndex, registerElement } = useWorkbenchKeyboard({
+    ...shortcuts,
+    itemCount: contentItems.length,
+    columnCount: contentColumnCount,
+    listMode: view === 'list',
+    // The Gallery node's image pane runs its own keyboard handler.
+    enabled: keyboardEnabled && node.kind !== 'gallery' && menuPoint === null,
+    onOpen: (index) => {
+      const item = contentItems[index]
+      if (item) openItem(item)
+    },
+    onToggleSelection: (index) => {
+      const item = contentItems[index]
+      if (item) toggleItem(item, index)
+    },
+    onExtendSelection: (fromIndex, toIndex) => {
+      setQuerySelection(null)
+      selection.extendTo(fromIndex, toIndex)
+    },
+    onSelectAll: () => {
+      if (querySpec) void selectAllQuery()
+      else selection.selectAll()
+    },
+    onClearSelection: () => {
+      if (!selectionModeActive) return false
+      clearSelection()
+      setQuerySelection(null)
+      return true
+    },
+    onDelete: () => {
+      if (querySelection || selectedGalleries.length > 0) void deleteSelection()
     },
   })
 
@@ -1212,11 +897,10 @@ export function ExplorerWorkbench() {
 
   useEffect(() => {
     focusIndex(null)
-    anchorRef.current = null
   }, [focusIndex, node.id, node.kind, node.path])
 
-  const error = rootsError || galleryError || physicalError || filesError
-  const loading = rootsLoading || galleryLoading || physicalLoading || filesLoading
+  const error = rootsError || galleryError || physicalError
+  const loading = rootsLoading || galleryLoading || physicalLoading
   const refresh = () => Promise.all([mutateRoots(), mutateGalleries(), mutatePhysical()])
 
   if (error) {
@@ -1229,6 +913,25 @@ export function ExplorerWorkbench() {
   }
   if (!roots && loading) return <div className="p-6"><SkeletonGrid /></div>
   if (!roots) return null
+
+  const hasGallerySelection = Boolean(querySelection) || selectedGalleries.length > 0
+  const singleSelected = !querySelection && selectedKeys.size === 1 ? selectedItem : undefined
+  const importableFolder = selectedPhysicalFolders.length === 1 && !selectedPhysicalFolders[0].gallery_id
+  const menuItems: ContextMenuEntry[] = [
+    { id: 'open', label: t('explorer.open'), icon: ExternalLink, disabled: !singleSelected, onSelect: () => { if (singleSelected) openItem(singleSelected) } },
+  ]
+  if (importableFolder) menuItems.push({ id: 'import', label: t('explorer.importFolder'), icon: Archive, onSelect: () => void importSelectedFolder() })
+  if (hasGallerySelection) {
+    menuItems.push(
+      { id: 'metadata', label: t('explorer.editMetadata'), icon: Edit3, separator: true, onSelect: () => setMetadataOpen(true) },
+      { id: 'tags', label: t('explorer.tags'), icon: Tags, onSelect: () => setOrganizeOpen('tags') },
+      { id: 'collections', label: t('explorer.collections'), icon: Layers3, onSelect: () => setOrganizeOpen('collections') },
+      { id: 'favorite', label: t('explorer.favorite'), icon: Star, onSelect: () => void runQuickAction('favorite') },
+      { id: 'read-later', label: t('explorer.readLater'), icon: Archive, onSelect: () => void runQuickAction('add_read_later') },
+      { id: 'merge', label: t('explorer.merge'), icon: Merge, disabled: Boolean(querySelection) || selectedGalleries.length < 2 || selectedGalleries.length > 50, onSelect: () => setMergeOpen(true) },
+      { id: 'delete', label: t('explorer.deleteFiles'), icon: Trash2, danger: true, separator: true, onSelect: () => void deleteSelection() },
+    )
+  }
 
   const currentLabel = node.kind === 'root' ? t('explorer.library') : node.label || node.id || t('explorer.library')
   const finderCrumbs: Array<{ label: string; target: WorkbenchNode }> = [
@@ -1281,7 +984,7 @@ export function ExplorerWorkbench() {
           <optgroup label={t('explorer.collections')}>{roots.virtual.collections.items.map((item) => <option key={item.id} value={`collection:${item.id}`}>{item.name}</option>)}</optgroup>
           <optgroup label={t('explorer.artists')}>{roots.virtual.artists.items.map((item) => <option key={item.id} value={`artist:${item.id}`}>{item.name.replace(/^[^:]+:/, '')}</option>)}</optgroup>
           <optgroup label={t('explorer.savedSearches')}>{roots.virtual.saved_searches.items.map((item) => <option key={item.id} value={`saved_search:${item.id}`}>{item.name}</option>)}</optgroup>
-          <optgroup label={t('explorer.smartViews')}><option value="smart:missing_metadata">{t('explorer.missingMetadata')}</option><option value="smart:duplicates">{t('explorer.duplicates')}</option><option value="trash:">{t('explorer.trash')}</option></optgroup>
+          <optgroup label={t('explorer.smartViews')}><option value="smart:missing_metadata">{t('explorer.missingMetadata')}</option><option value="smart:duplicates">{t('explorer.duplicates')}</option><option value="smart:hidden_images">{t('explorer.hiddenImages')}</option><option value="trash:">{t('explorer.trash')}</option></optgroup>
           {roots.physical.length > 0 && <optgroup label={t('explorer.physicalLibraries')}>{roots.physical.map((item) => <option key={item.id} value={`physical:${item.id}`}>{item.label}</option>)}</optgroup>}
         </select>
       </header>
@@ -1301,7 +1004,20 @@ export function ExplorerWorkbench() {
             {node.kind !== 'root' && <button type="button" onClick={goBack} className="text-vault-accent">{t('explorer.backToRoot')}</button>}
             <FolderOpen size={16} className="text-vault-text-muted" />
             <span className="truncate font-medium text-vault-text">{currentLabel}{node.path ? ` / ${node.path}` : ''}</span>
-            <span className="ml-auto text-xs text-vault-text-muted">{node.kind === 'physical' ? physical?.total ?? 0 : node.kind === 'root' ? rootItems.length : galleries?.total ?? galleryFiles?.total_files ?? 0}</span>
+            <span className="ml-auto text-xs text-vault-text-muted">{node.kind === 'physical' ? physical?.total ?? 0 : node.kind === 'root' ? rootItems.length : galleries?.total ?? imageInspect?.summary.active_count ?? 0}</span>
+            {querySpec && (
+              <>
+                <select aria-label={t('explorer.sortBy')} value={sortField} onChange={(event) => { setSortField(event.target.value as NonNullable<ExplorerQuery['sort']>); setOffset(0) }} className="rounded-md border border-vault-border bg-vault-bg px-2 py-1 text-xs text-vault-text">
+                  <option value="added_at">{t('explorer.sortAdded')}</option>
+                  <option value="posted_at">{t('explorer.sortPosted')}</option>
+                  <option value="title">{t('explorer.sortTitle')}</option>
+                  <option value="rating">{t('explorer.sortRating')}</option>
+                  <option value="pages">{t('explorer.sortPages')}</option>
+                  <option value="size">{t('explorer.sortSize')}</option>
+                </select>
+                <button type="button" aria-label={t('explorer.sortDirection')} title={sortDirection === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={() => { setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc')); setOffset(0) }} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{sortDirection === 'asc' ? '↑' : '↓'}</button>
+              </>
+            )}
             {querySpec && (galleries?.total || 0) > 0 && (
               <button type="button" onClick={selectAllQuery} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{t('explorer.selectAllResults')}</button>
             )}
@@ -1321,31 +1037,29 @@ export function ExplorerWorkbench() {
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto pb-24 lg:pb-4">
-            {node.kind === 'gallery' ? (
-              <div ref={contentGridRef} className={view === 'grid' ? 'grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 xl:grid-cols-5' : 'p-2'}>
-                {(galleryFiles?.files || []).map((file: LibraryFile, index: number) => (
-                  <GalleryFileItem
-                    key={file.filename}
-                    file={file}
-                    view={view}
-                    coarse={coarse}
-                    focused={focusedIndex === index}
-                    tabIndex={focusedIndex === null ? (index === 0 ? 0 : -1) : (focusedIndex === index ? 0 : -1)}
-                    elementRef={(element) => registerElement(index, element)}
-                    onFocus={() => focusIndex(index)}
-                    onOpen={() => router.push(readerHref(gallerySource, gallerySourceId, file.page_num || undefined))}
-                  />
-                ))}
-              </div>
-            ) : loading ? <div className="p-4"><SkeletonGrid /></div> : contentItems.length === 0 ? (
+          {node.kind === 'gallery' ? (
+            <GalleryImagePane
+              galleryId={Number(node.id) || 0}
+              source={gallerySource}
+              sourceId={gallerySourceId}
+              view={view}
+              coarse={coarse}
+              keyboardEnabled={keyboardEnabled}
+              shortcuts={shortcuts}
+              onOpenImage={(image) => router.push(readerHref(gallerySource, gallerySourceId, image.page_num || undefined))}
+              onChanged={() => void mutateRoots()}
+              onInspect={setImageInspect}
+            />
+          ) : (
+          <div ref={contentScrollRef} onPointerDown={selection.onContainerPointerDown} className="relative min-h-0 flex-1 select-none overflow-y-auto pb-24 lg:pb-4">
+            {loading ? <div className="p-4"><SkeletonGrid /></div> : contentItems.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-vault-text-muted"><Folder size={42} strokeWidth={1.2} /><p>{t('explorer.emptyDir')}</p></div>
             ) : view === 'grid' ? (
               <div ref={contentGridRef} className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                {contentItems.map((item, index) => <SelectableCard key={itemKey(item)} item={item} selected={isItemSelected(item)} selectionMode={selectedKeys.size > 0 || Boolean(querySelection)} coarse={coarse} view={view} previewUrl={'id' in item || item.kind !== 'media' ? undefined : api.explorer.physicalPreviewUrl(physicalId, item.path)} elementRef={(element) => registerElement(index, element)} tabIndex={focusedIndex === null ? (index === 0 ? 0 : -1) : (focusedIndex === index ? 0 : -1)} focused={focusedIndex === index} onFocus={() => focusIndex(index)} onSelect={(event) => selectItem(item, index, event)} onOpen={() => openItem(item)} />)}
+                {contentItems.map((item, index) => <SelectableCard key={itemKey(item)} item={item} selected={isItemSelected(item)} selectionMode={selectedKeys.size > 0 || Boolean(querySelection)} coarse={coarse} view={view} previewUrl={'id' in item || item.kind !== 'media' ? undefined : api.explorer.physicalPreviewUrl(physicalId, item.path)} elementRef={(element) => { registerElement(index, element); selection.registerItem(itemKey(item), element) }} tabIndex={focusedIndex === null ? (index === 0 ? 0 : -1) : (focusedIndex === index ? 0 : -1)} focused={focusedIndex === index} onFocus={() => focusIndex(index)} onSelect={(event) => selectItem(item, index, event)} onToggle={() => toggleItem(item, index)} onOpen={() => openItem(item)} onContextMenuAt={(x, y) => openContextMenu(item, index, x, y)} />)}
               </div>
             ) : (
-              <div ref={contentGridRef}>{contentItems.map((item, index) => <SelectableCard key={itemKey(item)} item={item} selected={isItemSelected(item)} selectionMode={selectedKeys.size > 0 || Boolean(querySelection)} coarse={coarse} view={view} previewUrl={'id' in item || item.kind !== 'media' ? undefined : api.explorer.physicalPreviewUrl(physicalId, item.path)} elementRef={(element) => registerElement(index, element)} tabIndex={focusedIndex === null ? (index === 0 ? 0 : -1) : (focusedIndex === index ? 0 : -1)} focused={focusedIndex === index} onFocus={() => focusIndex(index)} onSelect={(event) => selectItem(item, index, event)} onOpen={() => openItem(item)} />)}</div>
+              <div ref={contentGridRef}>{contentItems.map((item, index) => <SelectableCard key={itemKey(item)} item={item} selected={isItemSelected(item)} selectionMode={selectedKeys.size > 0 || Boolean(querySelection)} coarse={coarse} view={view} previewUrl={'id' in item || item.kind !== 'media' ? undefined : api.explorer.physicalPreviewUrl(physicalId, item.path)} elementRef={(element) => { registerElement(index, element); selection.registerItem(itemKey(item), element) }} tabIndex={focusedIndex === null ? (index === 0 ? 0 : -1) : (focusedIndex === index ? 0 : -1)} focused={focusedIndex === index} onFocus={() => focusIndex(index)} onSelect={(event) => selectItem(item, index, event)} onToggle={() => toggleItem(item, index)} onOpen={() => openItem(item)} onContextMenuAt={(x, y) => openContextMenu(item, index, x, y)} />)}</div>
             )}
             {querySpec && galleries && galleries.total > galleries.limit && (
               <div className="flex items-center justify-center gap-3 p-4">
@@ -1354,14 +1068,16 @@ export function ExplorerWorkbench() {
                 <button type="button" disabled={offset + galleries.limit >= galleries.total} onClick={() => setOffset(offset + galleries.limit)} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.next')}</button>
               </div>
             )}
+            <SelectionMarquee rect={selection.marquee} />
           </div>
+          )}
         </section>
-        <div className="hidden min-h-0 lg:block"><Inspector item={activeItem} physicalRoot={physicalRoot} /></div>
+        <div className="hidden min-h-0 lg:block">{node.kind === 'gallery' ? <ImageInspector data={imageInspect} /> : <Inspector item={activeItem} physicalRoot={physicalRoot} />}</div>
       </div>
 
       {effectiveSelectedCount > 0 && (
         <div className="fixed inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 flex max-w-[calc(100vw-1rem)] items-center gap-1 overflow-x-auto rounded-xl border border-vault-border bg-vault-card p-2 shadow-2xl lg:inset-x-auto lg:bottom-5 lg:left-1/2 lg:-translate-x-1/2">
-          <button type="button" onClick={() => { setSelectedKeys(new Set()); setQuerySelection(null) }} className="rounded p-2 text-vault-text-muted"><X size={18} /></button>
+          <button type="button" onClick={() => { clearSelection(); setQuerySelection(null) }} className="rounded p-2 text-vault-text-muted"><X size={18} /></button>
           <span className="mr-2 whitespace-nowrap text-sm font-medium text-vault-text">{t('explorer.selectedCount', { count: effectiveSelectedCount })}</span>
           {selectedPhysicalFolders.length === 1 && !selectedPhysicalFolders[0].gallery_id && <button type="button" onClick={importSelectedFolder} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover"><Archive size={16} /><span className="hidden sm:inline">{t('explorer.importFolder')}</span></button>}
           <button type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setMetadataOpen(true)} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover disabled:opacity-30"><Edit3 size={16} /><span className="hidden sm:inline">{t('explorer.editMetadata')}</span></button>
@@ -1376,6 +1092,7 @@ export function ExplorerWorkbench() {
         </div>
       )}
 
+      {menuPoint && <ContextMenu x={menuPoint.x} y={menuPoint.y} items={menuItems} ariaLabel={t('explorer.contextMenu')} onClose={() => setMenuPoint(null)} />}
       {metadataOpen && <MetadataDialog selection={selectedGalleries} querySelection={querySelection} onClose={() => setMetadataOpen(false)} onDone={() => void refresh()} />}
       {mergeOpen && <MergeDialog selection={selectedGalleries} onClose={() => setMergeOpen(false)} onDone={() => void refresh()} />}
       {organizeOpen && <OrganizeDialog kind={organizeOpen} selectionBody={actionSelectionBody} onClose={() => setOrganizeOpen(null)} onDone={() => void refresh()} />}
@@ -1392,6 +1109,12 @@ export function ExplorerWorkbench() {
               ['Backspace', t('explorer.back')],
               ['/ · Ctrl/⌘ + K', t('explorer.focusSearch')],
               ['Delete · ⌘ + Backspace', t('explorer.deleteFiles')],
+              ['Delete', t('explorer.hideImagesInGallery')],
+              ['Shift + Delete', t('explorer.purgeImages')],
+              ['Ctrl/⌘ + Click', t('explorer.toggleSelection')],
+              ['Shift + Click', t('explorer.extendSelection')],
+              ['Drag', t('explorer.marqueeSelect')],
+              ['Right-click · Shift + F10', t('explorer.contextMenu')],
               ['F2', t('explorer.editMetadata')],
               ['Alt + 1 / 2', t('explorer.switchLayout')],
               ['Ctrl/⌘ + 1 / 2', t('explorer.switchView')],

@@ -95,7 +95,7 @@ vi.mock('@/components/VirtualGrid', () => ({ VirtualGrid: () => null }))
 
 import GalleryDetailPage from '@/app/library/[source]/[sourceId]/page'
 
-const MEMBER_ONLY_SHEET_ITEMS = ['Share', 'Manage access', 'Versions', 'Merge', 'Delete Gallery']
+const MEMBER_ONLY_SHEET_ITEMS = ['Share', 'Manage access', 'Versions', 'Delete Gallery']
 
 function openMoreSheet() {
   fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
@@ -135,6 +135,9 @@ describe('gallery detail page header actions', () => {
       expect(within(sheet).getByText(label)).toBeInTheDocument()
     }
     expect(within(sheet).getByText('View Source')).toBeInTheDocument()
+    // The legacy gallery Merge action was removed in favour of the Explorer merge flow.
+    expect(within(sheet).queryByText('Merge')).not.toBeInTheDocument()
+    expect(screen.queryByText('Merge')).not.toBeInTheDocument()
   })
 
   it('shows member write controls in the header for a member', () => {

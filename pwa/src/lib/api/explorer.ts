@@ -6,7 +6,7 @@ export interface ExplorerQuery {
   node_kind?: 'all' | 'source' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash'
   node_id?: string | null
   query?: string
-  sort?: 'added_at' | 'posted_at' | 'title' | 'rating' | 'pages'
+  sort?: 'added_at' | 'posted_at' | 'title' | 'rating' | 'pages' | 'size'
   direction?: 'asc' | 'desc'
   offset?: number
   limit?: number
@@ -59,6 +59,8 @@ export interface ExplorerRoots {
       empty_galleries: number
       duplicate_pairs: number
       trash: boolean
+      hidden_images?: number
+      hidden_bytes?: number
     }
   }
   physical: Array<{
@@ -70,6 +72,75 @@ export interface ExplorerRoots {
     physical_bytes: number | null
     size_updated_at: string | null
   }>
+}
+
+export type ExplorerImageVisibility = 'active' | 'hidden' | 'all'
+export type ExplorerImageMedia = 'all' | 'image' | 'video' | 'gif'
+export type ExplorerImageSort = 'page' | 'size'
+
+export interface ExplorerImagesParams {
+  visibility?: ExplorerImageVisibility
+  media?: ExplorerImageMedia
+  sort?: ExplorerImageSort
+  direction?: 'asc' | 'desc'
+  offset?: number
+  limit?: number
+}
+
+export interface ExplorerImageItem {
+  image_id: number
+  /** Null for hidden images (they no longer occupy a page slot). */
+  page_num: number | null
+  /** Original page position, kept for hidden images. */
+  source_position: number | null
+  filename: string
+  visibility: 'active' | 'hidden' | string
+  hidden_at: string | null
+  media_type: string
+  file_size: number | null
+  width: number | null
+  height: number | null
+  duration: number | null
+  storage: 'cas' | 'external' | 'pending'
+  shared: boolean
+  thumb_path: string | null
+  thumb_srcset: string | null
+  file_path: string | null
+}
+
+export interface ExplorerImageSummary {
+  active_count: number
+  hidden_count: number
+  active_bytes: number
+  hidden_bytes: number
+  hidden_reclaimable_bytes: number
+}
+
+export interface ExplorerGalleryImages {
+  gallery_id: number
+  source: string
+  source_id: string
+  total: number
+  offset: number
+  limit: number
+  can_edit: boolean
+  summary: ExplorerImageSummary
+  items: ExplorerImageItem[]
+}
+
+export interface ExplorerPurgeResult {
+  gallery_id: number
+  dry_run: boolean
+  purgeable: number
+  purged: number
+  reclaim_bytes: number
+  shared_kept: number
+  skipped_external: number
+  skipped_not_hidden: number
+  skipped_pending: number
+  skipped_missing: number
+  blobs_deleted: number
+  operation_id: string | null
 }
 
 export interface ExplorerPhysicalEntry {
@@ -187,6 +258,16 @@ export const explorer = {
         created_at: string
       }>
     }>(`/api/explorer/galleries/${galleryId}/metadata-history`),
+  galleryImages: (galleryId: number, params: ExplorerImagesParams = {}) =>
+    apiFetch<ExplorerGalleryImages>(`/api/explorer/galleries/${galleryId}/images${qs({ ...params })}`),
+  purgeImages: (
+    galleryId: number,
+    body: { image_ids?: number[]; all_hidden?: boolean; dry_run: boolean },
+  ) =>
+    apiFetch<ExplorerPurgeResult>(`/api/explorer/galleries/${galleryId}/images/purge`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   physicalEntries: (libraryId: number, path = '', offset = 0, limit = 100) =>
     apiFetch<{
       library_id: number

@@ -37,7 +37,6 @@ import {
   BookmarkCheck,
   X,
   Share2,
-  GitMerge,
   History,
   Star,
   FolderHeart,
@@ -593,25 +592,6 @@ export default function GalleryDetailPage() {
     }
   }
 
-  const handleMerge = async () => {
-    if (!gallery) return
-    const value = window.prompt(t('library.mergeGalleryPrompt'))
-    const sourceGalleryId = Number(value)
-    if (
-      !value ||
-      !Number.isInteger(sourceGalleryId) ||
-      !window.confirm(t('library.mergeGalleryConfirm'))
-    )
-      return
-    try {
-      await api.galleryManagement.merge(gallery.id, sourceGalleryId)
-      await Promise.all([mutateGallery(), mutateImages()])
-      toast.success(t('library.galleryMerged'))
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error))
-    }
-  }
-
   // Toggle a single image and move the range anchor to it
   const toggleSelect = (image: GalleryImage, idx: number) => {
     setSelectedIds((prev) => {
@@ -930,13 +910,6 @@ export default function GalleryDetailPage() {
       : [],
     canEdit
       ? [
-          {
-            id: 'merge',
-            label: t('library.merge'),
-            icon: GitMerge,
-            danger: true,
-            onSelect: handleMerge,
-          },
           {
             id: 'delete',
             label: isDeleting
