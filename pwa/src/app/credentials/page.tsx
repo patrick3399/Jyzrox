@@ -22,6 +22,7 @@ import { CredentialAccounts, sanitizeAccountName } from '@/components/Credential
 import type { Credentials, EhAccount, PluginInfo, CredentialFlow, FieldDef } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // Sources that have their own credential section; the generic site list must not repeat them.
 const NON_GENERIC_SOURCES = new Set(['ehentai', 'pixiv', 'saucenao'])
@@ -30,10 +31,6 @@ const NON_GENERIC_SOURCES = new Set(['ehentai', 'pixiv', 'saucenao'])
 
 const inputClass =
   'w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm'
-const btnPrimary =
-  'px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors'
-const btnSecondary =
-  'px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors'
 
 // ── StatusBadge ────────────────────────────────────────────────────────────
 
@@ -95,10 +92,10 @@ function EhExtras({
 
       {/* Refresh account button */}
       <div className="mb-3">
-        <button onClick={onRefresh} disabled={ehAccountLoading} className={btnSecondary}>
+        <Button variant="secondary" size="md" onClick={onRefresh} disabled={ehAccountLoading}>
           <RefreshCw size={14} className="inline mr-1.5" />
           {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
-        </button>
+        </Button>
       </div>
 
       {/* Account info */}
@@ -226,13 +223,14 @@ function EhFieldsFlow({
           className={inputClass}
         />
       </div>
-      <button
+      <Button
+        variant="primary"
+        size="md"
         onClick={handleSave}
         disabled={saving || !memberId.trim() || !passHash.trim()}
-        className={btnPrimary}
       >
         {saving ? t('settings.saving') : t('settings.saveCookies')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -292,13 +290,10 @@ function PixivOAuthFlow({
         </p>
         <p className="text-yellow-400/70">{t('settings.pixivOauthHint2')}</p>
       </div>
-      <button
-        onClick={handleGetUrl}
-        className={`${btnSecondary} w-full flex items-center justify-center gap-2`}
-      >
+      <Button variant="secondary" size="md" className="w-full gap-2" onClick={handleGetUrl}>
         <ExternalLink size={14} />
         {t('credentials.oauthGetUrl')}
-      </button>
+      </Button>
       {codeVerifier && (
         <div>
           <p className="text-xs text-vault-text-muted mb-1">{t('settings.pixivOauthStep4')}</p>
@@ -309,13 +304,15 @@ function PixivOAuthFlow({
             placeholder={t('credentials.oauthPasteCallback')}
             className={inputClass}
           />
-          <button
+          <Button
+            variant="primary"
+            size="md"
+            className="mt-3"
             onClick={handleExchange}
             disabled={saving || !callbackUrl.trim()}
-            className={`${btnPrimary} mt-3`}
           >
             {saving ? t('settings.saving') : t('credentials.oauthExchange')}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -363,9 +360,9 @@ function PixivTokenFlow({
         />
         <p className="text-xs text-vault-text-muted mt-1">{t('settings.pixivHint')}</p>
       </div>
-      <button onClick={handleSave} disabled={saving || !token.trim()} className={btnPrimary}>
+      <Button variant="primary" size="md" onClick={handleSave} disabled={saving || !token.trim()}>
         {saving ? t('settings.saving') : t('settings.saveToken')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -424,9 +421,9 @@ function PixivCookieFlow({
           className={inputClass}
         />
       </div>
-      <button onClick={handleSave} disabled={saving || !cookie.trim()} className={btnPrimary}>
+      <Button variant="primary" size="md" onClick={handleSave} disabled={saving || !cookie.trim()}>
         {saving ? t('settings.saving') : t('credentials.oauthExchange')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -530,9 +527,9 @@ function GenericFieldsFlow({
           onChange={(v) => setValues((prev) => ({ ...prev, [field.name]: v }))}
         />
       ))}
-      <button onClick={handleSave} disabled={saving || !canSave} className={btnPrimary}>
+      <Button variant="primary" size="md" onClick={handleSave} disabled={saving || !canSave}>
         {saving ? t('credentials.saving') : t('credentials.save')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -754,10 +751,12 @@ function PluginCredentialSection({
 
           {/* Delete button */}
           {configured && accountCount <= 1 && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-4 border border-red-500/30 bg-red-600/20 text-red-400 hover:bg-red-600/30"
               onClick={handleDelete}
               disabled={deleting}
-              className="mt-4 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 flex items-center gap-1.5"
             >
               <Trash2 size={13} />
               {deleting
@@ -767,7 +766,7 @@ function PluginCredentialSection({
                   : isPixiv
                     ? t('settings.clearToken')
                     : t('credentials.clearCredential')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -981,14 +980,17 @@ function SiteCredentialSection({
                           )}
                         </button>
                         {count <= 1 && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-400/70 hover:text-red-400"
                             onClick={() => handleClear(source)}
                             disabled={clearingSource === source}
-                            className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
+
                             aria-label={t('credentials.clearConfirm', { source })}
                           >
                             {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
-                          </button>
+                          </Button>
                         )}
                       </div>
                       {expanded && (
@@ -1036,13 +1038,14 @@ function SiteCredentialSection({
                     placeholder={t('credentials.urlPlaceholder')}
                     className={`${inputClass} flex-1`}
                   />
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="md"
                     onClick={handleDetect}
                     disabled={detecting || !urlInput.trim()}
-                    className={btnSecondary}
                   >
                     {detecting ? t('credentials.detecting') : <Search size={16} />}
-                  </button>
+                  </Button>
                 </div>
                 {detectedName && (
                   <p className="text-xs text-green-400 mt-1">
@@ -1158,9 +1161,14 @@ function SiteCredentialSection({
                 </div>
               )}
 
-              <button onClick={handleSave} disabled={saving || !canSave} className={btnPrimary}>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={handleSave}
+                disabled={saving || !canSave}
+              >
                 {saving ? t('credentials.saving') : t('credentials.save')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1236,13 +1244,21 @@ function SauceNaoSection({
               />
               <p className="text-xs text-vault-text-muted mt-1">{t('saucenao.apiKeyHint')}</p>
             </div>
-            <button onClick={handleSave} disabled={saving || !apiKey.trim()} className={btnPrimary}>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={handleSave}
+              disabled={saving || !apiKey.trim()}
+            >
               {saving ? t('credentials.saving') : t('saucenao.saveApiKey')}
-            </button>
+            </Button>
           </div>
 
           {configured && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-4 border border-red-500/30 bg-red-600/20 text-red-400 hover:bg-red-600/30"
               onClick={async () => {
                 try {
                   await api.settings.deleteCredential('saucenao')
@@ -1252,11 +1268,10 @@ function SauceNaoSection({
                   toast.error(t('credentials.clearFailed'))
                 }
               }}
-              className="mt-4 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors flex items-center gap-1.5"
             >
               <Trash2 size={13} />
               {t('saucenao.clearApiKey')}
-            </button>
+            </Button>
           )}
         </div>
       )}

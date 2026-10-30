@@ -9,6 +9,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 export default function ExportPage() {
   const { data, isLoading } = useSWR('export-datasets', () => api.datasets.list())
@@ -46,11 +47,7 @@ export default function ExportPage() {
 
   return (
     <PageContainer variant="secondary" className="space-y-6">
-      <PageHeader
-        spacing="none"
-        title={t('export.title')}
-        subtitle={t('export.datasetSubtitle')}
-      />
+      <PageHeader spacing="none" title={t('export.title')} subtitle={t('export.datasetSubtitle')} />
 
       {isLoading ? (
         <LoadingSpinner />
@@ -124,15 +121,17 @@ export default function ExportPage() {
               />
               {t('export.includeMetadata')}
             </label>
-            <button
+            <Button
+              variant="primary"
+              size="md"
+              className="w-full"
               type="button"
               onClick={handleExport}
               disabled={!datasetId || exporting}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-vault-accent px-4 py-2.5 font-medium text-white disabled:opacity-50"
             >
               <Download size={17} />
               {exporting ? t('export.downloading') : t('export.downloadDataset')}
-            </button>
+            </Button>
           </section>
         </div>
       )}

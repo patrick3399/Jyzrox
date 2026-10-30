@@ -10,6 +10,7 @@ import { api, type ReconcileStatus } from '@/lib/api'
 import { t, formatBytes } from '@/lib/i18n'
 import { PageHeader } from '@/components/layout/PageHeader'
 import type { SystemHealth, SystemInfo, CacheStats, StorageInfo } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 const VERSION_LABELS: Record<string, string> = {
   jyzrox: 'Jyzrox',
@@ -217,9 +218,7 @@ export default function SystemSettingsPage() {
                   ].map(({ label, value }) => (
                     <div key={label} className="flex justify-between items-center px-3 py-2">
                       <span className="text-sm text-vault-text-muted">{label}</span>
-                      <span className="text-sm font-medium text-vault-text-secondary">
-                        {value}
-                      </span>
+                      <span className="text-sm font-medium text-vault-text-secondary">{value}</span>
                     </div>
                   ))}
                 </div>
@@ -274,13 +273,14 @@ export default function SystemSettingsPage() {
                   <p className="text-xs text-vault-text-muted uppercase tracking-wide">
                     {t('settings.cache')}
                   </p>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={handleRefreshCache}
                     disabled={cacheLoading}
-                    className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
                   >
                     {cacheLoading ? t('settings.loading') : t('settings.cacheRefresh')}
-                  </button>
+                  </Button>
                 </div>
                 {cacheStats && (
                   <div className="space-y-2">
@@ -324,28 +324,32 @@ export default function SystemSettingsPage() {
                               <span className="text-sm text-vault-text-secondary tabular-nums">
                                 {count}
                               </span>
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-400/70 hover:text-red-400"
                                 onClick={() => handleClearCacheCategory(cat)}
                                 disabled={cacheClearingCategory === cat || cacheClearingAll}
-                                className="text-xs text-red-400/70 hover:text-red-400 transition-colors px-2 py-0.5 disabled:opacity-40"
                               >
                                 {cacheClearingCategory === cat
                                   ? '...'
                                   : t('settings.clearCategory')}
-                              </button>
+                              </Button>
                             </div>
                           )
                         })}
                       </div>
                     )}
 
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-1 border border-red-500/30 bg-red-600/20 text-red-400 hover:bg-red-600/30"
                       onClick={handleClearAllCache}
                       disabled={cacheClearingAll || cacheClearingCategory !== null}
-                      className="mt-1 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {cacheClearingAll ? t('settings.clearing') : t('settings.clearCache')}
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -384,21 +388,20 @@ export default function SystemSettingsPage() {
                     {t('settings.reconcileNeverRun')}
                   </p>
                 )}
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="border border-vault-accent/30 bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30"
                   onClick={handleReconcile}
                   disabled={reconcileRunning}
-                  className="px-3 py-1.5 bg-vault-accent/20 border border-vault-accent/30 text-vault-accent rounded text-sm hover:bg-vault-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {reconcileRunning ? t('settings.reconcileRunning') : t('settings.reconcileRun')}
-                </button>
+                </Button>
               </div>
 
-              <button
-                onClick={loadSystem}
-                className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
-              >
+              <Button variant="ghost" size="sm" onClick={loadSystem}>
                 {t('settings.refresh')}
-              </button>
+              </Button>
             </div>
           )}
         </div>

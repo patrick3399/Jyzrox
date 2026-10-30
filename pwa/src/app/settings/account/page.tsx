@@ -4,13 +4,14 @@ import { useState, useCallback, useEffect } from 'react'
 import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { inputClass, btnPrimary, btnSecondary } from '@/components/settings/SettingsShared'
+import { inputClass, btnSecondary } from '@/components/settings/SettingsShared'
 import { t } from '@/lib/i18n'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import type { SessionInfo } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 export default function AccountSettingsPage() {
   useLocale()
@@ -218,9 +219,9 @@ export default function AccountSettingsPage() {
                           }}
                         />
                       </label>
-                      <button onClick={handleAvatarRemove} className={btnSecondary}>
+                      <Button variant="secondary" size="md" onClick={handleAvatarRemove}>
                         {t('settings.avatarRemove')}
-                      </button>
+                      </Button>
                     </div>
                     <p className="text-xs text-vault-text-muted">{t('settings.avatarMaxSize')}</p>
                   </div>
@@ -260,13 +261,14 @@ export default function AccountSettingsPage() {
                     placeholder={t('settings.emailPlaceholder')}
                     className={`${inputClass} flex-1`}
                   />
-                  <button
+                  <Button
+                    variant="primary"
+                    size="md"
                     onClick={handleSaveEmail}
                     disabled={emailSaving || profileEmailDraft === profileEmail}
-                    className={btnPrimary}
                   >
                     {emailSaving ? t('settings.saving') : t('settings.save')}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -322,13 +324,14 @@ export default function AccountSettingsPage() {
                 className={inputClass}
               />
             </div>
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleChangePassword}
               disabled={pwSaving || !currentPw || !newPw || !confirmPw}
-              className={btnPrimary}
             >
               {pwSaving ? t('settings.saving') : t('settings.update')}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -338,13 +341,14 @@ export default function AccountSettingsPage() {
             <p className="text-xs text-vault-text-muted uppercase tracking-wide">
               {t('settings.activeSessions')}
             </p>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleLoadSessions}
               disabled={sessionsLoading}
-              className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
             >
               {sessionsLoading ? t('settings.loading') : t('settings.refresh')}
-            </button>
+            </Button>
           </div>
 
           {sessionsLoading && sessions.length === 0 ? (
@@ -392,13 +396,15 @@ export default function AccountSettingsPage() {
                       </div>
                     </div>
                     {!s.is_current && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400/70 hover:text-red-400 shrink-0"
                         onClick={() => handleRevokeSession(s.token_prefix)}
                         disabled={revokingToken === s.token_prefix}
-                        className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
                       >
                         {revokingToken === s.token_prefix ? '...' : t('settings.revoke')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -412,12 +418,14 @@ export default function AccountSettingsPage() {
 
         {/* Logout */}
         <div className="pb-4">
-          <button
+          <Button
+            variant="ghost"
+            size="md"
+            className="border border-red-700/50 bg-red-900/40 text-red-400 hover:bg-red-900/60"
             onClick={logout}
-            className="px-4 py-2 bg-red-900/40 border border-red-700/50 hover:bg-red-900/60 text-red-400 rounded text-sm font-medium transition-colors"
           >
             {t('settings.logOut')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

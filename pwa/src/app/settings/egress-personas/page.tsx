@@ -10,11 +10,10 @@ import { t } from '@/lib/i18n'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import type { CredentialAccount, EgressPersona, PersonaTestResult } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
-const BTN =
-  'px-3 py-1.5 rounded text-xs font-medium bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-const DANGER_BTN =
-  'px-3 py-1.5 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+const BTN = 'text-xs bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30'
+const DANGER_BTN = 'text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30'
 const INPUT =
   'w-full bg-vault-bg border border-vault-border rounded px-3 py-2 text-sm text-vault-text disabled:opacity-50 disabled:cursor-not-allowed'
 const LABEL = 'text-xs text-vault-text-secondary block mb-1'
@@ -134,9 +133,15 @@ function CreateForm({ onCreated }: { onCreated: () => Promise<unknown> }) {
         </div>
       </div>
       <p className="text-xs text-vault-text-muted">{t('personas.identityHint')}</p>
-      <button type="submit" disabled={busy || !name.trim()} className={BTN}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className={BTN}
+        type="submit"
+        disabled={busy || !name.trim()}
+      >
         {t('personas.create')}
-      </button>
+      </Button>
     </form>
   )
 }
@@ -309,14 +314,16 @@ function PersonaCard({
               {bound ? (
                 <>
                   <span className="text-vault-text">{bound.account}</span>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={BTN}
                     type="button"
                     onClick={() => handleUnbind(source)}
                     disabled={busy}
-                    className={BTN}
                   >
                     {t('personas.unbind')}
-                  </button>
+                  </Button>
                 </>
               ) : free.length > 0 ? (
                 <>
@@ -331,14 +338,16 @@ function PersonaCard({
                       </option>
                     ))}
                   </select>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={BTN}
                     type="button"
                     onClick={() => handleBind(source, selected)}
                     disabled={busy || !selected}
-                    className={BTN}
                   >
                     {t('personas.bind')}
-                  </button>
+                  </Button>
                 </>
               ) : available ? (
                 <span className="text-xs text-vault-text-muted">
@@ -369,15 +378,36 @@ function PersonaCard({
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={handleSave} disabled={busy || !dirty} className={BTN}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={BTN}
+          type="button"
+          onClick={handleSave}
+          disabled={busy || !dirty}
+        >
           {t('common.save')}
-        </button>
-        <button type="button" onClick={handleTest} disabled={busy} className={BTN}>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={BTN}
+          type="button"
+          onClick={handleTest}
+          disabled={busy}
+        >
           {t('personas.test')}
-        </button>
-        <button type="button" onClick={handleDelete} disabled={busy} className={DANGER_BTN}>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={DANGER_BTN}
+          type="button"
+          onClick={handleDelete}
+          disabled={busy}
+        >
           {t('personas.delete')}
-        </button>
+        </Button>
       </div>
     </div>
   )

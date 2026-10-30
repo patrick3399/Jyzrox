@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import type { GdlUpgradeEvent } from '@/lib/types'
 import { useWsGdlUpgrade } from '@/lib/ws'
+import { Button } from '@/components/ui/button'
 
 export function GalleryDlSection() {
   const [version, setVersion] = useState<{
@@ -134,18 +135,23 @@ export function GalleryDlSection() {
               ? t('settings.galleryDlLastRejected', { error: lastResult.error ?? '' })
               : t('settings.galleryDlLastFailed', { error: lastResult.error ?? '' })}
           </span>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-400/70 hover:text-red-400 shrink-0"
             type="button"
             onClick={() => setLastResult(null)}
-            className="text-xs text-red-400/70 hover:text-red-400 shrink-0"
           >
             {t('settings.galleryDlDismiss')}
-          </button>
+          </Button>
         </div>
       )}
 
       <div className="flex flex-wrap gap-3 mb-3">
-        <button
+        <Button
+          variant="ghost"
+          size="md"
+          className="border border-blue-700/50 bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
           type="button"
           onClick={() =>
             runJob(
@@ -154,35 +160,38 @@ export function GalleryDlSection() {
             )
           }
           disabled={upToDate || operating || !version.latest}
-          className="px-4 py-2 bg-blue-900/30 border border-blue-700/50 text-blue-400 hover:bg-blue-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {operating
             ? t('common.loading')
             : version.latest && !upToDate
               ? t('settings.galleryDlUpgradeTo', { version: version.latest })
               : t('settings.galleryDlUpgrade')}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="md"
+          className="border border-red-700/50 bg-red-900/30 text-red-400 hover:bg-red-900/50"
           type="button"
           onClick={() => {
             if (!window.confirm(t('settings.galleryDlMasterConfirm'))) return
             void runJob(() => api.galleryDl.upgradeToMaster(), t('settings.galleryDlMasterQueued'))
           }}
           disabled={operating}
-          className="px-4 py-2 bg-red-900/30 border border-red-700/50 text-red-400 hover:bg-red-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {t('settings.galleryDlMaster')}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="md"
+          className="border border-amber-700/50 bg-amber-900/30 text-amber-400 hover:bg-amber-900/50"
           type="button"
           onClick={() =>
             runJob(() => api.galleryDl.rollback(), t('settings.galleryDlRollbackQueued'))
           }
           disabled={operating}
-          className="px-4 py-2 bg-amber-900/30 border border-amber-700/50 text-amber-400 hover:bg-amber-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {t('settings.galleryDlRollback')}
-        </button>
+        </Button>
       </div>
 
       <p className="text-[10px] text-amber-400/70 italic">

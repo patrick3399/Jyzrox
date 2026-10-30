@@ -13,6 +13,7 @@ import {
   type SWCacheConfig,
   DEFAULT_SW_CACHE_CONFIG,
 } from '@/lib/swCacheConfig'
+import { Button } from '@/components/ui/button'
 
 export default function CacheSettingsPage() {
   useLocale()
@@ -133,12 +134,14 @@ export default function CacheSettingsPage() {
 
             {/* Clear browser cache */}
             <div className="pt-3 border-t border-vault-border/50">
-              <button
+              <Button
+                variant="ghost"
+                size="md"
+                className="border border-red-500/30 bg-red-600/20 text-red-400 hover:bg-red-600/30"
                 onClick={handleClearBrowserCache}
-                className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-400 hover:bg-red-600/30 rounded text-sm font-medium transition-colors"
               >
                 {t('settings.clearBrowserCache')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

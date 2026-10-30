@@ -16,6 +16,7 @@ import {
   type CustomPalette,
 } from '@/lib/themeOverrides'
 import { persistUiPreferences, type ThemePreference } from '@/lib/uiPreferences'
+import { Button } from '@/components/ui/button'
 
 const PRESET_SWATCHES: Record<string, { bg: string; card: string; text: string }> = {
   light: { bg: '#ffffff', card: '#f5f5f5', text: '#171717' },
@@ -93,7 +94,11 @@ export function ThemeSection() {
         <h2 className="font-medium text-vault-text text-sm">{t('settings.themeSection')}</h2>
 
         {/* Theme choice */}
-        <div role="radiogroup" aria-label={t('settings.themeSection')} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div
+          role="radiogroup"
+          aria-label={t('settings.themeSection')}
+          className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+        >
           {THEME_ORDER.map((value) => {
             const selected = theme === value
             const swatch = value === 'custom' ? palette : PRESET_SWATCHES[value]
@@ -127,7 +132,9 @@ export function ThemeSection() {
 
         {/* Accent color */}
         <div className="space-y-2">
-          <h3 className="text-xs font-medium text-vault-text-secondary">{t('settings.accentColor')}</h3>
+          <h3 className="text-xs font-medium text-vault-text-secondary">
+            {t('settings.accentColor')}
+          </h3>
           <div className="flex flex-wrap items-center gap-2">
             {ACCENT_PRESETS.map((preset) => (
               <button
@@ -152,14 +159,10 @@ export function ThemeSection() {
               className="h-7 w-9 cursor-pointer rounded border border-vault-border bg-transparent p-0.5"
             />
             {accent != null && (
-              <button
-                type="button"
-                onClick={() => pickAccent(null)}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-vault-text-secondary hover:text-vault-text"
-              >
+              <Button variant="ghost" size="sm" type="button" onClick={() => pickAccent(null)}>
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden />
                 {t('settings.accentReset')}
-              </button>
+              </Button>
             )}
           </div>
           {accentLowContrast && (
@@ -173,7 +176,9 @@ export function ThemeSection() {
         {/* Custom palette editor */}
         {theme === 'custom' && (
           <div className="space-y-2">
-            <h3 className="text-xs font-medium text-vault-text-secondary">{t('settings.customThemeColors')}</h3>
+            <h3 className="text-xs font-medium text-vault-text-secondary">
+              {t('settings.customThemeColors')}
+            </h3>
             <div className="flex flex-wrap gap-4">
               {(
                 [
@@ -193,18 +198,19 @@ export function ThemeSection() {
                   {label}
                 </label>
               ))}
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 type="button"
                 onClick={() => {
                   setPalette(DEFAULT_CUSTOM_PALETTE)
                   saveCustomPalette(DEFAULT_CUSTOM_PALETTE)
                   void persistUiPreferences({ custom_palette: DEFAULT_CUSTOM_PALETTE })
                 }}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-vault-text-secondary hover:text-vault-text"
               >
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden />
                 {t('settings.customThemeReset')}
-              </button>
+              </Button>
             </div>
             <p className="text-xs text-vault-text-muted">{t('settings.customThemeHint')}</p>
             {textLowContrast && (

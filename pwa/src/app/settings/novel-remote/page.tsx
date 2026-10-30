@@ -14,9 +14,9 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import type { NovelHostKey } from '@/lib/api/novels'
 import { AlertDialog } from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 
-const BTN =
-  'px-3 py-1.5 rounded text-xs font-medium bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+const BTN = 'text-xs bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30'
 
 export default function NovelRemoteSettingsPage() {
   useLocale()
@@ -176,14 +176,20 @@ export default function NovelRemoteSettingsPage() {
               )}
               <div className="flex gap-2">
                 {hasKey && (
-                  <button onClick={handleCopy} className={`${BTN} flex items-center gap-1.5`}>
+                  <Button variant="ghost" size="sm" className={BTN} onClick={handleCopy}>
                     <Copy size={14} />
                     {t('novelRemote.copy')}
-                  </button>
+                  </Button>
                 )}
-                <button onClick={() => handleGenerate(hasKey)} disabled={busy} className={BTN}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={BTN}
+                  onClick={() => handleGenerate(hasKey)}
+                  disabled={busy}
+                >
                   {hasKey ? t('novelRemote.regenerateKey') : t('novelRemote.generateKey')}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -204,9 +210,15 @@ export default function NovelRemoteSettingsPage() {
                 className="w-full bg-vault-bg border border-vault-border rounded px-3 py-2 text-sm text-vault-text"
               />
               <p className="text-xs text-vault-text-muted">{t('novelRemote.urlHelp')}</p>
-              <button onClick={() => handleSave(false)} disabled={actionsDisabled} className={BTN}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={BTN}
+                onClick={() => handleSave(false)}
+                disabled={actionsDisabled}
+              >
                 {t('novelRemote.save')}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -220,9 +232,15 @@ export default function NovelRemoteSettingsPage() {
                     ? t('novelRemote.hostTrusted')
                     : t('novelRemote.hostNotTrusted')}
                 </span>
-                <button onClick={handleScan} disabled={!url || busy} className={BTN}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={BTN}
+                  onClick={handleScan}
+                  disabled={!url || busy}
+                >
                   {t('novelRemote.scanHost')}
-                </button>
+                </Button>
               </div>
               {hostKeys.length > 0 && (
                 <div className="space-y-2">
@@ -234,13 +252,15 @@ export default function NovelRemoteSettingsPage() {
                       <code className="text-xs text-vault-text break-all">
                         {k.type} {k.fingerprint}
                       </code>
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={BTN}
                         onClick={() => handleTrust(k.fingerprint)}
                         disabled={busy}
-                        className={BTN}
                       >
                         {t('novelRemote.trustHost')}
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -249,9 +269,15 @@ export default function NovelRemoteSettingsPage() {
           </div>
 
           <div className="flex gap-2">
-            <button onClick={handleTest} disabled={actionsDisabled} className={BTN}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={BTN}
+              onClick={handleTest}
+              disabled={actionsDisabled}
+            >
               {t('novelRemote.test')}
-            </button>
+            </Button>
           </div>
 
           <AlertDialog

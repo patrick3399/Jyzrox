@@ -38,6 +38,7 @@ import { api } from '@/lib/api'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { Dialog } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // ── Folder Picker modal ───────────────────────────────────────────────
 
@@ -117,136 +118,133 @@ function FolderPicker({
       title={
         <span className="flex items-center gap-2">
           {!showMounts && (
-            <button
-              onClick={goUp}
-              className="text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
-            >
+            <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={goUp}>
               <ArrowLeft size={16} />
-            </button>
+            </Button>
           )}
           <span className="text-sm font-medium">{t('import.folderPicker.title')}</span>
         </span>
       }
       footer={
         <div className="w-full">
-            <button
-              onClick={() => {
-                setEditingPath(patternExample)
-                setIsEditing(true)
-              }}
-              className="w-full mb-2 px-3 py-2 text-xs border border-vault-border text-vault-text rounded hover:border-vault-accent transition-colors font-mono truncate"
-            >
-              {patternExample}
-            </button>
-            <button
-              onClick={() => onSelect(editingPath.trim() || currentPath || '/')}
-              disabled={showMounts && !editingPath.includes('{')}
-              className="w-full px-3 py-2.5 text-sm bg-vault-accent text-white rounded font-medium hover:bg-vault-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {t('import.folderPicker.select')}
-            </button>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="w-full mb-2 font-mono truncate"
+            onClick={() => {
+              setEditingPath(patternExample)
+              setIsEditing(true)
+            }}
+          >
+            {patternExample}
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            className="w-full"
+            onClick={() => onSelect(editingPath.trim() || currentPath || '/')}
+            disabled={showMounts && !editingPath.includes('{')}
+          >
+            {t('import.folderPicker.select')}
+          </Button>
         </div>
       }
     >
-        {/* Editable path input */}
-        <div className="px-4 py-2 border-b border-vault-border bg-vault-bg">
-          <div className="flex items-center gap-2">
-            <p className="text-xs text-vault-text-muted shrink-0">
-              {t('import.folderPicker.path')}
-            </p>
-            {isEditing ? (
-              <input
-                type="text"
-                value={editingPath}
-                onChange={(e) => setEditingPath(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handlePathSubmit()
-                  if (e.key === 'Escape') {
-                    e.stopPropagation()
-                    setEditingPath(currentPath ?? '')
-                    setIsEditing(false)
-                  }
-                }}
-                onBlur={handlePathSubmit}
-                autoFocus
-                className="flex-1 bg-vault-input border border-vault-accent rounded px-2 py-1 text-xs font-mono text-vault-text focus:outline-none"
-                placeholder={patternExample}
-              />
-            ) : (
-              <button
-                onClick={() => {
-                  setEditingPath(currentPath ?? '/')
-                  setIsEditing(true)
-                }}
-                className="flex-1 text-left text-xs font-mono text-vault-accent hover:text-vault-text truncate transition-colors"
-              >
-                {displayPath}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Directory listing */}
-        <div className="flex-1 overflow-y-auto">
-          {isLoading ? (
-            <div className="flex justify-center py-8">
-              <LoadingSpinner />
-            </div>
-          ) : showMounts ? (
-            <>
-              {/* Mount points list */}
-              {!mountData?.mounts || mountData.mounts.length === 0 ? (
-                <p className="text-center py-8 text-sm text-vault-text-muted">
-                  {t('import.folderPicker.noMounts')}
-                </p>
-              ) : (
-                mountData.mounts.map((mount) => (
-                  <button
-                    key={mount.path}
-                    onClick={() => navigate(mount.path)}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-vault-card-hover transition-colors text-left border-b border-vault-border/30"
-                  >
-                    <HardDrive size={15} className="text-vault-accent shrink-0" />
-                    <span className="text-sm text-vault-text truncate flex-1 font-mono">
-                      {mount.path}
-                    </span>
-                    <ChevronRight size={14} className="text-vault-text-muted shrink-0" />
-                  </button>
-                ))
-              )}
-              {/* Browse root filesystem option */}
-              <button
-                onClick={() => navigate('/')}
-                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-vault-card-hover transition-colors text-left border-t border-vault-border/50"
-              >
-                <Folder size={15} className="text-vault-text-muted shrink-0" />
-                <span className="text-sm text-vault-text-muted truncate flex-1 font-mono">/</span>
-                <span className="text-xs text-vault-text-muted shrink-0">
-                  {t('import.folderPicker.browseRoot')}
-                </span>
-                <ChevronRight size={14} className="text-vault-text-muted shrink-0" />
-              </button>
-            </>
-          ) : fsData?.entries.length === 0 ? (
-            <p className="text-center py-8 text-sm text-vault-text-muted">
-              {t('import.dir.empty')}
-            </p>
+      {/* Editable path input */}
+      <div className="px-4 py-2 border-b border-vault-border bg-vault-bg">
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-vault-text-muted shrink-0">{t('import.folderPicker.path')}</p>
+          {isEditing ? (
+            <input
+              type="text"
+              value={editingPath}
+              onChange={(e) => setEditingPath(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handlePathSubmit()
+                if (e.key === 'Escape') {
+                  e.stopPropagation()
+                  setEditingPath(currentPath ?? '')
+                  setIsEditing(false)
+                }
+              }}
+              onBlur={handlePathSubmit}
+              autoFocus
+              className="flex-1 bg-vault-input border border-vault-accent rounded px-2 py-1 text-xs font-mono text-vault-text focus:outline-none"
+              placeholder={patternExample}
+            />
           ) : (
-            fsData?.entries.map((entry) => (
-              <button
-                key={entry.name}
-                onClick={() => navigateInto(entry.name)}
-                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-vault-card-hover transition-colors text-left border-b border-vault-border/30"
-              >
-                <Folder size={15} className="text-yellow-400/80 shrink-0" />
-                <span className="text-sm text-vault-text truncate flex-1 font-mono">
-                  {currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`}
-                </span>
-                <ChevronRight size={14} className="text-vault-text-muted shrink-0" />
-              </button>
-            ))
+            <button
+              onClick={() => {
+                setEditingPath(currentPath ?? '/')
+                setIsEditing(true)
+              }}
+              className="flex-1 text-left text-xs font-mono text-vault-accent hover:text-vault-text truncate transition-colors"
+            >
+              {displayPath}
+            </button>
           )}
         </div>
+      </div>
+
+      {/* Directory listing */}
+      <div className="flex-1 overflow-y-auto">
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <LoadingSpinner />
+          </div>
+        ) : showMounts ? (
+          <>
+            {/* Mount points list */}
+            {!mountData?.mounts || mountData.mounts.length === 0 ? (
+              <p className="text-center py-8 text-sm text-vault-text-muted">
+                {t('import.folderPicker.noMounts')}
+              </p>
+            ) : (
+              mountData.mounts.map((mount) => (
+                <button
+                  key={mount.path}
+                  onClick={() => navigate(mount.path)}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-vault-card-hover transition-colors text-left border-b border-vault-border/30"
+                >
+                  <HardDrive size={15} className="text-vault-accent shrink-0" />
+                  <span className="text-sm text-vault-text truncate flex-1 font-mono">
+                    {mount.path}
+                  </span>
+                  <ChevronRight size={14} className="text-vault-text-muted shrink-0" />
+                </button>
+              ))
+            )}
+            {/* Browse root filesystem option */}
+            <button
+              onClick={() => navigate('/')}
+              className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-vault-card-hover transition-colors text-left border-t border-vault-border/50"
+            >
+              <Folder size={15} className="text-vault-text-muted shrink-0" />
+              <span className="text-sm text-vault-text-muted truncate flex-1 font-mono">/</span>
+              <span className="text-xs text-vault-text-muted shrink-0">
+                {t('import.folderPicker.browseRoot')}
+              </span>
+              <ChevronRight size={14} className="text-vault-text-muted shrink-0" />
+            </button>
+          </>
+        ) : fsData?.entries.length === 0 ? (
+          <p className="text-center py-8 text-sm text-vault-text-muted">{t('import.dir.empty')}</p>
+        ) : (
+          fsData?.entries.map((entry) => (
+            <button
+              key={entry.name}
+              onClick={() => navigateInto(entry.name)}
+              className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-vault-card-hover transition-colors text-left border-b border-vault-border/30"
+            >
+              <Folder size={15} className="text-yellow-400/80 shrink-0" />
+              <span className="text-sm text-vault-text truncate flex-1 font-mono">
+                {currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`}
+              </span>
+              <ChevronRight size={14} className="text-vault-text-muted shrink-0" />
+            </button>
+          ))
+        )}
+      </div>
     </Dialog>
   )
 }
@@ -330,30 +328,35 @@ function ZoneA() {
                 </span>
                 {/* Rescan button */}
                 {lib.id !== null && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0 hover:text-vault-accent"
                     onClick={() => handleRescanPath(lib.id!)}
                     disabled={rescanningId === lib.id}
                     title={t('import.zoneA.rescan')}
-                    className="shrink-0 p-1.5 text-vault-text-muted hover:text-vault-accent transition-colors disabled:opacity-40"
                   >
                     <RefreshCw
                       size={13}
                       className={rescanningId === lib.id ? 'animate-spin' : ''}
                     />
-                  </button>
+                  </Button>
                 )}
                 {/* Remove button */}
                 {lib.id !== null && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0 text-red-400/60 hover:text-red-400"
                     onClick={async () => {
                       await removeLib(lib.id!)
                       mutateLibraries()
                     }}
-                    className="shrink-0 text-red-400/60 hover:text-red-400 transition-colors"
+
                     title={t('common.remove')}
                   >
                     <X size={14} />
-                  </button>
+                  </Button>
                 )}
               </div>
             ))}
@@ -365,13 +368,10 @@ function ZoneA() {
         {/* Add new path */}
         <div className="space-y-2">
           {/* Folder picker trigger */}
-          <button
-            onClick={() => setShowFolderPicker(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-vault-accent text-white rounded text-sm hover:bg-vault-accent/90 transition-colors"
-          >
+          <Button variant="primary" size="sm" onClick={() => setShowFolderPicker(true)}>
             <Plus size={14} />
             {t('import.zoneA.addLibrary')}
-          </button>
+          </Button>
         </div>
 
         {/* Folder picker modal */}
@@ -537,13 +537,10 @@ function ZoneB() {
         {/* ── idle: select folder ── */}
         {phase === 'idle' && (
           <>
-            <button
-              onClick={() => setShowPicker(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-vault-accent text-white rounded text-sm hover:bg-vault-accent/90 transition-colors"
-            >
+            <Button variant="primary" size="sm" onClick={() => setShowPicker(true)}>
               <Plus size={14} />
               {t('import.zoneB.selectFolder')}
-            </button>
+            </Button>
             {showPicker && (
               <FolderPicker
                 onSelect={(path) => {
@@ -563,12 +560,14 @@ function ZoneB() {
             {/* Selected path */}
             <div className="flex items-center gap-2">
               <p className="text-sm font-mono text-vault-text truncate flex-1">{selectedDir}</p>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 hover:text-vault-accent"
                 onClick={() => setShowPicker(true)}
-                className="shrink-0 text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
               >
                 {t('import.zoneB.change')}
-              </button>
+              </Button>
             </div>
 
             {/* Pattern input */}
@@ -609,10 +608,11 @@ function ZoneB() {
             </div>
 
             {/* Scan button */}
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleScan}
               disabled={scanLoading || !pattern.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-sm font-medium transition-colors"
             >
               {scanLoading ? (
                 <>
@@ -622,7 +622,7 @@ function ZoneB() {
               ) : (
                 t('import.batch.scan')
               )}
-            </button>
+            </Button>
 
             {showPicker && (
               <FolderPicker
@@ -649,14 +649,16 @@ function ZoneB() {
                   {t('import.batch.unmatchedCount', { count: String(unmatched.length) })}
                 </span>
               )}
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto hover:text-vault-accent"
                 onClick={() => {
                   setPhase('scanning')
                 }}
-                className="ml-auto text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
               >
                 {t('import.zoneB.change')}
-              </button>
+              </Button>
             </div>
 
             {matches.length === 0 ? (
@@ -768,15 +770,17 @@ function ZoneB() {
 
             {/* Import button */}
             {matches.length > 0 && (
-              <button
+              <Button
+                variant="primary"
+                size="md"
+                className="w-full"
                 onClick={handleImport}
                 disabled={selectedCount === 0}
-                className="w-full px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors"
               >
                 {selectedCount === matches.length
                   ? t('import.batch.importAll', { count: String(selectedCount) })
                   : t('import.batch.importSelected', { count: String(selectedCount) })}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -824,12 +828,9 @@ function ZoneB() {
                 })}
               </p>
             </div>
-            <button
-              onClick={handleReset}
-              className="px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-accent/50 text-vault-text rounded text-sm transition-colors"
-            >
+            <Button variant="secondary" size="md" onClick={handleReset}>
               {t('import.zoneB.selectFolder')}
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -959,18 +960,22 @@ function ConflictPanel() {
               {String(conflict.incoming.path ?? '')}
             </p>
             <div className="mt-2 flex gap-2">
-              <button
-                className="rounded bg-vault-accent px-3 py-1 text-xs text-white"
+              <Button
+                variant="primary"
+                size="sm"
+
                 onClick={() => resolve(conflict.id, 'merge')}
               >
                 {t('import.conflicts.mergeFiles')}
-              </button>
-              <button
-                className="rounded border border-vault-border px-3 py-1 text-xs"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+
                 onClick={() => resolve(conflict.id, 'skip')}
               >
                 {t('import.conflicts.skip')}
-              </button>
+              </Button>
             </div>
           </div>
         ))}

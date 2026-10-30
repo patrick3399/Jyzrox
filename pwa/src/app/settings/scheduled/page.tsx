@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { ScanLine } from 'lucide-react'
 import { useRescanLibrary, useRescanStatus, useCancelRescan } from '@/hooks/useImport'
 import { TaskList } from '@/components/ScheduledTasks/TaskList'
+import { Button } from '@/components/ui/button'
 
 export default function ScheduledSettingsPage() {
   useLocale()
@@ -52,7 +53,10 @@ export default function ScheduledSettingsPage() {
                 </p>
               </div>
               {isRunning ? (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="bg-red-500/20 text-red-400 hover:bg-red-500/30"
                   onClick={async () => {
                     try {
                       await cancelRescan()
@@ -62,21 +66,22 @@ export default function ScheduledSettingsPage() {
                     }
                   }}
                   disabled={cancelling}
-                  className="px-3 py-1.5 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
                 >
                   {cancelling
                     ? t('settings.media.rescan.cancelling')
                     : t('settings.media.rescan.cancel')}
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30"
                   onClick={handleRescan}
                   disabled={rescanning}
-                  className="px-3 py-1.5 rounded text-xs font-medium bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30 transition-colors flex items-center gap-1.5"
                 >
                   <ScanLine size={14} />
                   {t('settings.media.rescan')}
-                </button>
+                </Button>
               )}
             </div>
             {isRunning && processed != null && total != null && (

@@ -14,6 +14,7 @@ import { t } from '@/lib/i18n'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { updateFilter } from '@/lib/queryParser'
 import type { GalleryCategoryDef } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 // The Library page is driven by the `q` search string (a `category:` token), not a
 // `category` query param. The sentinel matches the library's own "uncategorized" option.
@@ -148,7 +149,9 @@ export default function CategoriesSettingsPage() {
                 title={t('categories.viewInLibrary')}
                 className="flex items-center gap-2 rounded-full border border-vault-border px-3 py-1 text-sm text-vault-text transition-colors hover:border-vault-accent hover:text-vault-accent"
               >
-                <span className={`h-3 w-3 rounded-full ${CATEGORY_PALETTE[c.color]?.swatch ?? 'bg-gray-500'}`} />
+                <span
+                  className={`h-3 w-3 rounded-full ${CATEGORY_PALETTE[c.color]?.swatch ?? 'bg-gray-500'}`}
+                />
                 {c.name}
                 <span className="text-xs text-vault-text-muted">
                   {t('categories.galleryCount', { count: String(c.gallery_count) })}
@@ -197,13 +200,15 @@ export default function CategoriesSettingsPage() {
               <span className="text-xs text-vault-text-muted">
                 {t('categories.galleryCount', { count: String(c.gallery_count) })}
               </span>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto text-red-400 hover:text-red-300"
                 type="button"
                 onClick={() => handleDelete(c)}
-                className="ml-auto text-xs text-red-400 hover:text-red-300"
               >
                 {t('categories.delete')}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -217,41 +222,36 @@ export default function CategoriesSettingsPage() {
             className="rounded border border-vault-border bg-vault-input px-2 py-1 text-sm text-vault-text focus:outline-none"
           />
           <ColorPicker palette={data.palette} value={newColor} onChange={setNewColor} />
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             type="button"
             onClick={handleAdd}
             disabled={!newName.trim()}
-            className="rounded bg-vault-accent px-3 py-1 text-sm text-white disabled:opacity-50"
           >
             {t('categories.add')}
-          </button>
+          </Button>
         </div>
       </section>
 
       <section className={card}>
-        <h2 className="mb-1 text-sm font-medium text-vault-text">{t('categories.backfillTitle')}</h2>
+        <h2 className="mb-1 text-sm font-medium text-vault-text">
+          {t('categories.backfillTitle')}
+        </h2>
         <p className="mb-3 text-xs text-vault-text-muted">{t('categories.backfillDesc')}</p>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={handlePreview}
-            className="rounded border border-vault-border px-3 py-1 text-sm text-vault-text"
-          >
+          <Button variant="secondary" size="sm" type="button" onClick={handlePreview}>
             {t('categories.backfillPreview')}
-          </button>
+          </Button>
           {backfillMatched !== null && (
             <>
               <span className="text-sm text-vault-text-muted">
                 {t('categories.backfillMatched', { count: String(backfillMatched) })}
               </span>
               {backfillMatched > 0 && (
-                <button
-                  type="button"
-                  onClick={handleApply}
-                  className="rounded bg-vault-accent px-3 py-1 text-sm text-white"
-                >
+                <Button variant="primary" size="sm" type="button" onClick={handleApply}>
                   {t('categories.backfillApply')}
-                </button>
+                </Button>
               )}
             </>
           )}
