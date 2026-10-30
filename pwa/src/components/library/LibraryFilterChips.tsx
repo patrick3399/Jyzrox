@@ -3,6 +3,7 @@
 import { X } from 'lucide-react'
 import { t } from '@/lib/i18n'
 import type { LibraryFilterChip, LibraryFilterChipKey } from '@/lib/libraryFilterChips'
+import { Button } from '@/components/ui/button'
 
 interface LibraryFilterChipsProps {
   chips: LibraryFilterChip[]
@@ -32,13 +33,15 @@ export function LibraryFilterChips({ chips, onRemove, onClearAll }: LibraryFilte
         </span>
       ))}
       {chips.length >= 2 && (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           type="button"
           onClick={onClearAll}
-          className="shrink-0 whitespace-nowrap px-2 py-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+          className="h-auto shrink-0 px-2 py-1 text-xs"
         >
           {t('library.clearAllFilters')}
-        </button>
+        </Button>
       )}
     </div>
   )

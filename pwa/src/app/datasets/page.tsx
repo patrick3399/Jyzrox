@@ -11,6 +11,7 @@ import { parseDatasetIds } from '@/lib/datasets'
 import { t } from '@/lib/i18n'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 function DatasetsPageInner() {
   useLocale()
@@ -79,13 +80,10 @@ function DatasetsPageInner() {
         title={t('datasets.title')}
         subtitle={t('datasets.subtitle')}
         actions={
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-vault-accent-fg transition-colors hover:bg-vault-accent-hover"
-          >
+          <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
             <Plus size={16} />
             {t('datasets.create')}
-          </button>
+          </Button>
         }
       />
 
@@ -142,20 +140,17 @@ function DatasetsPageInner() {
             <span className="block text-xs">{t('datasets.tagQueryHint')}</span>
           </label>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleCreate}
               disabled={busy || !name.trim()}
-              className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-vault-accent-fg disabled:opacity-50"
             >
               {busy ? t('common.loading') : t('datasets.create')}
-            </button>
-            <button
-              onClick={resetForm}
-              disabled={busy}
-              className="rounded-lg border border-vault-border px-4 py-2 text-sm text-vault-text-secondary"
-            >
+            </Button>
+            <Button variant="secondary" size="md" onClick={resetForm} disabled={busy}>
               {t('common.cancel')}
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -205,13 +200,15 @@ function DatasetsPageInner() {
                 </div>
               </button>
               <div className="mt-3 flex justify-end border-t border-vault-border pt-3">
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => handleDelete(dataset.id)}
                   aria-label={t('datasets.delete')}
-                  className="rounded p-1.5 text-vault-text-secondary transition-colors hover:bg-red-500/10 hover:text-red-400"
+                  className="size-8 hover:bg-red-500/10 hover:text-red-400"
                 >
                   <Trash2 size={15} />
-                </button>
+                </Button>
               </div>
             </article>
           ))}

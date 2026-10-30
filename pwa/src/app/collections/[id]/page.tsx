@@ -5,7 +5,11 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { X, Pencil, FolderHeart } from 'lucide-react'
 import { toast } from 'sonner'
-import { useCollection, useUpdateCollection, useRemoveGalleryFromCollection } from '@/hooks/useCollections'
+import {
+  useCollection,
+  useUpdateCollection,
+  useRemoveGalleryFromCollection,
+} from '@/hooks/useCollections'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { AppImage } from '@/components/AppImage'
@@ -14,6 +18,7 @@ import { t } from '@/lib/i18n'
 import { galleryHref } from '@/lib/galleryRoutes'
 import { useLocale } from '@/components/LocaleProvider'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { Button } from '@/components/ui/button'
 
 const PAGE_LIMIT = 24
 
@@ -118,13 +123,15 @@ function CollectionDetailInner() {
                   >
                     {data?.name ?? '…'}
                   </h1>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={handleStartEditName}
                     aria-label={t('collections.edit')}
-                    className="p-1 rounded text-vault-text-secondary hover:text-vault-text opacity-0 group-hover/title:opacity-100 transition-all"
+                    className="size-8 opacity-0 group-hover/title:opacity-100"
                   >
                     <Pencil size={14} />
-                  </button>
+                  </Button>
                 </>
               )}
             </div>
@@ -180,10 +187,7 @@ function CollectionDetailInner() {
           <p className="max-w-md px-4 text-center text-sm text-vault-text-muted">
             {t('collections.emptyHint')}
           </p>
-          <Link
-            href="/library"
-            className="text-sm text-vault-accent hover:underline"
-          >
+          <Link href="/library" className="text-sm text-vault-accent hover:underline">
             {t('collections.browseLibrary')}
           </Link>
         </div>
@@ -244,15 +248,15 @@ function CollectionDetailInner() {
 export default function CollectionDetailPage() {
   return (
     <PageContainer>
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <LoadingSpinner size="lg" />
-        </div>
-      }
-    >
-      <CollectionDetailInner />
-    </Suspense>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <LoadingSpinner size="lg" />
+          </div>
+        }
+      >
+        <CollectionDetailInner />
+      </Suspense>
     </PageContainer>
   )
 }

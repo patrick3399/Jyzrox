@@ -4,7 +4,12 @@ import { useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Trash2, FolderHeart, Image as ImageIcon, Check, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { useCollections, useCreateCollection, useUpdateCollection, useDeleteCollection } from '@/hooks/useCollections'
+import {
+  useCollections,
+  useCreateCollection,
+  useUpdateCollection,
+  useDeleteCollection,
+} from '@/hooks/useCollections'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { AppImage } from '@/components/AppImage'
 import { t } from '@/lib/i18n'
@@ -13,6 +18,7 @@ import type { Collection } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { AlertDialog } from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 
 interface CollectionCardProps {
   collection: Collection
@@ -81,20 +87,24 @@ function CollectionCard({
               className="flex-1 min-w-0 px-2 py-1 bg-vault-input border border-vault-accent rounded text-sm text-vault-text focus:outline-none"
               placeholder={t('collections.namePlaceholder')}
             />
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onEditSave}
               aria-label={t('common.save')}
-              className="p-1.5 rounded text-green-400 hover:bg-green-400/10 transition-colors"
+              className="size-8 text-green-400 hover:bg-green-400/10 hover:text-green-400"
             >
               <Check size={15} />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onEditCancel}
               aria-label={t('common.cancel')}
-              className="p-1.5 rounded text-vault-text-secondary hover:bg-vault-border/40 transition-colors"
+              className="size-8"
             >
               <X size={15} />
-            </button>
+            </Button>
           </>
         ) : (
           <>
@@ -107,26 +117,30 @@ function CollectionCard({
                 {t('collections.galleryCount', { count: String(collection.gallery_count) })}
               </p>
             </button>
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={(e) => {
                 e.stopPropagation()
                 onEdit(collection)
               }}
               aria-label={t('collections.edit')}
-              className="p-1.5 rounded text-vault-text-secondary hover:text-vault-text hover:bg-vault-border/40 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all"
+              className="size-8 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100"
             >
               <Pencil size={15} />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(collection.id)
               }}
               aria-label={t('collections.delete')}
-              className="p-1.5 rounded text-vault-text-secondary hover:text-red-400 hover:bg-red-400/10 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all"
+              className="size-8 hover:text-red-400 hover:bg-red-400/10 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100"
             >
               <Trash2 size={15} />
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -225,13 +239,10 @@ function CollectionsPageInner() {
         spacing="none"
         title={t('collections.title')}
         actions={
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-vault-accent hover:bg-vault-accent-hover text-vault-accent-fg text-sm font-medium rounded-lg transition-colors"
-        >
-          <Plus size={16} />
-          {t('collections.create')}
-        </button>
+          <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+            <Plus size={16} />
+            {t('collections.create')}
+          </Button>
         }
       />
 
@@ -253,23 +264,25 @@ function CollectionsPageInner() {
             className="w-full px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder:text-vault-text-secondary focus:outline-none focus:ring-1 focus:ring-vault-accent"
           />
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleCreate}
               disabled={creating || !newName.trim()}
-              className="px-4 py-2 bg-vault-accent hover:bg-vault-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-vault-accent-fg text-sm font-medium rounded-lg transition-colors"
             >
               {creating ? t('common.loading') : t('collections.create')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="md"
               onClick={() => {
                 setShowCreate(false)
                 setNewName('')
                 setNewDesc('')
               }}
-              className="px-4 py-2 bg-vault-card border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary text-sm rounded-lg transition-colors"
             >
               {t('common.cancel')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -322,15 +335,15 @@ function CollectionsPageInner() {
 export default function CollectionsPage() {
   return (
     <PageContainer>
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <LoadingSpinner size="lg" />
-        </div>
-      }
-    >
-      <CollectionsPageInner />
-    </Suspense>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <LoadingSpinner size="lg" />
+          </div>
+        }
+      >
+        <CollectionsPageInner />
+      </Suspense>
     </PageContainer>
   )
 }

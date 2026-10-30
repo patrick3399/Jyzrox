@@ -780,13 +780,15 @@ function LibraryContent() {
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400 flex items-center justify-between gap-3">
           <span>{error.message || t('common.failedToLoad')}</span>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             type="button"
             onClick={() => void retry()}
-            className="shrink-0 rounded border border-red-400/40 px-3 py-1.5 text-sm hover:bg-red-500/10"
+            className="shrink-0 border border-red-400/40 text-red-400 hover:bg-red-500/10 hover:text-red-400"
           >
             {t('common.retry')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -867,21 +869,27 @@ function LibraryContent() {
             <span className="text-sm text-vault-text font-medium">
               {t('library.selectedCount', { count: String(selectedIds.size) })}
             </span>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setSelectedIds(new Set(displayGalleries.map((g) => g.id)))}
-              className="text-xs text-vault-accent hover:underline"
+              className="h-auto px-1 py-0.5 text-xs text-vault-accent hover:bg-transparent hover:text-vault-accent hover:underline"
             >
               {t('library.selectAll')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setSelectedIds(new Set())}
-              className="text-xs text-vault-text-muted hover:underline"
+              className="h-auto px-1 py-0.5 text-xs hover:bg-transparent hover:underline"
             >
               {t('library.deselectAll')}
-            </button>
+            </Button>
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               onClick={async () => {
                 try {
                   const res = await api.library.batchGalleries({
@@ -894,11 +902,12 @@ function LibraryContent() {
                   toast.error(t('library.updateFailed'))
                 }
               }}
-              className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded text-white text-sm transition-colors"
             >
               {t('library.batchFavorite')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={async () => {
                 try {
                   const res = await api.library.batchGalleries({
@@ -911,11 +920,12 @@ function LibraryContent() {
                   toast.error(t('library.updateFailed'))
                 }
               }}
-              className="px-3 py-1.5 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors"
             >
               {t('library.batchUnfavorite')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={async () => {
                 try {
                   const res = await api.library.batchGalleries({
@@ -930,12 +940,13 @@ function LibraryContent() {
                   toast.error(t('library.updateFailed'))
                 }
               }}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm transition-colors flex items-center gap-1.5"
             >
               <Bookmark size={14} />
               {t('library.batchAddToReadingList')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={async () => {
                 try {
                   const res = await api.library.batchGalleries({
@@ -950,11 +961,10 @@ function LibraryContent() {
                   toast.error(t('library.updateFailed'))
                 }
               }}
-              className="px-3 py-1.5 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors flex items-center gap-1.5"
             >
               <BookmarkCheck size={14} />
               {t('library.batchRemoveFromReadingList')}
-            </button>
+            </Button>
             <select
               defaultValue=""
               onChange={async (e) => {
@@ -1024,27 +1034,31 @@ function LibraryContent() {
                 ))}
               </select>
             )}
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => {
                 setBatchTagMode('add')
                 setBatchTagList([])
                 setBatchTagInput('')
               }}
-              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded text-white text-sm transition-colors"
             >
               {t('library.batchAddTags')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => {
                 setBatchTagMode('remove')
                 setBatchTagList([])
                 setBatchTagInput('')
               }}
-              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 rounded text-white text-sm transition-colors"
             >
               {t('library.batchRemoveTags')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
               onClick={async () => {
                 if (!confirm(t('library.batchDeleteConfirm', { count: String(selectedIds.size) })))
                   return
@@ -1059,19 +1073,19 @@ function LibraryContent() {
                   toast.error(t('library.updateFailed'))
                 }
               }}
-              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded text-white text-sm transition-colors"
             >
               {t('library.batchDelete')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setSelectMode(false)
                 setSelectedIds(new Set())
               }}
-              className="px-3 py-1.5 text-vault-text-muted hover:text-vault-text text-sm transition-colors"
             >
               {t('common.cancel')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -1111,38 +1125,38 @@ function LibraryContent() {
           </>
         }
       >
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={batchTagInput}
-                onChange={(e) => setBatchTagInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && batchTagInput.trim()) {
-                    setBatchTagList((prev) => [...prev, batchTagInput.trim()])
-                    setBatchTagInput('')
-                  }
-                }}
-                placeholder={t('library.batchTagsPlaceholder')}
-                className="flex-1 bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-border-hover"
-                ref={batchTagInputRef}
-              />
-            </div>
-            <div className="flex flex-wrap gap-1 mb-3 min-h-[2rem]">
-              {batchTagList.map((tag, i) => (
-                <span
-                  key={i}
-                  className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs"
-                >
-                  {tag}
-                  <button
-                    onClick={() => setBatchTagList((prev) => prev.filter((_, j) => j !== i))}
-                    className="hover:text-red-400"
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            value={batchTagInput}
+            onChange={(e) => setBatchTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && batchTagInput.trim()) {
+                setBatchTagList((prev) => [...prev, batchTagInput.trim()])
+                setBatchTagInput('')
+              }
+            }}
+            placeholder={t('library.batchTagsPlaceholder')}
+            className="flex-1 bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-border-hover"
+            ref={batchTagInputRef}
+          />
+        </div>
+        <div className="flex flex-wrap gap-1 mb-3 min-h-[2rem]">
+          {batchTagList.map((tag, i) => (
+            <span
+              key={i}
+              className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs"
+            >
+              {tag}
+              <button
+                onClick={() => setBatchTagList((prev) => prev.filter((_, j) => j !== i))}
+                className="hover:text-red-400"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
       </Dialog>
     </div>
   )

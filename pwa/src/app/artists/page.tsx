@@ -17,6 +17,7 @@ import { useInfiniteFollowedArtists, useCheckArtistUpdates } from '@/hooks/useFo
 import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // Column count inferred from CSS breakpoints:
 // grid-cols-3 sm:4 md:5 lg:7 xl:8 2xl:10
@@ -154,7 +155,9 @@ function ArtistsPageInner() {
         </div>
 
         {viewMode === 'followed' && (
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={async () => {
               try {
                 await checkUpdates()
@@ -164,11 +167,10 @@ function ArtistsPageInner() {
               }
             }}
             disabled={isChecking}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-vault-accent text-vault-text-muted hover:text-white text-sm transition-colors"
           >
             <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
             {isChecking ? t('artists.checkingUpdates') : t('artists.checkUpdates')}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -212,7 +214,9 @@ function ArtistsPageInner() {
           {isLoading ? (
             <div className="text-center py-12 text-vault-text-secondary">{t('common.loading')}</div>
           ) : !artists.length ? (
-            <div className="text-center py-12 text-vault-text-secondary">{t('artists.noArtists')}</div>
+            <div className="text-center py-12 text-vault-text-secondary">
+              {t('artists.noArtists')}
+            </div>
           ) : (
             <VirtualGrid
               items={artists}
@@ -354,15 +358,15 @@ function ArtistsPageInner() {
 export default function ArtistsPage() {
   return (
     <PageContainer>
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <LoadingSpinner size="lg" />
-        </div>
-      }
-    >
-      <ArtistsPageInner />
-    </Suspense>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <LoadingSpinner size="lg" />
+          </div>
+        }
+      >
+        <ArtistsPageInner />
+      </Suspense>
     </PageContainer>
   )
 }

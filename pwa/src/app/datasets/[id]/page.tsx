@@ -31,6 +31,7 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import type { DatasetFilterConfig, DatasetFilterReport } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { Button } from '@/components/ui/button'
 
 const PAGE_LIMIT = 48
 
@@ -195,9 +196,7 @@ function DatasetDetailInner() {
     }
   }
 
-  const handleCaptionBatch = async (
-    operation: 'prepend_trigger' | 'search_replace',
-  ) => {
+  const handleCaptionBatch = async (operation: 'prepend_trigger' | 'search_replace') => {
     setBusy(true)
     try {
       const result =
@@ -241,35 +240,39 @@ function DatasetDetailInner() {
                 placeholder={t('datasets.descriptionPlaceholder')}
               />
               <div className="flex gap-2">
-                <button
+                <Button
+                  variant="primary"
+                  size="icon"
                   onClick={saveMetadata}
                   disabled={busy || !name.trim()}
-                  className="rounded bg-vault-accent p-2 text-vault-accent-fg disabled:opacity-50"
                   aria-label={t('common.save')}
                 >
                   <Check size={16} />
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon"
                   onClick={() => setEditing(false)}
                   disabled={busy}
-                  className="rounded border border-vault-border p-2 text-vault-text-secondary"
                   aria-label={t('common.cancel')}
                 >
                   <X size={16} />
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
             <div className="group/title">
               <div className="flex items-center gap-2">
                 <h1 className="truncate text-2xl font-bold text-vault-text">{data?.name ?? '…'}</h1>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={startEditing}
-                  className="rounded p-1 text-vault-text-secondary opacity-100 can-hover:opacity-0 can-hover:group-hover/title:opacity-100"
+                  className="size-8 opacity-100 can-hover:opacity-0 can-hover:group-hover/title:opacity-100"
                   aria-label={t('datasets.edit')}
                 >
                   <Pencil size={15} />
-                </button>
+                </Button>
               </div>
               <p className="mt-1 text-sm text-vault-text-secondary">
                 {data?.description || t('datasets.noDescription')}
@@ -278,27 +281,18 @@ function DatasetDetailInner() {
           )}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
-          <button
-            onClick={() => setShowCaptions((value) => !value)}
-            className="flex items-center gap-1.5 rounded-lg border border-vault-border bg-vault-card px-3 py-2 text-sm font-medium text-vault-text transition-colors hover:border-vault-accent/50"
-          >
+          <Button variant="secondary" size="sm" onClick={() => setShowCaptions((value) => !value)}>
             <MessageSquareText size={16} />
             {t('datasets.captions')}
-          </button>
-          <button
-            onClick={openFilters}
-            className="flex items-center gap-1.5 rounded-lg border border-vault-border bg-vault-card px-3 py-2 text-sm font-medium text-vault-text transition-colors hover:border-vault-accent/50"
-          >
+          </Button>
+          <Button variant="secondary" size="sm" onClick={openFilters}>
             <SlidersHorizontal size={16} />
             {t('datasets.filters')}
-          </button>
-          <button
-            onClick={() => setShowAdd((value) => !value)}
-            className="flex items-center gap-1.5 rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-vault-accent-fg"
-          >
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => setShowAdd((value) => !value)}>
             <Plus size={16} />
             {t('datasets.addMembers')}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -334,20 +328,17 @@ function DatasetDetailInner() {
             <span className="block text-xs">{t('datasets.tagQueryHint')}</span>
           </label>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleAdd}
               disabled={busy || !(galleryIds || collectionIds || imageIds || tagQuery)}
-              className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-vault-accent-fg disabled:opacity-50"
             >
               {busy ? t('common.loading') : t('datasets.addMembers')}
-            </button>
-            <button
-              onClick={() => setShowAdd(false)}
-              disabled={busy}
-              className="rounded-lg border border-vault-border px-4 py-2 text-sm text-vault-text-secondary"
-            >
+            </Button>
+            <Button variant="secondary" size="md" onClick={() => setShowAdd(false)} disabled={busy}>
               {t('common.cancel')}
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -356,7 +347,9 @@ function DatasetDetailInner() {
         <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-4">
           <div>
             <h2 className="font-semibold text-vault-text">{t('datasets.captionReview')}</h2>
-            <p className="mt-1 text-sm text-vault-text-secondary">{t('datasets.captionReviewHint')}</p>
+            <p className="mt-1 text-sm text-vault-text-secondary">
+              {t('datasets.captionReviewHint')}
+            </p>
           </div>
           <div className="grid gap-2 md:grid-cols-[1fr_auto]">
             <input
@@ -365,14 +358,16 @@ function DatasetDetailInner() {
               placeholder={t('datasets.triggerWordPlaceholder')}
               className="rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
             />
-            <button
+            <Button
+              variant="secondary"
+              size="md"
               type="button"
               disabled={busy || !triggerWord.trim()}
               onClick={() => handleCaptionBatch('prepend_trigger')}
-              className="rounded-lg border border-vault-accent px-4 py-2 text-sm text-vault-accent disabled:opacity-50"
+              className="border-vault-accent text-vault-accent"
             >
               {t('datasets.prependTrigger')}
-            </button>
+            </Button>
           </div>
           <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
             <input
@@ -387,14 +382,15 @@ function DatasetDetailInner() {
               placeholder={t('datasets.captionReplacement')}
               className="rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
             />
-            <button
+            <Button
+              variant="secondary"
+              size="md"
               type="button"
               disabled={busy || !captionSearch}
               onClick={() => handleCaptionBatch('search_replace')}
-              className="rounded-lg border border-vault-border px-4 py-2 text-sm text-vault-text-secondary disabled:opacity-50"
             >
               {t('datasets.replaceCaptions')}
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -406,13 +402,15 @@ function DatasetDetailInner() {
               <h2 className="font-semibold text-vault-text">{t('datasets.filtersTitle')}</h2>
               <p className="mt-1 text-sm text-vault-text-secondary">{t('datasets.filtersHint')}</p>
             </div>
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setShowFilters(false)}
-              className="rounded p-1 text-vault-text-secondary hover:text-vault-text"
+              className="size-8"
               aria-label={t('common.close')}
             >
               <X size={16} />
-            </button>
+            </Button>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="space-y-1 text-sm text-vault-text-secondary">
@@ -510,21 +508,21 @@ function DatasetDetailInner() {
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <button
+            <Button
+              variant="secondary"
+              size="md"
               onClick={handlePreviewFilters}
               disabled={busy}
-              className="rounded-lg border border-vault-accent px-4 py-2 text-sm font-medium text-vault-accent disabled:opacity-50"
+              className="border-vault-accent text-vault-accent"
             >
               {t('datasets.previewFilters')}
-            </button>
-            <button
-              onClick={handleApplyFilters}
-              disabled={busy}
-              className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-vault-accent-fg disabled:opacity-50"
-            >
+            </Button>
+            <Button variant="primary" size="md" onClick={handleApplyFilters} disabled={busy}>
               {busy ? t('common.loading') : t('datasets.applyFilters')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="md"
               onClick={() => {
                 setMinWidth('')
                 setMinHeight('')
@@ -532,10 +530,9 @@ function DatasetDetailInner() {
                 setFilterPreview(null)
               }}
               disabled={busy}
-              className="rounded-lg border border-vault-border px-4 py-2 text-sm text-vault-text-secondary disabled:opacity-50"
             >
               {t('datasets.clearFilters')}
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -653,15 +650,15 @@ function DatasetDetailInner() {
 export default function DatasetDetailPage() {
   return (
     <PageContainer>
-    <Suspense
-      fallback={
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <LoadingSpinner size="lg" />
-        </div>
-      }
-    >
-      <DatasetDetailInner />
-    </Suspense>
+      <Suspense
+        fallback={
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <LoadingSpinner size="lg" />
+          </div>
+        }
+      >
+        <DatasetDetailInner />
+      </Suspense>
     </PageContainer>
   )
 }

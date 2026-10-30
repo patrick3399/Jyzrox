@@ -14,6 +14,7 @@ import { X, Trash2, Clock } from 'lucide-react'
 import type { BrowseHistoryItem } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 const PAGE_SIZE = 24
 
@@ -185,15 +186,16 @@ function HistoryPageInner() {
         subtitle={t('history.subtitle')}
         actions={
           items.length > 0 && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleClearAll}
               disabled={clearing}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-700/50
-                         bg-red-900/20 text-red-400 hover:bg-red-900/40 transition-colors text-sm"
+              className="border border-red-700/50 bg-red-900/20 text-red-400 hover:bg-red-900/40 hover:text-red-400"
             >
               <Trash2 size={14} />
               {clearing ? '...' : t('history.clearAll')}
-            </button>
+            </Button>
           )
         }
       />

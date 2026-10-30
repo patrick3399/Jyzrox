@@ -52,6 +52,7 @@ import type {
 } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // Module-level so the SWR key stays referentially stable across renders.
 const MANUAL_JOBS_PARAMS: JobListParams = { exclude_subscription: true }
@@ -457,31 +458,37 @@ function JobRow({
             stopped={job.progress?.outcome === 'stopped'}
           />
           {job.status === 'running' && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onPause(job.id, 'pause')}
               disabled={stopping}
-              className="p-1.5 rounded-lg bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 transition-colors disabled:opacity-50"
+              className="size-8 border border-orange-500/30 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 hover:text-orange-400"
               title={t('queue.pause')}
             >
               <Pause size={14} />
-            </button>
+            </Button>
           )}
           {job.status === 'paused' && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onPause(job.id, 'resume')}
               disabled={stopping}
-              className="p-1.5 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 text-green-400 transition-colors disabled:opacity-50"
+              className="size-8 border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 hover:text-green-400"
               title={t('queue.resume')}
             >
               <Play size={14} />
-            </button>
+            </Button>
           )}
           {isActive && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               data-testid="job-stop"
               onClick={() => onStop(job)}
               disabled={stopping}
-              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-vault-accent/10 border border-vault-accent/30 hover:bg-vault-accent/20 text-vault-accent text-xs font-medium transition-colors disabled:opacity-60"
+              className="px-2 text-xs border border-vault-accent/30 bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 hover:text-vault-accent"
               title={t('queue.stop')}
               aria-label={stopping ? t('queue.stopping') : t('queue.stop')}
             >
@@ -489,29 +496,33 @@ function JobRow({
               <span className="hidden sm:inline">
                 {stopping ? t('queue.stopping') : t('queue.stop')}
               </span>
-            </button>
+            </Button>
           )}
           {isActive && canDiscard && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               data-testid="job-discard"
               onClick={() => onDiscard(job)}
               disabled={stopping}
-              className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 transition-colors disabled:opacity-50"
+              className="size-8 border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-400"
               title={t('queue.discard')}
               aria-label={t('queue.discard')}
             >
               <X size={14} />
-            </button>
+            </Button>
           )}
           {(job.status === 'failed' || job.status === 'partial') &&
             job.retry_count < job.max_retries && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => onRetry(job.id)}
-                className="p-1.5 rounded-lg bg-vault-accent/10 border border-vault-accent/30 hover:bg-vault-accent/20 text-vault-accent transition-colors"
+                className="size-8 border border-vault-accent/30 bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 hover:text-vault-accent"
                 title={t('queue.retry')}
               >
                 <RotateCcw size={14} />
-              </button>
+              </Button>
             )}
         </div>
       </div>
@@ -871,14 +882,15 @@ function QueuePageInner() {
             placeholder={t('queue.urlPlaceholder')}
             className="flex-1 bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
           />
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={handleEnqueue}
             disabled={isEnqueuing || !urlInput.trim()}
-            className="flex items-center gap-1.5 px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 rounded-lg text-white text-sm font-medium transition-colors"
           >
             <Plus size={16} />
             {isEnqueuing ? t('queue.adding') : t('queue.add')}
-          </button>
+          </Button>
         </div>
         {isFanboxUrl && (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-vault-text-muted">
@@ -1089,14 +1101,16 @@ function QueuePageInner() {
             <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
               {t('queue.completedFailed')} ({sortedCompleted.length})
             </h2>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={handleClear}
               disabled={isClearing || sortedCompleted.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-vault-card border border-vault-border hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 text-vault-text-muted transition-colors disabled:opacity-40"
+              className="text-xs hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400"
             >
               <Trash2 size={13} />
               {isClearing ? t('queue.clearing') : t('queue.clear')}
-            </button>
+            </Button>
           </div>
 
           <div className="space-y-2">

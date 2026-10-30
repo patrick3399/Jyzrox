@@ -52,6 +52,7 @@ import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { estimateGalleryThumbRowHeight } from '@/lib/gridRowHeight'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { Button } from '@/components/ui/button'
 
 const DOWNLOAD_REFRESH_INTERVAL_MS = 3000
 
@@ -874,12 +875,14 @@ function GalleryDetailPageInner() {
           <div className="bg-red-900/30 border border-red-700 rounded-lg p-6 text-red-400 max-w-md text-center">
             <p className="font-semibold mb-2">{t('library.failedToLoad')}</p>
             <p className="text-sm">{galleryError.message}</p>
-            <button
+            <Button
+              variant="secondary"
+              size="md"
               onClick={() => smartBack(router, '/library')}
-              className="mt-4 px-4 py-2 bg-vault-input border border-vault-border rounded text-vault-text-secondary text-sm hover:text-vault-text transition-colors"
+              className="mt-4"
             >
               {t('common.goBack')}
-            </button>
+            </Button>
           </div>
         </div>
         <BackButton fallback="/library" />
@@ -1029,7 +1032,9 @@ function GalleryDetailPageInner() {
                   </span>
                 )}
                 {statusAction.canEnqueue && canEdit && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
                       if (statusAction.kind !== 'repair') {
                         void handleEnqueueUpdate('update')
@@ -1041,7 +1046,7 @@ function GalleryDetailPageInner() {
                       }
                     }}
                     disabled={isEnqueueingUpdate || !!activeJobId}
-                    className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="h-auto px-2 py-0.5 text-xs border border-vault-accent/50 bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30 hover:text-vault-accent"
                   >
                     {isEnqueueingUpdate
                       ? '...'
@@ -1050,7 +1055,7 @@ function GalleryDetailPageInner() {
                             ? 'library.repairNow'
                             : 'library.updateNow',
                         )}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -1185,18 +1190,20 @@ function GalleryDetailPageInner() {
 
           {/* Secondary metadata — always shown from md, behind a toggle on phones */}
           <div className="col-span-2 md:col-span-1 md:col-start-2">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               type="button"
               onClick={() => setInfoOpen((open) => !open)}
               aria-expanded={infoOpen}
-              className="md:hidden flex items-center gap-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+              className="h-auto gap-1 px-1 py-1 text-xs md:hidden hover:bg-transparent"
             >
               <ChevronDown
                 size={14}
                 className={`transition-transform ${infoOpen ? 'rotate-180' : ''}`}
               />
               {infoOpen ? t('library.lessInfo') : t('library.moreInfo')}
-            </button>
+            </Button>
             <div
               className={`${infoOpen ? 'grid' : 'hidden'} md:grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mt-2 md:mt-0`}
             >
@@ -1273,21 +1280,25 @@ function GalleryDetailPageInner() {
                       {version.title || `#${version.id}`}
                     </Link>
                   ))}
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   type="button"
-                  className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-2 py-1 text-vault-text-secondary hover:border-vault-accent"
+                  className="h-auto px-2 py-1 hover:border-vault-accent"
                   onClick={handleLinkVersion}
                 >
                   <History size={14} /> {t('library.linkVersion')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   type="button"
                   onClick={() => setVersionsOpen(false)}
                   aria-label={t('common.close')}
-                  className="p-1 text-vault-text-muted hover:text-vault-text"
+                  className="size-8"
                 >
                   <X size={14} />
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -1356,7 +1367,9 @@ function GalleryDetailPageInner() {
           <div className="flex items-center gap-2">
             {selectMode ? (
               <>
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={async () => {
                     const ids = [...selectedIds].slice(0, 6)
                     if (!ids.length) return
@@ -1371,59 +1384,71 @@ function GalleryDetailPageInner() {
                   }}
                   disabled={selectedIds.size === 0 || selectedIds.size > 6}
                   title={t('library.sourceLookupLimit')}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-50"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.findSources', { count: selectedIds.size })}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleHideSelected}
                   disabled={selectedIds.size === 0 || isHiding}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                  className="h-auto py-1 text-xs border border-red-700/50 bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-400"
                 >
                   {isHiding
                     ? t('library.hidingImages')
                     : t('library.hideSelected', { count: selectedIds.size })}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={selectAllLoaded}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.selectAll')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={invertSelection}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.invertSelection')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={exitSelectMode}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.cancelSelect')}
-                </button>
+                </Button>
               </>
             ) : (
               <>
                 {canEdit && images.length > 0 && (
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setSelectMode(true)}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                    className="h-auto py-1 text-xs"
                   >
                     {t('library.selectImages')}
-                  </button>
+                  </Button>
                 )}
                 {canEdit && (hiddenImages.length > 0 || excludedBlobs.length > 0) && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setShowExcluded(!showExcluded)}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-yellow-900/30 border-yellow-700/50 text-yellow-400 hover:bg-yellow-900/50 transition-colors"
+                    className="h-auto py-1 text-xs border border-yellow-700/50 bg-yellow-900/30 text-yellow-400 hover:bg-yellow-900/50 hover:text-yellow-400"
                   >
                     {showExcluded
                       ? t('library.hideExcluded')
                       : t('library.showExcluded', {
                           count: hiddenImages.length + excludedBlobs.length,
                         })}
-                  </button>
+                  </Button>
                 )}
               </>
             )}
@@ -1614,13 +1639,15 @@ function GalleryDetailPageInner() {
                       )}
                     </div>
                   </div>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleRestoreImage(image.id)}
                     disabled={restoringImageId === image.id}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
+                    className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
                   >
                     {restoringImageId === image.id ? '...' : t('library.restoreHidden')}
-                  </button>
+                  </Button>
                 </div>
               ))}
               {excludedBlobs.map((blob) => (
@@ -1638,13 +1665,15 @@ function GalleryDetailPageInner() {
                       </span>
                     )}
                   </div>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleRestore(blob.blob_sha256)}
                     disabled={restoringHash === blob.blob_sha256}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
+                    className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
                   >
                     {restoringHash === blob.blob_sha256 ? '...' : t('library.restoreExcluded')}
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
