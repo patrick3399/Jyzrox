@@ -17,6 +17,7 @@ import { RepoStatusBar } from '@/components/novels/RepoStatusBar'
 import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 export default function NovelsPage() {
   useLocale()
@@ -39,16 +40,16 @@ export default function NovelsPage() {
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             {canEdit && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={() => setShowCreate(true)}
                 aria-label={t('novels.newWork')}
                 title={t('novels.newWork')}
-                className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
               >
                 <Plus className="size-4 shrink-0" />
                 <span className="hidden sm:inline">{t('novels.newWork')}</span>
-              </button>
+              </Button>
             )}
             <Link
               href="/novels/graph"

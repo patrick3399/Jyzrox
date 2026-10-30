@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 
 /**
  * Inline editor for one file's `summary:` frontmatter.
@@ -88,40 +89,44 @@ export function ChapterSummaryEditor({
         </p>
       )}
       <div className="mt-2 flex justify-end gap-2">
-        <button
-          type="button"
-          className="rounded border border-vault-border px-3 py-1 text-xs text-vault-text-muted hover:text-vault-text"
+        <Button
+          variant="secondary"
+          size="sm"
+          className="text-xs"
           onClick={onCancel}
         >
           {t('novels.cancel')}
-        </button>
+        </Button>
         {conflictSha ? (
           <>
-            <button
-              type="button"
-              className="rounded border border-vault-border px-3 py-1 text-xs text-vault-text-muted hover:text-vault-text"
+            <Button
+              variant="secondary"
+              size="sm"
+              className="text-xs"
               onClick={onSaved}
             >
               {t('novels.summaryDiscardMine')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              className="text-xs"
               disabled={saving}
-              className="rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
               onClick={() => save(conflictSha)}
             >
               {t('novels.summaryOverwrite')}
-            </button>
+            </Button>
           </>
         ) : (
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
+            className="text-xs"
             disabled={saving || baseSha === null}
-            className="rounded bg-vault-accent px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
             onClick={() => baseSha !== null && save(baseSha)}
           >
             {t('novels.save')}
-          </button>
+          </Button>
         )}
       </div>
     </div>

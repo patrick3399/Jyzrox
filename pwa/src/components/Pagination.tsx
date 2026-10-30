@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 
 interface PaginationProps {
   page: number // 0-indexed (confirmed/committed page from data)
@@ -58,7 +59,6 @@ export function Pagination({
         : 'bg-vault-card text-vault-text-secondary border border-vault-border hover:border-vault-accent hover:text-vault-text'
     }`
 
-  const btnNav = `${btnBase} bg-vault-card text-vault-text-secondary border border-vault-border hover:border-vault-accent hover:text-vault-text`
 
   const handlePageClick = (p: number) => {
     setDisplayPage(p)
@@ -75,15 +75,16 @@ export function Pagination({
       </p>
 
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          className={btnNav}
+        <Button
+          variant="secondary"
+          size="icon"
+          className="size-8"
           onClick={() => handlePageClick(activePage - 1)}
           disabled={isLoading || activePage === 0}
           aria-label={t('common.previousPage')}
         >
           <ChevronLeft size={16} />
-        </button>
+        </Button>
 
         {pageNumbers.map((item, idx) => {
           if (item === 'ellipsis-start' || item === 'ellipsis-end') {
@@ -111,15 +112,16 @@ export function Pagination({
           )
         })}
 
-        <button
-          type="button"
-          className={btnNav}
+        <Button
+          variant="secondary"
+          size="icon"
+          className="size-8"
           onClick={() => handlePageClick(activePage + 1)}
           disabled={isLoading || activePage >= totalPages - 1}
           aria-label={t('common.nextPage')}
         >
           <ChevronRight size={16} />
-        </button>
+        </Button>
       </div>
     </div>
   )

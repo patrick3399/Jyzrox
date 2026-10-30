@@ -17,6 +17,7 @@ import {
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { Button } from '@/components/ui/button'
 import { useWsJobs, useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
 import {
@@ -619,48 +620,46 @@ export default function SubscriptionsPage() {
         actions={
           <div className="flex items-center gap-1.5 flex-wrap">
             {(data?.subscriptions?.length ?? 0) > 0 && (
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={handleDeleteAll}
                 disabled={isDeletingAll}
-                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-red-400 hover:bg-red-900/30 hover:border-red-700/50 transition-colors disabled:opacity-50"
+                className="text-red-400 hover:text-red-400 hover:bg-red-900/30 hover:border-red-700/50"
               >
                 <Trash2 size={14} />
                 <span className="hidden sm:inline">
                   {isDeletingAll ? t('subscriptions.deletingAll') : t('subscriptions.deleteAll')}
                 </span>
-              </button>
+              </Button>
             )}
-            <button
-              onClick={openNewGroup}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
-            >
+            <Button variant="secondary" size="sm" onClick={openNewGroup}>
               <FolderOpen size={14} />
               {t('subscriptions.groupNew')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setShowBatch(!showBatch)
                 if (showAdd) setShowAdd(false)
               }}
-              className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                showBatch
-                  ? 'bg-vault-input border border-vault-border text-vault-text'
-                  : 'bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text'
-              }`}
+              className={showBatch ? 'text-vault-text' : undefined}
             >
               {showBatch ? <X size={14} /> : <List size={14} />}
               {showBatch ? t('common.cancel') : t('subscriptions.batchImport')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => {
                 setShowAdd(!showAdd)
                 if (showBatch) setShowBatch(false)
               }}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors"
             >
               {showAdd ? <X size={14} /> : <Plus size={14} />}
               {showAdd ? t('common.cancel') : t('subscriptions.addNew')}
-            </button>
+            </Button>
           </div>
         }
       />
@@ -794,13 +793,9 @@ export default function SubscriptionsPage() {
               ))}
             </div>
           </div>
-          <button
-            onClick={handleAdd}
-            disabled={creating || !url.trim()}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
-          >
+          <Button variant="primary" onClick={handleAdd} disabled={creating || !url.trim()}>
             {creating ? t('subscriptions.adding') : t('subscriptions.add')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -859,10 +854,10 @@ export default function SubscriptionsPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button
+            <Button
+              variant="primary"
               onClick={handleBatchImport}
               disabled={!!batchProgress || !batchUrls.trim()}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
             >
               {batchProgress
                 ? t('subscriptions.batchImporting', {
@@ -870,7 +865,7 @@ export default function SubscriptionsPage() {
                     total: batchProgress.total,
                   })
                 : t('subscriptions.batchImport')}
-            </button>
+            </Button>
             {batchProgress && (
               <div className="flex-1 h-2 bg-vault-border rounded-full overflow-hidden">
                 <div

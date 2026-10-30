@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { DiffView } from './DiffView'
+import { Button } from '@/components/ui/button'
 
 export function HistoryPanel({ path, canEdit = false }: { path: string; canEdit?: boolean }) {
   const [rev, setRev] = useState<string | null>(null)
@@ -55,14 +56,15 @@ export function HistoryPanel({ path, canEdit = false }: { path: string; canEdit?
           <span data-testid="compare-base">
             {t('novels.compareBase', { rev: base.slice(0, 7) })}
           </span>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="icon"
+            className="size-8"
             aria-label={t('novels.compareClear')}
-            className="inline-flex items-center rounded border border-vault-border p-0.5 hover:border-vault-accent"
             onClick={() => setBase(null)}
           >
             <X className="size-3" />
-          </button>
+          </Button>
         </div>
       )}
       <ul className="flex flex-col divide-y divide-vault-border rounded-lg border border-vault-border">
@@ -82,29 +84,29 @@ export function HistoryPanel({ path, canEdit = false }: { path: string; canEdit?
               </span>
             </button>
             <div className="flex shrink-0 items-center gap-1 pr-2">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="icon"
                 aria-pressed={base === c.hash}
                 aria-label={t('novels.compareWith', { rev: c.hash.slice(0, 7) })}
                 title={t('novels.compareWith', { rev: c.hash.slice(0, 7) })}
-                className={`rounded border border-vault-border p-1 text-vault-text-muted hover:border-vault-accent hover:text-vault-text ${
-                  base === c.hash ? 'border-vault-accent text-vault-text' : ''
-                }`}
+                className={`size-8 ${base === c.hash ? 'border-vault-accent text-vault-text' : ''}`}
                 onClick={() => setBase(base === c.hash ? null : c.hash)}
               >
                 <GitCompare className="size-3" />
-              </button>
+              </Button>
               {canEdit && (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="size-8"
                   disabled={reverting}
                   aria-label={t('novels.revertTo', { rev: c.hash.slice(0, 7) })}
                   title={t('novels.revertTo', { rev: c.hash.slice(0, 7) })}
-                  className="rounded border border-vault-border p-1 text-vault-text-muted hover:border-vault-accent hover:text-vault-text disabled:opacity-50"
                   onClick={() => handleRevert(c.hash)}
                 >
                   <RotateCcw className="size-3" />
-                </button>
+                </Button>
               )}
             </div>
           </li>

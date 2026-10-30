@@ -24,6 +24,7 @@ import {
 import { toast } from 'sonner'
 import { useSWRConfig } from 'swr'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 import { useCheckUrl, usePauseJob } from '@/hooks/useDownloadQueue'
 import { useStopSubscription } from '@/hooks/useSubscriptions'
 import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
@@ -225,22 +226,24 @@ function IntervalRow({
           {p.label}
         </button>
       ))}
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={commit}
-        className="rounded p-1 text-emerald-400 hover:bg-vault-card"
+        className="size-8 text-emerald-400"
         aria-label={t('common.save')}
       >
         <Check size={12} />
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={() => setEditing(false)}
-        className="rounded p-1 hover:bg-vault-card hover:text-vault-text"
+        className="size-8"
         aria-label={t('common.cancel')}
       >
         <X size={12} />
-      </button>
+      </Button>
     </div>
   )
 }
@@ -294,16 +297,17 @@ function DownloadOptionsRow({
       {expanded && supported && (
         <div>
           <MediaPolicyFields value={policy} onChange={setPolicy} />
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
             disabled={!dirty || !onDownloadOptionsChange}
             onClick={() =>
               onDownloadOptionsChange?.(sub, withMediaPolicy(sub.download_options, policy))
             }
-            className="mt-2 rounded bg-vault-accent px-2 py-1 text-xs text-white transition-colors hover:bg-vault-accent/90 disabled:opacity-40"
+            className="mt-2 text-xs"
           >
             {t('common.save')}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -312,7 +316,7 @@ function DownloadOptionsRow({
 
 // Footer actions: a 40px touch target on phones, compact from `sm` up.
 const FOOTER_ACTION =
-  'flex size-10 items-center justify-center rounded-lg transition-colors sm:size-auto sm:rounded sm:p-1.5'
+  'sm:size-auto sm:rounded sm:p-1.5'
 const FOOTER_ICON = 18
 const FOOTER_ICON_CLASS = 'sm:size-3.5'
 
@@ -539,35 +543,41 @@ export function SubscriptionCard({
         </span>
         <div className="flex shrink-0 items-center gap-1 sm:gap-0.5">
           {latestJob?.status === 'running' && !isStopping && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               data-testid="subscription-pause"
               onClick={() => void handlePause('pause')}
               disabled={isPausing}
-              className={`${FOOTER_ACTION} text-vault-text-muted hover:text-orange-400 disabled:opacity-60`}
+              className={`${FOOTER_ACTION} hover:text-orange-400`}
               title={t('queue.pause')}
               aria-label={t('queue.pause')}
             >
               <Pause size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
-            </button>
+            </Button>
           )}
           {latestJob?.status === 'paused' && !isStopping && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               data-testid="subscription-resume"
               onClick={() => void handlePause('resume')}
               disabled={isPausing}
-              className={`${FOOTER_ACTION} text-vault-text-muted hover:text-green-400 disabled:opacity-60`}
+              className={`${FOOTER_ACTION} hover:text-green-400`}
               title={t('queue.resume')}
               aria-label={t('queue.resume')}
             >
               <Play size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
-            </button>
+            </Button>
           )}
           {hasActiveJob && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               data-testid="subscription-stop"
               onClick={() => void handleStop()}
               disabled={isStopping}
-              className={`${FOOTER_ACTION} text-vault-text-muted hover:text-amber-400 disabled:opacity-60`}
+              className={`${FOOTER_ACTION} hover:text-amber-400`}
               title={isStopping ? t('queue.stopping') : t('subscriptions.stop')}
               aria-label={isStopping ? t('queue.stopping') : t('subscriptions.stop')}
             >
@@ -575,12 +585,14 @@ export function SubscriptionCard({
                 size={FOOTER_ICON}
                 className={`${FOOTER_ICON_CLASS} ${isStopping ? 'animate-pulse' : ''}`}
               />
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onCheck(sub)}
             disabled={checkingId === sub.id}
-            className={`${FOOTER_ACTION} text-vault-text-muted hover:text-emerald-400 disabled:opacity-60`}
+            className={`${FOOTER_ACTION} hover:text-emerald-400`}
             title={t('subscriptions.downloadNow')}
             aria-label={t('subscriptions.downloadNow')}
           >
@@ -588,17 +600,18 @@ export function SubscriptionCard({
               size={FOOTER_ICON}
               className={`${FOOTER_ICON_CLASS} ${checkingId === sub.id ? 'animate-pulse' : ''}`}
             />
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setShowActions((value) => !value)}
-            className={`${FOOTER_ACTION} ${showActions ? 'bg-vault-border text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+            className={`${FOOTER_ACTION} ${showActions ? 'bg-vault-border text-vault-text' : ''}`}
             title={t('common.more')}
             aria-label={t('common.more')}
             aria-expanded={showActions}
           >
             <MoreHorizontal size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
-          </button>
+          </Button>
         </div>
       </div>
 

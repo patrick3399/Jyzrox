@@ -18,6 +18,7 @@ import { useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 const DISMISSED_KEY = 'dashboard:dismissed_alerts'
 const COMPACT_LINKS_KEY = 'dashboard_compact_links'
@@ -100,13 +101,15 @@ function SystemAlerts({
             className={`flex items-center justify-between gap-3 border rounded-lg px-4 py-3 text-sm ${styles.wrap}`}
           >
             <span className="leading-snug">{msg}</span>
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => dismiss(msg)}
-              className={`shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
+              className={`size-8 shrink-0 ${styles.btn}`}
               aria-label={t('common.dismissAlert')}
             >
               <X size={14} />
-            </button>
+            </Button>
           </div>
         )
       })}
@@ -244,9 +247,11 @@ function DashboardInner() {
           <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
             {t('dashboard.quickLinks.title')}
           </h2>
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={toggleCompactLinks}
-            className="p-1.5 rounded-md text-vault-text-muted hover:text-vault-text hover:bg-vault-card-hover transition-colors"
+            className="size-8"
             aria-label={
               compactLinks
                 ? t('dashboard.quickLinks.expandedView')
@@ -259,7 +264,7 @@ function DashboardInner() {
             }
           >
             {compactLinks ? <LayoutList size={15} /> : <LayoutGrid size={15} />}
-          </button>
+          </Button>
         </div>
 
         {/* Grid — animates between compact and expanded */}

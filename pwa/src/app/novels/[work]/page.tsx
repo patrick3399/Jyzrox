@@ -20,6 +20,7 @@ import { ChapterSummaryEditor } from '@/components/novels/ChapterSummaryEditor'
 import { OutlineSection } from '@/components/novels/OutlineSection'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 export default function NovelWorkPage() {
   useLocale()
@@ -60,24 +61,26 @@ export default function NovelWorkPage() {
         actions={
           <div className="flex shrink-0 items-center gap-2">
             {/* Linting reads every chapter, so it is opt-in rather than automatic. */}
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="md"
+              className="shrink-0"
               aria-pressed={lintOn}
               onClick={() => setLintOn((v) => !v)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
             >
               <SpellCheck className="size-4" />
               {t('novels.checkFormat')}
-            </button>
+            </Button>
             {canEdit && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
+                className="shrink-0"
                 onClick={() => setShowCreate(true)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
               >
                 <Plus className="size-4" />
                 {t('novels.newChapter')}
-              </button>
+              </Button>
             )}
           </div>
         }
@@ -122,15 +125,16 @@ export default function NovelWorkPage() {
                   {t('novels.charCount', { count: c.chars.toLocaleString() })}
                 </span>
                 {canEdit && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="size-8 shrink-0"
                     aria-label={t('novels.editSummary')}
                     title={t('novels.editSummary')}
-                    className="shrink-0 rounded border border-vault-border p-1 text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
                     onClick={() => setEditingSummary(editingSummary === c.path ? null : c.path)}
                   >
                     <Pencil className="size-3" />
-                  </button>
+                  </Button>
                 )}
               </div>
               {editingSummary === c.path && (

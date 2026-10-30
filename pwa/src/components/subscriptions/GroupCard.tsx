@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { SubscriptionCard, timeAgo } from './SubscriptionCard'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 import type { DownloadJob, Subscription, SubscriptionGroup } from '@/lib/types'
 
 function groupStatusBadge(status: string) {
@@ -140,16 +141,20 @@ export function GroupCard({
         {/* Group actions — stop propagation so clicking them doesn't toggle accordion */}
         {!isUngrouped && (
           <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onRun(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-emerald-400 transition-colors"
+              className="size-8 hover:text-emerald-400"
               title={t('subscriptions.groupRunNow')}
             >
               <Play size={13} />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onPauseResume(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-yellow-400 transition-colors"
+              className="size-8 hover:text-yellow-400"
               title={
                 group.status === 'paused'
                   ? t('subscriptions.groupResume')
@@ -157,22 +162,26 @@ export function GroupCard({
               }
             >
               <Pause size={13} />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onEdit(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
+              className="size-8 hover:text-vault-accent"
               title={t('subscriptions.groupEdit')}
             >
               <Settings2 size={13} />
-            </button>
+            </Button>
             {!group.is_system && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => onDelete(group)}
-                className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors"
+                className="size-8 hover:text-red-400"
                 title={t('subscriptions.groupDelete')}
               >
                 <Trash2 size={13} />
-              </button>
+              </Button>
             )}
           </div>
         )}

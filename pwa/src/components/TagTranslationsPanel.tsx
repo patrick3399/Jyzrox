@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 
 /**
  * Full tag translations browse/search panel. Available to every logged-in
@@ -168,32 +169,35 @@ export default function TagTranslationsPanel({ isAdmin }: TagTranslationsPanelPr
                     <td className="p-3 text-sm text-right">
                       {isEditing ? (
                         <div className="flex gap-1 justify-end">
-                          <button
-                            type="button"
+                          <Button
+                            variant="primary"
+                            size="sm"
                             onClick={() => handleSave(item.namespace, item.name)}
-                            className="px-2 py-1 text-xs bg-vault-accent hover:bg-vault-accent/90 rounded text-white transition-colors"
+                            className="text-xs"
                           >
                             {t('common.save')}
-                          </button>
-                          <button
-                            type="button"
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={cancelEdit}
-                            className="px-2 py-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+                            className="text-xs"
                           >
                             {t('common.cancel')}
-                          </button>
+                          </Button>
                         </div>
                       ) : (
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => startEdit(key, item.translation)}
                           aria-label={t('tags.editTranslation')}
                           title={t('tags.editTranslation')}
-                          className="flex items-center gap-1 px-2 py-1 text-xs text-vault-text-secondary hover:text-vault-accent transition-colors ml-auto"
+                          className="text-xs ml-auto hover:text-vault-accent"
                         >
                           <Pencil size={12} />
                           {t('tags.editTranslation')}
-                        </button>
+                        </Button>
                       )}
                     </td>
                   )}
@@ -214,26 +218,26 @@ export default function TagTranslationsPanel({ isAdmin }: TagTranslationsPanelPr
       {/* Offset pagination */}
       {totalPages > 1 && (
         <div className="flex gap-2 mt-4 items-center">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setOffset(Math.max(0, offset - limit))}
             disabled={page === 0}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
           >
             <ChevronLeft size={14} /> {t('tags.prev')}
-          </button>
+          </Button>
           <span className="text-sm text-vault-text-secondary">
             {page + 1} / {totalPages} (
             {t('tags.translationsBrowseTotal', { total: String(total) })})
           </span>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setOffset(Math.min((totalPages - 1) * limit, offset + limit))}
             disabled={page >= totalPages - 1}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
           >
             {t('tags.next')} <ChevronRight size={14} />
-          </button>
+          </Button>
         </div>
       )}
     </>

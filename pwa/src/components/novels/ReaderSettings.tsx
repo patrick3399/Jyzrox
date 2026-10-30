@@ -2,6 +2,7 @@
 
 import { Minus, Plus } from 'lucide-react'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 
 export type ReaderTheme = 'light' | 'dark' | 'sepia'
 
@@ -29,25 +30,27 @@ export function ReaderSettings({
     <div className="flex flex-wrap items-center gap-4">
       <div className="flex items-center gap-2" aria-label={t('novels.fontSize')}>
         <span className="text-xs text-vault-text-muted">{t('novels.fontSize')}</span>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="icon"
+          className="size-8"
           aria-label={`${t('novels.fontSize')} -`}
-          className="rounded border border-vault-border p-1 hover:border-vault-accent"
           onClick={() => onChange({ ...prefs, fontSize: Math.max(12, prefs.fontSize - 1) })}
         >
           <Minus className="size-3" />
-        </button>
+        </Button>
         <span className="w-6 text-center text-sm text-vault-text" data-testid="reader-font-size">
           {prefs.fontSize}
         </span>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="icon"
+          className="size-8"
           aria-label={`${t('novels.fontSize')} +`}
-          className="rounded border border-vault-border p-1 hover:border-vault-accent"
           onClick={() => onChange({ ...prefs, fontSize: Math.min(32, prefs.fontSize + 1) })}
         >
           <Plus className="size-3" />
-        </button>
+        </Button>
       </div>
 
       <div className="flex items-center gap-1" role="group" aria-label={t('novels.theme')}>

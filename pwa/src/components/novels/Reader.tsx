@@ -15,6 +15,7 @@ import {
   type ReaderPrefs,
   type ReaderTheme,
 } from './ReaderSettings'
+import { Button } from '@/components/ui/button'
 
 const PREFS_CACHE_KEY = 'novel:prefs'
 const VIEWMODE_CACHE_KEY = 'novel:viewmode'
@@ -236,15 +237,16 @@ export function Reader({ path, canEdit = false }: { path: string; canEdit?: bool
       <div className="order-1 min-w-0 flex-1 lg:order-2">
         <div className="mb-4 flex items-center justify-between gap-2">
           <ReaderSettings prefs={prefs} onChange={persistPrefs} />
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0 text-xs"
             aria-pressed={viewMode === 'raw'}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
             onClick={toggleViewMode}
           >
             {viewMode === 'raw' ? <Eye className="size-3" /> : <Code className="size-3" />}
             {viewMode === 'raw' ? t('novels.viewRendered') : t('novels.viewRaw')}
-          </button>
+          </Button>
         </div>
         <article
           data-theme={prefs.theme}

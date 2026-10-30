@@ -12,6 +12,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { BackButton } from '@/components/BackButton'
 import { CATEGORY_LABEL_KEYS, type WorkCategory } from '@/components/novels/WorkCategorySection'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { Button } from '@/components/ui/button'
 
 function hitHref(path: string): string {
   const parts = path.split('/')
@@ -57,13 +58,14 @@ export default function NovelSearchPage() {
           placeholder={t('novels.searchPlaceholder')}
           className="flex-1 rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-sm text-vault-text"
         />
-        <button
+        <Button
+          variant="primary"
+          size="md"
           type="submit"
-          className="inline-flex items-center gap-1 rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white"
         >
           <Search className="size-4" />
           {t('novels.search')}
-        </button>
+        </Button>
       </form>
 
       {isLoading ? (

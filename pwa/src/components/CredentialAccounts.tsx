@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import type { CredentialAccount } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 const inputClass =
   'w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm'
@@ -142,14 +143,16 @@ export function CredentialAccounts({
                   >
                     {t('credentials.setActive')}
                   </button>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => handleDelete(entry.account)}
                     disabled={busy}
                     aria-label={t('credentials.deleteAccount', { account: entry.account })}
-                    className="text-red-400/70 hover:text-red-400 transition-colors px-1 py-1 disabled:opacity-40"
+                    className="size-8 text-red-400/70 hover:text-red-400"
                   >
                     <Trash2 size={13} />
-                  </button>
+                  </Button>
                 </div>
               )}
             </li>

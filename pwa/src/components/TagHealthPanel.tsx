@@ -6,6 +6,7 @@ import { Trash2, EyeOff, RotateCcw, Link2Off } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import type { TagItem } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 /**
  * Tag Health Report panel (admin-only).
@@ -115,24 +116,26 @@ export default function TagHealthPanel() {
                   <span className="text-vault-text-muted ml-2">({tag.count})</span>
                 </span>
                 <div className="flex gap-1">
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => handleDeleteOrphan(tag)}
                     aria-label={t('tags.health.delete')}
                     title={t('tags.health.delete')}
-                    className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                    className="size-8 text-red-400 hover:bg-red-500/10 hover:text-red-400"
                   >
                     <Trash2 size={14} />
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => handleIgnore(`orphan:${tag.id}`)}
                     aria-label={t('tags.health.ignore')}
                     title={t('tags.health.ignore')}
-                    className="p-1 text-vault-text-muted hover:bg-vault-card-hover rounded transition-colors"
+                    className="size-8"
                   >
                     <EyeOff size={14} />
-                  </button>
+                  </Button>
                 </div>
               </li>
             ))}
@@ -166,24 +169,26 @@ export default function TagHealthPanel() {
                           )}
                         </span>
                         {canonical && canonical.id !== tag.id && (
-                          <button
-                            type="button"
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => handleSetAlias(tag, canonical)}
-                            className="px-2 py-1 text-xs bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 rounded transition-colors"
+                            className="text-xs bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 hover:text-vault-accent"
                           >
                             {t('tags.health.setAlias')}
-                          </button>
+                          </Button>
                         )}
                       </li>
                     ))}
                   </ul>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleIgnore(`dup:${group.key}`)}
-                    className="flex items-center gap-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+                    className="text-xs"
                   >
                     <EyeOff size={12} /> {t('tags.health.ignore')}
-                  </button>
+                  </Button>
                 </div>
               )
             })}
@@ -212,15 +217,16 @@ export default function TagHealthPanel() {
                           {node.namespace}:{node.name}
                         </span>
                         {next && (
-                          <button
-                            type="button"
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => handleBreakImplication(node.id, next.id)}
                             aria-label={t('tags.health.breakLink')}
                             title={t('tags.health.breakLink')}
-                            className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            className="size-8 text-red-400 hover:bg-red-500/10 hover:text-red-400"
                           >
                             <Link2Off size={12} />
-                          </button>
+                          </Button>
                         )}
                         <span aria-hidden="true" className="text-vault-text-muted">
                           &rarr;
@@ -234,13 +240,14 @@ export default function TagHealthPanel() {
                     </span>
                   )}
                 </div>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => handleIgnore(`cycle:${cycle.key}`)}
-                  className="flex items-center gap-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+                  className="text-xs"
                 >
                   <EyeOff size={12} /> {t('tags.health.ignore')}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -260,15 +267,16 @@ export default function TagHealthPanel() {
               {ignoredKeys.map((key) => (
                 <li key={key} className="flex items-center justify-between text-sm">
                   <span className="font-mono">{key}</span>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => handleUnignore(key)}
                     aria-label={t('tags.health.unignore')}
                     title={t('tags.health.unignore')}
-                    className="p-1 text-vault-text-muted hover:bg-vault-card-hover rounded transition-colors"
+                    className="size-8"
                   >
                     <RotateCcw size={14} />
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

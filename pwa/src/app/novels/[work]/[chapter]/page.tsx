@@ -18,6 +18,7 @@ import { Editor } from '@/components/novels/Editor'
 import { HistoryPanel } from '@/components/novels/HistoryPanel'
 import { FormatPanel } from '@/components/novels/FormatPanel'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { Button } from '@/components/ui/button'
 
 export default function NovelChapterPage() {
   useLocale()
@@ -59,36 +60,39 @@ export default function NovelChapterPage() {
         <div className="flex min-w-0 items-center gap-3">
           <h1 className="truncate text-lg font-semibold text-vault-text">{chapterName}</h1>
           {path && view !== 'edit' && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0 text-xs"
               aria-pressed={view === 'history'}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
               onClick={() => setView(view === 'history' ? 'read' : 'history')}
             >
               <History className="size-3" />
               {t('novels.history')}
-            </button>
+            </Button>
           )}
           {path && view !== 'edit' && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0 text-xs"
               aria-pressed={view === 'format'}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
               onClick={() => setView(view === 'format' ? 'read' : 'format')}
             >
               <SpellCheck className="size-3" />
               {t('novels.format')}
-            </button>
+            </Button>
           )}
           {canEdit && view !== 'edit' && path && (
-            <button
-              type="button"
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0 text-xs"
               onClick={() => setView('edit')}
             >
               <Pencil className="size-3" />
               {t('novels.edit')}
-            </button>
+            </Button>
           )}
         </div>
       </div>
