@@ -25,7 +25,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { galleryHref } from '@/lib/galleryRoutes'
 import type { SearchGalleryItem } from '@/lib/api'
-import { decideAnchorRestore, type BrowseAnchor } from '@/lib/browse/anchor'
+import { decideAnchorRestore, restoreAnchorOffset, type BrowseAnchor } from '@/lib/browse/anchor'
 import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
 import {
   estimateLibraryGridRowHeight,
@@ -464,7 +464,11 @@ function LibraryContent() {
       const gallery = displayGalleries[request.index]
       const element = gallery ? itemElementsRef.current.get(gallery.id) : null
       if (!element) return
-      window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - pending.offset)
+      const rect = element.getBoundingClientRect()
+      window.scrollTo(
+        0,
+        window.scrollY + rect.top - restoreAnchorOffset(pending.offset, rect.height),
+      )
       pendingRestoreRef.current = null
       setRestoreRequest(undefined)
       handledRestoreKeyRef.current = pending.key

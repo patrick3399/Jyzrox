@@ -23,3 +23,15 @@ export function decideAnchorRestore<Item>(
   }
   return { kind: 'top' }
 }
+
+/**
+ * Viewport offset to restore an anchor card at. The stored offset is the card's
+ * top at capture time; if the card has since become shorter (e.g. a layout
+ * change shipped between capture and restore) a negative offset as deep as the
+ * card would leave it entirely above the viewport, so align its top instead.
+ * A zero height means the card is not laid out yet; keep the stored offset.
+ */
+export function restoreAnchorOffset(offset: number, cardHeight: number): number {
+  if (cardHeight > 0 && offset <= -cardHeight) return 0
+  return offset
+}

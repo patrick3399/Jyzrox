@@ -90,4 +90,8 @@ describe('Library browse-session page wiring contract', () => {
     expect(source).toMatch(/restoreInstruction\.identityKey[\s\S]{0,120}state\.identityKey/)
     expect(source).toMatch(/acknowledgeRestore\(restoreInstruction\.key\)/)
   })
+
+  it('clamps the restored anchor offset to the anchor card height', () => {
+    expect(source).toMatch(/restoreAnchorOffset\(\s*pending\.offset,\s*rect\.height\s*\)/)
+  })
 })
