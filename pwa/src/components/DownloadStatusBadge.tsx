@@ -1,39 +1,21 @@
+import type { ComponentProps } from 'react'
 import { t } from '@/lib/i18n'
+import { Badge } from '@/components/ui/badge'
 
 interface DownloadStatusBadgeProps {
   status: 'proxy_only' | 'partial' | 'complete'
 }
 
-const statusConfig: Record<
-  DownloadStatusBadgeProps['status'],
-  { labelKey: string; className: string }
-> = {
-  complete: {
-    labelKey: 'library.statusComplete',
-    className: 'bg-green-900/50 text-green-300 border-green-800',
-  },
-  partial: {
-    labelKey: 'library.statusPartial',
-    className: 'bg-yellow-900/50 text-yellow-300 border-yellow-800',
-  },
-  proxy_only: {
-    labelKey: 'library.statusProxyOnly',
-    className: 'bg-blue-900/50 text-blue-300 border-blue-800',
-  },
+type Tone = NonNullable<ComponentProps<typeof Badge>['tone']>
+
+const statusConfig: Record<DownloadStatusBadgeProps['status'], { labelKey: string; tone: Tone }> = {
+  complete: { labelKey: 'library.statusComplete', tone: 'success' },
+  partial: { labelKey: 'library.statusPartial', tone: 'warning' },
+  proxy_only: { labelKey: 'library.statusProxyOnly', tone: 'accent' },
 }
 
 export function DownloadStatusBadge({ status }: DownloadStatusBadgeProps) {
-  const { labelKey, className } = statusConfig[status]
+  const { labelKey, tone } = statusConfig[status]
 
-  return (
-    <span
-      className={`
-        inline-block px-1.5 py-0.5
-        rounded border text-xs font-medium
-        ${className}
-      `}
-    >
-      {t(labelKey)}
-    </span>
-  )
+  return <Badge tone={tone}>{t(labelKey)}</Badge>
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import type { ComponentProps } from 'react'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   Download,
@@ -17,6 +18,7 @@ import {
   Square,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 import { galleryHref } from '@/lib/galleryRoutes'
 import {
   useDownloadJobs,
@@ -70,14 +72,14 @@ function compareActiveJobs(a: DownloadJob, b: DownloadJob): number {
   return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  queued: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
-  running: 'bg-blue-500/10 border-blue-500/30 text-blue-400',
-  done: 'bg-green-500/10 border-green-500/30 text-green-400',
-  failed: 'bg-red-500/10 border-red-500/30 text-red-400',
-  cancelled: 'bg-vault-card border-vault-border text-vault-text-muted',
-  paused: 'bg-orange-500/10 border-orange-500/30 text-orange-400',
-  partial: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
+const STATUS_TONES: Record<string, NonNullable<ComponentProps<typeof Badge>['tone']>> = {
+  queued: 'neutral',
+  running: 'accent',
+  done: 'success',
+  failed: 'danger',
+  cancelled: 'neutral',
+  paused: 'neutral',
+  partial: 'warning',
 }
 
 function StatusBadge({
@@ -92,9 +94,7 @@ function StatusBadge({
   // A "done" run that fetched nothing new only confirmed what is stored.
   const shown = status === 'done' && alreadySaved ? 'cancelled' : status
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[shown] ?? STATUS_STYLES.cancelled}`}
-    >
+    <Badge tone={STATUS_TONES[shown] ?? 'neutral'} className="gap-1.5">
       {status === 'running' && (
         <span className="flex gap-0.5">
           <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
@@ -107,7 +107,7 @@ function StatusBadge({
         : status === 'done' && stopped
           ? t('queue.stopped')
           : status}
-    </span>
+    </Badge>
   )
 }
 
@@ -460,10 +460,10 @@ function JobRow({
           {job.status === 'running' && (
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => onPause(job.id, 'pause')}
               disabled={stopping}
-              className="size-8 border border-orange-500/30 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 hover:text-orange-400"
+              className="border border-orange-500/30 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 hover:text-orange-400"
               title={t('queue.pause')}
             >
               <Pause size={14} />
@@ -472,10 +472,10 @@ function JobRow({
           {job.status === 'paused' && (
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => onPause(job.id, 'resume')}
               disabled={stopping}
-              className="size-8 border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 hover:text-green-400"
+              className="border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 hover:text-green-400"
               title={t('queue.resume')}
             >
               <Play size={14} />
@@ -501,11 +501,11 @@ function JobRow({
           {isActive && canDiscard && (
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               data-testid="job-discard"
               onClick={() => onDiscard(job)}
               disabled={stopping}
-              className="size-8 border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-400"
+              className="border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-400"
               title={t('queue.discard')}
               aria-label={t('queue.discard')}
             >
@@ -516,9 +516,9 @@ function JobRow({
             job.retry_count < job.max_retries && (
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 onClick={() => onRetry(job.id)}
-                className="size-8 border border-vault-accent/30 bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 hover:text-vault-accent"
+                className="border border-vault-accent/30 bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 hover:text-vault-accent"
                 title={t('queue.retry')}
               >
                 <RotateCcw size={14} />
