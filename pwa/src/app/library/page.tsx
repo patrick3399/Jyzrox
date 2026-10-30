@@ -1,25 +1,8 @@
 'use client'
 
-import {
-  useState,
-  useCallback,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-} from 'react'
+import { useState, useCallback, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  BookOpen,
-  X,
-  ChevronDown,
-  LayoutGrid,
-  List,
-  Bookmark,
-  BookmarkCheck,
-  HelpCircle,
-} from 'lucide-react'
+import { BookOpen, X, LayoutGrid, List, Bookmark, BookmarkCheck } from 'lucide-react'
 import { useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
 import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import type { Gallery } from '@/lib/types'
@@ -32,6 +15,9 @@ import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
+import { LibrarySearchBar } from '@/components/library/LibrarySearchBar'
+import { LibraryFilterChips } from '@/components/library/LibraryFilterChips'
+import { LibraryFilterSheet } from '@/components/library/LibraryFilterSheet'
 import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -47,6 +33,7 @@ import {
   getLibraryGridColumns,
   getLibraryGridGap,
 } from '@/lib/libraryLayout'
+import { libraryFilterChips, type LibraryFilterChipKey } from '@/lib/libraryFilterChips'
 import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
 
 const SORT_OPTIONS = [
@@ -95,6 +82,7 @@ function LibraryContent() {
     setFilter,
     commitSearch,
     clearSearch,
+    clearFilters,
     handleInputChange,
     selectMode,
     setSelectMode,
@@ -110,7 +98,7 @@ function LibraryContent() {
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
   const [batchTagInput, setBatchTagInput] = useState('')
   const [batchTagList, setBatchTagList] = useState<string[]>([])
-  const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const displayPreferences = useDisplayPreferences()
   const gridColumns = useMemo(
     () =>
@@ -132,21 +120,6 @@ function LibraryContent() {
     localStorage.setItem('library_view_mode', mode)
   }, [])
 
-  // Collapsible filter panel: collapsed by default on mobile, expanded on desktop
-  const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true
-    return window.innerWidth >= 1024
-  })
-
-  // Keep filtersOpen in sync when window crosses lg breakpoint on resize
-  useEffect(() => {
-    function onResize() {
-      if (window.innerWidth >= 1024) setFiltersOpen(true)
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
   // Collections stay eager because they also populate the normal filter panel.
   const { data: collectionsData } = useCollections()
   const { data: profile } = useProfile()
@@ -159,12 +132,11 @@ function LibraryContent() {
     updateView,
     restoreInstruction,
     acknowledgeRestore,
-  } =
-    useLibraryBrowseSession({
-      query: rawQuery,
-      enabled: profile !== undefined,
-      userId: profile?.username,
-    })
+  } = useLibraryBrowseSession({
+    query: rawQuery,
+    enabled: profile !== undefined,
+    userId: profile?.username,
+  })
   const canManageDatasets = profile?.role === 'member' || profile?.role === 'admin'
   // Datasets are only ever read by the batch-action bar, so don't pay for the
   // request until that bar is actually on screen.
@@ -181,6 +153,30 @@ function LibraryContent() {
       ? `${parsed.source}:${parsed.importMode}`
       : parsed.source
     : ''
+
+  const sourceDisplayLabel = (value: string, fallback: string) =>
+    value === 'local:link'
+      ? t('explorer.externalFolders')
+      : value === 'local:copy'
+        ? t('explorer.jyzroxImport')
+        : fallback
+
+  const filterChips = libraryFilterChips(parsed, {
+    sourceLabel: (combined) =>
+      sourceDisplayLabel(
+        combined,
+        sourcesData?.find((opt) => opt.value === combined)?.label ?? combined,
+      ),
+    collectionName: (id) => collectionsData?.collections.find((c) => c.id === id)?.name,
+    sortLabel: (value) => SORT_OPTIONS.find((opt) => opt.value === value)?.label() ?? value,
+  })
+
+  const handleRemoveChip = (key: LibraryFilterChipKey) => {
+    setFilter(key, null)
+    if (key === 'source') setFilter('import', null)
+  }
+
+  const closeFilterSheet = useCallback(() => setFilterSheetOpen(false), [])
 
   const displayGalleries = useMemo<Gallery[]>(
     () => state.items.map(mapSearchItemToGallery),
@@ -486,276 +482,16 @@ function LibraryContent() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">{t('library.title')}</h1>
-
-      {/* Search + filter panel: the search bar stays usable; only the filters collapse */}
-      <div className="bg-vault-card border border-vault-border rounded-lg mb-6">
-        <div className="p-4">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => handleInputChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitSearch(inputValue)
-                }}
-                placeholder={t('library.searchPlaceholder')}
-                className="w-full bg-vault-input border border-vault-border rounded-lg pl-3 pr-10 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
-              />
-              {inputValue && (
-                <button
-                  type="button"
-                  onClick={clearSearch}
-                  className="absolute right-0 top-0 h-full w-10 flex items-center justify-center text-vault-text-muted hover:text-vault-text transition-colors"
-                  aria-label={t('browse.clearSearch')}
-                  title={t('browse.clearSearch')}
-                >
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-            <button
-              onClick={() => setSyntaxHelpOpen((v) => !v)}
-              className="shrink-0 p-2 text-vault-text-muted hover:text-vault-accent transition-colors"
-              title={t('library.syntaxHelp')}
-            >
-              <HelpCircle size={16} />
-            </button>
-          </div>
-          {syntaxHelpOpen && (
-            <div className="mt-2 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
-              <p>character:rem — {t('library.syntaxTagSearch')}</p>
-              <p>rem — {t('library.syntaxNameOnly')}</p>
-              <p>-general:sketch — {t('library.syntaxExclude')}</p>
-              <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
-              <p>source:ehentai — {t('library.syntaxSource')}</p>
-              <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
-              <p>favorited:true — {t('library.syntaxFavorited')}</p>
-              <p>sort:rating — {t('library.syntaxSort')}</p>
-              <p>collection:5 — {t('library.syntaxCollection')}</p>
-              <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
-              <p>category:doujinshi — {t('library.syntaxCategory')}</p>
-              <p>import:link — {t('library.syntaxImportMode')}</p>
-              <p>rl:true — {t('library.syntaxReadingList')}</p>
-            </div>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h1 className="text-2xl font-bold">{t('library.title')}</h1>
+          {total !== null && (
+            <span className="text-sm text-vault-text-muted whitespace-nowrap">
+              {`${formatNumber(total)} ${t('library.galleries')}`}
+            </span>
           )}
         </div>
-
-        {/* Toggle button — always visible */}
-        <button
-          onClick={() => setFiltersOpen((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 border-t border-vault-border text-sm font-medium text-vault-text-secondary hover:text-vault-text transition-colors lg:cursor-default"
-          aria-expanded={filtersOpen}
-          aria-controls="library-filter-panel"
-        >
-          <span>{filtersOpen ? t('library.hideFilters') : t('library.showFilters')}</span>
-          <ChevronDown
-            size={16}
-            className={`transition-transform duration-300 ${filtersOpen ? 'rotate-180' : 'rotate-0'}`}
-          />
-        </button>
-
-        {/* Collapsible content — CSS transition via grid-rows */}
-        <div
-          id="library-filter-panel"
-          className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
-            filtersOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-          }`}
-        >
-          <div className="overflow-hidden">
-            <div className="px-4 pb-4 border-t border-vault-border pt-4">
-              <div className="flex flex-wrap gap-4 items-center">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                    {t('library.minRating')}
-                  </label>
-                  <select
-                    value={parsed.rating ?? ''}
-                    onChange={(e) => {
-                      setFilter('rating', e.target.value ? e.target.value : null)
-                    }}
-                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
-                  >
-                    <option value="">{t('library.any')}</option>
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <option key={n} value={n}>
-                        {n}+
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                    {t('library.source')}
-                  </label>
-                  <select
-                    value={combinedSource}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      if (!val) {
-                        setFilter('source', null)
-                        setFilter('import', null)
-                      } else {
-                        const colonIdx = val.indexOf(':')
-                        if (colonIdx !== -1) {
-                          setFilter('source', val.slice(0, colonIdx))
-                          setFilter('import', val.slice(colonIdx + 1))
-                        } else {
-                          setFilter('source', val)
-                          setFilter('import', null)
-                        }
-                      }
-                    }}
-                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
-                  >
-                    <option value="">{t('library.allSources')}</option>
-                    {(sourcesData ?? []).map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.value === 'local:link'
-                          ? t('explorer.externalFolders')
-                          : opt.value === 'local:copy'
-                            ? t('explorer.jyzroxImport')
-                            : opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {categoriesData && (
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                      {t('library.filterCategory')}
-                    </label>
-                    <select
-                      value={parsed.category ?? ''}
-                      onChange={(e) => {
-                        setFilter('category', e.target.value || null)
-                      }}
-                      className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
-                    >
-                      <option value="">{t('library.allCategories')}</option>
-                      <option value="__uncategorized__">
-                        {t('library.categoryUncategorized')}
-                      </option>
-                      {categoriesData.categories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {collectionsData && collectionsData.collections.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                      {t('collections.filterByCollection')}
-                    </label>
-                    <select
-                      value={parsed.collection ?? ''}
-                      onChange={(e) => setFilter('collection', e.target.value || null)}
-                      className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
-                    >
-                      <option value="">{t('collections.allCollections')}</option>
-                      {collectionsData.collections.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.gallery_count})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                    {t('library.sort')}
-                  </label>
-                  <select
-                    value={sortValue}
-                    onChange={(e) => {
-                      setFilter(
-                        'sort',
-                        e.target.value === 'added_at' ? null : e.target.value || null,
-                      )
-                    }}
-                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
-                  >
-                    {SORT_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label()}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={parsed.favorited}
-                    onChange={(e) => {
-                      setFilter('favorited', e.target.checked ? 'true' : null)
-                    }}
-                    className="w-4 h-4 accent-yellow-500"
-                  />
-                  <span className="text-sm text-vault-text-secondary">
-                    {t('library.favoritesOnly')}
-                  </span>
-                </label>
-
-                <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer whitespace-nowrap">
-                  <input
-                    type="checkbox"
-                    checked={parsed.readingList}
-                    onChange={(e) => setFilter('rl', e.target.checked ? 'true' : null)}
-                    className="rounded border-vault-border"
-                  />
-                  {t('library.readingListOnly')}
-                </label>
-
-                <button
-                  onClick={() => {
-                    setSelectMode(!selectMode)
-                    setSelectedIds(new Set())
-                  }}
-                  className={`px-3 py-1 rounded text-sm font-medium border transition-colors ${
-                    selectMode
-                      ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
-                      : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent'
-                  }`}
-                >
-                  {t('library.select')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {parsed.artistId && (
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-xs text-vault-text-muted uppercase tracking-wide">
-            {t('library.artistFilter')}:
-          </span>
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs">
-            {parsed.artistId}
-            <button
-              onClick={() => setFilter('artist_id', null)}
-              className="ml-1 hover:text-red-400 transition-colors"
-              aria-label={t('library.clearArtistFilter')}
-            >
-              <X size={12} />
-            </button>
-          </span>
-        </div>
-      )}
-
-      {total !== null && (
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-sm text-vault-text-muted">
-            {`${formatNumber(total)} ${t('library.galleries')}`}
-          </span>
+        <div className="flex items-center gap-2 shrink-0">
           {/* View mode toggle */}
           <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
             <button
@@ -773,8 +509,195 @@ function LibraryContent() {
               <List size={15} />
             </button>
           </div>
+          <button
+            type="button"
+            aria-pressed={selectMode}
+            onClick={() => {
+              setSelectMode(!selectMode)
+              setSelectedIds(new Set())
+            }}
+            className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              selectMode
+                ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
+                : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent'
+            }`}
+          >
+            {t('library.select')}
+          </button>
         </div>
-      )}
+      </div>
+
+      <div className="mb-4 space-y-2">
+        <LibrarySearchBar
+          value={inputValue}
+          onChange={handleInputChange}
+          onCommit={commitSearch}
+          onClear={clearSearch}
+          onCancel={clearSearch}
+          activeFilterCount={filterChips.length}
+          onOpenFilters={() => setFilterSheetOpen(true)}
+        />
+        <LibraryFilterChips
+          chips={filterChips}
+          onRemove={handleRemoveChip}
+          onClearAll={clearFilters}
+        />
+      </div>
+
+      <LibraryFilterSheet open={filterSheetOpen} onClose={closeFilterSheet}>
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+              {t('library.minRating')}
+            </label>
+            <select
+              value={parsed.rating ?? ''}
+              onChange={(e) => {
+                setFilter('rating', e.target.value ? e.target.value : null)
+              }}
+              className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
+            >
+              <option value="">{t('library.any')}</option>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={n}>
+                  {n}+
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-1">
+            <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+              {t('library.source')}
+            </label>
+            <select
+              value={combinedSource}
+              onChange={(e) => {
+                const val = e.target.value
+                if (!val) {
+                  setFilter('source', null)
+                  setFilter('import', null)
+                } else {
+                  const colonIdx = val.indexOf(':')
+                  if (colonIdx !== -1) {
+                    setFilter('source', val.slice(0, colonIdx))
+                    setFilter('import', val.slice(colonIdx + 1))
+                  } else {
+                    setFilter('source', val)
+                    setFilter('import', null)
+                  }
+                }
+              }}
+              className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
+            >
+              <option value="">{t('library.allSources')}</option>
+              {(sourcesData ?? []).map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {sourceDisplayLabel(opt.value, opt.label)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {categoriesData && (
+            <div className="grid gap-1">
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                {t('library.filterCategory')}
+              </label>
+              <select
+                value={parsed.category ?? ''}
+                onChange={(e) => {
+                  setFilter('category', e.target.value || null)
+                }}
+                className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
+              >
+                <option value="">{t('library.allCategories')}</option>
+                <option value="__uncategorized__">{t('library.categoryUncategorized')}</option>
+                {categoriesData.categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {collectionsData && collectionsData.collections.length > 0 && (
+            <div className="grid gap-1">
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                {t('collections.filterByCollection')}
+              </label>
+              <select
+                value={parsed.collection ?? ''}
+                onChange={(e) => setFilter('collection', e.target.value || null)}
+                className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
+              >
+                <option value="">{t('collections.allCollections')}</option>
+                {collectionsData.collections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.gallery_count})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="grid gap-1">
+            <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+              {t('library.sort')}
+            </label>
+            <select
+              value={sortValue}
+              onChange={(e) => {
+                setFilter('sort', e.target.value === 'added_at' ? null : e.target.value || null)
+              }}
+              className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label()}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer min-h-8">
+            <input
+              type="checkbox"
+              checked={parsed.favorited}
+              onChange={(e) => {
+                setFilter('favorited', e.target.checked ? 'true' : null)
+              }}
+              className="w-4 h-4 accent-yellow-500"
+            />
+            <span className="text-sm text-vault-text-secondary">{t('library.favoritesOnly')}</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer min-h-8">
+            <input
+              type="checkbox"
+              checked={parsed.readingList}
+              onChange={(e) => setFilter('rl', e.target.checked ? 'true' : null)}
+              className="rounded border-vault-border"
+            />
+            {t('library.readingListOnly')}
+          </label>
+        </div>
+
+        <div className="mt-4 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
+          <p>character:rem — {t('library.syntaxTagSearch')}</p>
+          <p>rem — {t('library.syntaxNameOnly')}</p>
+          <p>-general:sketch — {t('library.syntaxExclude')}</p>
+          <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
+          <p>source:ehentai — {t('library.syntaxSource')}</p>
+          <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
+          <p>favorited:true — {t('library.syntaxFavorited')}</p>
+          <p>sort:rating — {t('library.syntaxSort')}</p>
+          <p>collection:5 — {t('library.syntaxCollection')}</p>
+          <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
+          <p>category:doujinshi — {t('library.syntaxCategory')}</p>
+          <p>import:link — {t('library.syntaxImportMode')}</p>
+          <p>rl:true — {t('library.syntaxReadingList')}</p>
+        </div>
+      </LibraryFilterSheet>
 
       {isSessionLoading && displayGalleries.length === 0 && <SkeletonGrid />}
 

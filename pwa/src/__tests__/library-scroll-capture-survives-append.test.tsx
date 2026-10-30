@@ -45,6 +45,7 @@ vi.mock('@/hooks/useUnifiedSearch', () => ({
     },
     setFilter: vi.fn(),
     commitSearch: vi.fn(),
+    clearFilters: vi.fn(),
     handleInputChange: vi.fn(),
     selectMode: false,
     setSelectMode: vi.fn(),

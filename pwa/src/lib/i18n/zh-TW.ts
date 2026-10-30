@@ -1692,6 +1692,10 @@ const zhTW: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': '顯示篩選',
   'library.hideFilters': '隱藏篩選',
+  'library.filters': '篩選',
+  'library.clearAllFilters': '清除全部',
+  'library.removeFilter': '移除 {name}',
+  'library.titleFilter': '標題',
   'library.filterCategory': '分類',
   'library.allCategories': '所有分類',
 

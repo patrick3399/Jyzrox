@@ -8,9 +8,9 @@
  * collapsed on mobile, so searching took an extra tap to open the panel first.
  */
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const search = vi.hoisted(() => ({ inputValue: '', clearSearch: vi.fn() }))
+const search = vi.hoisted(() => ({ inputValue: '', clearSearch: vi.fn(), clearFilters: vi.fn() }))
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/lib/i18n', async (importOriginal) => ({
@@ -39,6 +39,7 @@ vi.mock('@/hooks/useUnifiedSearch', () => ({
     setFilter: vi.fn(),
     commitSearch: vi.fn(),
     clearSearch: search.clearSearch,
+    clearFilters: search.clearFilters,
     handleInputChange: vi.fn(),
     selectMode: false,
     setSelectMode: vi.fn(),
@@ -115,28 +116,24 @@ describe('Library search clear button', () => {
 })
 
 describe('Library search bar placement', () => {
-  let originalInnerWidth: number
-
   beforeEach(() => {
     vi.clearAllMocks()
     search.inputValue = ''
-    originalInnerWidth = window.innerWidth
   })
 
-  afterEach(() => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
-  })
-
-  it('keeps the search bar outside the filter panel that starts collapsed on mobile', () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
+  it('keeps the search bar visible without any collapsible filter panel toggle', () => {
     render(<LibraryPage />)
 
-    const toggle = screen.getByRole('button', { name: 'library.showFilters' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
-    expect(panel).not.toBeNull()
+    expect(screen.getByPlaceholderText('library.searchPlaceholder')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'library.showFilters' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'library.hideFilters' })).toBeNull()
+  })
 
-    const searchBox = screen.getByPlaceholderText('library.searchPlaceholder')
-    expect(panel).not.toContainElement(searchBox)
+  it('puts the filter button in the same row as the search input', () => {
+    render(<LibraryPage />)
+
+    const row = screen.getByPlaceholderText('library.searchPlaceholder').closest('.flex.items-center')
+    expect(row).not.toBeNull()
+    expect(row).toContainElement(screen.getByRole('button', { name: 'library.filters' }))
   })
 })

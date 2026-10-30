@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { libraryBrowseIdentityKey } from '@/lib/browse/library'
-import { parseQuery, updateFilter } from '@/lib/queryParser'
+import { parseQuery, queryText, updateFilter, withText, withoutFilters } from '@/lib/queryParser'
 
 export function useUnifiedSearch() {
   const searchParams = useSearchParams()
@@ -15,7 +15,7 @@ export function useUnifiedSearch() {
   const hasOutboundIntentRef = useRef(false)
 
   const [rawQuery, setRawQuery] = useState(incomingQuery)
-  const [inputValue, setInputValue] = useState(rawQuery)
+  const [inputValue, setInputValue] = useState(() => queryText(incomingQuery))
 
   // Derived parsed filters
   const parsed = useMemo(() => parseQuery(rawQuery), [rawQuery])
@@ -29,7 +29,7 @@ export function useUnifiedSearch() {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
     setRawQuery(incomingQuery)
-    setInputValue(incomingQuery)
+    setInputValue(queryText(incomingQuery))
   }, [incomingQuery])
 
   // Only explicit local mutations own an outbound URL update. Mount and
@@ -58,18 +58,24 @@ export function useUnifiedSearch() {
   // Filter mutation (from UI dropdowns)
   const setFilter = useCallback((key: string, value: string | null) => {
     hasOutboundIntentRef.current = true
-    setRawQuery((prev) => {
-      const updated = updateFilter(prev, key, value)
-      setInputValue(updated)
-      return updated
-    })
+    setRawQuery((prev) => updateFilter(prev, key, value))
+  }, [])
+
+  // Drop every filter, keep the typed text.
+  const clearFilters = useCallback(() => {
+    hasOutboundIntentRef.current = true
+    setRawQuery((prev) => withoutFilters(prev))
   }, [])
 
   // Commit search from input (e.g. on Enter)
   const commitSearch = useCallback((value: string) => {
     if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
     hasOutboundIntentRef.current = true
-    setRawQuery(value)
+    setRawQuery((prev) => {
+      const next = withText(prev, value)
+      setInputValue(queryText(next))
+      return next
+    })
   }, [])
 
   // One-tap reset: drops the typed text along with any debounce still holding it.
@@ -77,7 +83,7 @@ export function useUnifiedSearch() {
     if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
     hasOutboundIntentRef.current = true
     setInputValue('')
-    setRawQuery('')
+    setRawQuery((prev) => withText(prev, ''))
   }, [])
 
   // Input change handler. Debounced commit keeps clearing/searching responsive
@@ -87,7 +93,7 @@ export function useUnifiedSearch() {
     if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
     inputDebounceRef.current = setTimeout(() => {
       hasOutboundIntentRef.current = true
-      setRawQuery(value)
+      setRawQuery((prev) => withText(prev, value))
     }, 300)
   }, [])
 
@@ -108,6 +114,7 @@ export function useUnifiedSearch() {
     setFilter,
     commitSearch,
     clearSearch,
+    clearFilters,
     handleInputChange,
     selectMode,
     setSelectMode,

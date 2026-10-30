@@ -92,8 +92,9 @@ describe('useUnifiedSearch URL ownership', () => {
 
 describe('useUnifiedSearch clearSearch', () => {
   it('empties the input and the committed query in the same tick', () => {
-    navigation.search = 'q=artist_id%3Afirst'
+    navigation.search = 'q=artist%3Afirst'
     const { result } = renderHook(() => useUnifiedSearch())
+    expect(result.current.inputValue).toBe('artist:first')
 
     act(() => result.current.clearSearch())
 

@@ -408,6 +408,10 @@ const ko: Record<string, string> = {
   'library.tagRemoveFailed': '태그 제거 실패',
   'library.showFilters': '필터 표시',
   'library.hideFilters': '필터 숨기기',
+  'library.filters': '필터',
+  'library.clearAllFilters': '모두 지우기',
+  'library.removeFilter': '{name} 제거',
+  'library.titleFilter': '제목',
   'library.clearArtistFilter': '아티스트 필터 초기화',
 
   // ── Collections ──

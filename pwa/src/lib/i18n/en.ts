@@ -1908,6 +1908,10 @@ const en: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': 'Show Filters',
   'library.hideFilters': 'Hide Filters',
+  'library.filters': 'Filters',
+  'library.clearAllFilters': 'Clear all',
+  'library.removeFilter': 'Remove {name}',
+  'library.titleFilter': 'Title',
   'library.filterCategory': 'Category',
   'library.allCategories': 'All Categories',
 

@@ -273,3 +273,59 @@ export function updateFilter(query: string, key: string, value: string | null): 
 
   return buildQuery(parsed)
 }
+
+const FILTER_KEYS = new Set([
+  'title',
+  'source',
+  'rating',
+  'favorited',
+  'rl',
+  'collection',
+  'artist_id',
+  'category',
+  'import',
+  'sort',
+])
+
+/** True for a `key:value` token whose key is one of the structured filters. */
+export function isFilterToken(token: string): boolean {
+  if (token.startsWith('-')) return false
+  const colon = token.indexOf(':')
+  return colon > 0 && FILTER_KEYS.has(token.slice(0, colon).toLowerCase())
+}
+
+/** The free-text part of a query: every non-filter token, in original order. */
+export function queryText(q: string): string {
+  return tokenize(q)
+    .filter((token) => !isFilterToken(token))
+    .join(' ')
+}
+
+/**
+ * Replace the free-text part of `q` with `text`, keeping `q`'s filters. A filter
+ * typed inside `text` wins over the same filter already in `q`.
+ */
+export function withText(q: string, text: string): string {
+  const base = parseQuery(q)
+  const typed = parseQuery(text)
+  return buildQuery({
+    tags: typed.tags,
+    nameOnlyTags: typed.nameOnlyTags,
+    excludeTags: typed.excludeTags,
+    title: typed.title ?? base.title,
+    source: typed.source ?? base.source,
+    rating: typed.rating ?? base.rating,
+    favorited: typed.favorited || base.favorited,
+    readingList: typed.readingList || base.readingList,
+    collection: typed.collection ?? base.collection,
+    artistId: typed.artistId ?? base.artistId,
+    category: typed.category ?? base.category,
+    importMode: typed.importMode ?? base.importMode,
+    sort: typed.sort ?? base.sort,
+  })
+}
+
+/** Drop every filter token, keeping only the free-text part (normalised). */
+export function withoutFilters(q: string): string {
+  return withText('', queryText(q))
+}

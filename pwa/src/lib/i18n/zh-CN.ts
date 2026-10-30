@@ -1877,6 +1877,10 @@ const zhCN: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': '显示筛选',
   'library.hideFilters': '隐藏筛选',
+  'library.filters': '筛选',
+  'library.clearAllFilters': '清除全部',
+  'library.removeFilter': '移除 {name}',
+  'library.titleFilter': '标题',
 
   // ── Trash ──
   'trash.title': '回收站',

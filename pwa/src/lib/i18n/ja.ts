@@ -2002,6 +2002,10 @@ const ja: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': 'フィルターを表示',
   'library.hideFilters': 'フィルターを非表示',
+  'library.filters': 'フィルター',
+  'library.clearAllFilters': 'すべてクリア',
+  'library.removeFilter': '{name} を解除',
+  'library.titleFilter': 'タイトル',
 
   // ── Reading List ──
   'readingList.title': '読書リスト',
