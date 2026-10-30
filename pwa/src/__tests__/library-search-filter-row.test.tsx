@@ -254,20 +254,38 @@ describe('Library search focus behaviour', () => {
   })
 })
 
-describe('Library filter sheet', () => {
-  it('test_filter_sheet_opens_from_filter_button_and_closes_on_escape', () => {
+describe('Library filter panel', () => {
+  it('test_filter_button_expands_the_inline_panel_instead_of_opening_a_dialog', () => {
+    const { container } = render(<LibraryPage />)
+    const button = screen.getByRole('button', { name: 'library.filters' })
+    const panel = container.querySelector('#library-filter-panel')
+
+    expect(panel).not.toBeNull()
+    expect(button).toHaveAttribute('aria-controls', 'library-filter-panel')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    // Collapsed: the controls stay in the DOM but out of the tab order.
+    expect(panel).toHaveAttribute('inert')
+
+    fireEvent.click(button)
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(panel).not.toHaveAttribute('inert')
+    expect(panel?.querySelectorAll('select').length).toBeGreaterThan(0)
+
+    fireEvent.click(button)
+
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    expect(panel).toHaveAttribute('inert')
+  })
+
+  it('test_syntax_help_stays_hidden_until_its_toggle_in_the_panel_is_pressed', () => {
     render(<LibraryPage />)
-    expect(screen.queryByRole('dialog')).toBeNull()
-
     fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
-    const dialog = screen.getByRole('dialog')
-    expect(dialog).toBeInTheDocument()
-    expect(within(dialog).getByText('library.filters')).toBeInTheDocument()
+    expect(screen.queryByText(/library\.syntaxTagSearch/)).toBeNull()
 
-    act(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    })
+    fireEvent.click(screen.getByRole('button', { name: /library\.syntaxHelp/ }))
 
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByText(/library\.syntaxTagSearch/)).toBeInTheDocument()
   })
 })

@@ -11,7 +11,8 @@ interface LibrarySearchBarProps {
   onClear: () => void
   onCancel: () => void
   activeFilterCount: number
-  onOpenFilters: () => void
+  filtersOpen: boolean
+  onToggleFilters: () => void
 }
 
 /**
@@ -25,7 +26,8 @@ export function LibrarySearchBar({
   onClear,
   onCancel,
   activeFilterCount,
-  onOpenFilters,
+  filtersOpen,
+  onToggleFilters,
 }: LibrarySearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [focused, setFocused] = useState(false)
@@ -74,11 +76,17 @@ export function LibrarySearchBar({
       >
         <button
           type="button"
-          onClick={onOpenFilters}
+          onClick={onToggleFilters}
+          aria-expanded={filtersOpen}
+          aria-controls="library-filter-panel"
           tabIndex={focused ? -1 : undefined}
           aria-label={t('library.filters')}
           title={t('library.filters')}
-          className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-vault-border bg-vault-input text-vault-text-secondary hover:text-vault-text hover:border-vault-border-hover transition-colors"
+          className={`relative flex h-10 w-10 items-center justify-center rounded-lg border transition-colors ${
+            filtersOpen
+              ? 'border-vault-accent bg-vault-accent/10 text-vault-accent'
+              : 'border-vault-border bg-vault-input text-vault-text-secondary hover:text-vault-text hover:border-vault-border-hover'
+          }`}
         >
           <SlidersHorizontal size={16} />
           {activeFilterCount > 0 && (

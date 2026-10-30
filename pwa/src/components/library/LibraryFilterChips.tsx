@@ -14,7 +14,7 @@ export function LibraryFilterChips({ chips, onRemove, onClearAll }: LibraryFilte
   if (chips.length === 0) return null
 
   return (
-    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+    <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1">
       {chips.map((chip) => (
         <span
           key={chip.key}

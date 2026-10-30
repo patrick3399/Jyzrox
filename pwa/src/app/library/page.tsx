@@ -2,7 +2,7 @@
 
 import { useState, useCallback, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, X, LayoutGrid, List, Bookmark, BookmarkCheck } from 'lucide-react'
+import { BookOpen, X, LayoutGrid, List, Bookmark, BookmarkCheck, HelpCircle } from 'lucide-react'
 import { useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
 import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import type { Gallery } from '@/lib/types'
@@ -17,7 +17,6 @@ import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { LibrarySearchBar } from '@/components/library/LibrarySearchBar'
 import { LibraryFilterChips } from '@/components/library/LibraryFilterChips'
-import { LibraryFilterSheet } from '@/components/library/LibraryFilterSheet'
 import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -98,7 +97,8 @@ function LibraryContent() {
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
   const [batchTagInput, setBatchTagInput] = useState('')
   const [batchTagList, setBatchTagList] = useState<string[]>([])
-  const [filterSheetOpen, setFilterSheetOpen] = useState(false)
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
   const displayPreferences = useDisplayPreferences()
   const gridColumns = useMemo(
     () =>
@@ -175,8 +175,6 @@ function LibraryContent() {
     setFilter(key, null)
     if (key === 'source') setFilter('import', null)
   }
-
-  const closeFilterSheet = useCallback(() => setFilterSheetOpen(false), [])
 
   const displayGalleries = useMemo<Gallery[]>(
     () => state.items.map(mapSearchItemToGallery),
@@ -527,7 +525,7 @@ function LibraryContent() {
         </div>
       </div>
 
-      <div className="mb-4 space-y-2">
+      <div className="mb-4">
         <LibrarySearchBar
           value={inputValue}
           onChange={handleInputChange}
@@ -535,169 +533,205 @@ function LibraryContent() {
           onClear={clearSearch}
           onCancel={clearSearch}
           activeFilterCount={filterChips.length}
-          onOpenFilters={() => setFilterSheetOpen(true)}
+          filtersOpen={filterPanelOpen}
+          onToggleFilters={() => setFilterPanelOpen((v) => !v)}
         />
+
+        {/* Collapsible filter panel — CSS transition via grid-rows */}
+        <div
+          id="library-filter-panel"
+          inert={!filterPanelOpen}
+          className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+            filterPanelOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          }`}
+        >
+          <div className="overflow-hidden">
+            <div className="mt-2 bg-vault-card border border-vault-border rounded-lg p-4">
+              <div className="flex flex-wrap gap-4 items-center">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                    {t('library.minRating')}
+                  </label>
+                  <select
+                    value={parsed.rating ?? ''}
+                    onChange={(e) => {
+                      setFilter('rating', e.target.value ? e.target.value : null)
+                    }}
+                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
+                  >
+                    <option value="">{t('library.any')}</option>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <option key={n} value={n}>
+                        {n}+
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                    {t('library.source')}
+                  </label>
+                  <select
+                    value={combinedSource}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (!val) {
+                        setFilter('source', null)
+                        setFilter('import', null)
+                      } else {
+                        const colonIdx = val.indexOf(':')
+                        if (colonIdx !== -1) {
+                          setFilter('source', val.slice(0, colonIdx))
+                          setFilter('import', val.slice(colonIdx + 1))
+                        } else {
+                          setFilter('source', val)
+                          setFilter('import', null)
+                        }
+                      }
+                    }}
+                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
+                  >
+                    <option value="">{t('library.allSources')}</option>
+                    {(sourcesData ?? []).map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {sourceDisplayLabel(opt.value, opt.label)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {categoriesData && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                      {t('library.filterCategory')}
+                    </label>
+                    <select
+                      value={parsed.category ?? ''}
+                      onChange={(e) => {
+                        setFilter('category', e.target.value || null)
+                      }}
+                      className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
+                    >
+                      <option value="">{t('library.allCategories')}</option>
+                      <option value="__uncategorized__">
+                        {t('library.categoryUncategorized')}
+                      </option>
+                      {categoriesData.categories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {collectionsData && collectionsData.collections.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                      {t('collections.filterByCollection')}
+                    </label>
+                    <select
+                      value={parsed.collection ?? ''}
+                      onChange={(e) => setFilter('collection', e.target.value || null)}
+                      className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
+                    >
+                      <option value="">{t('collections.allCollections')}</option>
+                      {collectionsData.collections.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.gallery_count})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                    {t('library.sort')}
+                  </label>
+                  <select
+                    value={sortValue}
+                    onChange={(e) => {
+                      setFilter(
+                        'sort',
+                        e.target.value === 'added_at' ? null : e.target.value || null,
+                      )
+                    }}
+                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
+                  >
+                    {SORT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={parsed.favorited}
+                    onChange={(e) => {
+                      setFilter('favorited', e.target.checked ? 'true' : null)
+                    }}
+                    className="w-4 h-4 accent-yellow-500"
+                  />
+                  <span className="text-sm text-vault-text-secondary">
+                    {t('library.favoritesOnly')}
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={parsed.readingList}
+                    onChange={(e) => setFilter('rl', e.target.checked ? 'true' : null)}
+                    className="rounded border-vault-border"
+                  />
+                  {t('library.readingListOnly')}
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setSyntaxHelpOpen((v) => !v)}
+                  aria-expanded={syntaxHelpOpen}
+                  className={`flex items-center gap-1 text-sm transition-colors ${
+                    syntaxHelpOpen
+                      ? 'text-vault-accent'
+                      : 'text-vault-text-muted hover:text-vault-accent'
+                  }`}
+                >
+                  <HelpCircle size={16} />
+                  {t('library.syntaxHelp')}
+                </button>
+              </div>
+
+              {syntaxHelpOpen && (
+                <div className="mt-4 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
+                  <p>character:rem — {t('library.syntaxTagSearch')}</p>
+                  <p>rem — {t('library.syntaxNameOnly')}</p>
+                  <p>-general:sketch — {t('library.syntaxExclude')}</p>
+                  <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
+                  <p>source:ehentai — {t('library.syntaxSource')}</p>
+                  <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
+                  <p>favorited:true — {t('library.syntaxFavorited')}</p>
+                  <p>sort:rating — {t('library.syntaxSort')}</p>
+                  <p>collection:5 — {t('library.syntaxCollection')}</p>
+                  <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
+                  <p>category:doujinshi — {t('library.syntaxCategory')}</p>
+                  <p>import:link — {t('library.syntaxImportMode')}</p>
+                  <p>rl:true — {t('library.syntaxReadingList')}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         <LibraryFilterChips
           chips={filterChips}
           onRemove={handleRemoveChip}
           onClearAll={clearFilters}
         />
       </div>
-
-      <LibraryFilterSheet open={filterSheetOpen} onClose={closeFilterSheet}>
-        <div className="grid gap-3">
-          <div className="grid gap-1">
-            <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-              {t('library.minRating')}
-            </label>
-            <select
-              value={parsed.rating ?? ''}
-              onChange={(e) => {
-                setFilter('rating', e.target.value ? e.target.value : null)
-              }}
-              className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
-            >
-              <option value="">{t('library.any')}</option>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <option key={n} value={n}>
-                  {n}+
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid gap-1">
-            <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-              {t('library.source')}
-            </label>
-            <select
-              value={combinedSource}
-              onChange={(e) => {
-                const val = e.target.value
-                if (!val) {
-                  setFilter('source', null)
-                  setFilter('import', null)
-                } else {
-                  const colonIdx = val.indexOf(':')
-                  if (colonIdx !== -1) {
-                    setFilter('source', val.slice(0, colonIdx))
-                    setFilter('import', val.slice(colonIdx + 1))
-                  } else {
-                    setFilter('source', val)
-                    setFilter('import', null)
-                  }
-                }
-              }}
-              className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
-            >
-              <option value="">{t('library.allSources')}</option>
-              {(sourcesData ?? []).map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {sourceDisplayLabel(opt.value, opt.label)}
-                </option>
-              ))}
-            </select>
-          </div>
-          {categoriesData && (
-            <div className="grid gap-1">
-              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                {t('library.filterCategory')}
-              </label>
-              <select
-                value={parsed.category ?? ''}
-                onChange={(e) => {
-                  setFilter('category', e.target.value || null)
-                }}
-                className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
-              >
-                <option value="">{t('library.allCategories')}</option>
-                <option value="__uncategorized__">{t('library.categoryUncategorized')}</option>
-                {categoriesData.categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {collectionsData && collectionsData.collections.length > 0 && (
-            <div className="grid gap-1">
-              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                {t('collections.filterByCollection')}
-              </label>
-              <select
-                value={parsed.collection ?? ''}
-                onChange={(e) => setFilter('collection', e.target.value || null)}
-                className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
-              >
-                <option value="">{t('collections.allCollections')}</option>
-                {collectionsData.collections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.gallery_count})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="grid gap-1">
-            <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-              {t('library.sort')}
-            </label>
-            <select
-              value={sortValue}
-              onChange={(e) => {
-                setFilter('sort', e.target.value === 'added_at' ? null : e.target.value || null)
-              }}
-              className="w-full bg-vault-input border border-vault-border rounded px-2 py-2 text-vault-text text-sm focus:outline-none"
-            >
-              {SORT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label()}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <label className="flex items-center gap-2 cursor-pointer min-h-8">
-            <input
-              type="checkbox"
-              checked={parsed.favorited}
-              onChange={(e) => {
-                setFilter('favorited', e.target.checked ? 'true' : null)
-              }}
-              className="w-4 h-4 accent-yellow-500"
-            />
-            <span className="text-sm text-vault-text-secondary">{t('library.favoritesOnly')}</span>
-          </label>
-
-          <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer min-h-8">
-            <input
-              type="checkbox"
-              checked={parsed.readingList}
-              onChange={(e) => setFilter('rl', e.target.checked ? 'true' : null)}
-              className="rounded border-vault-border"
-            />
-            {t('library.readingListOnly')}
-          </label>
-        </div>
-
-        <div className="mt-4 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
-          <p>character:rem — {t('library.syntaxTagSearch')}</p>
-          <p>rem — {t('library.syntaxNameOnly')}</p>
-          <p>-general:sketch — {t('library.syntaxExclude')}</p>
-          <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
-          <p>source:ehentai — {t('library.syntaxSource')}</p>
-          <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
-          <p>favorited:true — {t('library.syntaxFavorited')}</p>
-          <p>sort:rating — {t('library.syntaxSort')}</p>
-          <p>collection:5 — {t('library.syntaxCollection')}</p>
-          <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
-          <p>category:doujinshi — {t('library.syntaxCategory')}</p>
-          <p>import:link — {t('library.syntaxImportMode')}</p>
-          <p>rl:true — {t('library.syntaxReadingList')}</p>
-        </div>
-      </LibraryFilterSheet>
 
       {isSessionLoading && displayGalleries.length === 0 && <SkeletonGrid />}
 
