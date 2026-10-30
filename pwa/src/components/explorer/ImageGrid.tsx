@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { ArrowDownAZ, ArrowUpAZ, Eye, EyeOff, FileImage, RotateCcw, Trash2, X } from 'lucide-react'
@@ -259,17 +260,17 @@ export function GalleryImagePane({
           <option value="page">{t('explorer.sortPage')}</option>
           <option value="size">{t('explorer.sortSize')}</option>
         </select>
-        <button type="button" aria-label={t('explorer.sortDirection')} title={direction === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={toggleDirection} className="rounded-md border border-vault-border p-1.5 text-vault-text hover:bg-vault-card-hover">
+        <Button variant="secondary" size="icon" className="size-8" type="button" aria-label={t('explorer.sortDirection')} title={direction === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={toggleDirection}>
           {direction === 'asc' ? <ArrowUpAZ size={16} /> : <ArrowDownAZ size={16} />}
-        </button>
+        </Button>
         {summary && (
           <div className="ml-auto flex flex-wrap items-center gap-3 text-xs text-vault-text-muted" data-testid="image-summary">
             <span>{t('explorer.activeSummary', { count: summary.active_count, bytes: formatBytes(summary.active_bytes) })}</span>
             {summary.hidden_count > 0 && <span>{t('explorer.hiddenSummary', { count: summary.hidden_count, bytes: formatBytes(summary.hidden_bytes) })}</span>}
             {canEdit && summary.hidden_count > 0 && (
-              <button type="button" data-testid="empty-hidden" onClick={() => setPurge({ allHidden: true })} className="flex items-center gap-1 rounded-md border border-red-500/40 px-2 py-1 text-red-400 hover:bg-red-500/10">
+              <Button variant="ghost" size="sm" className="border border-red-500/40 text-red-400 hover:bg-red-500/10" type="button" data-testid="empty-hidden" onClick={() => setPurge({ allHidden: true })}>
                 <Trash2 size={13} />{t('explorer.emptyHidden', { count: summary.hidden_count, bytes: formatBytes(summary.hidden_reclaimable_bytes) })}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -284,7 +285,7 @@ export function GalleryImagePane({
         {error ? (
           <div className="m-4 rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
             <p>{error.message || t('common.errorOccurred')}</p>
-            <button type="button" onClick={() => void mutate()} className="mt-3 rounded bg-vault-card px-3 py-1.5 text-vault-text">{t('common.retry')}</button>
+            <Button variant="secondary" size="sm" className="mt-3" type="button" onClick={() => void mutate()}>{t('common.retry')}</Button>
           </div>
         ) : isLoading && !data ? (
           <div className="p-4"><SkeletonGrid /></div>
@@ -315,22 +316,22 @@ export function GalleryImagePane({
         <SelectionMarquee rect={selection.marquee} />
         {total > limit && (
           <div className="flex items-center justify-center gap-3 p-4">
-            <button type="button" disabled={offset === 0} onClick={() => goToOffset(Math.max(0, offset - limit))} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.prev')}</button>
+            <Button variant="secondary" size="sm" type="button" disabled={offset === 0} onClick={() => goToOffset(Math.max(0, offset - limit))}>{t('common.prev')}</Button>
             <span className="text-sm text-vault-text-muted">{offset + 1}–{Math.min(offset + limit, total)} / {total}</span>
-            <button type="button" disabled={offset + limit >= total} onClick={() => goToOffset(offset + limit)} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.next')}</button>
+            <Button variant="secondary" size="sm" type="button" disabled={offset + limit >= total} onClick={() => goToOffset(offset + limit)}>{t('common.next')}</Button>
           </div>
         )}
       </div>
 
       {selectedImages.length > 0 && (
         <div data-testid="image-action-bar" className="fixed inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 flex max-w-[calc(100vw-1rem)] items-center gap-1 overflow-x-auto rounded-xl border border-vault-border bg-vault-card p-2 shadow-2xl lg:inset-x-auto lg:bottom-5 lg:left-1/2 lg:-translate-x-1/2">
-          <button type="button" aria-label={t('explorer.clearSelection')} onClick={() => selection.clear()} className="rounded p-2 text-vault-text-muted"><X size={18} /></button>
+          <Button variant="ghost" size="icon" className="size-8" type="button" aria-label={t('explorer.clearSelection')} onClick={() => selection.clear()}><X size={18} /></Button>
           <span className="mr-2 whitespace-nowrap text-sm font-medium text-vault-text">{t('explorer.selectedCount', { count: selectedImages.length })}</span>
           {canEdit && (
             <>
-              <button type="button" data-testid="action-hide" disabled={activeSelected.length === 0} onClick={() => void hideImages(selectedImages)} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover disabled:opacity-30"><EyeOff size={16} /><span className="hidden sm:inline">{t('explorer.hideImages')}</span></button>
-              <button type="button" data-testid="action-restore" disabled={hiddenSelected.length === 0} onClick={() => void restoreImages(selectedImages)} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover disabled:opacity-30"><RotateCcw size={16} /><span className="hidden sm:inline">{t('explorer.restoreImages')}</span></button>
-              <button type="button" data-testid="action-purge" disabled={!allSelectedHidden} onClick={() => requestPurge(selectedImages)} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-30"><Trash2 size={16} /><span className="hidden sm:inline">{t('explorer.purgeImages')}</span></button>
+              <Button variant="ghost" size="sm" type="button" data-testid="action-hide" disabled={activeSelected.length === 0} onClick={() => void hideImages(selectedImages)}><EyeOff size={16} /><span className="hidden sm:inline">{t('explorer.hideImages')}</span></Button>
+              <Button variant="ghost" size="sm" type="button" data-testid="action-restore" disabled={hiddenSelected.length === 0} onClick={() => void restoreImages(selectedImages)}><RotateCcw size={16} /><span className="hidden sm:inline">{t('explorer.restoreImages')}</span></Button>
+              <Button variant="ghost" size="sm" className="text-red-400 hover:bg-red-500/10" type="button" data-testid="action-purge" disabled={!allSelectedHidden} onClick={() => requestPurge(selectedImages)}><Trash2 size={16} /><span className="hidden sm:inline">{t('explorer.purgeImages')}</span></Button>
             </>
           )}
         </div>

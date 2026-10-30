@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import { useState, useEffect } from 'react'
 import { use } from 'react'
 import Link from 'next/link'
@@ -208,26 +209,20 @@ function IllustDetailPageInner({ params }: { params: Promise<{ id: string }> }) 
 
           {/* Actions */}
           <div className="flex gap-2">
-            <button
+            <Button variant="primary" size="md" className="flex-1"
               onClick={handleDownload}
               disabled={downloading}
-              className="flex-1 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:bg-vault-accent/80 transition-colors disabled:opacity-50"
             >
               {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary" size="icon" className={isBookmarked ? 'border-yellow-500/50 bg-yellow-500/20 text-yellow-400 hover:bg-red-500/10 hover:text-red-400' : ''}
               onClick={handleBookmark}
               disabled={bookmarking}
               title={bookmarkLabel}
               aria-label={bookmarkLabel}
-              className={`w-10 h-10 flex items-center justify-center rounded-lg border text-base transition-colors disabled:opacity-50 ${
-                isBookmarked
-                  ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400 hover:bg-red-500/10 hover:text-red-400'
-                  : 'bg-vault-card border-vault-border text-vault-text hover:bg-vault-card-hover'
-              }`}
             >
               {bookmarking ? '·' : isBookmarked ? '★' : '☆'}
-            </button>
+            </Button>
             <Link
               href={`/reader/pixiv/${illustId}`}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors"

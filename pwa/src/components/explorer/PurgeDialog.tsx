@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -90,16 +91,15 @@ export function PurgeDialog({ galleryId, imageIds, allHidden = false, onClose, o
         )}
       </div>
       <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
-        <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button
+        <Button variant="ghost" size="md" type="button" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button variant="danger" size="md"
           type="button"
           data-testid="purge-confirm"
           disabled={!preview || preview.purgeable === 0 || working}
           onClick={() => void confirm()}
-          className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {working ? t('common.loading') : t('explorer.purgeConfirm')}
-        </button>
+        </Button>
       </footer>
     </Modal>
   )

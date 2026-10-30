@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import {
   Suspense,
   useState,
@@ -594,12 +595,11 @@ function EhGalleryDetail() {
           <div className="text-center">
             <p className="text-red-400 text-lg font-semibold">{t('library.failedToLoad')}</p>
             <p className="text-sm text-vault-text-muted mt-1">{galleryError.message}</p>
-            <button
+            <Button variant="secondary" size="md" className="mt-4"
               onClick={() => smartBack(router, '/e-hentai')}
-              className="mt-4 px-4 py-2 bg-vault-card rounded text-sm hover:bg-vault-card-hover"
             >
               {t('reader.goBack')}
-            </button>
+            </Button>
           </div>
         </div>
         <BackButton fallback="/e-hentai" />
@@ -710,18 +710,16 @@ function EhGalleryDetail() {
 
             {/* Action buttons */}
             <div className="flex flex-wrap gap-3 pt-1">
-              <button
+              <Button variant="primary" size="md" className="px-6"
                 onClick={() => handleRead(1)}
-                className="px-6 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors"
               >
                 {t('browse.read')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary" size="md" className="px-6"
                 onClick={handleDownload}
-                className="px-6 py-2.5 bg-green-700 hover:bg-green-600 rounded-lg text-white text-sm font-medium transition-colors"
               >
                 {t('browse.download')}
-              </button>
+              </Button>
               <a
                 href={`https://e-hentai.org/gallerytorrents.php?gid=${gallery.gid}&t=${gallery.token}`}
                 target="_blank"
@@ -887,13 +885,11 @@ function EhGalleryDetail() {
         {/* ── Comments ── */}
         <div className="space-y-3">
           {!showComments ? (
-            <button
+            <Button variant="secondary" size="md" className="w-full"
               onClick={() => setShowComments(true)}
-              className="w-full py-2.5 rounded-lg border border-vault-border text-vault-text-secondary text-sm
-                         hover:bg-vault-hover hover:text-vault-text transition-colors"
             >
               {t('browse.showComments')}
-            </button>
+            </Button>
           ) : (
             <>
               <div className="flex items-center justify-between">
@@ -952,13 +948,11 @@ function EhGalleryDetail() {
                     ))}
                   </div>
                   {!showAllComments && comments.length > 3 && (
-                    <button
+                    <Button variant="secondary" size="md" className="w-full"
                       onClick={() => setShowAllComments(true)}
-                      className="w-full py-2.5 rounded-lg border border-vault-border text-vault-text-secondary text-sm
-                                 hover:bg-vault-hover hover:text-vault-text transition-colors"
                     >
                       {t('browse.showAllComments', { count: String(comments.length) })}
-                    </button>
+                    </Button>
                   )}
                 </>
               )}
@@ -974,14 +968,12 @@ function EhGalleryDetail() {
             </h2>
             <PreviewGrid thumbs={previewThumbs} onRead={handleRead} />
             {gallery.pages > previewThumbs.length && hasMore && !infiniteScroll && (
-              <button
+              <Button variant="secondary" size="md" className="w-full"
                 onClick={loadMorePreviews}
                 disabled={loadingMore}
-                className="w-full py-2.5 rounded-lg border border-vault-border text-vault-text-secondary text-sm
-                           hover:bg-vault-hover hover:text-vault-text transition-colors disabled:opacity-50"
               >
                 {loadingMore ? t('common.loading') : t('browse.loadMorePreviews')}
-              </button>
+              </Button>
             )}
             {infiniteScroll && hasMore && (
               <div ref={sentinelRef} className="flex justify-center py-4">

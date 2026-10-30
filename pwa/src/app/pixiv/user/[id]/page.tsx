@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import { useState, useEffect } from 'react'
 import { use } from 'react'
 import Link from 'next/link'
@@ -99,13 +100,12 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
           </span>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity duration-200" />
-        <button
+        <Button variant="primary" size="sm" className="absolute bottom-2 right-2 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 text-xs"
           onClick={handleDownload}
           disabled={downloading}
-          className="absolute bottom-2 right-2 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity bg-vault-accent text-white text-xs px-2 py-1 rounded hover:bg-vault-accent/80 disabled:opacity-50"
         >
           {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-        </button>
+        </Button>
       </div>
       <p className="mt-1 text-xs text-vault-text truncate px-0.5">{illust.title}</p>
     </Link>
@@ -353,21 +353,16 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
                 <p className="text-sm text-vault-text-secondary">@{user.account}</p>
               </div>
               <div className="flex items-center gap-2 ml-auto shrink-0">
-                <button
+                <Button variant={isFollowing ? 'secondary' : 'primary'} size="sm" className={isFollowing ? 'hover:bg-red-500/10 hover:text-red-400' : ''}
                   onClick={handleToggleFollow}
                   disabled={followLoading}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
-                    isFollowing
-                      ? 'bg-vault-card border border-vault-border text-vault-text hover:bg-red-500/10 hover:text-red-400'
-                      : 'bg-vault-accent text-white hover:bg-vault-accent/80'
-                  }`}
                 >
                   {followLoading
                     ? t('pixiv.loading')
                     : isFollowing
                       ? t('pixiv.unfollowOnPixiv')
                       : t('pixiv.followOnPixiv')}
-                </button>
+                </Button>
                 <a
                   href={`https://www.pixiv.net/users/${user.id}`}
                   target="_blank"
@@ -401,17 +396,16 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
               <p className="text-sm text-vault-text leading-relaxed">{user.comment}</p>
             )}
             <div className="flex flex-wrap gap-2 pt-2 border-t border-vault-border">
-              <button
+              <Button variant="primary" size="sm"
                 onClick={() => handleCollectionSync(false)}
                 disabled={collectionLoading || Boolean(collection?.job_id)}
-                className="px-3 py-1.5 rounded-lg text-sm bg-vault-accent text-white disabled:opacity-50"
               >
                 {collection?.job_id
                   ? t('pixiv.collectionSyncing')
                   : collection?.gallery_id
                     ? t('pixiv.collectionSync')
                     : t('pixiv.collectionCreate')}
-              </button>
+              </Button>
               {collection?.gallery_id && (
                 <>
                   <Link
@@ -420,24 +414,22 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
                   >
                     {t('pixiv.collectionOpen')}
                   </Link>
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => handleCollectionSync(true)}
                     disabled={collectionLoading || Boolean(collection.job_id)}
-                    className="px-3 py-1.5 rounded-lg text-sm border border-vault-border text-vault-text disabled:opacity-50"
                   >
                     {t('pixiv.collectionReconcile')}
-                  </button>
+                  </Button>
                 </>
               )}
-              <button
+              <Button variant="secondary" size="sm"
                 onClick={handleToggleSubscription}
                 disabled={collectionLoading}
-                className="px-3 py-1.5 rounded-lg text-sm border border-vault-border text-vault-text disabled:opacity-50"
               >
                 {collection?.subscribed
                   ? t('pixiv.collectionUnsubscribe')
                   : t('pixiv.collectionSubscribe')}
-              </button>
+              </Button>
               {collection && collection.work_count > 0 && (
                 <span className="self-center text-xs text-vault-text-secondary">
                   {t('pixiv.collectionWorks', { count: String(collection.work_count) })}
@@ -502,13 +494,12 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
 
             {hasMoreWorks && (
               <div className="flex justify-center pt-2">
-                <button
+                <Button variant="secondary" size="md" className="px-6"
                   onClick={() => setSize(size + 1)}
                   disabled={worksLoading}
-                  className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
                 >
                   {worksLoading ? t('pixiv.loading') : t('pixiv.loadMore')}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -533,13 +524,12 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
               </div>
               {hasMoreBookmarks && (
                 <div className="flex justify-center pt-2">
-                  <button
+                  <Button variant="secondary" size="md" className="px-6"
                     onClick={() => setBookmarksSize(bookmarksSize + 1)}
                     disabled={bookmarksLoading}
-                    className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
                   >
                     {bookmarksLoading ? t('pixiv.loading') : t('pixiv.loadMore')}
-                  </button>
+                  </Button>
                 </div>
               )}
             </>

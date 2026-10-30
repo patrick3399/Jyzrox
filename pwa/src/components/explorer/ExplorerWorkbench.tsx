@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import { CategoryFilter } from './CategoryFilter'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
@@ -971,7 +972,7 @@ export function ExplorerWorkbench() {
     return (
       <div className="m-6 rounded-lg border border-red-500/40 bg-red-500/10 p-6 text-red-300">
         <p>{error instanceof Error ? error.message : t('common.errorOccurred')}</p>
-        <button type="button" onClick={() => void refresh()} className="mt-4 rounded bg-vault-card px-3 py-2 text-sm text-vault-text">{t('common.retry')}</button>
+        <Button variant="secondary" size="sm" className="mt-4" type="button" onClick={() => void refresh()}>{t('common.retry')}</Button>
       </div>
     )
   }
@@ -1033,7 +1034,7 @@ export function ExplorerWorkbench() {
         </div>
         <button type="button" aria-label={t('explorer.gridView')} onClick={() => changeView('grid')} className={`rounded p-2 ${view === 'grid' ? 'bg-vault-accent/15 text-vault-accent' : 'text-vault-text-muted'}`}><Grid2X2 size={17} /></button>
         <button type="button" aria-label={t('explorer.listView')} onClick={() => changeView('list')} className={`rounded p-2 ${view === 'list' ? 'bg-vault-accent/15 text-vault-accent' : 'text-vault-text-muted'}`}><List size={18} /></button>
-        <button type="button" aria-label={t('explorer.keyboardShortcuts')} title={t('explorer.keyboardShortcuts')} onClick={() => setShortcutsOpen(true)} className="hidden rounded p-2 text-vault-text-muted hover:bg-vault-card-hover sm:block"><Keyboard size={18} /></button>
+        <Button variant="ghost" size="icon" className="hidden sm:inline-flex size-8" type="button" aria-label={t('explorer.keyboardShortcuts')} title={t('explorer.keyboardShortcuts')} onClick={() => setShortcutsOpen(true)}><Keyboard size={18} /></Button>
         <select
           aria-label={t('explorer.libraryTree')}
           value={`${node.kind}:${node.id || ''}`}
@@ -1098,14 +1099,14 @@ export function ExplorerWorkbench() {
                     onChange={(next) => { refine({ cat: next, offset: 0 }); clearSelection(); setQuerySelection(null) }}
                   />
                 )}
-                <button type="button" aria-label={t('explorer.sortDirection')} title={sortDirection === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={() => refine({ dir: sortDirection === 'asc' ? 'desc' : 'asc', offset: 0 })} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{sortDirection === 'asc' ? '↑' : '↓'}</button>
+                <Button variant="secondary" size="sm" className="text-xs" type="button" aria-label={t('explorer.sortDirection')} title={sortDirection === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={() => refine({ dir: sortDirection === 'asc' ? 'desc' : 'asc', offset: 0 })}>{sortDirection === 'asc' ? '↑' : '↓'}</Button>
               </>
             )}
             {querySpec && (galleries?.total || 0) > 0 && (
-              <button type="button" onClick={selectAllQuery} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{t('explorer.selectAllResults')}</button>
+              <Button variant="secondary" size="sm" className="text-xs" type="button" onClick={selectAllQuery}>{t('explorer.selectAllResults')}</Button>
             )}
-            {node.kind === 'smart' && node.id === 'duplicates' && <button type="button" onClick={() => router.push('/dedup')} className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text hover:bg-vault-card-hover">{t('explorer.reviewPairs')}</button>}
-            {node.kind === 'physical' && <button type="button" aria-label={t('explorer.refreshSize')} onClick={async () => { await api.explorer.refreshPhysicalSize(physicalId, node.path || ''); await mutatePhysical() }} className="rounded p-1 text-vault-text-muted hover:bg-vault-card-hover"><RefreshCw size={15} /></button>}
+            {node.kind === 'smart' && node.id === 'duplicates' && <Button variant="secondary" size="sm" className="text-xs" type="button" onClick={() => router.push('/dedup')}>{t('explorer.reviewPairs')}</Button>}
+            {node.kind === 'physical' && <Button variant="ghost" size="icon" className="size-8" type="button" aria-label={t('explorer.refreshSize')} onClick={async () => { await api.explorer.refreshPhysicalSize(physicalId, node.path || ''); await mutatePhysical() }}><RefreshCw size={15} /></Button>}
           </div>
 
           {layout === 'finder' && activeItem && (
@@ -1146,9 +1147,9 @@ export function ExplorerWorkbench() {
             )}
             {querySpec && galleries && galleries.total > galleries.limit && (
               <div className="flex items-center justify-center gap-3 p-4">
-                <button type="button" disabled={offset === 0} onClick={() => refine({ offset: Math.max(0, offset - galleries.limit) })} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.prev')}</button>
+                <Button variant="secondary" size="sm" type="button" disabled={offset === 0} onClick={() => refine({ offset: Math.max(0, offset - galleries.limit) })}>{t('common.prev')}</Button>
                 <span className="text-sm text-vault-text-muted">{offset + 1}–{Math.min(offset + galleries.limit, galleries.total)} / {galleries.total}</span>
-                <button type="button" disabled={offset + galleries.limit >= galleries.total} onClick={() => refine({ offset: offset + galleries.limit })} className="rounded-md border border-vault-border px-3 py-2 text-sm text-vault-text disabled:opacity-30">{t('common.next')}</button>
+                <Button variant="secondary" size="sm" type="button" disabled={offset + galleries.limit >= galleries.total} onClick={() => refine({ offset: offset + galleries.limit })}>{t('common.next')}</Button>
               </div>
             )}
             <SelectionMarquee rect={selection.marquee} />
@@ -1160,18 +1161,18 @@ export function ExplorerWorkbench() {
 
       {effectiveSelectedCount > 0 && (
         <div className="fixed inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 flex max-w-[calc(100vw-1rem)] items-center gap-1 overflow-x-auto rounded-xl border border-vault-border bg-vault-card p-2 shadow-2xl lg:inset-x-auto lg:bottom-5 lg:left-1/2 lg:-translate-x-1/2">
-          <button type="button" onClick={() => { clearSelection(); setQuerySelection(null) }} className="rounded p-2 text-vault-text-muted"><X size={18} /></button>
+          <Button variant="ghost" size="icon" className="size-8" type="button" onClick={() => { clearSelection(); setQuerySelection(null) }}><X size={18} /></Button>
           <span className="mr-2 whitespace-nowrap text-sm font-medium text-vault-text">{t('explorer.selectedCount', { count: effectiveSelectedCount })}</span>
-          {selectedPhysicalFolders.length === 1 && !selectedPhysicalFolders[0].gallery_id && <button type="button" onClick={importSelectedFolder} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover"><Archive size={16} /><span className="hidden sm:inline">{t('explorer.importFolder')}</span></button>}
-          <button type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setMetadataOpen(true)} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover disabled:opacity-30"><Edit3 size={16} /><span className="hidden sm:inline">{t('explorer.editMetadata')}</span></button>
-          <button type="button" disabled={Boolean(querySelection) || selectedGalleries.length < 2 || selectedGalleries.length > 50} onClick={() => setMergeOpen(true)} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover disabled:opacity-30"><Merge size={16} /><span className="hidden sm:inline">{t('explorer.merge')}</span></button>
-          <button type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setOrganizeOpen('tags')} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover disabled:opacity-30"><Tags size={16} /><span className="hidden sm:inline">{t('explorer.tags')}</span></button>
-          <button type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setOrganizeOpen('collections')} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover disabled:opacity-30"><Layers3 size={16} /><span className="hidden sm:inline">{t('explorer.collections')}</span></button>
-          <button type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => void runQuickAction('favorite')} className="rounded-md p-2 text-vault-text hover:bg-vault-card-hover disabled:opacity-30" aria-label={t('explorer.favorite')}><Star size={16} /></button>
-          <button type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => void runQuickAction('add_read_later')} className="rounded-md p-2 text-vault-text hover:bg-vault-card-hover disabled:opacity-30" aria-label={t('explorer.readLater')}><Archive size={16} /></button>
+          {selectedPhysicalFolders.length === 1 && !selectedPhysicalFolders[0].gallery_id && <Button variant="ghost" size="sm" type="button" onClick={importSelectedFolder}><Archive size={16} /><span className="hidden sm:inline">{t('explorer.importFolder')}</span></Button>}
+          <Button variant="ghost" size="sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setMetadataOpen(true)}><Edit3 size={16} /><span className="hidden sm:inline">{t('explorer.editMetadata')}</span></Button>
+          <Button variant="ghost" size="sm" type="button" disabled={Boolean(querySelection) || selectedGalleries.length < 2 || selectedGalleries.length > 50} onClick={() => setMergeOpen(true)}><Merge size={16} /><span className="hidden sm:inline">{t('explorer.merge')}</span></Button>
+          <Button variant="ghost" size="sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setOrganizeOpen('tags')}><Tags size={16} /><span className="hidden sm:inline">{t('explorer.tags')}</span></Button>
+          <Button variant="ghost" size="sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setOrganizeOpen('collections')}><Layers3 size={16} /><span className="hidden sm:inline">{t('explorer.collections')}</span></Button>
+          <Button variant="ghost" size="icon" className="size-8" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => void runQuickAction('favorite')} aria-label={t('explorer.favorite')}><Star size={16} /></Button>
+          <Button variant="ghost" size="icon" className="size-8" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => void runQuickAction('add_read_later')} aria-label={t('explorer.readLater')}><Archive size={16} /></Button>
           <select aria-label={t('explorer.rating')} disabled={!querySelection && selectedGalleries.length === 0} defaultValue="" onChange={(event) => { if (event.target.value) void runQuickAction('rate', Number(event.target.value)); event.target.value = '' }} className="hidden rounded-md border border-vault-border bg-vault-card px-2 py-1 text-sm text-vault-text sm:block disabled:opacity-30"><option value="">{t('explorer.rating')}</option>{[0, 1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating}</option>)}</select>
           <select aria-label={t('explorer.moreActions')} disabled={!querySelection && selectedGalleries.length === 0} defaultValue="" onChange={(event) => { const action = event.target.value as 'unfavorite' | 'remove_read_later'; if (action) void runQuickAction(action); event.target.value = '' }} className="rounded-md border border-vault-border bg-vault-card px-2 py-1 text-sm text-vault-text disabled:opacity-30"><option value="">{t('explorer.moreActions')}</option><option value="unfavorite">{t('explorer.unfavorite')}</option><option value="remove_read_later">{t('explorer.removeReadLater')}</option></select>
-          <button type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={deleteSelection} className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-30"><Trash2 size={16} /><span className="hidden sm:inline">{t('explorer.deleteFiles')}</span></button>
+          <Button variant="ghost" size="sm" className="text-red-400 hover:bg-red-500/10" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={deleteSelection}><Trash2 size={16} /><span className="hidden sm:inline">{t('explorer.deleteFiles')}</span></Button>
         </div>
       )}
 

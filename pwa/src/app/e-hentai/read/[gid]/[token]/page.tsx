@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import { useMemo, useState, useEffect, Suspense, useCallback } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { useEhGallery, useEhGalleryImagesPaginated } from '@/hooks/useGalleries'
@@ -108,12 +109,11 @@ function EhProxyReaderPage() {
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error.message}</p>
-          <button
+          <Button variant="secondary" size="md" className="mt-4"
             onClick={() => smartBack(router, backHref)}
-            className="mt-4 px-4 py-2 bg-neutral-800 rounded text-sm hover:bg-neutral-700 transition-colors"
           >
             {t('common.goBack')}
-          </button>
+          </Button>
         </div>
       </ReaderFallbackScreen>
     )
@@ -140,12 +140,11 @@ function EhProxyReaderPage() {
           {loadingTooLong && (
             <div className="mt-4 space-y-2">
               <p className="text-xs text-yellow-500">{t('reader.loadingTooLong')}</p>
-              <button
+              <Button variant="secondary" size="sm" className="text-xs"
                 onClick={() => smartBack(router, backHref)}
-                className="px-4 py-2 bg-neutral-800 rounded text-xs hover:bg-neutral-700 transition-colors"
               >
                 {t('common.goBack')}
-              </button>
+              </Button>
             </div>
           )}
         </div>

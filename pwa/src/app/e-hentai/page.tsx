@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import {
   useState,
   useRef,
@@ -969,51 +970,47 @@ function BrowsePage() {
               />
             )}
           </div>
-          <button
+          <Button variant="ghost" size="icon" className="shrink-0"
             onClick={() => {
               setMobileSearchOpen(false)
               setShowHistory(false)
             }}
-            className="px-3 py-2.5 text-sm text-vault-text-secondary hover:text-vault-text transition-colors shrink-0"
           >
             <XIcon size={18} />
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Desktop + mobile compact row */}
       <div className={`flex gap-2 ${mobileSearchOpen ? 'hidden sm:flex' : ''}`}>
         {/* Mobile search icon button */}
-        <button
+        <Button variant="secondary" size="icon"
           type="button"
           onClick={() => setShowImageSearch(true)}
           title={t('browse.searchByImage')}
           aria-label={t('browse.searchByImage')}
-          className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors"
         >
           <Camera size={16} />
-        </button>
+        </Button>
 
-        <button
+        <Button variant="secondary" size="icon" className="sm:hidden shrink-0"
           onClick={() => setMobileSearchOpen(true)}
-          className="sm:hidden p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors shrink-0"
           aria-label={t('browse.search')}
         >
           <SearchIcon size={18} />
-        </button>
+        </Button>
 
         {/* Mobile saved searches button */}
         <div ref={mobileSavedSearchesRef} className="relative sm:hidden shrink-0">
-          <button
+          <Button variant="secondary" size="icon"
             onClick={() => {
               setShowSavedSearches((v) => !v)
               setShowSaveInput(false)
             }}
             title={t('browse.savedSearches')}
-            className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors"
           >
             {savedSearches.length > 0 ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
-          </button>
+          </Button>
 
           {/* Mobile saved searches dropdown */}
           {showSavedSearches && (
@@ -1044,12 +1041,11 @@ function BrowsePage() {
                     autoFocus
                     className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                   />
-                  <button
+                  <Button variant="primary" size="sm" className="shrink-0"
                     onClick={handleSaveSearch}
-                    className="px-2 py-1 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-xs font-medium transition-colors shrink-0"
                   >
                     {t('browse.saveSearch')}
-                  </button>
+                  </Button>
                 </div>
               )}
 
@@ -1164,29 +1160,27 @@ function BrowsePage() {
           )}
         </div>
 
-        <button
+        <Button variant="primary" size="md" className="hidden sm:inline-flex shrink-0"
           onClick={() => {
             if (debounceRef.current) clearTimeout(debounceRef.current)
             setAutocompleteOpen(false)
             commitSearch(inputValue)
           }}
-          className="hidden sm:block px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
         >
           {t('browse.search')}
-        </button>
+        </Button>
 
         {/* Saved Searches button (desktop) */}
         <div ref={savedSearchesRef} className="relative hidden sm:block shrink-0">
-          <button
+          <Button variant="secondary" size="icon"
             onClick={() => {
               setShowSavedSearches((v) => !v)
               setShowSaveInput(false)
             }}
             title={t('browse.savedSearches')}
-            className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors"
           >
             {savedSearches.length > 0 ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
-          </button>
+          </Button>
 
           {/* Saved searches dropdown */}
           {showSavedSearches && (
@@ -1217,12 +1211,11 @@ function BrowsePage() {
                     autoFocus
                     className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                   />
-                  <button
+                  <Button variant="primary" size="sm" className="shrink-0"
                     onClick={handleSaveSearch}
-                    className="px-2 py-1 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-xs font-medium transition-colors shrink-0"
                   >
                     {t('browse.saveSearch')}
-                  </button>
+                  </Button>
                 </div>
               )}
 
@@ -1270,13 +1263,12 @@ function BrowsePage() {
         {/* Subscribe to search button (desktop) */}
         {query && (
           <div className="relative hidden sm:block shrink-0">
-            <button
+            <Button variant="secondary" size="icon"
               onClick={() => setShowSubscribe(!showSubscribe)}
               title={t('browse.subscribeToSearch')}
-              className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-accent transition-colors"
             >
               <Rss size={18} />
-            </button>
+            </Button>
             {showSubscribe && (
               <div className="absolute right-0 top-full mt-1 z-40 w-80 bg-vault-card border border-vault-border rounded-lg shadow-xl p-4 space-y-3">
                 <h3 className="text-sm font-medium text-vault-text">
@@ -1334,39 +1326,36 @@ function BrowsePage() {
                     </select>
                   </div>
                 </div>
-                <button
+                <Button variant="primary" size="sm" className="w-full"
                   onClick={handleSubscribe}
                   disabled={subCreating}
-                  className="w-full px-3 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
                 >
                   {subCreating ? t('subscriptions.adding') : t('subscriptions.add')}
-                </button>
+                </Button>
               </div>
             )}
           </div>
         )}
 
-        <button
+        <Button variant="secondary" size="icon" className="hidden sm:inline-flex"
           type="button"
           onClick={() => void refreshFromTop()}
           disabled={!canRefresh || refreshing}
           title={t('common.refresh')}
           aria-label={t('common.refresh')}
-          className="hidden sm:block p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-        </button>
+        </Button>
 
-        <button
+        <Button variant="secondary" size="icon"
           type="button"
           onClick={openRandomLoadedGallery}
           disabled={items.length === 0}
           title={t('browse.openRandom')}
           aria-label={t('browse.openRandom')}
-          className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Shuffle size={16} />
-        </button>
+        </Button>
 
         {/* View toggle */}
         <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
@@ -1395,14 +1384,13 @@ function BrowsePage() {
         >
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-vault-text">{t('browse.searchByImage')}</h2>
-            <button
+            <Button variant="ghost" size="icon" className="size-8"
               type="button"
               onClick={() => setShowImageSearch(false)}
-              className="text-vault-text-muted hover:text-vault-text"
               aria-label={t('common.close')}
             >
               <XIcon size={16} />
-            </button>
+            </Button>
           </div>
           <input
             type="file"
@@ -1437,14 +1425,13 @@ function BrowsePage() {
               {t('browse.includeExpunged')}
             </label>
           </div>
-          <button
+          <Button variant="primary" size="md"
             type="button"
             onClick={submitImageSearch}
             disabled={!imageSearchFile || imageSearchLoading}
-            className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {imageSearchLoading ? t('common.loading') : t('browse.search')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1902,9 +1889,8 @@ function BrowsePage() {
         >
           <p className="font-medium text-vault-text">{t('error.session_expired')}</p>
           <p className="text-sm text-vault-text-muted">{t('browse.imageSessionExpiredHelp')}</p>
-          <button
+          <Button variant="primary" size="md"
             type="button"
-            className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white hover:bg-vault-accent/90"
             onClick={() =>
               actions.commitIdentity(
                 { tab: 'search', query: '', filters: initialFilters },
@@ -1913,7 +1899,7 @@ function BrowsePage() {
             }
           >
             {t('browse.startNewSearch')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1990,12 +1976,11 @@ function BrowsePage() {
           {state.error && !loading && (
             <div className="flex flex-col items-center gap-2 py-4">
               <span className="text-xs text-red-400">{t('browse.failedLoadResults')}</span>
-              <button
+              <Button variant="secondary" size="sm" className="rounded-full text-xs"
                 onClick={() => loadMore()}
-                className="px-4 py-1.5 rounded-full text-xs font-medium border border-vault-border text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text transition-colors"
               >
                 {t('common.retry')}
-              </button>
+              </Button>
             </div>
           )}
 

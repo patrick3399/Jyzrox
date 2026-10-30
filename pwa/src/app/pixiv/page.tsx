@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import {
   Suspense,
   useCallback,
@@ -158,14 +159,13 @@ function IllustCard({
         >
           {bookmarked ? '★' : '☆'}
         </button>
-        <button
+        <Button variant="primary" size="sm" className="text-xs"
           type="button"
           onClick={handleDownload}
           disabled={downloading}
-          className="rounded bg-vault-accent px-2 py-1 text-xs text-white disabled:opacity-50"
         >
           {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -208,14 +208,13 @@ function IllustCard({
       >
         {bookmarked ? '★' : '☆'}
       </button>
-      <button
+      <Button variant="primary" size="sm" className="absolute bottom-12 right-2 text-xs"
         type="button"
         onClick={handleDownload}
         disabled={downloading}
-        className="absolute bottom-12 right-2 rounded bg-vault-accent px-2 py-1 text-xs text-white disabled:opacity-50"
       >
         {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -840,13 +839,12 @@ function PixivPageInner() {
           placeholder={t('pixiv.searchPlaceholder')}
           className="flex-1 rounded-lg border border-vault-border bg-vault-card px-4 py-2.5 text-sm text-vault-text"
         />
-        <button
+        <Button variant="primary" size="md"
           type="button"
           onClick={handleSearchSubmit}
-          className="rounded-lg bg-vault-accent px-4 py-2.5 text-sm font-medium text-white"
         >
           {t('pixiv.search')}
-        </button>
+        </Button>
         <div className="flex overflow-hidden rounded-lg border border-vault-border">
           <button
             type="button"
@@ -867,16 +865,15 @@ function PixivPageInner() {
             <List size={18} />
           </button>
         </div>
-        <button
+        <Button variant="secondary" size="icon" className="hidden sm:inline-flex"
           type="button"
           onClick={() => void refreshFromTop()}
           disabled={!canRefresh || isRefreshing}
           aria-label={t('common.refresh')}
           title={t('common.refresh')}
-          className="hidden items-center rounded-lg border border-vault-border px-3 text-vault-text-muted hover:text-vault-text disabled:opacity-40 sm:flex"
         >
           <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
-        </button>
+        </Button>
       </div>
 
       {identity.surface === 'search' ? (
