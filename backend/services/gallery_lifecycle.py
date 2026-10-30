@@ -12,18 +12,19 @@ import asyncio
 import logging
 import shutil
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.redis_client import get_redis
-from db.models import Gallery, Image
+from db.models import DownloadJob, Gallery, Image
 from services.cas import decrement_ref_count, library_dir
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
 
 logger = logging.getLogger(__name__)
 
 _SOURCES_CACHE_KEY = "library:sources"
+_ACTIVE_JOB_STATUSES = ("queued", "running", "paused")
 
 
 async def invalidate_sources_cache() -> None:
@@ -75,3 +76,58 @@ async def hard_delete_galleries(db: AsyncSession, galleries: list[Gallery]) -> d
         deleted_count = 0
 
     return {"affected": len(galleries), "deleted_dirs": deleted_count}
+
+
+async def settle_stale_downloading_galleries(db: AsyncSession, gallery_ids: list[int]) -> int:
+    """Move galleries stuck on ``downloading`` that no active job owns to ``partial`` (or ``proxy_only`` if empty).
+
+    A job that ended without finalizing its gallery (worker killed, keep path
+    failed after the stop claim) leaves it on ``downloading`` for good.
+    Trashed galleries are never touched (BE-T17). Returns how many galleries
+    changed; the caller commits.
+    """
+    if not gallery_ids:
+        return 0
+
+    unique_gallery_ids = list(set(gallery_ids))
+    active_ids = set(
+        (
+            await db.execute(
+                select(DownloadJob.gallery_id).where(
+                    DownloadJob.gallery_id.in_(unique_gallery_ids),
+                    DownloadJob.status.in_(_ACTIVE_JOB_STATUSES),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    stale_ids = [gid for gid in unique_gallery_ids if gid not in active_ids]
+    if not stale_ids:
+        return 0
+
+    image_counts = {
+        gid: count
+        for gid, count in (
+            await db.execute(
+                select(Image.gallery_id, func.count()).where(Image.gallery_id.in_(stale_ids)).group_by(Image.gallery_id)
+            )
+        ).all()
+    }
+
+    partial_ids = [gid for gid in stale_ids if image_counts.get(gid, 0) > 0]
+    empty_ids = [gid for gid in stale_ids if image_counts.get(gid, 0) == 0]
+    stuck = (Gallery.download_status == "downloading", Gallery.deleted_at.is_(None))
+
+    settled = 0
+    if partial_ids:
+        result = await db.execute(
+            update(Gallery).where(Gallery.id.in_(partial_ids), *stuck).values(download_status="partial")
+        )
+        settled += result.rowcount or 0
+    if empty_ids:
+        result = await db.execute(
+            update(Gallery).where(Gallery.id.in_(empty_ids), *stuck).values(download_status="proxy_only", pages=0)
+        )
+        settled += result.rowcount or 0
+    return settled

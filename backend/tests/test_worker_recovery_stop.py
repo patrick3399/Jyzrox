@@ -166,3 +166,38 @@ async def test_stale_reaper_without_stop_intent_still_fails_a_zombie_job(db_sess
     retry_env.finalize.assert_not_awaited()
     await db_session.refresh(job)
     assert job.status != "running"
+
+
+# ── startup: galleries left on `downloading` by a job that already ended ─
+
+
+async def test_startup_settles_downloading_gallery_whose_stopped_job_is_already_done(db_session, db_session_factory):
+    """A worker killed after the stop claim leaves the job `done` and its gallery `downloading`. Recovery only
+    looks at `running` jobs, so the sweep must settle every `downloading` gallery no active job owns."""
+    from sqlalchemy import select
+
+    from db.models import Gallery, Image
+    from tests._download_stop_support import add_gallery
+    from worker import _settle_orphan_downloading_galleries
+
+    kept = await add_gallery(db_session, source_id="1", download_status="downloading")
+    empty = await add_gallery(db_session, source_id="2", download_status="downloading")
+    active = await add_gallery(db_session, source_id="3", download_status="downloading")
+    trashed = await add_gallery(
+        db_session, source_id="4", download_status="downloading", deleted_at=utc(2026, 10, 30, 8, 0)
+    )
+    db_session.add(Image(gallery_id=kept.id, filename="001.jpg", page_num=1))
+    await db_session.commit()
+    await add_job(db_session, status="done", gallery_id=kept.id, stop_requested_at=utc(2026, 10, 30, 9, 0))
+    await add_job(db_session, status="queued", gallery_id=active.id)
+
+    with patch("core.database.AsyncSessionLocal", db_session_factory):
+        settled = await _settle_orphan_downloading_galleries()
+
+    assert settled == 2
+    async with db_session_factory() as s:
+        statuses = {g.id: g.download_status for g in (await s.execute(select(Gallery))).scalars()}
+    assert statuses[kept.id] == "partial"
+    assert statuses[empty.id] == "proxy_only"
+    assert statuses[active.id] == "downloading"  # its job will import into it again
+    assert statuses[trashed.id] == "downloading"  # BE-T17: a trashed gallery is never touched

@@ -58,8 +58,11 @@ async def _flag_stop(factory, job_id):
         await s.commit()
 
 
-async def _run(db_session_factory, tmp_path, job, importer, plugin_download):
-    """Run the real _run_download_job with the plugin and importer faked and stop intent read from SQLite."""
+async def _run(db_session_factory, tmp_path, job, importer, plugin_download, extra=None):
+    """Run the real _run_download_job with the plugin and importer faked and stop intent read from SQLite.
+
+    ``extra`` adds or overrides patch targets for one test.
+    """
     from worker.download import _run_download_job
 
     plugin = MagicMock()
@@ -98,6 +101,7 @@ async def _run(db_session_factory, tmp_path, job, importer, plugin_download):
             "services.download_stop.AsyncSessionLocal": db_session_factory,
             "worker.progressive.ProgressiveImporter": MagicMock(return_value=importer),
             "worker.progressive._rmtree_staging_dir": h.rmtree,
+            **(extra or {}),
         }.items():
             stack.enter_context(patch(target, value))
         h.outcome = await _run_download_job(
@@ -328,6 +332,73 @@ async def test_keep_failure_after_the_claim_still_moves_the_boundary_and_ends_do
     assert h.set_sub.await_args.args == (str(job.id), "stopped")
     imp.abort.assert_awaited_once()
     h.finalize_enqueue.assert_not_awaited()
+
+
+def _sessions_failing_get(factory):
+    """A session factory whose ``get`` fails (the intent lookup) while ``execute`` (the claim) still works."""
+
+    def _make():
+        session = factory()
+        session.get = AsyncMock(side_effect=RuntimeError("connection reset"))
+        return session
+
+    return _make
+
+
+async def test_cancelled_result_with_unreadable_intent_and_stop_flag_keeps_instead_of_cleanup(
+    db_session, db_session_factory, tmp_path
+):
+    """The DB lookup of the intent fails but the Redis flag says ``stop``: the run is kept, never cleaned up.
+
+    An unreadable intent used to read as "no intent", which sent a user's stop down the cancel branch and
+    deleted what the run fetched.
+    """
+    job = await add_job(db_session, status="running", mode="download")
+    imp = _importer()
+    redis = MagicMock(get=AsyncMock(return_value=b"stop"))
+
+    h = await _run(
+        db_session_factory,
+        tmp_path,
+        job,
+        imp,
+        _stop_during_run(db_session_factory, job, _result("cancelled")),
+        extra={
+            "services.download_stop.AsyncSessionLocal": _sessions_failing_get(db_session_factory),
+            "services.download_stop.get_redis": MagicMock(return_value=redis),
+        },
+    )
+
+    imp.cleanup.assert_not_awaited()
+    imp.finalize_kept.assert_awaited_once()
+    assert h.outcome["outcome"] == "stopped"
+    assert "cancelled" not in [c.args[1] for c in h.set_status.await_args_list]
+    assert await _db_status(db_session_factory, job.id) == "done"
+
+
+async def test_keep_failure_after_the_claim_settles_the_gallery_instead_of_a_dead_handoff(
+    db_session, db_session_factory, tmp_path
+):
+    """After the claim the job is `done`, so finalize_stopped_job would ignore a hand-off. A keep path that breaks
+    there (finalize and abort both failing) must settle its gallery itself, not leave it on `downloading`."""
+    from db.models import Gallery
+    from tests._download_stop_support import add_gallery
+
+    gallery = await add_gallery(db_session, download_status="downloading")
+    job = await add_job(db_session, status="running", mode="download", gallery_id=gallery.id)
+    imp = _importer(gallery_id=gallery.id)
+    imp.finalize_kept = AsyncMock(side_effect=RuntimeError("db gone"))
+    imp.abort = AsyncMock(side_effect=RuntimeError("db still gone"))
+
+    h = await _run(
+        db_session_factory, tmp_path, job, imp, _stop_during_run(db_session_factory, job, _result("cancelled"))
+    )
+
+    h.finalize_enqueue.assert_not_awaited()
+    assert h.outcome["status"] == "done" and h.outcome["outcome"] == "stopped"
+    assert await _db_status(db_session_factory, job.id) == "done"
+    async with db_session_factory() as s:
+        assert (await s.get(Gallery, gallery.id)).download_status != "downloading"
 
 
 # ── stop before start: boundary of a job that never ran ───────────────────

@@ -354,3 +354,43 @@ async def test_cancel_while_the_keep_path_finalizes_is_refused_and_the_job_stays
     async with db_session_factory() as check:
         row = (await check.execute(select(DownloadJob.status, DownloadJob.progress))).one()
     assert row.status == "done" and row.progress["outcome"] == "stopped"
+
+
+# ── read_stop_intent: a failed lookup falls back to the Redis flag ───────
+
+
+def _failing_sessions():
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(side_effect=RuntimeError("connection reset"))
+    session.__aexit__ = AsyncMock(return_value=None)
+    return MagicMock(return_value=session)
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [(b"stop", "stop"), ("stop", "stop"), (b"1", "cancel"), (None, None)],
+)
+async def test_read_stop_intent_db_error_falls_back_to_the_flag_value(flag, expected):
+    from services.download_stop import read_stop_intent
+
+    sessions = _failing_sessions()
+    redis = MagicMock(get=AsyncMock(return_value=flag))
+    with (
+        patch("services.download_stop.AsyncSessionLocal", sessions),
+        patch("services.download_stop.get_redis", MagicMock(return_value=redis)),
+        patch("services.download_stop._INTENT_RETRY_DELAY_S", 0, create=True),
+    ):
+        assert await read_stop_intent("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d") == expected
+    assert sessions.call_count == 2  # retried once before trusting the flag
+
+
+async def test_read_stop_intent_db_and_redis_errors_report_no_intent():
+    from services.download_stop import read_stop_intent
+
+    redis = MagicMock(get=AsyncMock(side_effect=RuntimeError("redis down")))
+    with (
+        patch("services.download_stop.AsyncSessionLocal", _failing_sessions()),
+        patch("services.download_stop.get_redis", MagicMock(return_value=redis)),
+        patch("services.download_stop._INTENT_RETRY_DELAY_S", 0, create=True),
+    ):
+        assert await read_stop_intent("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d") is None

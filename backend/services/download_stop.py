@@ -10,6 +10,7 @@ task covers it.
 The router and the worker both use this module; neither imports the other.
 """
 
+import asyncio
 import logging
 import time
 import uuid
@@ -35,6 +36,12 @@ _STOP_FLAG_TTL_S = 3600
 _FINALIZE_DELAY_S = 5
 
 _STOPPABLE_STATUSES = ("queued", "running", "paused")
+
+# A failed intent lookup is retried once before the Redis flag is trusted instead.
+_INTENT_READ_ATTEMPTS = 2
+_INTENT_RETRY_DELAY_S = 0.2
+# Value of the Redis cancel flag for a cancel.
+_CANCEL_FLAG_VALUE = "1"
 
 
 class StopNotAllowed(Exception):
@@ -210,19 +217,39 @@ async def read_stop_intent(job_id: str) -> str | None:
     """Authoritative intent from the DB: ``"cancel"``, ``"stop"`` or ``None``.
 
     Reads the row in its own session because the Redis flag is only a
-    best-effort signal. Cancel outranks stop. Never raises: a lookup failure is
-    logged and reported as no intent, so it cannot break the caller's finalize.
+    best-effort signal. Cancel outranks stop. Never raises: a lookup that keeps
+    failing falls back to the flag's value, because reading it as "no intent"
+    would send a user's stop down the cancel branch, which deletes the run.
     """
-    try:
-        async with AsyncSessionLocal() as session:
-            job = await session.get(DownloadJob, uuid.UUID(str(job_id)))
-            if job is None:
+    for attempt in range(_INTENT_READ_ATTEMPTS):
+        try:
+            async with AsyncSessionLocal() as session:
+                job = await session.get(DownloadJob, uuid.UUID(str(job_id)))
+                if job is None:
+                    return None
+                if job.status == "cancelled":
+                    return "cancel"
+                if job.stop_requested_at is not None:
+                    return "stop"
                 return None
-            if job.status == "cancelled":
-                return "cancel"
-            if job.stop_requested_at is not None:
-                return "stop"
-            return None
-    except Exception as exc:  # noqa: BLE001 - must never block a worker finalize on a lookup error
-        logger.error("[download_stop] failed to read stop intent for %s: %s", job_id, exc)
+        except Exception as exc:  # noqa: BLE001 - must never block a worker finalize on a lookup error
+            logger.error("[download_stop] failed to read stop intent for %s: %s", job_id, exc)
+            if attempt + 1 < _INTENT_READ_ATTEMPTS:
+                await asyncio.sleep(_INTENT_RETRY_DELAY_S)
+    return await _intent_from_flag(job_id)
+
+
+async def _intent_from_flag(job_id: str) -> str | None:
+    """The intent the Redis cancel flag carries (``"stop"`` or ``"1"``), or None."""
+    try:
+        value = await get_redis().get(_cancel_flag_key(job_id))
+    except Exception as exc:  # noqa: BLE001 - last resort after the DB lookup failed
+        logger.error("[download_stop] failed to read the cancel flag for %s: %s", job_id, exc)
         return None
+    if isinstance(value, bytes):
+        value = value.decode(errors="replace")
+    if value == STOP_FLAG_VALUE:
+        return "stop"
+    if value == _CANCEL_FLAG_VALUE:
+        return "cancel"
+    return None

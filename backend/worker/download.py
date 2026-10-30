@@ -403,12 +403,16 @@ async def _finish_stopped(
 ) -> dict:
     """Keep what a user-stopped run fetched and end the job ``done``.
 
-    A failure here must not leave the job running with nobody to finish it, so it
-    hands the job to ``finalize_stopped_job``: once this execution releases its
-    admission token that task redoes the keep path from the database state.
+    A failure before the claim must not leave the job running with nobody to
+    finish it, so it hands the job to ``finalize_stopped_job``: once this
+    execution releases its admission token that task redoes the keep path from
+    the database state. After the claim the job is ``done`` and that task would
+    ignore it, so a failure there settles the gallery here instead.
     """
+    state = {"claimed": False}
     try:
         return await _finish_stopped_inner(
+            state=state,
             importer=importer,
             target_dir=target_dir,
             url=url,
@@ -424,6 +428,9 @@ async def _finish_stopped(
         )
     except Exception as exc:
         logger.error("[download] keep path failed for stopped job %s: %s", db_job_id, exc, exc_info=True)
+        if state["claimed"]:
+            await _settle_claimed_gallery(importer, db_job_id)
+            return {"status": "done", "outcome": "stopped", "error": str(exc)}
         if db_job_id:
             try:
                 await enqueue_finalize_stopped_job(db_job_id)
@@ -432,8 +439,28 @@ async def _finish_stopped(
         return {"status": "stopping", "error": str(exc)}
 
 
+async def _settle_claimed_gallery(importer, db_job_id: str | None) -> None:
+    """Take a claimed stop's gallery off ``downloading`` when its keep path broke.
+
+    Best effort; what it cannot settle, worker startup does.
+    """
+    gallery_id = getattr(importer, "gallery_id", None)
+    if not gallery_id or getattr(importer, "skipped_trashed", False) is True:
+        return
+    try:
+        from core.database import AsyncSessionLocal
+        from services.gallery_lifecycle import settle_stale_downloading_galleries
+
+        async with AsyncSessionLocal() as session:
+            await settle_stale_downloading_galleries(session, [gallery_id])
+            await session.commit()
+    except Exception as exc:
+        logger.error("[download] could not settle gallery %s of stopped job %s: %s", gallery_id, db_job_id, exc)
+
+
 async def _finish_stopped_inner(
     *,
+    state: dict,
     importer,
     target_dir: Path,
     url: str,
@@ -463,6 +490,7 @@ async def _finish_stopped_inner(
     if claim != "claimed":
         logger.warning("[download] stop keep path of %s found the job %s; leaving it", db_job_id, claim)
         return {"status": claim}
+    state["claimed"] = True
 
     # 3. The subscription boundary moves to the run start, never backwards. Before
     # the gallery work: the job is already `done`, so nothing would redo it.
@@ -476,7 +504,8 @@ async def _finish_stopped_inner(
         try:
             gallery_id = await importer.finalize_kept(target_dir, mode=mode)
         except Exception as exc:
-            # The job is claimed, so no hand-off would redo this: leave it to reconciliation.
+            # The job is claimed, so no hand-off would redo this: abort settles the gallery
+            # (and if abort fails too, _finish_stopped does).
             logger.error("[download] keep path failed for stopped job %s: %s", db_job_id, exc, exc_info=True)
             await importer.abort()
     else:

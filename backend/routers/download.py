@@ -34,6 +34,7 @@ from services.download_policy import get_credential_policy, normalize_download_o
 from services.download_presenter import serialize_download_job
 from services.download_stop import StopNotAllowed, request_stop
 from services.egress_persona import resolve_admission_key
+from services.gallery_lifecycle import settle_stale_downloading_galleries
 from worker.helpers import compute_job_key, enqueue_download_job
 
 logger = logging.getLogger(__name__)
@@ -82,56 +83,6 @@ class PreviewResponse(BaseModel):
     rating: float | None = None
     thumb_url: str | None = None
     category: str | None = None
-
-
-async def _normalize_finished_gallery_statuses(db: AsyncSession, gallery_ids: list[int]) -> None:
-    """Clear stale downloading states for galleries with no active download job."""
-    if not gallery_ids:
-        return
-
-    unique_gallery_ids = list(set(gallery_ids))
-    active_ids = set(
-        (
-            await db.execute(
-                select(DownloadJob.gallery_id).where(
-                    DownloadJob.gallery_id.in_(unique_gallery_ids),
-                    DownloadJob.status.in_(["queued", "running", "paused"]),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    stale_ids = [gid for gid in unique_gallery_ids if gid not in active_ids]
-    if not stale_ids:
-        return
-
-    from db.models import Image
-
-    image_counts = {
-        gid: count
-        for gid, count in (
-            await db.execute(
-                select(Image.gallery_id, func.count()).where(Image.gallery_id.in_(stale_ids)).group_by(Image.gallery_id)
-            )
-        ).all()
-    }
-
-    partial_ids = [gid for gid in stale_ids if image_counts.get(gid, 0) > 0]
-    empty_ids = [gid for gid in stale_ids if image_counts.get(gid, 0) == 0]
-
-    if partial_ids:
-        await db.execute(
-            update(Gallery)
-            .where(Gallery.id.in_(partial_ids), Gallery.download_status == "downloading")
-            .values(download_status="partial")
-        )
-    if empty_ids:
-        await db.execute(
-            update(Gallery)
-            .where(Gallery.id.in_(empty_ids), Gallery.download_status == "downloading")
-            .values(download_status="proxy_only", pages=0)
-        )
 
 
 async def _credential_warning(source: str) -> str | None:
@@ -396,7 +347,7 @@ async def clear_finished_jobs(
         .scalars()
         .all()
     )
-    await _normalize_finished_gallery_statuses(db, gallery_ids)
+    await settle_stale_downloading_galleries(db, gallery_ids)
 
     stmt = delete(DownloadJob).where(*conditions)
     result = await db.execute(stmt)

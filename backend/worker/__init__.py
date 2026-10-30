@@ -351,6 +351,33 @@ async def _sweep_orphan_repair_archives() -> int:
     return handled
 
 
+async def _settle_orphan_downloading_galleries() -> int:
+    """Settle every live gallery left on ``downloading`` by a job that is no longer active.
+
+    The running-job recovery only reaches galleries of jobs that are still
+    ``running``. A worker killed after a stop claimed its job ``done`` (or after
+    any other terminal write, before finalize) leaves the gallery stuck.
+    Nothing executes during startup, so every such gallery is stale.
+    """
+    from sqlalchemy import select
+
+    from core.database import AsyncSessionLocal
+    from db.models import Gallery
+    from services.gallery_lifecycle import settle_stale_downloading_galleries
+
+    async with AsyncSessionLocal() as session:
+        gallery_ids = list(
+            (
+                await session.execute(
+                    select(Gallery.id).where(Gallery.download_status == "downloading", Gallery.deleted_at.is_(None))
+                )
+            ).scalars()
+        )
+        settled = await settle_stale_downloading_galleries(session, gallery_ids)
+        await session.commit()
+    return settled
+
+
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
     # Fail fast if the DB is not migrated to this image's schema head (e.g. a
@@ -624,6 +651,14 @@ async def startup(ctx: dict) -> None:
             logger.info("Cleared %d orphaned repair archive table(s)", swept)
     except Exception as exc:
         logger.error("Failed to sweep orphaned repair archive tables: %s", exc)
+
+    # A job that ended without finalizing its gallery leaves it on `downloading`.
+    try:
+        settled = await _settle_orphan_downloading_galleries()
+        if settled:
+            logger.info("Settled %d gallery(ies) stuck on downloading", settled)
+    except Exception as exc:
+        logger.error("Failed to settle galleries stuck on downloading: %s", exc)
 
     # HR-019: a SIGKILL (container OOM) kills local_import_job before its
     # terminal-status write, leaving the gallery on `importing` with no queue
