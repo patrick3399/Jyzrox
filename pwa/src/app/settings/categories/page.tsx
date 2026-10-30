@@ -11,6 +11,7 @@ import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { api } from '@/lib/api'
 import { CATEGORY_PALETTE } from '@/lib/categoryPalette'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { updateFilter } from '@/lib/queryParser'
 import type { GalleryCategoryDef } from '@/lib/types'
 
@@ -136,7 +137,7 @@ export default function CategoriesSettingsPage() {
   return (
     <div className="max-w-2xl space-y-6">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold text-vault-text">{t('settingsCategory.categories')}</h1>
+      <PageHeader title={t('settingsCategory.categories')} />
       <section className={card}>
         <h2 className="mb-3 text-sm font-medium text-vault-text">{t('categories.builtin')}</h2>
         <ul className="flex flex-wrap gap-2">

@@ -5,6 +5,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useAdminGuard } from '@/hooks/useAdminGuard'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 
@@ -30,7 +31,7 @@ export default function LoggingSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.logging')}</h1>
+      <PageHeader title={t('settingsCategory.logging')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5 space-y-4">

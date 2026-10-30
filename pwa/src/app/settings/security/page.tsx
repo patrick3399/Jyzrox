@@ -8,6 +8,7 @@ import { ToggleRow } from '@/components/settings/SettingsShared'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function SecuritySettingsPage() {
   useLocale()
@@ -41,7 +42,7 @@ export default function SecuritySettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.security')}</h1>
+      <PageHeader title={t('settingsCategory.security')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5 space-y-1 divide-y divide-vault-border">

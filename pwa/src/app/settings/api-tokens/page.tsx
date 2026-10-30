@@ -6,6 +6,7 @@ import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { inputClass, btnPrimary } from '@/components/settings/SettingsShared'
 import { formatDate, t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Copy } from 'lucide-react'
@@ -76,7 +77,7 @@ export default function ApiTokensSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.apiTokens')}</h1>
+      <PageHeader title={t('settingsCategory.apiTokens')} />
 
       <div className="space-y-6">
         {/* Create new token */}

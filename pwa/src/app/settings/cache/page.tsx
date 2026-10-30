@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { SaveStatus, type SaveStatusValue } from '@/components/settings/SettingsShared'
 import {
@@ -52,7 +53,7 @@ export default function CacheSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.cache')}</h1>
+      <PageHeader title={t('settingsCategory.cache')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5 pt-5">

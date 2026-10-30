@@ -10,6 +10,7 @@ import { BackButton } from '@/components/BackButton'
 import { ToggleRow } from '@/components/settings/SettingsShared'
 import { setFeatureAndSyncCache } from '@/lib/featureSettings'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import type { NovelHostKey } from '@/lib/api/novels'
 
@@ -141,9 +142,7 @@ export default function NovelRemoteSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">
-        {t('settingsCategory.novelRemote')}
-      </h1>
+      <PageHeader title={t('settingsCategory.novelRemote')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden mb-4">
         <div className="px-5">

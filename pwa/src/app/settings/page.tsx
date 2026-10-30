@@ -6,6 +6,7 @@ import { Key } from 'lucide-react'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { getSettingsGroups } from '@/lib/settingsRegistry'
 import { SettingsCard } from '@/components/settings/SettingsCard'
 
@@ -16,7 +17,7 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
+      <PageHeader title={t('settings.title')} />
 
       {/* Credentials quick link */}
       <Link

@@ -5,6 +5,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import {
   getTagTranslationPreference,
   setTagTranslationPreference,
@@ -110,7 +111,7 @@ export default function GeneralSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.general')}</h1>
+      <PageHeader title={t('settingsCategory.general')} />
 
       <div className="space-y-3">
         {/* Language */}

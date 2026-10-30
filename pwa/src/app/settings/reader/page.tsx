@@ -4,6 +4,7 @@ import { useReducer } from 'react'
 import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 
@@ -215,7 +216,7 @@ export default function ReaderSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.reader')}</h1>
+      <PageHeader title={t('settingsCategory.reader')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl px-5 pb-5 pt-5">
         <ReaderSettingsSection onForceRerender={forceRerender} />

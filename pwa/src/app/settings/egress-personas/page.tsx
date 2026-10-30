@@ -7,6 +7,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useAdminGuard } from '@/hooks/useAdminGuard'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import type { CredentialAccount, EgressPersona, PersonaTestResult } from '@/lib/types'
 
@@ -425,7 +426,7 @@ export default function EgressPersonasPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('personas.title')}</h1>
+      <PageHeader title={t('personas.title')} />
 
       <CreateForm onCreated={refresh} />
 

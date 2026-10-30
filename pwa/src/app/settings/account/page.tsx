@@ -6,6 +6,7 @@ import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { inputClass, btnPrimary, btnSecondary } from '@/components/settings/SettingsShared'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
@@ -160,7 +161,7 @@ export default function AccountSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.account')}</h1>
+      <PageHeader title={t('settingsCategory.account')} />
 
       <div className="space-y-6">
         {/* Avatar */}

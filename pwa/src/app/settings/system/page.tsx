@@ -8,6 +8,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { toast } from 'sonner'
 import { api, type ReconcileStatus } from '@/lib/api'
 import { t, formatBytes } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import type { SystemHealth, SystemInfo, CacheStats, StorageInfo } from '@/lib/types'
 
 const VERSION_LABELS: Record<string, string> = {
@@ -134,7 +135,7 @@ export default function SystemSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.system')}</h1>
+      <PageHeader title={t('settingsCategory.system')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5">

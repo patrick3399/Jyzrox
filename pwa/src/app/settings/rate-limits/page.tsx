@@ -9,6 +9,7 @@ import { SaveStatus, type SaveStatusValue } from '@/components/settings/Settings
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import type { RateLimitSettings, SiteRateConfig } from '@/lib/types'
 
 const SITE_LABELS: Record<string, string> = {
@@ -256,9 +257,7 @@ export default function RateLimitsSettingsPage() {
     return (
       <div className="max-w-2xl">
         <BackButton fallback="/settings" />
-        <h1 className="text-2xl font-bold mb-6 text-vault-text">
-          {t('settingsCategory.rateLimits')}
-        </h1>
+        <PageHeader title={t('settingsCategory.rateLimits')} />
         <div className="flex justify-center py-8">
           <LoadingSpinner />
         </div>
@@ -270,9 +269,7 @@ export default function RateLimitsSettingsPage() {
     return (
       <div className="max-w-2xl">
         <BackButton fallback="/settings" />
-        <h1 className="text-2xl font-bold mb-6 text-vault-text">
-          {t('settingsCategory.rateLimits')}
-        </h1>
+        <PageHeader title={t('settingsCategory.rateLimits')} />
         <p className="text-xs text-vault-text-muted">{t('common.failedToLoad')}</p>
       </div>
     )
@@ -287,9 +284,7 @@ export default function RateLimitsSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">
-        {t('settingsCategory.rateLimits')}
-      </h1>
+      <PageHeader title={t('settingsCategory.rateLimits')} />
 
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-4">

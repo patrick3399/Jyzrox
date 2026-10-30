@@ -5,6 +5,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { X, Plus, Tag } from 'lucide-react'
@@ -85,15 +86,17 @@ export default function BlockedTagsSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <div className="flex items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold text-vault-text">{t('settingsCategory.blockedTags')}</h1>
-        {blockedTags.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-sm text-vault-text-muted">
+      <PageHeader
+        title={t('settingsCategory.blockedTags')}
+        meta={
+          blockedTags.length > 0 ? (
+            <span className="inline-flex items-center gap-1 text-sm text-vault-text-muted">
             <Tag size={14} />
             {blockedTags.length}
           </span>
-        )}
-      </div>
+          ) : undefined
+        }
+      />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5">
