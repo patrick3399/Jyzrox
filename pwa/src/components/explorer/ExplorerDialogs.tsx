@@ -2,32 +2,42 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { Loader2, X } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { api } from '@/lib/api'
 import type { ExplorerGalleryItem } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
+import { Dialog } from '@/components/ui/dialog'
 
 import { galleryName, type QuerySelection } from './shared'
 
-export function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+export function Modal({
+  title,
+  children,
+  footer,
+  onClose,
+}: {
+  title: string
+  children: React.ReactNode
+  footer?: React.ReactNode
+  onClose: () => void
+}) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={title} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-t-xl border border-vault-border bg-vault-card shadow-2xl sm:rounded-xl" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="sticky top-0 flex items-center justify-between border-b border-vault-border bg-vault-card px-5 py-4">
-          <h2 className="font-semibold text-vault-text">{title}</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 text-vault-text-muted hover:bg-vault-card-hover"><X size={18} /></button>
-        </header>
-        {children}
-      </section>
-    </div>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      title={title}
+      size="lg"
+      padded={false}
+      footer={footer}
+    >
+      {children}
+    </Dialog>
   )
 }
 
@@ -97,7 +107,14 @@ export function MetadataDialog({
   }
 
   return (
-    <Modal title={t('explorer.editMetadata')} onClose={onClose}>
+    <Modal title={t('explorer.editMetadata')} onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button variant="primary" disabled={saving || categoryInvalid} onClick={submit}>{saving ? t('common.loading') : t('common.save')}</Button>
+        </>
+      }
+    >
       <div className="space-y-4 p-5">
         <p className="text-sm text-vault-text-muted">{t('explorer.manualFieldsLocked')}</p>
         {METADATA_FIELDS.map((field) => {
@@ -151,10 +168,6 @@ export function MetadataDialog({
           )
         })}
       </div>
-      <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
-        <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button type="button" disabled={saving || categoryInvalid} onClick={submit} className="rounded-md bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? t('common.loading') : t('common.save')}</button>
-      </footer>
     </Modal>
   )
 }
@@ -193,7 +206,14 @@ export function MergeDialog({ selection, onClose, onDone }: { selection: Explore
   }
 
   return (
-    <Modal title={t('explorer.mergeGalleries')} onClose={onClose}>
+    <Modal title={t('explorer.mergeGalleries')} onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button variant="danger" disabled={!preview || working} onClick={merge}>{working ? t('common.loading') : t('explorer.mergeGalleries')}</Button>
+        </>
+      }
+    >
       <div className="space-y-5 p-5">
         <label className="block text-sm text-vault-text">{t('explorer.mergeTarget')}
           <select value={targetId} onChange={(event) => setTargetId(Number(event.target.value))} className="mt-2 w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2">
@@ -226,10 +246,6 @@ export function MergeDialog({ selection, onClose, onDone }: { selection: Explore
           {t('explorer.merge404Warning')}
         </div>
       </div>
-      <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
-        <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button type="button" disabled={!preview || working} onClick={merge} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{working ? t('common.loading') : t('explorer.mergeGalleries')}</button>
-      </footer>
     </Modal>
   )
 }
@@ -272,7 +288,14 @@ export function OrganizeDialog({
   }
 
   return (
-    <Modal title={kind === 'tags' ? t('explorer.manageTags') : t('explorer.manageCollections')} onClose={onClose}>
+    <Modal title={kind === 'tags' ? t('explorer.manageTags') : t('explorer.manageCollections')} onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button variant="primary" disabled={saving} onClick={submit}>{saving ? t('common.loading') : t('common.save')}</Button>
+        </>
+      }
+    >
       <div className="space-y-4 p-5">
         <div className="flex rounded-md border border-vault-border p-1">
           <button type="button" onClick={() => setOperation('add')} className={`flex-1 rounded px-3 py-2 text-sm ${operation === 'add' ? 'bg-vault-accent text-white' : 'text-vault-text-muted'}`}>{t('explorer.add')}</button>
@@ -287,10 +310,6 @@ export function OrganizeDialog({
           </select>
         )}
       </div>
-      <footer className="flex justify-end gap-2 border-t border-vault-border px-5 py-4">
-        <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm text-vault-text-muted hover:bg-vault-card-hover">{t('common.cancel')}</button>
-        <button type="button" disabled={saving} onClick={submit} className="rounded-md bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? t('common.loading') : t('common.save')}</button>
-      </footer>
     </Modal>
   )
 }

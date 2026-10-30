@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Loader2, Search, ExternalLink, AlertCircle } from 'lucide-react'
+import { Loader2, Search, ExternalLink, AlertCircle } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { SauceNaoResult } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { Dialog } from '@/components/ui/dialog'
 
 export function SauceNaoModal({ imageId, onClose }: { imageId: number; onClose: () => void }) {
   const [results, setResults] = useState<SauceNaoResult[] | null>(null)
@@ -52,67 +53,48 @@ export function SauceNaoModal({ imageId, onClose }: { imageId: number; onClose: 
           : null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={onClose}
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      title={
+        <span className="flex items-center gap-2">
+          <Search size={14} className="text-vault-accent" />
+          {t('saucenao.title')}
+        </span>
+      }
+      size="xl"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="saucenao-dialog-title"
-        className="bg-vault-card border border-vault-border rounded-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-vault-border">
-          <div className="flex items-center gap-2">
-            <Search size={14} className="text-vault-accent" />
-            <h3 id="saucenao-dialog-title" className="text-sm font-semibold text-vault-text">
-              {t('saucenao.title')}
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-vault-text-muted hover:text-vault-text transition-colors"
-          >
-            <X size={16} />
-          </button>
+      {loading && (
+        <div className="flex flex-col items-center justify-center py-8 gap-2">
+          <Loader2 className="animate-spin text-vault-text-muted" size={24} />
+          <p className="text-sm text-vault-text-muted">{t('saucenao.searching')}</p>
         </div>
+      )}
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading && (
-            <div className="flex flex-col items-center justify-center py-8 gap-2">
-              <Loader2 className="animate-spin text-vault-text-muted" size={24} />
-              <p className="text-sm text-vault-text-muted">{t('saucenao.searching')}</p>
-            </div>
-          )}
-
-          {errorMessage && (
-            <div className="flex flex-col items-center py-8 gap-2">
-              <AlertCircle size={24} className="text-red-400" />
-              <p className="text-sm text-red-400 text-center">{errorMessage}</p>
-            </div>
-          )}
-
-          {results && results.length === 0 && (
-            <div className="flex flex-col items-center py-8 gap-2">
-              <Search size={24} className="text-vault-text-muted" />
-              <p className="text-sm text-vault-text-muted">{t('saucenao.noResults')}</p>
-            </div>
-          )}
-
-          {results && results.length > 0 && (
-            <div className="space-y-2">
-              {results.map((r, i) => (
-                <ResultItem key={i} result={r} />
-              ))}
-            </div>
-          )}
+      {errorMessage && (
+        <div className="flex flex-col items-center py-8 gap-2">
+          <AlertCircle size={24} className="text-red-400" />
+          <p className="text-sm text-red-400 text-center">{errorMessage}</p>
         </div>
-      </div>
-    </div>
+      )}
+
+      {results && results.length === 0 && (
+        <div className="flex flex-col items-center py-8 gap-2">
+          <Search size={24} className="text-vault-text-muted" />
+          <p className="text-sm text-vault-text-muted">{t('saucenao.noResults')}</p>
+        </div>
+      )}
+
+      {results && results.length > 0 && (
+        <div className="space-y-2">
+          {results.map((r, i) => (
+            <ResultItem key={i} result={r} />
+          ))}
+        </div>
+      )}
+    </Dialog>
   )
 }
 

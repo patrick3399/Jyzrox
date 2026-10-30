@@ -1,13 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
-import { Check, FolderHeart, Plus, X } from 'lucide-react'
+import { useCallback, useState, type ReactNode } from 'react'
+import { Check, FolderHeart, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useCollections, revalidateCollections } from '@/hooks/useCollections'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { Dialog } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 interface AddToCollectionMenuProps {
   /**
@@ -63,20 +64,6 @@ export function AddToCollectionMenu({
     },
     [onOpenChange],
   )
-
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      // This Escape dismisses the sheet and nothing else. Detail pages listen
-      // on window for the same key to go back; document listeners run first.
-      e.preventDefault()
-      e.stopPropagation()
-      setOpen(false)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [open, setOpen])
 
   const close = () => {
     setOpen(false)
@@ -170,103 +157,81 @@ export function AddToCollectionMenu({
     }
   }
 
-  const sheet = open && typeof document !== 'undefined' && (
-    <div
-      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50"
-      onClick={close}
+  const sheet = (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) close()
+      }}
+      title={t('collections.addToCollection')}
+      size="sm"
+      padded={false}
     >
-      <div
-        role="dialog"
-        aria-label={t('collections.addToCollection')}
-        className="w-full sm:w-96 sm:max-w-[90vw] max-h-[80vh] flex flex-col bg-vault-card border border-vault-border rounded-t-xl sm:rounded-lg pb-[var(--sab)] sm:pb-0"
-        onClick={(e) => e.stopPropagation()}
+      {isLoading ? (
+        <div className="flex justify-center py-6">
+          <LoadingSpinner size="md" />
+        </div>
+      ) : collections.length === 0 ? (
+        <p className="px-4 py-4 text-sm text-vault-text-muted">{t('collections.noCollections')}</p>
+      ) : (
+        <ul>
+          {collections.map((c) => {
+            const contains = singleMode && c.contains_gallery === true
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  onClick={() => handleRowClick(c.id, c.name, contains)}
+                  disabled={busyId !== null}
+                  aria-pressed={singleMode ? contains : undefined}
+                  className="w-full flex items-center gap-3 px-4 py-3 min-h-11 text-left text-sm text-vault-text hover:bg-vault-hover active:bg-vault-hover transition-colors disabled:opacity-60 border-b border-vault-border/50 last:border-b-0"
+                >
+                  <span className="w-4 shrink-0 flex justify-center">
+                    {busyId === c.id ? (
+                      <LoadingSpinner size="sm" />
+                    ) : contains ? (
+                      <Check
+                        size={16}
+                        className="text-vault-accent"
+                        aria-label={t('collections.inCollection')}
+                      />
+                    ) : null}
+                  </span>
+                  <span className="flex-1 min-w-0 truncate">{c.name}</span>
+                  <span className="text-xs text-vault-text-muted shrink-0">{c.gallery_count}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <form
+        className="flex items-center gap-2 border-t border-vault-border px-4 py-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void handleCreate()
+        }}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-vault-border">
-          <h3 className="text-base font-medium text-vault-text">
-            {t('collections.addToCollection')}
-          </h3>
-          <button
-            type="button"
-            onClick={close}
-            aria-label={t('common.close')}
-            className="p-2 -m-2 text-vault-text-muted hover:text-vault-text"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-          {isLoading ? (
-            <div className="flex justify-center py-6">
-              <LoadingSpinner size="md" />
-            </div>
-          ) : collections.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-vault-text-muted">
-              {t('collections.noCollections')}
-            </p>
-          ) : (
-            <ul>
-              {collections.map((c) => {
-                const contains = singleMode && c.contains_gallery === true
-                return (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleRowClick(c.id, c.name, contains)}
-                      disabled={busyId !== null}
-                      aria-pressed={singleMode ? contains : undefined}
-                      className="w-full flex items-center gap-3 px-4 py-3 min-h-11 text-left text-sm text-vault-text hover:bg-vault-hover active:bg-vault-hover transition-colors disabled:opacity-60 border-b border-vault-border/50 last:border-b-0"
-                    >
-                      <span className="w-4 shrink-0 flex justify-center">
-                        {busyId === c.id ? (
-                          <LoadingSpinner size="sm" />
-                        ) : contains ? (
-                          <Check
-                            size={16}
-                            className="text-vault-accent"
-                            aria-label={t('collections.inCollection')}
-                          />
-                        ) : null}
-                      </span>
-                      <span className="flex-1 min-w-0 truncate">{c.name}</span>
-                      <span className="text-xs text-vault-text-muted shrink-0">
-                        {c.gallery_count}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-
-        <form
-          className="flex items-center gap-2 px-4 py-3 border-t border-vault-border"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void handleCreate()
-          }}
+        <input
+          type="text"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder={t('collections.newCollection')}
+          aria-label={t('collections.newCollection')}
+          maxLength={200}
+          className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-3 py-2 text-base sm:text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover"
+        />
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={!newName.trim() || busyId !== null}
+          className="shrink-0"
         >
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder={t('collections.newCollection')}
-            aria-label={t('collections.newCollection')}
-            maxLength={200}
-            className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-3 py-2 text-base sm:text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover"
-          />
-          <button
-            type="submit"
-            disabled={!newName.trim() || busyId !== null}
-            className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {busyId === 'new' ? <LoadingSpinner size="sm" /> : <Plus size={14} />}
-            {t('collections.createAndAdd')}
-          </button>
-        </form>
-      </div>
-    </div>
+          {busyId === 'new' ? <LoadingSpinner size="sm" /> : <Plus size={14} />}
+          {t('collections.createAndAdd')}
+        </Button>
+      </form>
+    </Dialog>
   )
 
   return (
@@ -286,7 +251,7 @@ export function AddToCollectionMenu({
           </>
         )}
       </button>
-      {sheet ? createPortal(sheet, document.body) : null}
+      {sheet}
     </>
   )
 }
