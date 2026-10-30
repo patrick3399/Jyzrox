@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
+import { Popover } from '@/components/ui/popover'
 import { t } from '@/lib/i18n'
 import { tagNameSearchTerm } from '@/lib/queryParser'
 
@@ -15,38 +14,8 @@ interface TagSearchPopoverProps {
 
 export function TagSearchPopover({ tag, gallerySource, anchorEl, onClose }: TagSearchPopoverProps) {
   const router = useRouter()
-  const popoverRef = useRef<HTMLDivElement | undefined>(undefined)
-
   // Compute the bare name part (strip namespace if present)
   const name = tag.includes(':') ? tag.split(':').slice(1).join(':') : tag
-
-  const rect = anchorEl.getBoundingClientRect()
-  const top = rect.bottom + window.scrollY + 4
-  const left = rect.left + window.scrollX
-
-  useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        // This Escape dismisses the popover and nothing else. The detail page
-        // listens on window for the same key to go back; document listeners
-        // run first, so claim the event before it gets there.
-        e.preventDefault()
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [onClose])
 
   const handleSearchLocal = () => {
     onClose()
@@ -63,13 +32,14 @@ export function TagSearchPopover({ tag, gallerySource, anchorEl, onClose }: TagS
     router.push(`/pixiv?tab=search&q=${encodeURIComponent(name)}`)
   }
 
-  const content = (
-    <div
-      ref={(el) => {
-        popoverRef.current = el ?? undefined
+  return (
+    <Popover
+      open
+      anchor={anchorEl}
+      onOpenChange={(o) => {
+        if (!o) onClose()
       }}
-      style={{ position: 'absolute', top, left, zIndex: 9999 }}
-      className="min-w-[180px] bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden"
+      className="min-w-[180px] overflow-hidden"
     >
       <button
         onClick={handleSearchLocal}
@@ -93,9 +63,6 @@ export function TagSearchPopover({ tag, gallerySource, anchorEl, onClose }: TagS
           {t('tags.searchPixiv')}
         </button>
       )}
-    </div>
+    </Popover>
   )
-
-  if (typeof document === 'undefined') return null
-  return createPortal(content, document.body)
 }

@@ -353,13 +353,13 @@ describe('ExplorerWorkbench', () => {
     showGalleryImages()
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
-    expect(screen.queryByTestId('explorer-context-menu')).toBeNull()
+    expect(screen.queryByRole('menu')).toBeNull()
 
     fireEvent.contextMenu(imageTiles()[0])
 
-    const menu = screen.getByTestId('explorer-context-menu')
-    expect(within(menu).getByTestId('context-menu-hide')).toBeEnabled()
-    expect(within(menu).getByTestId('context-menu-purge')).toBeDisabled()
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('menuitem', { name: 'explorer.hideImages' })).toBeEnabled()
+    expect(within(menu).getByRole('menuitem', { name: 'explorer.purgeImages' })).toHaveAttribute('aria-disabled', 'true')
     // Right-click on an unselected tile selects it first.
     expect(imageTiles()[0].getAttribute('aria-pressed')).toBe('true')
   })
@@ -385,7 +385,7 @@ describe('ExplorerWorkbench', () => {
     render(<ExplorerPage />)
 
     fireEvent.contextMenu(imageTiles()[1])
-    fireEvent.click(screen.getByTestId('context-menu-hide'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'explorer.hideImages' }))
 
     await waitFor(() => expect(api.library.hideImagesBatch).toHaveBeenCalledWith('local', 'one', [12]))
   })
