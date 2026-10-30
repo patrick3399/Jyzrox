@@ -120,7 +120,8 @@ describe('Library batch tag dialog', () => {
   it('test_batch_tag_dialog_escape_closes_with_default_prevented_and_skips_window_listener', async () => {
     render(<LibraryPage />)
     fireEvent.click(screen.getByRole('button', { name: 'library.batchAddTags' }))
-    const input = screen.getByPlaceholderText('library.batchTagsPlaceholder')
+    // The dialog's code loads on first open.
+    const input = await screen.findByPlaceholderText('library.batchTagsPlaceholder')
     expect(input).toBeInTheDocument()
 
     window.addEventListener('keydown', windowListener)

@@ -17,7 +17,6 @@ import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { LibrarySearchBar } from '@/components/library/LibrarySearchBar'
 import { LibraryFilterChips } from '@/components/library/LibraryFilterChips'
-import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { t, formatNumber } from '@/lib/i18n'
@@ -37,8 +36,20 @@ import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
 import { useScrollReveal } from '@/hooks/useScrollReveal'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Dialog } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useOpenedOnce } from '@/hooks/useOpenedOnce'
+import dynamic from 'next/dynamic'
+
+// Batch-bar overlays only exist in select mode; keep Base UI Dialog out of the
+// page's initial JS.
+const Dialog = dynamic(() => import('@/components/ui/dialog').then((module) => module.Dialog), {
+  ssr: false,
+})
+const AddToCollectionMenu = dynamic(
+  () =>
+    import('@/components/library/AddToCollectionMenu').then((module) => module.AddToCollectionMenu),
+  { ssr: false },
+)
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -104,6 +115,7 @@ function LibraryContent() {
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
   const [batchTagInput, setBatchTagInput] = useState('')
   const batchTagInputRef = useRef<HTMLInputElement>(null)
+  const batchTagOpened = useOpenedOnce(batchTagMode !== null)
   const [batchTagList, setBatchTagList] = useState<string[]>([])
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   // Search block: sticky, slides away on scroll down and back on scroll up.
@@ -1090,74 +1102,76 @@ function LibraryContent() {
         </div>
       )}
 
-      <Dialog
-        open={batchTagMode !== null}
-        onOpenChange={(o) => {
-          if (!o) setBatchTagMode(null)
-        }}
-        size="sm"
-        initialFocus={batchTagInputRef}
-        title={batchTagMode === 'add' ? t('library.batchAddTags') : t('library.batchRemoveTags')}
-        footer={
-          <>
-            <Button onClick={() => setBatchTagMode(null)}>{t('common.cancel')}</Button>
-            <Button
-              variant="primary"
-              disabled={batchTagList.length === 0}
-              onClick={async () => {
-                try {
-                  const res = await api.library.batchGalleries({
-                    action: batchTagMode === 'add' ? 'add_tags' : 'remove_tags',
-                    gallery_ids: [...selectedIds],
-                    tags: batchTagList,
-                  })
-                  toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  setBatchTagMode(null)
-                  setBatchTagList([])
-                  await refresh()
-                } catch {
-                  toast.error(t('library.updateFailed'))
+      {batchTagOpened && (
+        <Dialog
+          open={batchTagMode !== null}
+          onOpenChange={(o) => {
+            if (!o) setBatchTagMode(null)
+          }}
+          size="sm"
+          initialFocus={batchTagInputRef}
+          title={batchTagMode === 'add' ? t('library.batchAddTags') : t('library.batchRemoveTags')}
+          footer={
+            <>
+              <Button onClick={() => setBatchTagMode(null)}>{t('common.cancel')}</Button>
+              <Button
+                variant="primary"
+                disabled={batchTagList.length === 0}
+                onClick={async () => {
+                  try {
+                    const res = await api.library.batchGalleries({
+                      action: batchTagMode === 'add' ? 'add_tags' : 'remove_tags',
+                      gallery_ids: [...selectedIds],
+                      tags: batchTagList,
+                    })
+                    toast.success(t('library.batchSuccess', { count: String(res.affected) }))
+                    setBatchTagMode(null)
+                    setBatchTagList([])
+                    await refresh()
+                  } catch {
+                    toast.error(t('library.updateFailed'))
+                  }
+                }}
+              >
+                {t('library.batchTagsConfirm')}
+              </Button>
+            </>
+          }
+        >
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={batchTagInput}
+              onChange={(e) => setBatchTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && batchTagInput.trim()) {
+                  setBatchTagList((prev) => [...prev, batchTagInput.trim()])
+                  setBatchTagInput('')
                 }
               }}
-            >
-              {t('library.batchTagsConfirm')}
-            </Button>
-          </>
-        }
-      >
-        <div className="flex gap-2 mb-3">
-          <input
-            type="text"
-            value={batchTagInput}
-            onChange={(e) => setBatchTagInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && batchTagInput.trim()) {
-                setBatchTagList((prev) => [...prev, batchTagInput.trim()])
-                setBatchTagInput('')
-              }
-            }}
-            placeholder={t('library.batchTagsPlaceholder')}
-            className="flex-1 bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-border-hover"
-            ref={batchTagInputRef}
-          />
-        </div>
-        <div className="flex flex-wrap gap-1 mb-3 min-h-[2rem]">
-          {batchTagList.map((tag, i) => (
-            <span
-              key={i}
-              className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs"
-            >
-              {tag}
-              <button
-                onClick={() => setBatchTagList((prev) => prev.filter((_, j) => j !== i))}
-                className="hover:text-red-400"
+              placeholder={t('library.batchTagsPlaceholder')}
+              className="flex-1 bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-border-hover"
+              ref={batchTagInputRef}
+            />
+          </div>
+          <div className="flex flex-wrap gap-1 mb-3 min-h-[2rem]">
+            {batchTagList.map((tag, i) => (
+              <span
+                key={i}
+                className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs"
               >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-      </Dialog>
+                {tag}
+                <button
+                  onClick={() => setBatchTagList((prev) => prev.filter((_, j) => j !== i))}
+                  className="hover:text-red-400"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        </Dialog>
+      )}
     </div>
   )
 }
