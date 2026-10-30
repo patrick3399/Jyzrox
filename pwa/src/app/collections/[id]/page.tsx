@@ -125,10 +125,10 @@ function CollectionDetailInner() {
                   </h1>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     onClick={handleStartEditName}
                     aria-label={t('collections.edit')}
-                    className="size-8 opacity-0 group-hover/title:opacity-100"
+                    className="opacity-0 group-hover/title:opacity-100"
                   >
                     <Pencil size={14} />
                   </Button>

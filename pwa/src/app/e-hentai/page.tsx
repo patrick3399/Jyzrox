@@ -1384,7 +1384,7 @@ function BrowsePage() {
         >
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-vault-text">{t('browse.searchByImage')}</h2>
-            <Button variant="ghost" size="icon" className="size-8"
+            <Button variant="ghost" size="icon-sm"
               type="button"
               onClick={() => setShowImageSearch(false)}
               aria-label={t('common.close')}

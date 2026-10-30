@@ -77,8 +77,7 @@ export function Pagination({
       <div className="flex items-center gap-1">
         <Button
           variant="secondary"
-          size="icon"
-          className="size-8"
+          size="icon-sm"
           onClick={() => handlePageClick(activePage - 1)}
           disabled={isLoading || activePage === 0}
           aria-label={t('common.previousPage')}
@@ -114,8 +113,7 @@ export function Pagination({
 
         <Button
           variant="secondary"
-          size="icon"
-          className="size-8"
+          size="icon-sm"
           onClick={() => handlePageClick(activePage + 1)}
           disabled={isLoading || activePage >= totalPages - 1}
           aria-label={t('common.nextPage')}

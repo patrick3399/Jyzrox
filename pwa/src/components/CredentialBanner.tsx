@@ -25,12 +25,12 @@ export function CredentialBanner({ source }: { source: string }) {
       </div>
       <Button
         variant="ghost"
-        size="icon"
+        size="icon-sm"
         onClick={() => {
           setDismissed(true)
           localStorage.setItem(`credential_banner_dismissed_${source}`, 'true')
         }}
-        className="size-8 text-amber-400 hover:text-amber-200 shrink-0"
+        className="text-amber-400 hover:text-amber-200 shrink-0"
         aria-label={t('credential.banner.dismiss')}
       >
         <XIcon className="w-4 h-4" />

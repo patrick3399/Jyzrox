@@ -266,9 +266,9 @@ function DatasetDetailInner() {
                 <h1 className="truncate text-2xl font-bold text-vault-text">{data?.name ?? '…'}</h1>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="icon-sm"
                   onClick={startEditing}
-                  className="size-8 opacity-100 can-hover:opacity-0 can-hover:group-hover/title:opacity-100"
+                  className="opacity-100 can-hover:opacity-0 can-hover:group-hover/title:opacity-100"
                   aria-label={t('datasets.edit')}
                 >
                   <Pencil size={15} />
@@ -404,9 +404,8 @@ function DatasetDetailInner() {
             </div>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => setShowFilters(false)}
-              className="size-8"
               aria-label={t('common.close')}
             >
               <X size={16} />

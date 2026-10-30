@@ -260,7 +260,7 @@ export function GalleryImagePane({
           <option value="page">{t('explorer.sortPage')}</option>
           <option value="size">{t('explorer.sortSize')}</option>
         </select>
-        <Button variant="secondary" size="icon" className="size-8" type="button" aria-label={t('explorer.sortDirection')} title={direction === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={toggleDirection}>
+        <Button variant="secondary" size="icon-sm" type="button" aria-label={t('explorer.sortDirection')} title={direction === 'asc' ? t('explorer.sortAscending') : t('explorer.sortDescending')} onClick={toggleDirection}>
           {direction === 'asc' ? <ArrowUpAZ size={16} /> : <ArrowDownAZ size={16} />}
         </Button>
         {summary && (
@@ -325,7 +325,7 @@ export function GalleryImagePane({
 
       {selectedImages.length > 0 && (
         <div data-testid="image-action-bar" className="fixed inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 flex max-w-[calc(100vw-1rem)] items-center gap-1 overflow-x-auto rounded-xl border border-vault-border bg-vault-card p-2 shadow-2xl lg:inset-x-auto lg:bottom-5 lg:left-1/2 lg:-translate-x-1/2">
-          <Button variant="ghost" size="icon" className="size-8" type="button" aria-label={t('explorer.clearSelection')} onClick={() => selection.clear()}><X size={18} /></Button>
+          <Button variant="ghost" size="icon-sm" type="button" aria-label={t('explorer.clearSelection')} onClick={() => selection.clear()}><X size={18} /></Button>
           <span className="mr-2 whitespace-nowrap text-sm font-medium text-vault-text">{t('explorer.selectedCount', { count: selectedImages.length })}</span>
           {canEdit && (
             <>

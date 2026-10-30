@@ -27,6 +27,12 @@ describe('Button', () => {
   it('icon size is a 40px square', () => {
     expect(buttonVariants({ size: 'icon' })).toContain('size-10')
   })
+
+  it('icon-sm size is a 32px square for dense rows', () => {
+    const cls = buttonVariants({ size: 'icon-sm' })
+    expect(cls).toContain('size-8')
+    expect(cls).not.toContain('size-10')
+  })
 })
 
 describe('Badge', () => {

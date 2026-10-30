@@ -58,8 +58,7 @@ export function HistoryPanel({ path, canEdit = false }: { path: string; canEdit?
           </span>
           <Button
             variant="secondary"
-            size="icon"
-            className="size-8"
+            size="icon-sm"
             aria-label={t('novels.compareClear')}
             onClick={() => setBase(null)}
           >
@@ -86,11 +85,11 @@ export function HistoryPanel({ path, canEdit = false }: { path: string; canEdit?
             <div className="flex shrink-0 items-center gap-1 pr-2">
               <Button
                 variant="secondary"
-                size="icon"
+                size="icon-sm"
                 aria-pressed={base === c.hash}
                 aria-label={t('novels.compareWith', { rev: c.hash.slice(0, 7) })}
                 title={t('novels.compareWith', { rev: c.hash.slice(0, 7) })}
-                className={`size-8 ${base === c.hash ? 'border-vault-accent text-vault-text' : ''}`}
+                className={`${base === c.hash ? 'border-vault-accent text-vault-text' : ''}`}
                 onClick={() => setBase(base === c.hash ? null : c.hash)}
               >
                 <GitCompare className="size-3" />
@@ -98,8 +97,7 @@ export function HistoryPanel({ path, canEdit = false }: { path: string; canEdit?
               {canEdit && (
                 <Button
                   variant="secondary"
-                  size="icon"
-                  className="size-8"
+                  size="icon-sm"
                   disabled={reverting}
                   aria-label={t('novels.revertTo', { rev: c.hash.slice(0, 7) })}
                   title={t('novels.revertTo', { rev: c.hash.slice(0, 7) })}

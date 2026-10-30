@@ -228,18 +228,17 @@ function IntervalRow({
       ))}
       <Button
         variant="ghost"
-        size="icon"
+        size="icon-sm"
         onClick={commit}
-        className="size-8 text-emerald-400"
+        className="text-emerald-400"
         aria-label={t('common.save')}
       >
         <Check size={12} />
       </Button>
       <Button
         variant="ghost"
-        size="icon"
+        size="icon-sm"
         onClick={() => setEditing(false)}
-        className="size-8"
         aria-label={t('common.cancel')}
       >
         <X size={12} />

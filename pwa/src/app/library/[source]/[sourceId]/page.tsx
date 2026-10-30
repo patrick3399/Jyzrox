@@ -1291,11 +1291,10 @@ function GalleryDetailPageInner() {
                 </Button>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="icon-sm"
                   type="button"
                   onClick={() => setVersionsOpen(false)}
                   aria-label={t('common.close')}
-                  className="size-8"
                 >
                   <X size={14} />
                 </Button>

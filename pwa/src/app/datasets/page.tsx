@@ -202,10 +202,10 @@ function DatasetsPageInner() {
               <div className="mt-3 flex justify-end border-t border-vault-border pt-3">
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="icon-sm"
                   onClick={() => handleDelete(dataset.id)}
                   aria-label={t('datasets.delete')}
-                  className="size-8 hover:bg-red-500/10 hover:text-red-400"
+                  className="hover:bg-red-500/10 hover:text-red-400"
                 >
                   <Trash2 size={15} />
                 </Button>

@@ -118,21 +118,20 @@ export default function TagHealthPanel() {
                 <div className="flex gap-1">
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     onClick={() => handleDeleteOrphan(tag)}
                     aria-label={t('tags.health.delete')}
                     title={t('tags.health.delete')}
-                    className="size-8 text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                    className="text-red-400 hover:bg-red-500/10 hover:text-red-400"
                   >
                     <Trash2 size={14} />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     onClick={() => handleIgnore(`orphan:${tag.id}`)}
                     aria-label={t('tags.health.ignore')}
                     title={t('tags.health.ignore')}
-                    className="size-8"
                   >
                     <EyeOff size={14} />
                   </Button>
@@ -219,11 +218,11 @@ export default function TagHealthPanel() {
                         {next && (
                           <Button
                             variant="ghost"
-                            size="icon"
+                            size="icon-sm"
                             onClick={() => handleBreakImplication(node.id, next.id)}
                             aria-label={t('tags.health.breakLink')}
                             title={t('tags.health.breakLink')}
-                            className="size-8 text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                            className="text-red-400 hover:bg-red-500/10 hover:text-red-400"
                           >
                             <Link2Off size={12} />
                           </Button>
@@ -269,11 +268,10 @@ export default function TagHealthPanel() {
                   <span className="font-mono">{key}</span>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     onClick={() => handleUnignore(key)}
                     aria-label={t('tags.health.unignore')}
                     title={t('tags.health.unignore')}
-                    className="size-8"
                   >
                     <RotateCcw size={14} />
                   </Button>

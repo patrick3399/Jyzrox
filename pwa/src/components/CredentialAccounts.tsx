@@ -145,11 +145,11 @@ export function CredentialAccounts({
                   </button>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     onClick={() => handleDelete(entry.account)}
                     disabled={busy}
                     aria-label={t('credentials.deleteAccount', { account: entry.account })}
-                    className="size-8 text-red-400/70 hover:text-red-400"
+                    className="text-red-400/70 hover:text-red-400"
                   >
                     <Trash2 size={13} />
                   </Button>

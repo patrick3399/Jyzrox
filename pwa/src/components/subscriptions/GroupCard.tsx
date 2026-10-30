@@ -143,18 +143,18 @@ export function GroupCard({
           <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => onRun(group)}
-              className="size-8 hover:text-emerald-400"
+              className="hover:text-emerald-400"
               title={t('subscriptions.groupRunNow')}
             >
               <Play size={13} />
             </Button>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => onPauseResume(group)}
-              className="size-8 hover:text-yellow-400"
+              className="hover:text-yellow-400"
               title={
                 group.status === 'paused'
                   ? t('subscriptions.groupResume')
@@ -165,9 +165,9 @@ export function GroupCard({
             </Button>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => onEdit(group)}
-              className="size-8 hover:text-vault-accent"
+              className="hover:text-vault-accent"
               title={t('subscriptions.groupEdit')}
             >
               <Settings2 size={13} />
@@ -175,9 +175,9 @@ export function GroupCard({
             {!group.is_system && (
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 onClick={() => onDelete(group)}
-                className="size-8 hover:text-red-400"
+                className="hover:text-red-400"
                 title={t('subscriptions.groupDelete')}
               >
                 <Trash2 size={13} />

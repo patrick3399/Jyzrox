@@ -118,7 +118,7 @@ function FolderPicker({
       title={
         <span className="flex items-center gap-2">
           {!showMounts && (
-            <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={goUp}>
+            <Button variant="ghost" size="icon-sm" className="shrink-0" onClick={goUp}>
               <ArrowLeft size={16} />
             </Button>
           )}
@@ -330,8 +330,8 @@ function ZoneA() {
                 {lib.id !== null && (
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-8 shrink-0 hover:text-vault-accent"
+                    size="icon-sm"
+                    className="shrink-0 hover:text-vault-accent"
                     onClick={() => handleRescanPath(lib.id!)}
                     disabled={rescanningId === lib.id}
                     title={t('import.zoneA.rescan')}
@@ -346,8 +346,8 @@ function ZoneA() {
                 {lib.id !== null && (
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-8 shrink-0 text-red-400/60 hover:text-red-400"
+                    size="icon-sm"
+                    className="shrink-0 text-red-400/60 hover:text-red-400"
                     onClick={async () => {
                       await removeLib(lib.id!)
                       mutateLibraries()

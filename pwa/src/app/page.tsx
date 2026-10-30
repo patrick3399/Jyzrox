@@ -103,9 +103,9 @@ function SystemAlerts({
             <span className="leading-snug">{msg}</span>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => dismiss(msg)}
-              className={`size-8 shrink-0 ${styles.btn}`}
+              className={`shrink-0 ${styles.btn}`}
               aria-label={t('common.dismissAlert')}
             >
               <X size={14} />
@@ -249,9 +249,8 @@ function DashboardInner() {
           </h2>
           <Button
             variant="ghost"
-            size="icon"
+            size="icon-sm"
             onClick={toggleCompactLinks}
-            className="size-8"
             aria-label={
               compactLinks
                 ? t('dashboard.quickLinks.expandedView')

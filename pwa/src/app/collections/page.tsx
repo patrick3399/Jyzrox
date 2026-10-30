@@ -89,19 +89,18 @@ function CollectionCard({
             />
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={onEditSave}
               aria-label={t('common.save')}
-              className="size-8 text-green-400 hover:bg-green-400/10 hover:text-green-400"
+              className="text-green-400 hover:bg-green-400/10 hover:text-green-400"
             >
               <Check size={15} />
             </Button>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={onEditCancel}
               aria-label={t('common.cancel')}
-              className="size-8"
             >
               <X size={15} />
             </Button>
@@ -119,25 +118,25 @@ function CollectionCard({
             </button>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={(e) => {
                 e.stopPropagation()
                 onEdit(collection)
               }}
               aria-label={t('collections.edit')}
-              className="size-8 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100"
+              className="opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100"
             >
               <Pencil size={15} />
             </Button>
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(collection.id)
               }}
               aria-label={t('collections.delete')}
-              className="size-8 hover:text-red-400 hover:bg-red-400/10 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100"
+              className="hover:text-red-400 hover:bg-red-400/10 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100"
             >
               <Trash2 size={15} />
             </Button>

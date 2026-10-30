@@ -127,8 +127,8 @@ export default function NovelWorkPage() {
                 {canEdit && (
                   <Button
                     variant="secondary"
-                    size="icon"
-                    className="size-8 shrink-0"
+                    size="icon-sm"
+                    className="shrink-0"
                     aria-label={t('novels.editSummary')}
                     title={t('novels.editSummary')}
                     onClick={() => setEditingSummary(editingSummary === c.path ? null : c.path)}

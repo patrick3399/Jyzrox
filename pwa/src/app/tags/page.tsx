@@ -363,9 +363,9 @@ function TagsPageInner() {
                           </span>
                           <Button
                             variant="ghost"
-                            size="icon"
+                            size="icon-sm"
                             onClick={() => handleDeleteAlias(a.alias_namespace, a.alias_name)}
-                            className="size-8 text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                            className="text-red-400 hover:bg-red-500/10 hover:text-red-400"
                           >
                             <Trash2 size={14} />
                           </Button>
@@ -414,11 +414,11 @@ function TagsPageInner() {
                           </span>
                           <Button
                             variant="ghost"
-                            size="icon"
+                            size="icon-sm"
                             onClick={() =>
                               handleDeleteImplication(imp.antecedent_id, imp.consequent_id)
                             }
-                            className="size-8 text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                            className="text-red-400 hover:bg-red-500/10 hover:text-red-400"
                           >
                             <Trash2 size={14} />
                           </Button>

@@ -32,8 +32,7 @@ export function ReaderSettings({
         <span className="text-xs text-vault-text-muted">{t('novels.fontSize')}</span>
         <Button
           variant="secondary"
-          size="icon"
-          className="size-8"
+          size="icon-sm"
           aria-label={`${t('novels.fontSize')} -`}
           onClick={() => onChange({ ...prefs, fontSize: Math.max(12, prefs.fontSize - 1) })}
         >
@@ -44,8 +43,7 @@ export function ReaderSettings({
         </span>
         <Button
           variant="secondary"
-          size="icon"
-          className="size-8"
+          size="icon-sm"
           aria-label={`${t('novels.fontSize')} +`}
           onClick={() => onChange({ ...prefs, fontSize: Math.min(32, prefs.fontSize + 1) })}
         >

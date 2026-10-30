@@ -181,8 +181,8 @@ export default function ApiTokensSettingsPage() {
                             {tk.token && (
                               <Button
                                 variant="ghost"
-                                size="icon"
-                                className="size-8 shrink-0"
+                                size="icon-sm"
+                                className="shrink-0"
                                 onClick={() => {
                                   navigator.clipboard.writeText(tk.token!)
                                   toast.success(t('settings.copied'))
@@ -254,8 +254,8 @@ export default function ApiTokensSettingsPage() {
             </code>
             <Button
               variant="ghost"
-              size="icon"
-              className="size-8 shrink-0 hover:text-vault-accent"
+              size="icon-sm"
+              className="shrink-0 hover:text-vault-accent"
               onClick={() => {
                 navigator.clipboard.writeText(
                   `${window.location.origin}/api/rss/recent?token=YOUR_TOKEN`,

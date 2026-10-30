@@ -16,6 +16,7 @@ export const buttonVariants = cva(
         sm: 'h-8 px-3',
         md: 'h-10 px-4',
         icon: 'size-10 p-0',
+        'icon-sm': 'size-8 p-0',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },
