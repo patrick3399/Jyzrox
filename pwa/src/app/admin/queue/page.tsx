@@ -10,6 +10,8 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import type { SaqJob, SaqWorker } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -63,9 +65,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function WorkersSection({ workers }: { workers: SaqWorker[] }) {
   if (workers.length === 0) {
-    return (
-      <p className="text-sm text-vault-text-secondary px-1">{t('admin.queue.noWorkers')}</p>
-    )
+    return <p className="text-sm text-vault-text-secondary px-1">{t('admin.queue.noWorkers')}</p>
   }
   return (
     <div className="overflow-x-auto">
@@ -82,9 +82,7 @@ function WorkersSection({ workers }: { workers: SaqWorker[] }) {
         <tbody className="divide-y divide-vault-border">
           {workers.map((w) => (
             <tr key={w.id} className="hover:bg-vault-card-hover transition-colors">
-              <td className="px-3 py-2 font-mono text-vault-text truncate max-w-[12rem]">
-                {w.id}
-              </td>
+              <td className="px-3 py-2 font-mono text-vault-text truncate max-w-[12rem]">{w.id}</td>
               <td className="px-3 py-2 text-right text-green-400">{w.stats.complete}</td>
               <td className="px-3 py-2 text-right text-red-400">{w.stats.failed}</td>
               <td className="px-3 py-2 text-right text-yellow-400">{w.stats.retried}</td>
@@ -144,20 +142,21 @@ function JobRow({
 
       {/* Expanded detail */}
       {expanded && (
-        <div
-          className="px-4 pb-4 space-y-3"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="px-4 pb-4 space-y-3" onClick={(e) => e.stopPropagation()}>
           {/* Timestamps */}
           <div className="flex flex-wrap gap-4 text-xs text-vault-text-secondary">
             <span>
               {t('admin.queue.queued')}: {timeAgo(job.queued)}
             </span>
             {job.started && (
-              <span>{t('admin.queue.startedAt')}: {timeAgo(job.started)}</span>
+              <span>
+                {t('admin.queue.startedAt')}: {timeAgo(job.started)}
+              </span>
             )}
             {job.completed && (
-              <span>{t('admin.queue.completedAt')}: {timeAgo(job.completed)}</span>
+              <span>
+                {t('admin.queue.completedAt')}: {timeAgo(job.completed)}
+              </span>
             )}
             <span>
               {t('admin.queue.attempts')}: {job.attempts}
@@ -255,11 +254,9 @@ export default function AdminQueuePage() {
     }
   }, [profileLoading, profile, isAdmin, router])
 
-  const { data: overview } = useSWR(
-    'admin/queue/overview',
-    () => api.adminQueue.overview(),
-    { refreshInterval: 3000 },
-  )
+  const { data: overview } = useSWR('admin/queue/overview', () => api.adminQueue.overview(), {
+    refreshInterval: 3000,
+  })
 
   const {
     data: jobsData,
@@ -279,9 +276,11 @@ export default function AdminQueuePage() {
 
   if (profileLoading || !profile || !isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
-      </div>
+      <PageContainer variant="secondary">
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
+        </div>
+      </PageContainer>
     )
   }
 
@@ -315,117 +314,119 @@ export default function AdminQueuePage() {
   const functionNames = Array.from(new Set(jobs.map((j) => j.function))).sort()
 
   return (
-    <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <ListTodo size={24} className="text-vault-accent shrink-0" />
-        <h1 className="text-2xl font-bold text-vault-text">{t('admin.queue.title')}</h1>
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-vault-card border border-vault-border rounded-xl px-4 py-3">
-          <p className="text-xs text-vault-text-secondary mb-1">{t('admin.queue.active')}</p>
-          <p className="text-2xl font-bold text-blue-400">{overview?.active ?? '—'}</p>
-        </div>
-        <div className="bg-vault-card border border-vault-border rounded-xl px-4 py-3">
-          <p className="text-xs text-vault-text-secondary mb-1">{t('admin.queue.queued')}</p>
-          <p className="text-2xl font-bold text-yellow-400">{overview?.queued ?? '—'}</p>
-        </div>
-        <div className="bg-vault-card border border-vault-border rounded-xl px-4 py-3">
-          <p className="text-xs text-vault-text-secondary mb-1">{t('admin.queue.scheduled')}</p>
-          <p className="text-2xl font-bold text-vault-text-secondary">{overview?.scheduled ?? '—'}</p>
-        </div>
-      </div>
-
-      {/* Workers section */}
-      <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-vault-border">
-          <Activity size={14} className="text-vault-text-muted" />
-          <h2 className="text-sm font-semibold text-vault-text">{t('admin.queue.workers')}</h2>
-          <span className="ml-auto text-xs text-vault-text-secondary">{workers.length}</span>
-        </div>
-        <div className="p-4">
-          <WorkersSection workers={workers} />
-        </div>
-      </div>
-
-      {/* Jobs section */}
-      <div className="space-y-3">
-        {/* Filter bar */}
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold text-vault-text mr-1">{t('admin.queue.jobs')}</h2>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-2 py-1.5 text-xs bg-vault-input border border-vault-border rounded text-vault-text"
-            aria-label={t('admin.queue.status')}
-          >
-            <option value="">{t('admin.queue.allStatuses')}</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <select
-            value={fnFilter}
-            onChange={(e) => setFnFilter(e.target.value)}
-            className="px-2 py-1.5 text-xs bg-vault-input border border-vault-border rounded text-vault-text"
-            aria-label={t('admin.queue.function')}
-          >
-            <option value="">{t('admin.queue.allFunctions')}</option>
-            {functionNames.map((fn) => (
-              <option key={fn} value={fn}>
-                {fn}
-              </option>
-            ))}
-          </select>
-          <span className="ml-auto text-xs text-vault-text-secondary">{total}</span>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('admin.queue.title')}
+        icon={<ListTodo size={24} className="text-vault-accent shrink-0" />}
+      />
+      <main className="space-y-6">
+        {/* Stats row */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-vault-card border border-vault-border rounded-xl px-4 py-3">
+            <p className="text-xs text-vault-text-secondary mb-1">{t('admin.queue.active')}</p>
+            <p className="text-2xl font-bold text-blue-400">{overview?.active ?? '—'}</p>
+          </div>
+          <div className="bg-vault-card border border-vault-border rounded-xl px-4 py-3">
+            <p className="text-xs text-vault-text-secondary mb-1">{t('admin.queue.queued')}</p>
+            <p className="text-2xl font-bold text-yellow-400">{overview?.queued ?? '—'}</p>
+          </div>
+          <div className="bg-vault-card border border-vault-border rounded-xl px-4 py-3">
+            <p className="text-xs text-vault-text-secondary mb-1">{t('admin.queue.scheduled')}</p>
+            <p className="text-2xl font-bold text-vault-text-secondary">
+              {overview?.scheduled ?? '—'}
+            </p>
+          </div>
         </div>
 
-        {/* Job list */}
+        {/* Workers section */}
         <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-          {jobsLoading ? (
-            <div className="px-4 py-10 text-center text-vault-text-secondary text-sm">
-              {t('common.loading')}
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-vault-border">
+            <Activity size={14} className="text-vault-text-muted" />
+            <h2 className="text-sm font-semibold text-vault-text">{t('admin.queue.workers')}</h2>
+            <span className="ml-auto text-xs text-vault-text-secondary">{workers.length}</span>
+          </div>
+          <div className="p-4">
+            <WorkersSection workers={workers} />
+          </div>
+        </div>
+
+        {/* Jobs section */}
+        <div className="space-y-3">
+          {/* Filter bar */}
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold text-vault-text mr-1">{t('admin.queue.jobs')}</h2>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-2 py-1.5 text-xs bg-vault-input border border-vault-border rounded text-vault-text"
+              aria-label={t('admin.queue.status')}
+            >
+              <option value="">{t('admin.queue.allStatuses')}</option>
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <select
+              value={fnFilter}
+              onChange={(e) => setFnFilter(e.target.value)}
+              className="px-2 py-1.5 text-xs bg-vault-input border border-vault-border rounded text-vault-text"
+              aria-label={t('admin.queue.function')}
+            >
+              <option value="">{t('admin.queue.allFunctions')}</option>
+              {functionNames.map((fn) => (
+                <option key={fn} value={fn}>
+                  {fn}
+                </option>
+              ))}
+            </select>
+            <span className="ml-auto text-xs text-vault-text-secondary">{total}</span>
+          </div>
+
+          {/* Job list */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            {jobsLoading ? (
+              <div className="px-4 py-10 text-center text-vault-text-secondary text-sm">
+                {t('common.loading')}
+              </div>
+            ) : jobs.length === 0 ? (
+              <div className="px-4 py-10 text-center text-vault-text-secondary text-sm">
+                {t('admin.queue.noJobs')}
+              </div>
+            ) : (
+              jobs.map((job) => (
+                <JobRow key={job.key} job={job} onRetry={handleRetry} onAbort={handleAbort} />
+              ))
+            )}
+          </div>
+
+          {/* Pagination */}
+          {(hasPrev || hasNext) && (
+            <div className="flex justify-between items-center">
+              <button
+                onClick={() => setOffset((prev) => Math.max(0, prev - LIMIT))}
+                disabled={!hasPrev}
+                className="px-4 py-2 text-sm bg-vault-input border border-vault-border rounded text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label={t('common.previousPage')}
+              >
+                {t('common.previousPage')}
+              </button>
+              <span className="text-xs text-vault-text-secondary">
+                {offset + 1}–{Math.min(offset + LIMIT, total)} / {total}
+              </span>
+              <button
+                onClick={() => setOffset((prev) => prev + LIMIT)}
+                disabled={!hasNext}
+                className="px-4 py-2 text-sm bg-vault-input border border-vault-border rounded text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label={t('common.nextPage')}
+              >
+                {t('common.nextPage')}
+              </button>
             </div>
-          ) : jobs.length === 0 ? (
-            <div className="px-4 py-10 text-center text-vault-text-secondary text-sm">
-              {t('admin.queue.noJobs')}
-            </div>
-          ) : (
-            jobs.map((job) => (
-              <JobRow key={job.key} job={job} onRetry={handleRetry} onAbort={handleAbort} />
-            ))
           )}
         </div>
-
-        {/* Pagination */}
-        {(hasPrev || hasNext) && (
-          <div className="flex justify-between items-center">
-            <button
-              onClick={() => setOffset((prev) => Math.max(0, prev - LIMIT))}
-              disabled={!hasPrev}
-              className="px-4 py-2 text-sm bg-vault-input border border-vault-border rounded text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label={t('common.previousPage')}
-            >
-              {t('common.previousPage')}
-            </button>
-            <span className="text-xs text-vault-text-secondary">
-              {offset + 1}–{Math.min(offset + LIMIT, total)} / {total}
-            </span>
-            <button
-              onClick={() => setOffset((prev) => prev + LIMIT)}
-              disabled={!hasNext}
-              className="px-4 py-2 text-sm bg-vault-input border border-vault-border rounded text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label={t('common.nextPage')}
-            >
-              {t('common.nextPage')}
-            </button>
-          </div>
-        )}
-      </div>
-    </main>
+      </main>
+    </PageContainer>
   )
 }

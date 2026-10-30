@@ -20,6 +20,8 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
 import { CredentialAccounts, sanitizeAccountName } from '@/components/CredentialAccounts'
 import type { Credentials, EhAccount, PluginInfo, CredentialFlow, FieldDef } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // Sources that have their own credential section; the generic site list must not repeat them.
 const NON_GENERIC_SOURCES = new Set(['ehentai', 'pixiv', 'saucenao'])
@@ -662,7 +664,9 @@ function PluginCredentialSection({
 
   // A non-fields flow with no bespoke component has no UI to offer.
   if (!specialFlow && currentFlow && currentFlow.fields.length === 0) {
-    specialFlow = <p className="text-xs text-vault-text-muted">{t('credentials.flowUnavailable')}</p>
+    specialFlow = (
+      <p className="text-xs text-vault-text-muted">{t('credentials.flowUnavailable')}</p>
+    )
   }
 
   return (
@@ -1320,9 +1324,11 @@ export default function CredentialsPage() {
 
   if (profileLoading || !profile || !isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
-      </div>
+      <PageContainer variant="secondary">
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
+        </div>
+      </PageContainer>
     )
   }
 
@@ -1330,11 +1336,11 @@ export default function CredentialsPage() {
   const pluginSections = plugins.filter((p) => p.source_id !== 'gallery_dl')
 
   return (
-    <div className="max-w-2xl">
-      <div className="flex items-center gap-3 mb-6">
-        <Key size={22} className="text-vault-accent" />
-        <h1 className="text-2xl font-bold text-vault-text">{t('credentials.title')}</h1>
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('credentials.title')}
+        icon={<Key size={22} className="text-vault-accent" />}
+      />
 
       {pluginsLoading ? (
         <div className="text-sm text-vault-text-muted">{t('common.loading')}</div>
@@ -1372,6 +1378,6 @@ export default function CredentialsPage() {
           />
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

@@ -17,6 +17,7 @@ import { Reader } from '@/components/novels/Reader'
 import { Editor } from '@/components/novels/Editor'
 import { HistoryPanel } from '@/components/novels/HistoryPanel'
 import { FormatPanel } from '@/components/novels/FormatPanel'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 export default function NovelChapterPage() {
   useLocale()
@@ -46,7 +47,7 @@ export default function NovelChapterPage() {
   const chapterHref = (name: string, p: string) => novelChapterHref(work, name, p)
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-6">
+    <PageContainer variant="secondary">
       <div className="mb-4 flex items-center justify-between gap-2">
         <Link
           href={`/novels/${encodeURIComponent(work)}`}
@@ -142,6 +143,6 @@ export default function NovelChapterPage() {
           structural parent), not the browser's previous page — a chapter opened
           from search or an adjacent chapter still goes up to the chapter list. */}
       <BackButton fallback={`/novels/${encodeURIComponent(work)}`} toParent />
-    </div>
+    </PageContainer>
   )
 }

@@ -66,6 +66,8 @@ import {
   writeSubscriptionView,
   type SubscriptionView,
 } from '@/components/subscriptions/sourceGrouping'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 const GroupModal = dynamic(
   () => import('@/components/subscriptions/GroupModal').then((module) => module.GroupModal),
@@ -610,59 +612,58 @@ export default function SubscriptionsPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 overflow-x-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 mb-6 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Rss size={24} className="text-vault-accent shrink-0" />
-          <h1 className="text-xl font-bold text-vault-text">{t('subscriptions.title')}</h1>
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {(data?.subscriptions?.length ?? 0) > 0 && (
+    <PageContainer variant="secondary" className="overflow-x-hidden">
+      <PageHeader
+        title={t('subscriptions.title')}
+        icon={<Rss size={24} className="text-vault-accent shrink-0" />}
+        actions={
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(data?.subscriptions?.length ?? 0) > 0 && (
+              <button
+                onClick={handleDeleteAll}
+                disabled={isDeletingAll}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-red-400 hover:bg-red-900/30 hover:border-red-700/50 transition-colors disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                <span className="hidden sm:inline">
+                  {isDeletingAll ? t('subscriptions.deletingAll') : t('subscriptions.deleteAll')}
+                </span>
+              </button>
+            )}
             <button
-              onClick={handleDeleteAll}
-              disabled={isDeletingAll}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-red-400 hover:bg-red-900/30 hover:border-red-700/50 transition-colors disabled:opacity-50"
+              onClick={openNewGroup}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
             >
-              <Trash2 size={14} />
-              <span className="hidden sm:inline">
-                {isDeletingAll ? t('subscriptions.deletingAll') : t('subscriptions.deleteAll')}
-              </span>
+              <FolderOpen size={14} />
+              {t('subscriptions.groupNew')}
             </button>
-          )}
-          <button
-            onClick={openNewGroup}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
-          >
-            <FolderOpen size={14} />
-            {t('subscriptions.groupNew')}
-          </button>
-          <button
-            onClick={() => {
-              setShowBatch(!showBatch)
-              if (showAdd) setShowAdd(false)
-            }}
-            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              showBatch
-                ? 'bg-vault-input border border-vault-border text-vault-text'
-                : 'bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text'
-            }`}
-          >
-            {showBatch ? <X size={14} /> : <List size={14} />}
-            {showBatch ? t('common.cancel') : t('subscriptions.batchImport')}
-          </button>
-          <button
-            onClick={() => {
-              setShowAdd(!showAdd)
-              if (showBatch) setShowBatch(false)
-            }}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors"
-          >
-            {showAdd ? <X size={14} /> : <Plus size={14} />}
-            {showAdd ? t('common.cancel') : t('subscriptions.addNew')}
-          </button>
-        </div>
-      </div>
+            <button
+              onClick={() => {
+                setShowBatch(!showBatch)
+                if (showAdd) setShowAdd(false)
+              }}
+              className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                showBatch
+                  ? 'bg-vault-input border border-vault-border text-vault-text'
+                  : 'bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text'
+              }`}
+            >
+              {showBatch ? <X size={14} /> : <List size={14} />}
+              {showBatch ? t('common.cancel') : t('subscriptions.batchImport')}
+            </button>
+            <button
+              onClick={() => {
+                setShowAdd(!showAdd)
+                if (showBatch) setShowBatch(false)
+              }}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors"
+            >
+              {showAdd ? <X size={14} /> : <Plus size={14} />}
+              {showAdd ? t('common.cancel') : t('subscriptions.addNew')}
+            </button>
+          </div>
+        }
+      />
 
       {/* Add form */}
       {showAdd && (
@@ -1093,6 +1094,6 @@ export default function SubscriptionsPage() {
           onSave={handleGroupSave}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }

@@ -18,6 +18,8 @@ import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
 import { WorkCategorySection } from '@/components/novels/WorkCategorySection'
 import { ChapterSummaryEditor } from '@/components/novels/ChapterSummaryEditor'
 import { OutlineSection } from '@/components/novels/OutlineSection'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function NovelWorkPage() {
   useLocale()
@@ -44,7 +46,7 @@ export default function NovelWorkPage() {
   const hasAnyCategory = categories ? Object.values(categories).some((n) => n > 0) : false
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
+    <PageContainer variant="secondary">
       <Link
         href="/novels"
         className="mb-4 inline-flex items-center gap-1 text-sm text-vault-text-muted hover:text-vault-text"
@@ -52,34 +54,34 @@ export default function NovelWorkPage() {
         <ArrowLeft className="size-4" />
         {t('novels.works')}
       </Link>
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="flex items-center gap-2 text-2xl font-semibold text-vault-text">
-          <BookText className="size-6" />
-          {work}
-        </h1>
-        <div className="flex shrink-0 items-center gap-2">
-          {/* Linting reads every chapter, so it is opt-in rather than automatic. */}
-          <button
-            type="button"
-            aria-pressed={lintOn}
-            onClick={() => setLintOn((v) => !v)}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
-          >
-            <SpellCheck className="size-4" />
-            {t('novels.checkFormat')}
-          </button>
-          {canEdit && (
+      <PageHeader
+        title={work}
+        icon={<BookText className="size-6" />}
+        actions={
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Linting reads every chapter, so it is opt-in rather than automatic. */}
             <button
               type="button"
-              onClick={() => setShowCreate(true)}
+              aria-pressed={lintOn}
+              onClick={() => setLintOn((v) => !v)}
               className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
             >
-              <Plus className="size-4" />
-              {t('novels.newChapter')}
+              <SpellCheck className="size-4" />
+              {t('novels.checkFormat')}
             </button>
-          )}
-        </div>
-      </div>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+              >
+                <Plus className="size-4" />
+                {t('novels.newChapter')}
+              </button>
+            )}
+          </div>
+        }
+      />
 
       {isLoading ? (
         <LoadingSpinner />
@@ -168,6 +170,6 @@ export default function NovelWorkPage() {
       )}
 
       <BackButton fallback="/novels" toParent />
-    </div>
+    </PageContainer>
   )
 }

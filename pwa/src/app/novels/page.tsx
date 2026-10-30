@@ -15,6 +15,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { RepoStatusBar } from '@/components/novels/RepoStatusBar'
 import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function NovelsPage() {
   useLocale()
@@ -30,54 +32,54 @@ export default function NovelsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="flex items-center gap-2 text-2xl font-semibold text-vault-text">
-          <BookText className="size-6" />
-          {t('novels.title')}
-        </h1>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              aria-label={t('novels.newWork')}
-              title={t('novels.newWork')}
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('novels.title')}
+        icon={<BookText className="size-6" />}
+        actions={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                aria-label={t('novels.newWork')}
+                title={t('novels.newWork')}
+                className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+              >
+                <Plus className="size-4 shrink-0" />
+                <span className="hidden sm:inline">{t('novels.newWork')}</span>
+              </button>
+            )}
+            <Link
+              href="/novels/graph"
+              aria-label={t('novels.graph')}
+              title={t('novels.graph')}
               className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
             >
-              <Plus className="size-4 shrink-0" />
-              <span className="hidden sm:inline">{t('novels.newWork')}</span>
-            </button>
-          )}
-          <Link
-            href="/novels/graph"
-            aria-label={t('novels.graph')}
-            title={t('novels.graph')}
-            className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
-          >
-            <Share2 className="size-4 shrink-0" />
-            <span className="hidden sm:inline">{t('novels.graph')}</span>
-          </Link>
-          <Link
-            href="/novels/notes"
-            aria-label={t('novels.notes')}
-            title={t('novels.notes')}
-            className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
-          >
-            <NotebookText className="size-4 shrink-0" />
-            <span className="hidden sm:inline">{t('novels.notes')}</span>
-          </Link>
-          <Link
-            href="/novels/search"
-            aria-label={t('novels.search')}
-            title={t('novels.search')}
-            className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
-          >
-            <Search className="size-4 shrink-0" />
-            <span className="hidden sm:inline">{t('novels.search')}</span>
-          </Link>
-        </div>
-      </div>
+              <Share2 className="size-4 shrink-0" />
+              <span className="hidden sm:inline">{t('novels.graph')}</span>
+            </Link>
+            <Link
+              href="/novels/notes"
+              aria-label={t('novels.notes')}
+              title={t('novels.notes')}
+              className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+            >
+              <NotebookText className="size-4 shrink-0" />
+              <span className="hidden sm:inline">{t('novels.notes')}</span>
+            </Link>
+            <Link
+              href="/novels/search"
+              aria-label={t('novels.search')}
+              title={t('novels.search')}
+              className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+            >
+              <Search className="size-4 shrink-0" />
+              <span className="hidden sm:inline">{t('novels.search')}</span>
+            </Link>
+          </div>
+        }
+      />
 
       <RepoStatusBar />
 
@@ -114,6 +116,6 @@ export default function NovelsPage() {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }

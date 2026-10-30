@@ -35,6 +35,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { api } from '@/lib/api'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Folder Picker modal ───────────────────────────────────────────────
 
@@ -985,24 +987,27 @@ export default function ImportPage() {
   const [tab, setTab] = useState<'overview' | 'conflicts'>('overview')
 
   return (
-    <div className="max-w-3xl">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <FolderInput size={22} className="text-vault-accent shrink-0" />
-        <h1 className="text-2xl font-bold text-vault-text">{t('import.title')}</h1>
-        {monitorData && (
-          <span
-            className="ml-auto flex items-center gap-1 text-xs text-vault-text-muted"
-            title={monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')}
-          >
-            <CircleDot
-              size={12}
-              className={monitorData.running ? 'text-green-400' : 'text-vault-text-muted'}
-            />
-            {monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')}
-          </span>
-        )}
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('import.title')}
+        icon={<FolderInput size={22} className="text-vault-accent shrink-0" />}
+        actions={
+          monitorData && (
+            <span
+              className="flex items-center gap-1 text-xs text-vault-text-muted"
+              title={
+                monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')
+              }
+            >
+              <CircleDot
+                size={12}
+                className={monitorData.running ? 'text-green-400' : 'text-vault-text-muted'}
+              />
+              {monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')}
+            </span>
+          )
+        }
+      />
 
       <div className="mb-4 flex gap-2 border-b border-vault-border">
         <button
@@ -1028,6 +1033,6 @@ export default function ImportPage() {
       ) : (
         <ConflictPanel />
       )}
-    </div>
+    </PageContainer>
   )
 }

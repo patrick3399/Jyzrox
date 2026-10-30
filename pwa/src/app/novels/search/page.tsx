@@ -11,6 +11,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { BackButton } from '@/components/BackButton'
 import { CATEGORY_LABEL_KEYS, type WorkCategory } from '@/components/novels/WorkCategorySection'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 function hitHref(path: string): string {
   const parts = path.split('/')
@@ -33,7 +34,7 @@ export default function NovelSearchPage() {
   const hits = data?.hits ?? []
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
+    <PageContainer variant="secondary">
       <Link
         href="/novels"
         className="mb-4 inline-flex items-center gap-1 text-sm text-vault-text-muted hover:text-vault-text"
@@ -93,6 +94,6 @@ export default function NovelSearchPage() {
       )}
 
       <BackButton fallback="/novels" toParent />
-    </div>
+    </PageContainer>
   )
 }

@@ -22,6 +22,8 @@ import type {
   ProbeField,
   ProbeFieldMapping,
 } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -843,9 +845,11 @@ export default function AdminSitesPage() {
 
   if (profileLoading || !profile || !isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
-      </div>
+      <PageContainer variant="secondary">
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
+        </div>
+      </PageContainer>
     )
   }
 
@@ -870,18 +874,20 @@ export default function AdminSitesPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-vault-text text-xl font-semibold">{t('admin.sites.title')}</h1>
-        <button
-          onClick={() => setShowProbe(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:opacity-90 transition-opacity"
-        >
-          <Globe className="w-4 h-4" />
-          {t('admin.sites.probe')}
-        </button>
-      </div>
+    <PageContainer variant="secondary" className="space-y-6">
+      <PageHeader
+        spacing="none"
+        title={t('admin.sites.title')}
+        actions={
+          <button
+            onClick={() => setShowProbe(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            <Globe className="w-4 h-4" />
+            {t('admin.sites.probe')}
+          </button>
+        }
+      />
 
       {/* Probe detected source banner */}
       {probeResult?.detectedSource && (
@@ -979,6 +985,6 @@ export default function AdminSitesPage() {
       {showProbe && (
         <ProbeDialog onClose={() => setShowProbe(false)} onProbeSuccess={handleProbeSuccess} />
       )}
-    </div>
+    </PageContainer>
   )
 }

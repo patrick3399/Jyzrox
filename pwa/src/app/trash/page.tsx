@@ -11,6 +11,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 function daysRemaining(deletedAt: string, retentionDays: number = 30): number {
   const deleted = new Date(deletedAt)
@@ -91,24 +93,25 @@ export default function TrashPage() {
   const galleries = data?.galleries ?? []
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
-      <div className="flex items-center justify-between gap-2 mb-6">
-        <div className="flex items-center gap-3">
-          <Trash2 size={24} className="text-vault-text-muted" />
-          <h1 className="text-xl font-bold text-vault-text">{t('trash.title')}</h1>
-          {data && <span className="text-sm text-vault-text-muted">({data.total})</span>}
-        </div>
-        {trashEnabled && galleries.length > 0 && (
-          <button
-            onClick={handleEmptyTrash}
-            disabled={actionInProgress === 'empty'}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
-          >
-            <AlertTriangle size={14} />
-            {t('trash.emptyTrash')}
-          </button>
-        )}
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('trash.title')}
+        icon={<Trash2 size={24} className="text-vault-text-muted" />}
+        meta={data ? `(${data.total})` : undefined}
+        actions={
+          trashEnabled &&
+          galleries.length > 0 && (
+            <button
+              onClick={handleEmptyTrash}
+              disabled={actionInProgress === 'empty'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+            >
+              <AlertTriangle size={14} />
+              {t('trash.emptyTrash')}
+            </button>
+          )
+        }
+      />
 
       {isLoading && (
         <div className="flex justify-center py-12">
@@ -184,6 +187,6 @@ export default function TrashPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

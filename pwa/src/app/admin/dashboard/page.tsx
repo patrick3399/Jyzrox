@@ -23,6 +23,8 @@ import { useProfile } from '@/hooks/useProfile'
 import { useDashboard } from '@/hooks/useDashboard'
 import { api } from '@/lib/api'
 import type { DashboardSiteStats, DashboardTiming, DownloadJob } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -602,23 +604,29 @@ export default function DownloadDashboardPage() {
 
   if (isLoading || profileLoading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <Loader2 className="animate-spin text-vault-text-muted" size={24} />
-      </div>
+      <PageContainer variant="secondary">
+        <div className="flex items-center justify-center h-48">
+          <Loader2 className="animate-spin text-vault-text-muted" size={24} />
+        </div>
+      </PageContainer>
     )
   }
 
   if (!data) {
-    return <div className="p-6 text-vault-text-muted text-sm">{t('common.failedToLoad')}</div>
+    return (
+      <PageContainer variant="secondary">
+        <div className="text-vault-text-muted text-sm">{t('common.failedToLoad')}</div>
+      </PageContainer>
+    )
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Activity size={22} className="text-vault-accent shrink-0" />
-        <h1 className="text-xl font-semibold text-vault-text">{t('downloadDashboard.title')}</h1>
-      </div>
+    <PageContainer variant="secondary" className="space-y-6">
+      <PageHeader
+        spacing="none"
+        title={t('downloadDashboard.title')}
+        icon={<Activity size={22} className="text-vault-accent shrink-0" />}
+      />
 
       {/* Global status bar */}
       <GlobalBar
@@ -684,6 +692,6 @@ export default function DownloadDashboardPage() {
 
       {/* Recent events */}
       <RecentEvents />
-    </div>
+    </PageContainer>
   )
 }

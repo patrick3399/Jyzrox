@@ -10,6 +10,8 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import type { LogEntry } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 const LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const
 const LEVEL_COLORS: Record<string, string> = {
@@ -206,8 +208,8 @@ export default function LogsPage() {
   if (role && role !== 'admin') return null
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-xl font-bold text-vault-text">{t('logs.title')}</h1>
+    <PageContainer variant="secondary" className="space-y-4">
+      <PageHeader title={t('logs.title')} spacing="none" />
 
       {/* Filter toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -320,6 +322,6 @@ export default function LogsPage() {
       )}
 
       <RetentionSettings />
-    </div>
+    </PageContainer>
   )
 }

@@ -13,6 +13,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function ReadingListPage() {
   useLocale()
@@ -41,14 +43,12 @@ export default function ReadingListPage() {
   const galleries = data?.galleries ?? []
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
-      <div className="flex items-center gap-3 mb-6">
-        <BookMarked size={24} className="text-vault-text-muted" />
-        <h1 className="text-xl font-bold text-vault-text">{t('readingList.title')}</h1>
-        {data?.total !== undefined && (
-          <span className="text-sm text-vault-text-muted">({data.total})</span>
-        )}
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('readingList.title')}
+        icon={<BookMarked size={24} className="text-vault-text-muted" />}
+        meta={data?.total !== undefined ? `(${data.total})` : undefined}
+      />
 
       {isLoading && (
         <div className="flex justify-center py-12">
@@ -107,6 +107,6 @@ export default function ReadingListPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

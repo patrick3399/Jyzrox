@@ -7,6 +7,8 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import type { PluginInfo } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function PluginsPage() {
   useLocale()
@@ -22,11 +24,11 @@ export default function PluginsPage() {
   }, [])
 
   return (
-    <div className="max-w-3xl">
-      <div className="flex items-center gap-3 mb-6">
-        <Puzzle size={22} className="text-vault-accent" />
-        <h1 className="text-2xl font-bold">{t('plugins.title')}</h1>
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('plugins.title')}
+        icon={<Puzzle size={22} className="text-vault-accent" />}
+      />
 
       {loading ? (
         <p className="text-vault-text-muted">{t('common.loading')}</p>
@@ -84,7 +86,6 @@ export default function PluginsPage() {
                 )}
               </div>
 
-
               {/* Credential status */}
               {plugin.credential_schema.length > 0 && (
                 <div className="mt-3 flex items-center gap-2 text-xs">
@@ -105,6 +106,6 @@ export default function PluginsPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }
