@@ -429,8 +429,18 @@ _SQLITE_SCHEMA = [
         created_by_user_id INTEGER REFERENCES users(id),
         source_url TEXT,
         deleted_at TIMESTAMP,
-        metadata_updated_at TIMESTAMP
+        metadata_updated_at TIMESTAMP,
+        content_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+    """,
+    # SQLite equivalent of PG trg_galleries_content_updated_at. CURRENT_TIMESTAMP
+    # is 'YYYY-MM-DD HH:MM:SS', same shape the ORM writes (space separator), so it
+    # orders correctly against ORM-written datetimes.
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_galleries_content_updated_at
+    AFTER UPDATE OF pages ON galleries
+    WHEN NEW.pages IS NOT NULL AND NEW.pages > COALESCE(OLD.pages, 0)
+    BEGIN UPDATE galleries SET content_updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; END
     """,
     """
     CREATE TABLE IF NOT EXISTS blobs (

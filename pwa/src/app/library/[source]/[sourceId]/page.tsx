@@ -1216,6 +1216,14 @@ export default function GalleryDetailPage() {
                 ...(gallery.posted_at
                   ? [{ labelKey: 'library.metaPosted', value: formatDate(gallery.posted_at) }]
                   : []),
+                ...(gallery.content_updated_at
+                  ? [
+                      {
+                        labelKey: 'library.metaUpdated',
+                        value: formatDate(gallery.content_updated_at),
+                      },
+                    ]
+                  : []),
                 { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
               ].map(({ labelKey, value }) => (
                 <div key={labelKey} className="min-w-0 truncate">

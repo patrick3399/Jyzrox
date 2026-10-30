@@ -192,6 +192,7 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
 
     sort_columns = {
         "added_at": Gallery.added_at,
+        "content_updated_at": Gallery.content_updated_at,
         "posted_at": Gallery.posted_at,
         "title": Gallery.title,
         "rating": Gallery.rating,

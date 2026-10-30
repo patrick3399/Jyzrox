@@ -49,7 +49,7 @@ const DEFAULTS: ExplorerRefinements = {
   ioffset: 0,
 }
 
-const SORTS: readonly Sort[] = ['added_at', 'posted_at', 'title', 'rating', 'pages', 'size']
+const SORTS: readonly Sort[] = ['added_at', 'content_updated_at', 'posted_at', 'title', 'rating', 'pages', 'size']
 const DIRECTIONS: readonly Direction[] = ['asc', 'desc']
 const VISIBILITIES: readonly ExplorerImageVisibility[] = ['active', 'hidden', 'all']
 const MEDIAS: readonly ExplorerImageMedia[] = ['all', 'image', 'video', 'gif']

@@ -6,7 +6,7 @@ export interface ExplorerQuery {
   node_kind?: 'all' | 'source' | 'category' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash'
   node_id?: string | null
   query?: string
-  sort?: 'added_at' | 'posted_at' | 'title' | 'rating' | 'pages' | 'size'
+  sort?: 'added_at' | 'content_updated_at' | 'posted_at' | 'title' | 'rating' | 'pages' | 'size'
   direction?: 'asc' | 'desc'
   offset?: number
   limit?: number

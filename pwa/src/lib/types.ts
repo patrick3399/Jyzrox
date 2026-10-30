@@ -24,6 +24,7 @@ export interface Gallery {
   missing_pages?: number | null
   posted_at: string | null
   added_at: string
+  content_updated_at?: string | null
   rating: number // 0–5 (legacy global, kept for backward compat)
   favorited: boolean // legacy, always false now
   is_favorited: boolean // per-user favorite status
@@ -1070,7 +1071,7 @@ export interface GallerySearchParams {
   page?: number
   cursor?: string
   limit?: number
-  sort?: 'added_at' | 'rating' | 'pages'
+  sort?: 'added_at' | 'content_updated_at' | 'rating' | 'pages'
   collection?: number
   category?: string
 }

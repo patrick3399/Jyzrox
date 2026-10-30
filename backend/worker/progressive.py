@@ -354,6 +354,7 @@ class ProgressiveImporter:
                     "tags_array": gallery.tags_array,
                     "source_url": gallery.source_url,
                     "artist_id": gallery.artist_id,
+                    "content_updated_at": gallery.content_updated_at,
                 }
 
         await self._load_gallery_state()
@@ -402,6 +403,7 @@ class ProgressiveImporter:
                     Gallery.source_url,
                     Gallery.artist_id,
                     Gallery.pages,
+                    Gallery.content_updated_at,
                 ).where(Gallery.source == source, Gallery.source_id == source_id)
             )
         ).first()
@@ -417,6 +419,7 @@ class ProgressiveImporter:
                 "tags_array": existing.tags_array,
                 "source_url": existing.source_url,
                 "artist_id": existing.artist_id,
+                "content_updated_at": existing.content_updated_at,
             }
         if existing is not None and existing.deleted_at is not None:
             self.gallery_id = existing.id
@@ -1446,6 +1449,11 @@ class ProgressiveImporter:
                 gallery.source_url = snap["source_url"]
                 gallery.artist_id = snap["artist_id"]
                 gallery.download_status = snap["download_status"]
+                # The pages trigger already advanced content_updated_at while this
+                # run's pages were counted. Restore it explicitly; pages only goes
+                # down below, so the trigger will not override the restored value.
+                if snap.get("content_updated_at") is not None:
+                    gallery.content_updated_at = snap["content_updated_at"]
             count = (
                 await session.execute(
                     select(func.count()).where(Image.gallery_id == self.gallery_id, Image.visibility == "active")

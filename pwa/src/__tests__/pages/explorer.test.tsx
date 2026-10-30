@@ -486,6 +486,21 @@ describe('ExplorerWorkbench', () => {
     })
   })
 
+  it('keeps sort=content_updated_at from the URL and offers it in the Galleries sort select', async () => {
+    currentParams = 'kind=source&id=local&label=Local&sort=content_updated_at'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    const select = screen.getByLabelText('explorer.sortBy') as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => option.value)).toContain('content_updated_at')
+    expect(select.value).toBe('content_updated_at')
+    await waitFor(() => {
+      const last = swrCalls.findLast((entry) => entry.name === 'explorer-query')!
+      expect(JSON.parse((last.key as string[])[1])).toMatchObject({ sort: 'content_updated_at' })
+    })
+  })
+
   it('offers sorting Gallery images by size and requests sort size from the images endpoint', async () => {
     showGalleryImages()
     vi.mocked(api.explorer.galleryImages).mockResolvedValue(galleryImages() as never)

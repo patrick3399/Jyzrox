@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     tags_array      TEXT[] DEFAULT '{}',
     source_url      TEXT,
     metadata_updated_at TIMESTAMPTZ,
+    content_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (source, source_id)
 );
 
@@ -921,6 +922,37 @@ CREATE INDEX IF NOT EXISTS idx_galleries_public_added_at_id
 
 CREATE INDEX IF NOT EXISTS idx_galleries_owner_added_at_id
   ON galleries (created_by_user_id, added_at DESC, id DESC)
+  WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL;
+
+-- ── Gallery content_updated_at: last time active pages grew ─────────
+-- Bumped by trigger so every code path that raises galleries.pages is covered.
+-- Decreases and unchanged values never move it (cancel restores it explicitly).
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS content_updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+CREATE OR REPLACE FUNCTION bump_gallery_content_updated_at()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.pages IS NOT NULL AND NEW.pages > COALESCE(OLD.pages, 0) THEN
+        NEW.content_updated_at := now();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_galleries_content_updated_at ON galleries;
+CREATE TRIGGER trg_galleries_content_updated_at
+BEFORE UPDATE OF pages ON galleries
+FOR EACH ROW EXECUTE FUNCTION bump_gallery_content_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_galleries_live_content_updated_at_id
+  ON galleries (content_updated_at DESC, id DESC)
+  WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_galleries_public_content_updated_at_id
+  ON galleries (content_updated_at DESC, id DESC)
+  WHERE deleted_at IS NULL AND visibility = 'public';
+
+CREATE INDEX IF NOT EXISTS idx_galleries_owner_content_updated_at_id
+  ON galleries (created_by_user_id, content_updated_at DESC, id DESC)
   WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL;
 
 -- ── read_progress indexes (#144) ─────────────────────────────────────

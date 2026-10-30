@@ -129,6 +129,7 @@ def _encode_cursor(gallery: Gallery, sort: str) -> str:
     """
     sort_val = {
         "added_at": gallery.added_at.isoformat() if gallery.added_at else "",
+        "content_updated_at": gallery.content_updated_at.isoformat() if gallery.content_updated_at else "",
         "rating": gallery.rating,
         "pages": gallery.pages if gallery.pages is not None else 0,
     }[sort]
@@ -299,7 +300,7 @@ async def list_galleries(
     category: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    sort: Literal["added_at", "rating", "pages"] = Query(default="added_at"),
+    sort: Literal["added_at", "content_updated_at", "rating", "pages"] = Query(default="added_at"),
     cursor: str | None = Query(default=None),
     collection: int | None = Query(default=None),
     auth: dict = Depends(require_auth),
@@ -371,7 +372,12 @@ async def list_galleries(
     if blocked_tags:
         stmt = stmt.where(not_(Gallery.tags_array.overlap(blocked_tags)))
 
-    sort_col = {"added_at": Gallery.added_at, "rating": Gallery.rating, "pages": Gallery.pages}[sort]
+    sort_col = {
+        "added_at": Gallery.added_at,
+        "content_updated_at": Gallery.content_updated_at,
+        "rating": Gallery.rating,
+        "pages": Gallery.pages,
+    }[sort]
 
     if cursor is not None:
         # Keyset pagination — no COUNT(*), no OFFSET
@@ -395,6 +401,19 @@ async def list_galleries(
                 or_(
                     Gallery.added_at < parsed,
                     and_(Gallery.added_at == parsed, Gallery.id < cursor_id),
+                )
+            )
+        elif sort == "content_updated_at":
+            from datetime import datetime as _dt
+
+            try:
+                parsed = _dt.fromisoformat(cursor_val)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor value")
+            stmt = stmt.where(
+                or_(
+                    Gallery.content_updated_at < parsed,
+                    and_(Gallery.content_updated_at == parsed, Gallery.id < cursor_id),
                 )
             )
         elif sort == "rating":
@@ -790,7 +809,7 @@ async def list_artists(
     sort_col = {
         "gallery_count": desc(func.count()),
         "total_pages": desc(func.coalesce(func.sum(Gallery.pages), 0)),
-        "latest": desc(func.max(Gallery.added_at)),
+        "latest": desc(func.max(Gallery.content_updated_at)),
     }[sort]
     base = base.order_by(sort_col).offset(page * limit).limit(limit)
 
@@ -2813,6 +2832,7 @@ def _g(
         "missing_pages": (max(g.source_pages - (g.pages or 0), 0) if g.source_pages is not None else None),
         "posted_at": g.posted_at.isoformat() if g.posted_at else None,
         "added_at": g.added_at.isoformat() if g.added_at else None,
+        "content_updated_at": g.content_updated_at.isoformat() if g.content_updated_at else None,
         "rating": g.rating,
         "favorited": False,
         "is_favorited": is_favorited,

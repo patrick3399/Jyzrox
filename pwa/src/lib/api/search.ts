@@ -25,6 +25,7 @@ export type SearchGalleryItem = {
   download_status: string
   added_at: string | null
   posted_at: string | null
+  content_updated_at?: string | null
   tags: string[]
   cover_thumb?: string | null
 }

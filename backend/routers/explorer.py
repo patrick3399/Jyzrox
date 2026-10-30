@@ -138,7 +138,7 @@ class ExplorerQueryRequest(BaseModel):
     node_kind: Literal["all", "source", "collection", "artist", "category", "saved_search", "smart", "trash"] = "all"
     node_id: str | None = None
     query: str = Field(default="", max_length=1000)
-    sort: Literal["added_at", "posted_at", "title", "rating", "pages", "size"] = "added_at"
+    sort: Literal["added_at", "content_updated_at", "posted_at", "title", "rating", "pages", "size"] = "added_at"
     direction: Literal["asc", "desc"] = "desc"
     category: str | None = Field(default=None, max_length=200)
     facets: bool = False

@@ -43,6 +43,12 @@ describe('libraryFilterChips', () => {
     expect(result[0].label).toContain('SORT<rating>')
   })
 
+  it('test_content_updated_at_sort_token_produces_sort_chip_not_dropped_as_default', () => {
+    const result = chips('sort:content_updated_at')
+    expect(result.map((c) => c.key)).toEqual(['sort'])
+    expect(result[0].label).toContain('SORT<content_updated_at>')
+  })
+
   it('test_rating_chip_label_is_star_at_least_n', () => {
     expect(chips('rating:>=4')[0]).toMatchObject({ key: 'rating', label: '★≥4' })
   })

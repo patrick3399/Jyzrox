@@ -107,6 +107,7 @@ def _encode_cursor(row: Gallery, sort: str) -> str:
     """
     sort_val = {
         "added_at": row.added_at.isoformat() if row.added_at else "",
+        "content_updated_at": row.content_updated_at.isoformat() if row.content_updated_at else "",
         "rating": row.rating,
         "pages": row.pages if row.pages is not None else 0,
         "posted_at": row.posted_at.isoformat() if row.posted_at else "",
@@ -177,7 +178,8 @@ async def search_galleries(
       source:ehentai                    → source filter
       rating:>=4                        → minimum rating
       favorited:true                    → favorited only
-      sort:rating                       → override sort order
+      sort:rating                       → override sort order (added_at, content_updated_at, rating,
+                                          pages, posted_at, title)
       collection:5                      → galleries in collection #5
       artist_id:pixiv123                → galleries by artist_id
       category:doujinshi                → galleries in category
@@ -268,6 +270,7 @@ async def search_galleries(
     # Sort — DESC for numeric/date columns, ASC for title
     sort_map = {
         "added_at": desc(Gallery.added_at),
+        "content_updated_at": desc(Gallery.content_updated_at),
         "rating": desc(Gallery.rating),
         "pages": desc(Gallery.pages),
         "posted_at": desc(Gallery.posted_at),
@@ -305,6 +308,7 @@ async def search_galleries(
             "uploader": r.uploader,
             "download_status": r.download_status,
             "added_at": r.added_at.isoformat() if r.added_at else None,
+            "content_updated_at": r.content_updated_at.isoformat() if r.content_updated_at else None,
             "posted_at": r.posted_at.isoformat() if r.posted_at else None,
             "tags": r.tags_array or [],
             "tags_array": r.tags_array or [],
@@ -501,6 +505,19 @@ async def search_galleries(
                     or_(
                         Gallery.added_at < parsed,
                         and_(Gallery.added_at == parsed, Gallery.id < cursor_id),
+                    )
+                )
+            elif effective_sort == "content_updated_at":
+                from datetime import datetime as _dt
+
+                try:
+                    parsed = _dt.fromisoformat(cursor_val)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid cursor value")
+                base_stmt = base_stmt.where(
+                    or_(
+                        Gallery.content_updated_at < parsed,
+                        and_(Gallery.content_updated_at == parsed, Gallery.id < cursor_id),
                     )
                 )
             elif effective_sort == "posted_at":

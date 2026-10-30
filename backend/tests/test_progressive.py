@@ -411,6 +411,55 @@ class TestProgressiveImporterPreExistingCancel:
         assert lib_dir.exists(), "library dir of a pre-existing gallery must not be rmtree'd"
         assert not thumb_directory.exists(), "thumb dir of the now-unreferenced new blob must be removed"
 
+    async def test_cancel_redownload_restores_content_updated_at(self, db_session, db_session_factory, tmp_path):
+        """The pages trigger advances content_updated_at when a run grows the
+        gallery; cancelling must put the pre-run value back."""
+        gallery_id = await _insert_gallery(db_session, download_status="complete", pages=1)
+        original = "2024-01-02 03:04:05.000000"
+        await db_session.execute(
+            text("UPDATE galleries SET content_updated_at = :v WHERE id = :id"), {"v": original, "id": gallery_id}
+        )
+        sha_old = "aaaa11" + "0" * 58
+        sha_new = "bbbb11" + "0" * 58
+        await _insert_blob(db_session, sha_old, ref_count=1)
+        await _insert_blob(db_session, sha_new, ref_count=1)
+        await _insert_image(db_session, gallery_id, 1, sha_old, filename="001.jpg")
+        await db_session.commit()
+
+        importer = await self._attach_importer(db_session, db_session_factory, gallery_id)
+        assert importer.pre_existing is True
+
+        await _insert_image(db_session, gallery_id, 2, sha_new, filename="002.jpg")
+        # Run grows the gallery: pages increase -> trigger bumps content_updated_at.
+        await db_session.execute(text("UPDATE galleries SET pages = 2 WHERE id = :id"), {"id": gallery_id})
+        await db_session.commit()
+        bumped = (
+            await db_session.execute(
+                text("SELECT content_updated_at FROM galleries WHERE id = :id"), {"id": gallery_id}
+            )
+        ).scalar()
+        assert str(bumped) != original, "precondition: trigger must have advanced the timestamp"
+
+        lib_dir = tmp_path / "library" / "test_source" / "test_001"
+        lib_dir.mkdir(parents=True)
+        thumb_directory = tmp_path / "thumbs" / sha_new[:2] / sha_new[2:4] / sha_new
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.library_dir", return_value=lib_dir),
+            patch("worker.progressive.thumb_dir", return_value=thumb_directory),
+        ):
+            await importer.cleanup()
+
+        db_session.expire_all()
+        row = (
+            await db_session.execute(
+                text("SELECT pages, content_updated_at FROM galleries WHERE id = :id"), {"id": gallery_id}
+            )
+        ).fetchone()
+        assert row[0] == 1
+        assert str(row[1]).startswith("2024-01-02 03:04:05"), "cancel must restore content_updated_at"
+
     async def test_cancel_fresh_download_still_fully_deletes_gallery(self, db_session, db_session_factory):
         """Regression guard: full-delete behavior must survive for galleries
         created by this run (pre_existing stays False)."""

@@ -122,6 +122,12 @@ class Gallery(Base):
     source_dir_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metadata_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Maintained by a PG trigger that sets it to now() whenever ``pages`` increases.
+    # No server_onupdate: expiring it on every UPDATE makes serializers lazy-load
+    # it after commit, which raises in async sessions.
+    content_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     images: Mapped[list[Image]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
     gallery_tags: Mapped[list[GalleryTag]] = relationship(back_populates="gallery", cascade="all, delete-orphan")

@@ -1084,6 +1084,7 @@ export function ExplorerWorkbench() {
               <>
                 <select aria-label={t('explorer.sortBy')} value={sortField} onChange={(event) => refine({ sort: event.target.value as NonNullable<ExplorerQuery['sort']>, offset: 0 })} className="rounded-md border border-vault-border bg-vault-bg px-2 py-1 text-xs text-vault-text">
                   <option value="added_at">{t('explorer.sortAdded')}</option>
+                  <option value="content_updated_at">{t('explorer.sortUpdated')}</option>
                   <option value="posted_at">{t('explorer.sortPosted')}</option>
                   <option value="title">{t('explorer.sortTitle')}</option>
                   <option value="rating">{t('explorer.sortRating')}</option>

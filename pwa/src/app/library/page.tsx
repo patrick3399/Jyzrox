@@ -38,6 +38,7 @@ import { useScrollReveal } from '@/hooks/useScrollReveal'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
+  { value: 'content_updated_at', label: () => t('library.dateUpdated') },
   { value: 'posted_at', label: () => t('library.datePosted') },
   { value: 'rating', label: () => t('library.rating') },
   { value: 'pages', label: () => t('library.pagesSort') },
@@ -65,6 +66,7 @@ function mapSearchItemToGallery(item: SearchGalleryItem): Gallery {
     download_status: item.download_status as Gallery['download_status'],
     added_at: item.added_at ?? '',
     posted_at: item.posted_at,
+    content_updated_at: item.content_updated_at ?? null,
     tags_array: item.tags_array ?? item.tags,
     cover_thumb: item.cover_thumb ?? null,
     import_mode: item.import_mode,

@@ -111,6 +111,12 @@ describe('initFilterState — defaults', () => {
 
     expect(state.sourceFilter).toBe('eh:download')
   })
+
+  it('should keep ?sort=content_updated_at instead of falling back to added_at', () => {
+    const state = initFilterState(new URLSearchParams('sort=content_updated_at'))
+
+    expect(state.sort).toBe('content_updated_at')
+  })
 })
 
 // ── filterReducer tests ───────────────────────────────────────────────
@@ -156,6 +162,12 @@ describe('filterReducer', () => {
     const next = filterReducer(base, { type: 'SET_SORT', payload: 'rating' })
 
     expect(next.sort).toBe('rating')
+  })
+
+  it('SET_SORT should accept content_updated_at', () => {
+    const next = filterReducer(base, { type: 'SET_SORT', payload: 'content_updated_at' })
+
+    expect(next.sort).toBe('content_updated_at')
   })
 
   it('TOGGLE_SELECTED_ID should add an id then remove it on second toggle', () => {
