@@ -21,6 +21,16 @@
   --color-vault-input: var(--color-input);
   --color-vault-accent-hover: var(--color-accent-hover);
   --color-vault-accent-fg: var(--color-accent-fg);
+  --color-vault-hover: var(--color-card-hover);
+  --color-vault-bg-secondary: var(--color-card);
+  --color-vault-danger: var(--color-danger);
+  --color-vault-danger-hover: var(--color-danger-hover);
+  --color-vault-success: var(--color-success);
+  --color-vault-warning: var(--color-warning);
+  --color-vault-overlay: var(--color-overlay);
+  --shadow-vault-popup: var(--shadow-popup);
+  --ease-vault-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-vault-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 :root {
@@ -36,6 +46,15 @@
   --color-input: #f5f5f5;
   --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, white);
   --color-accent-fg: #ffffff;
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --motion-slow: 300ms;
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-overlay: #00000080;
+  --shadow-popup: 0 12px 32px #00000026;
 }
 
 .dark {
@@ -49,6 +68,12 @@
   --color-text-muted: #8a8a8a;
   --color-accent: #6366f1;
   --color-input: #1a1a1a;
+  --color-danger: #dc2626;
+  --color-danger-hover: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-overlay: #00000099;
+  --shadow-popup: 0 12px 32px #00000080;
 }
 
 .amoled {
@@ -62,6 +87,12 @@
   --color-text-muted: #8a8a8a;
   --color-accent: #6366f1;
   --color-input: #0a0a0a;
+  --color-danger: #dc2626;
+  --color-danger-hover: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-overlay: #000000b3;
+  --shadow-popup: 0 12px 32px #00000080;
 }
 
 html,
