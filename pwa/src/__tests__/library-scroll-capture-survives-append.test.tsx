@@ -193,13 +193,17 @@ describe('Library scroll capture vs a concurrent append', () => {
     const view = render(<LibraryPage />)
 
     fireEvent.scroll(window)
-    expect(frames.size).toBe(1)
+    // The anchor capture (and the search block's scroll-reveal) each queue a frame.
+    const pending = frames.size
+    expect(pending).toBeGreaterThan(0)
 
     // The append commits while that capture frame is still pending.
     sessionModel.extraItem = true
     act(() => {
       view.rerender(<LibraryPage />)
     })
+    // No scroll frame may be cancelled by the append's commit.
+    expect(frames.size).toBe(pending)
     runFrames()
 
     expect(updateView).toHaveBeenCalled()

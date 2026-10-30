@@ -289,3 +289,18 @@ describe('Library filter panel', () => {
     expect(screen.getByText(/library\.syntaxTagSearch/)).toBeInTheDocument()
   })
 })
+
+describe('Library search block scroll reveal', () => {
+  it('test_search_block_is_sticky_below_the_status_bar_and_holds_search_panel_and_chips', () => {
+    const { container } = render(<LibraryPage />)
+    const block = screen.getByTestId('library-search-block')
+
+    expect(block.className).toMatch(/(^|\s)sticky(\s|$)/)
+    expect(block.style.top).toBe('var(--sat)')
+    expect(block).toContainElement(screen.getByPlaceholderText(PLACEHOLDER))
+    expect(block).toContainElement(container.querySelector('#library-filter-panel') as HTMLElement)
+    // At the top of the page nothing is slid away.
+    expect(block).not.toHaveAttribute('data-scroll-hidden')
+    expect(block.style.transform).toBe('')
+  })
+})

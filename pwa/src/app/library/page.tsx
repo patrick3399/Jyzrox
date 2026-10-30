@@ -34,6 +34,7 @@ import {
 } from '@/lib/libraryLayout'
 import { libraryFilterChips, type LibraryFilterChipKey } from '@/lib/libraryFilterChips'
 import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
+import { useScrollReveal } from '@/hooks/useScrollReveal'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -98,6 +99,15 @@ function LibraryContent() {
   const [batchTagInput, setBatchTagInput] = useState('')
   const [batchTagList, setBatchTagList] = useState<string[]>([])
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  // Search block: sticky, slides away on scroll down and back on scroll up.
+  const [searchFocused, setSearchFocused] = useState(false)
+  const searchSentinelRef = useRef<HTMLDivElement>(null)
+  const searchBlockRef = useRef<HTMLDivElement>(null)
+  const { stuck: searchStuck, hidden: searchHidden } = useScrollReveal({
+    sentinelRef: searchSentinelRef,
+    blockRef: searchBlockRef,
+    locked: searchFocused || filterPanelOpen,
+  })
   const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
   const displayPreferences = useDisplayPreferences()
   const gridColumns = useMemo(
@@ -480,7 +490,7 @@ function LibraryContent() {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 mb-4">
+      <div className="flex items-center justify-between gap-3 mb-2">
         <div className="flex items-baseline gap-2 min-w-0">
           <h1 className="text-2xl font-bold">{t('library.title')}</h1>
           {total !== null && (
@@ -525,7 +535,31 @@ function LibraryContent() {
         </div>
       </div>
 
-      <div className="mb-4">
+      <div ref={searchSentinelRef} aria-hidden="true" />
+      <div
+        ref={searchBlockRef}
+        data-testid="library-search-block"
+        data-stuck={searchStuck || undefined}
+        data-scroll-hidden={searchHidden || undefined}
+        onFocusCapture={() => setSearchFocused(true)}
+        onBlurCapture={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSearchFocused(false)
+        }}
+        style={{
+          top: 'var(--sat)',
+          transform: searchHidden ? 'translateY(calc(-100% - var(--sat)))' : undefined,
+        }}
+        className={`sticky z-20 -mx-4 px-4 lg:-mx-6 lg:px-6 xl:-mx-8 xl:px-8 py-2 mb-2 bg-vault-bg transition-[transform,box-shadow] duration-200 ${
+          searchStuck && !searchHidden ? 'shadow-md shadow-black/30' : ''
+        }`}
+      >
+        {/* Covers the translucent status bar above the stuck block. */}
+        {searchStuck && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-x-0 bottom-full h-[var(--sat)] bg-vault-bg"
+          />
+        )}
         <LibrarySearchBar
           value={inputValue}
           onChange={handleInputChange}
