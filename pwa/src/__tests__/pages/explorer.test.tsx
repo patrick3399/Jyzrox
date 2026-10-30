@@ -614,6 +614,52 @@ describe('ExplorerWorkbench', () => {
     expect(screen.getAllByLabelText('explorer.toggleSelection')).toHaveLength(2)
   })
 
+  it('a search drops the query-wide selection so Delete cannot reach the previous results', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({ selection_token: 'token-old', count: 500, expires_in: 1800 })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(screen.getByText('explorer.selectAllResults'))
+    await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
+
+    fireEvent.change(screen.getByPlaceholderText('explorer.searchPlaceholder'), { target: { value: 'needle' } })
+    await waitFor(() => expect(commit).toHaveBeenCalledWith(expect.stringContaining('q=needle'), 'replace'))
+
+    await waitFor(() => expect(screen.queryByText('explorer.selectedCount')).toBeNull())
+    fireEvent.keyDown(window, { key: 'Delete' })
+    expect(api.explorer.deleteSelection).not.toHaveBeenCalled()
+  })
+
+  it('a sort change keeps the query-wide selection (same result set)', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({ selection_token: 'token-1', count: 2, expires_in: 1800 })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(screen.getByText('explorer.selectAllResults'))
+    await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
+    fireEvent.change(screen.getByLabelText('explorer.sortBy'), { target: { value: 'title' } })
+    await waitFor(() => expect(commit).toHaveBeenCalledWith(expect.stringContaining('sort=title'), 'replace'))
+    expect(screen.getByText('explorer.selectedCount')).toBeDefined()
+  })
+
+  it('a page change clears a visible selection whose galleries are no longer on screen', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    fireEvent.keyDown(window, { key: ' ' })
+    await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
+    setUrl('/explorer?kind=source&id=local&label=Local&offset=60')
+    await waitFor(() => expect(screen.queryByText('explorer.selectedCount')).toBeNull())
+  })
+
   it('moves content focus with arrows and opens the focused Gallery with Enter', async () => {
     currentParams = 'kind=source&id=local&label=Local'
     swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }

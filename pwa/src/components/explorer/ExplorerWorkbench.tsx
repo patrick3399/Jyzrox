@@ -725,6 +725,20 @@ export function ExplorerWorkbench() {
     setSearchText(urlState.q)
   }, [nodeKey, urlState.q, clearSelection])
 
+  // A search changes the result set, so a query-wide selection token would act
+  // on galleries no longer listed. A page or order change keeps the set (the
+  // token stays valid) but moves the visible items, whose keys would otherwise
+  // be counted while the actions only send what is on screen.
+  const listKey = `${urlState.q}|${offset}|${sortField}|${sortDirection}`
+  const previousListRef = useRef({ q: urlState.q, listKey })
+  useEffect(() => {
+    const previous = previousListRef.current
+    if (previous.listKey === listKey) return
+    previousListRef.current = { q: urlState.q, listKey }
+    clearSelection()
+    if (previous.q !== urlState.q) setQuerySelection(null)
+  }, [listKey, urlState.q, clearSelection])
+
   const selectedGalleries = useMemo(
     () => contentItems.filter((item): item is ExplorerGalleryItem => 'id' in item && item.id > 0 && selectedKeys.has(itemKey(item))),
     [contentItems, selectedKeys],
