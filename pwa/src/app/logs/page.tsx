@@ -12,6 +12,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import type { LogEntry } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 const LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const
 const LEVEL_COLORS: Record<string, string> = {
@@ -136,12 +137,9 @@ function RetentionSettings() {
               className="w-24 px-2 py-1 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
             />
           </div>
-          <button
-            onClick={save}
-            className="px-4 py-1.5 bg-vault-accent text-white rounded text-sm font-medium hover:bg-vault-accent/90 transition-colors"
-          >
+          <Button variant="primary" size="sm" onClick={save}>
             {t('common.save')}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -283,13 +281,15 @@ export default function LogsPage() {
             </button>
           )}
 
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={clearLogs}
-            className="flex items-center gap-1 px-2 py-1.5 rounded text-xs bg-vault-input border border-vault-border text-vault-text-secondary hover:text-red-400 hover:border-red-500/30 transition-colors"
+            className="text-xs hover:text-red-400 hover:border-red-500/30"
           >
             <Trash2 size={12} />
             {t('logs.clearLogs')}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -311,13 +311,13 @@ export default function LogsPage() {
 
       {!realTime && hasMore && (
         <div className="flex justify-center">
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setOffset((prev) => prev + limit)}
             disabled={isLoading}
-            className="px-4 py-2 bg-vault-input border border-vault-border rounded text-sm text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-50"
           >
             {t('logs.showMore')}
-          </button>
+          </Button>
         </div>
       )}
 

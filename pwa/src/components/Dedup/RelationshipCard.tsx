@@ -6,6 +6,7 @@ import { AppImage } from '@/components/AppImage'
 import type { RelationshipItem } from '@/lib/types'
 import Link from 'next/link'
 import { galleryHref, readerHref } from '@/lib/galleryRoutes'
+import { Button } from '@/components/ui/button'
 
 interface RelationshipCardProps {
   item: RelationshipItem
@@ -179,16 +180,18 @@ export function RelationshipCard({
                   </div>
                 ))}
               </div>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() =>
                   handle(`keep-${idx}`, () => onKeep(item.id, blob.sha256, discardRefs))
                 }
                 disabled={!!loading}
-                className="w-full px-2 py-1 rounded text-xs font-medium bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                className="w-full text-xs bg-green-500/10 text-green-400 hover:bg-green-500/20 hover:text-green-400"
               >
                 {loading === `keep-${idx}` ? <LoadingSpinner size="sm" /> : null}
                 {t('dedup.keepThis')}
-              </button>
+              </Button>
             </div>
           )
         })}
@@ -199,21 +202,25 @@ export function RelationshipCard({
         <div className="flex-1 px-3 py-1.5 rounded text-xs text-vault-text-muted text-center border border-vault-border">
           {t('dedup.selectToKeep')}
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => handle('whitelist', () => onWhitelist(item.id))}
           disabled={!!loading}
-          className="flex-1 px-3 py-1.5 rounded text-xs font-medium bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+          className="flex-1 text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-400"
         >
           {loading === 'whitelist' ? <LoadingSpinner size="sm" /> : null}
           {t('dedup.actionWhitelist')}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => handle('dismiss', () => onDismiss(item.id))}
           disabled={!!loading}
-          className="px-3 py-1.5 rounded text-xs font-medium bg-vault-input border border-vault-border text-vault-text-muted hover:text-vault-text transition-colors disabled:opacity-50"
+          className="text-xs"
         >
           {t('dedup.actionDismiss')}
-        </button>
+        </Button>
       </div>
     </div>
   )

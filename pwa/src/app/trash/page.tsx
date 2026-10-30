@@ -13,6 +13,7 @@ import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 function daysRemaining(deletedAt: string, retentionDays: number = 30): number {
   const deleted = new Date(deletedAt)
@@ -101,14 +102,16 @@ export default function TrashPage() {
         actions={
           trashEnabled &&
           galleries.length > 0 && (
-            <button
+            <Button
+              variant="danger"
+              size="sm"
               onClick={handleEmptyTrash}
               disabled={actionInProgress === 'empty'}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+              className="text-xs"
             >
               <AlertTriangle size={14} />
               {t('trash.emptyTrash')}
-            </button>
+            </Button>
           )
         }
       />
@@ -166,22 +169,26 @@ export default function TrashPage() {
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <button
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={() => handleRestore(g)}
                   disabled={actionInProgress === `restore-${g.id}`}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium bg-green-600 hover:bg-green-700 text-white transition-colors disabled:opacity-50"
+                  className="gap-1 text-xs"
                 >
                   <RotateCcw size={12} />
                   {t('trash.restore')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
                   onClick={() => handlePermanentDelete(g)}
                   disabled={actionInProgress === `delete-${g.id}`}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+                  className="gap-1 text-xs"
                 >
                   <Trash2 size={12} />
                   {t('trash.permanentDelete')}
-                </button>
+                </Button>
               </div>
             </div>
           ))}

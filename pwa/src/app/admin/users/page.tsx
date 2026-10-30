@@ -121,13 +121,10 @@ export default function AdminUsersPage() {
         title={t('admin.users.title')}
         icon={<ShieldCheck size={24} className="text-vault-accent shrink-0" />}
         actions={
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors text-sm font-medium"
-          >
+          <Button variant="primary" onClick={() => setShowCreate(true)}>
             <Plus size={16} />
             {t('admin.users.addUser')}
-          </button>
+          </Button>
         }
       />
       <main className="space-y-6">
@@ -196,18 +193,20 @@ export default function AdminUsersPage() {
                           {formatDate(user.last_login_at)}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => {
                               setDeleteTarget(user)
                               setDeleteOpen(true)
                             }}
                             disabled={isSelf}
-                            className="p-1.5 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            className="hover:text-red-400 hover:bg-red-500/10"
                             aria-label={t('admin.users.delete')}
                             title={t('admin.users.delete')}
                           >
                             <Trash2 size={15} />
-                          </button>
+                          </Button>
                         </td>
                       </tr>
                     )
@@ -236,66 +235,64 @@ export default function AdminUsersPage() {
           }
         >
           <form id="create-user-form" onSubmit={handleCreate} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-vault-text">
-                    {t('admin.users.username')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={createForm.username}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
-                    className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text placeholder-vault-text-secondary focus:outline-none focus:ring-1 focus:ring-vault-accent"
-                    placeholder={t('admin.users.username')}
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-vault-text">
-                    {t('admin.users.password')}
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={createForm.password}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
-                    className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text placeholder-vault-text-secondary focus:outline-none focus:ring-1 focus:ring-vault-accent"
-                    placeholder={t('admin.users.password')}
-                    autoComplete="new-password"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-vault-text">
-                    {t('admin.users.role')}
-                  </label>
-                  <select
-                    value={createForm.role}
-                    onChange={(e) =>
-                      setCreateForm((f) => ({ ...f, role: e.target.value as UserRole }))
-                    }
-                    className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text focus:outline-none focus:ring-1 focus:ring-vault-accent"
-                  >
-                    <option value="admin">{t('admin.users.roleAdmin')}</option>
-                    <option value="member">{t('admin.users.roleMember')}</option>
-                    <option value="viewer">{t('admin.users.roleViewer')}</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-vault-text">
-                    {t('admin.users.email')}
-                    <span className="ml-1 text-vault-text-secondary font-normal text-xs">
-                      ({t('common.optional')})
-                    </span>
-                  </label>
-                  <input
-                    type="email"
-                    value={createForm.email}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
-                    className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text placeholder-vault-text-secondary focus:outline-none focus:ring-1 focus:ring-vault-accent"
-                    placeholder={t('admin.users.email')}
-                    autoComplete="off"
-                  />
-                </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-vault-text">
+                {t('admin.users.username')}
+              </label>
+              <input
+                type="text"
+                required
+                value={createForm.username}
+                onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
+                className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text placeholder-vault-text-secondary focus:outline-none focus:ring-1 focus:ring-vault-accent"
+                placeholder={t('admin.users.username')}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-vault-text">
+                {t('admin.users.password')}
+              </label>
+              <input
+                type="password"
+                required
+                value={createForm.password}
+                onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
+                className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text placeholder-vault-text-secondary focus:outline-none focus:ring-1 focus:ring-vault-accent"
+                placeholder={t('admin.users.password')}
+                autoComplete="new-password"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-vault-text">
+                {t('admin.users.role')}
+              </label>
+              <select
+                value={createForm.role}
+                onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as UserRole }))}
+                className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text focus:outline-none focus:ring-1 focus:ring-vault-accent"
+              >
+                <option value="admin">{t('admin.users.roleAdmin')}</option>
+                <option value="member">{t('admin.users.roleMember')}</option>
+                <option value="viewer">{t('admin.users.roleViewer')}</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-vault-text">
+                {t('admin.users.email')}
+                <span className="ml-1 text-vault-text-secondary font-normal text-xs">
+                  ({t('common.optional')})
+                </span>
+              </label>
+              <input
+                type="email"
+                value={createForm.email}
+                onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
+                className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text placeholder-vault-text-secondary focus:outline-none focus:ring-1 focus:ring-vault-accent"
+                placeholder={t('admin.users.email')}
+                autoComplete="off"
+              />
+            </div>
           </form>
         </Dialog>
 
@@ -309,7 +306,9 @@ export default function AdminUsersPage() {
           description={
             <>
               <span className="block">{t('admin.users.deleteConfirm')}</span>
-              <span className="mt-2 block font-medium text-vault-text">{deleteTarget?.username}</span>
+              <span className="mt-2 block font-medium text-vault-text">
+                {deleteTarget?.username}
+              </span>
             </>
           }
           confirmLabel={t('admin.users.delete')}

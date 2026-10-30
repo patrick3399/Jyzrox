@@ -25,6 +25,7 @@ import { api } from '@/lib/api'
 import type { DashboardSiteStats, DashboardTiming, DownloadJob } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -297,43 +298,51 @@ function ActiveJobCard({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {isPaused ? (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onResume(job.id)}
               disabled={isStopping}
-              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+              className="hover:text-green-400 hover:bg-green-500/10"
               title={t('downloadDashboard.resume')}
             >
               <Play size={14} />
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onPause(job.id)}
               disabled={isStopping}
-              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+              className="hover:text-yellow-400 hover:bg-yellow-500/10"
               title={t('downloadDashboard.pause')}
             >
               <Pause size={14} />
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onStop(job)}
             disabled={isStopping}
-            className="p-1.5 rounded-lg text-vault-accent hover:bg-vault-accent/10 transition-colors disabled:opacity-50"
+            className="text-vault-accent hover:text-vault-accent hover:bg-vault-accent/10"
             title={isStopping ? t('queue.stopping') : t('queue.stop')}
             aria-label={isStopping ? t('queue.stopping') : t('queue.stop')}
           >
             <Square size={14} />
-          </button>
+          </Button>
           {canDiscard && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onDiscard(job)}
               disabled={isStopping}
-              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+              className="hover:text-red-400 hover:bg-red-500/10"
               title={t('queue.discard')}
               aria-label={t('queue.discard')}
             >
               <X size={14} />
-            </button>
+            </Button>
           )}
         </div>
       </div>

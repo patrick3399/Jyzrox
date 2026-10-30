@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import type { DatabaseBackup as DatabaseBackupRecord } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 function formatSize(bytes: number | null): string {
   if (bytes == null) return '-'
@@ -49,7 +50,9 @@ function BackupRow({
       <span className={`text-xs ${statusClass(backup.status, backup.exists)}`}>
         {backup.exists ? backup.status : t('backups.missingFile')}
       </span>
-      <span className="text-xs text-vault-text-muted tabular-nums">{formatSize(backup.size_bytes)}</span>
+      <span className="text-xs text-vault-text-muted tabular-nums">
+        {formatSize(backup.size_bytes)}
+      </span>
       {backup.exists ? (
         <a
           href={`/api/admin/backups/${encodeURIComponent(backup.id)}/download`}
@@ -62,14 +65,16 @@ function BackupRow({
       ) : (
         <span className="p-1.5" />
       )}
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         type="button"
         onClick={() => onDelete(backup.id)}
-        className="p-1.5 rounded text-vault-text-muted hover:text-red-400 hover:bg-red-500/10"
+        className="hover:text-red-400 hover:bg-red-500/10"
         aria-label={t('backups.delete')}
       >
         <Trash2 size={14} />
-      </button>
+      </Button>
     </div>
   )
 }
@@ -106,19 +111,23 @@ export function BackupList() {
           <h2 className="text-lg font-semibold text-vault-text">{t('backups.title')}</h2>
           <p className="text-xs text-vault-text-muted">{data?.path ?? t('backups.loadingPath')}</p>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           type="button"
           onClick={handleRun}
           disabled={runBackup.isMutating}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-vault-accent/10 text-vault-accent text-xs font-medium hover:bg-vault-accent/20 disabled:opacity-50"
+          className="text-xs bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 hover:text-vault-accent"
         >
           <Play size={14} />
           {t('backups.runNow')}
-        </button>
+        </Button>
       </div>
 
       <div className="bg-vault-input border border-vault-border rounded-lg overflow-hidden">
-        {isLoading && <div className="p-3 text-sm text-vault-text-muted">{t('common.loading')}</div>}
+        {isLoading && (
+          <div className="p-3 text-sm text-vault-text-muted">{t('common.loading')}</div>
+        )}
         {error && <div className="p-3 text-sm text-red-400">{t('backups.loadFailed')}</div>}
         {!isLoading && !error && (data?.backups.length ?? 0) === 0 && (
           <div className="p-3 text-sm text-vault-text-muted">{t('backups.empty')}</div>

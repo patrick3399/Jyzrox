@@ -12,6 +12,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import type { SaqJob, SaqWorker } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -203,22 +204,26 @@ function JobRow({
           {(canRetry || canAbort) && (
             <div className="flex gap-2 pt-1">
               {canRetry && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => onRetry(job.key)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-vault-card-hover border border-vault-border text-vault-text hover:text-vault-accent hover:border-vault-accent/50 transition-colors"
+                  className="text-xs text-vault-text hover:text-vault-accent hover:border-vault-accent/50"
                 >
                   <RotateCcw size={12} />
                   {t('admin.queue.retry')}
-                </button>
+                </Button>
               )}
               {canAbort && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => onAbort(job.key)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-vault-card-hover border border-vault-border text-vault-text hover:text-red-400 hover:border-red-500/30 transition-colors"
+                  className="text-xs text-vault-text hover:text-red-400 hover:border-red-500/30"
                 >
                   <XCircle size={12} />
                   {t('admin.queue.abort')}
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -404,25 +409,25 @@ export default function AdminQueuePage() {
           {/* Pagination */}
           {(hasPrev || hasNext) && (
             <div className="flex justify-between items-center">
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => setOffset((prev) => Math.max(0, prev - LIMIT))}
                 disabled={!hasPrev}
-                className="px-4 py-2 text-sm bg-vault-input border border-vault-border rounded text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label={t('common.previousPage')}
               >
                 {t('common.previousPage')}
-              </button>
+              </Button>
               <span className="text-xs text-vault-text-secondary">
                 {offset + 1}–{Math.min(offset + LIMIT, total)} / {total}
               </span>
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => setOffset((prev) => prev + LIMIT)}
                 disabled={!hasNext}
-                className="px-4 py-2 text-sm bg-vault-input border border-vault-border rounded text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label={t('common.nextPage')}
               >
                 {t('common.nextPage')}
-              </button>
+              </Button>
             </div>
           )}
         </div>

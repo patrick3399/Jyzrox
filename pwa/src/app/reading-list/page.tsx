@@ -15,6 +15,7 @@ import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 export default function ReadingListPage() {
   useLocale()
@@ -90,18 +91,20 @@ export default function ReadingListPage() {
                 </div>
               </div>
               <div className="shrink-0">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={(e) => {
                     e.stopPropagation()
                     handleRemove(g)
                   }}
                   disabled={removingId === g.id}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium bg-vault-input border border-vault-border text-vault-text-secondary hover:border-red-500/50 hover:text-red-400 transition-colors disabled:opacity-50"
+                  className="gap-1 text-xs hover:border-red-500/50 hover:text-red-400"
                   aria-label={t('readingList.remove')}
                 >
                   <X size={12} />
                   {t('readingList.remove')}
-                </button>
+                </Button>
               </div>
             </div>
           ))}
