@@ -29,12 +29,24 @@ describe('PageHeader', () => {
     expect(h1.className).toContain('font-bold')
   })
 
-  it('uses mb-4/sm:mb-6 by default and mb-2 when dense', () => {
+  it('uses mb-4/sm:mb-6 by default, mb-2 when dense, and no margin when none', () => {
     const { container, rerender } = render(<PageHeader title="A" />)
-    expect(container.querySelector('header')?.className).toMatch(/\bmb-4\b.*\bsm:mb-6\b/)
-    rerender(<PageHeader title="A" dense />)
-    expect(container.querySelector('header')?.className).toContain('mb-2')
-    expect(container.querySelector('header')?.className).not.toContain('mb-4')
+    const cls = () => container.querySelector('header')?.className ?? ''
+    expect(cls()).toMatch(/\bmb-4\b/)
+    expect(cls()).toContain('sm:mb-6')
+    rerender(<PageHeader title="A" spacing="dense" />)
+    expect(cls()).toContain('mb-2')
+    expect(cls()).not.toContain('mb-4')
+    rerender(<PageHeader title="A" spacing="none" />)
+    expect(cls()).not.toMatch(/\bmb-|sm:mb-/)
+  })
+
+  it('test_page_header_actions_wrap_instead_of_overflowing_on_narrow_screens', () => {
+    const { container } = render(<PageHeader title="A" actions={<button>Go</button>} />)
+    expect(container.querySelector('header')?.className).toContain('flex-wrap')
+    const actions = screen.getByRole('button', { name: 'Go' }).parentElement
+    expect(actions?.className).toContain('flex-wrap')
+    expect(actions?.className).not.toContain('shrink-0')
   })
 
   it('renders subtitle, meta and actions', () => {
