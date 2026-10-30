@@ -815,7 +815,6 @@ const ja: Record<string, string> = {
   'library.tagRemoved': 'タグを削除しました',
   'library.tagAddFailed': 'タグの追加に失敗しました',
   'library.tagRemoveFailed': 'タグの削除に失敗しました',
-  'library.clearArtistFilter': 'アーティストフィルターをクリア',
 
   // ── Artists ──
   'artists.title': 'アーティスト',
@@ -2000,8 +1999,6 @@ const ja: Record<string, string> = {
   'contextMenu.removeFromReadingList': '読書リストから削除',
 
   // ── Library filter panel ──
-  'library.showFilters': 'フィルターを表示',
-  'library.hideFilters': 'フィルターを非表示',
   'library.filters': 'フィルター',
   'library.clearAllFilters': 'すべてクリア',
   'library.removeFilter': '{name} を解除',

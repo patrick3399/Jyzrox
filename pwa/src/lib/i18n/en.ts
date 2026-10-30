@@ -1878,7 +1878,6 @@ const en: Record<string, string> = {
   'reader.favoriteFailed': 'Failed to update favorite',
   'reader.toggleControls': 'Toggle controls',
   'reader.videoSeek': 'Seek',
-  'library.clearArtistFilter': 'Clear artist filter',
   'credential.banner.dismiss': 'Dismiss',
 
   // ── Error codes ──
@@ -1906,8 +1905,6 @@ const en: Record<string, string> = {
   'contextMenu.removeFromReadingList': 'Remove from Reading List',
 
   // ── Library filter panel ──
-  'library.showFilters': 'Show Filters',
-  'library.hideFilters': 'Hide Filters',
   'library.filters': 'Filters',
   'library.clearAllFilters': 'Clear all',
   'library.removeFilter': 'Remove {name}',

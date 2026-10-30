@@ -311,7 +311,6 @@ const zhTW: Record<string, string> = {
   'library.batchDeleteConfirm': '刪除 {count} 個圖庫？此操作無法復原。',
   'library.batchSuccess': '已更新 {count} 個圖庫',
   'library.artistFilter': '藝術家',
-  'library.clearArtistFilter': '清除藝術家篩選',
   'library.viewSource': '查看來源',
   'library.moreActions': '更多操作',
   'library.moreInfo': '更多資訊',
@@ -1690,8 +1689,6 @@ const zhTW: Record<string, string> = {
   'contextMenu.removeFromReadingList': '從稍後閱讀移除',
 
   // ── Library filter panel ──
-  'library.showFilters': '顯示篩選',
-  'library.hideFilters': '隱藏篩選',
   'library.filters': '篩選',
   'library.clearAllFilters': '清除全部',
   'library.removeFilter': '移除 {name}',

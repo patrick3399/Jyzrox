@@ -899,7 +899,6 @@ const zhCN: Record<string, string> = {
   'library.tagRemoved': '标签已移除',
   'library.tagAddFailed': '添加标签失败',
   'library.tagRemoveFailed': '移除标签失败',
-  'library.clearArtistFilter': '清除画师筛选',
 
   // ── Artists ──
   'artists.title': '画师',
@@ -1875,8 +1874,6 @@ const zhCN: Record<string, string> = {
   'contextMenu.openDetail': '查看详情',
 
   // ── Library filter panel ──
-  'library.showFilters': '显示筛选',
-  'library.hideFilters': '隐藏筛选',
   'library.filters': '筛选',
   'library.clearAllFilters': '清除全部',
   'library.removeFilter': '移除 {name}',
