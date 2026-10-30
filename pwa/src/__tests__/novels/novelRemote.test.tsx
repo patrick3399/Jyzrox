@@ -137,11 +137,11 @@ describe('NovelRemotePage', () => {
     })
     await renderReady()
     fireEvent.click(screen.getByText('novelRemote.save'))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('alertdialog')
     expect(dialog.textContent).toContain('"unpushed":"3"')
 
     fireEvent.click(screen.getByText('novelRemote.cancel'))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(m.save).toHaveBeenCalledTimes(1)
 
     m.save.mockResolvedValueOnce({
@@ -151,7 +151,7 @@ describe('NovelRemotePage', () => {
       needsReclone: { reason: 'unrelated', unpushed: 3, dirty: false },
     })
     fireEvent.click(screen.getByText('novelRemote.save'))
-    await screen.findByRole('dialog')
+    await screen.findByRole('alertdialog')
     m.save.mockResolvedValueOnce({ ok: true, mode: 'recloned' })
     fireEvent.click(screen.getByText('novelRemote.recloneConfirm'))
     await waitFor(() => expect(m.save).toHaveBeenLastCalledWith(URL_, true))

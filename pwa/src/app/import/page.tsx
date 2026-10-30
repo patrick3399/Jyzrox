@@ -36,6 +36,7 @@ import { t } from '@/lib/i18n'
 import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { api } from '@/lib/api'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { Dialog } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Folder Picker modal ───────────────────────────────────────────────
@@ -105,10 +106,16 @@ function FolderPicker({
   const patternExample = `${patternBase}/{artist}/{_}/{title}`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="bg-vault-card border border-vault-border rounded-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-vault-border">
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+      size="md"
+      padded={false}
+      className="sm:max-h-[80vh]"
+      title={
+        <span className="flex items-center gap-2">
           {!showMounts && (
             <button
               onClick={goUp}
@@ -117,15 +124,30 @@ function FolderPicker({
               <ArrowLeft size={16} />
             </button>
           )}
-          <h3 className="text-sm font-medium text-vault-text">{t('import.folderPicker.title')}</h3>
-          <button
-            onClick={onClose}
-            className="ml-auto text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
-          >
-            <X size={16} />
-          </button>
+          <span className="text-sm font-medium">{t('import.folderPicker.title')}</span>
+        </span>
+      }
+      footer={
+        <div className="w-full">
+            <button
+              onClick={() => {
+                setEditingPath(patternExample)
+                setIsEditing(true)
+              }}
+              className="w-full mb-2 px-3 py-2 text-xs border border-vault-border text-vault-text rounded hover:border-vault-accent transition-colors font-mono truncate"
+            >
+              {patternExample}
+            </button>
+            <button
+              onClick={() => onSelect(editingPath.trim() || currentPath || '/')}
+              disabled={showMounts && !editingPath.includes('{')}
+              className="w-full px-3 py-2.5 text-sm bg-vault-accent text-white rounded font-medium hover:bg-vault-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t('import.folderPicker.select')}
+            </button>
         </div>
-
+      }
+    >
         {/* Editable path input */}
         <div className="px-4 py-2 border-b border-vault-border bg-vault-bg">
           <div className="flex items-center gap-2">
@@ -140,6 +162,7 @@ function FolderPicker({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handlePathSubmit()
                   if (e.key === 'Escape') {
+                    e.stopPropagation()
                     setEditingPath(currentPath ?? '')
                     setIsEditing(false)
                   }
@@ -224,28 +247,7 @@ function FolderPicker({
             ))
           )}
         </div>
-
-        {/* Footer */}
-        <div className="px-4 py-3 border-t border-vault-border">
-          <button
-            onClick={() => {
-              setEditingPath(patternExample)
-              setIsEditing(true)
-            }}
-            className="w-full mb-2 px-3 py-2 text-xs border border-vault-border text-vault-text rounded hover:border-vault-accent transition-colors font-mono truncate"
-          >
-            {patternExample}
-          </button>
-          <button
-            onClick={() => onSelect(editingPath.trim() || currentPath || '/')}
-            disabled={showMounts && !editingPath.includes('{')}
-            className="w-full px-3 py-2.5 text-sm bg-vault-accent text-white rounded font-medium hover:bg-vault-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {t('import.folderPicker.select')}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 

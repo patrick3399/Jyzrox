@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
-import { ShieldCheck, Plus, Trash2, X } from 'lucide-react'
+import { ShieldCheck, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
@@ -12,6 +12,9 @@ import { useProfile } from '@/hooks/useProfile'
 import type { UserInfo, UserRole } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { AlertDialog } from '@/components/ui/alert-dialog'
+import { Dialog } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—'
@@ -43,6 +46,7 @@ export default function AdminUsersPage() {
 
   // Delete dialog state
   const [deleteTarget, setDeleteTarget] = useState<UserInfo | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   const isAdmin = profile?.role === 'admin'
@@ -100,7 +104,7 @@ export default function AdminUsersPage() {
     try {
       await api.users.delete(deleteTarget.id)
       toast.success(t('admin.users.deleted'))
-      setDeleteTarget(null)
+      setDeleteOpen(false)
       mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -193,7 +197,10 @@ export default function AdminUsersPage() {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
-                            onClick={() => setDeleteTarget(user)}
+                            onClick={() => {
+                              setDeleteTarget(user)
+                              setDeleteOpen(true)
+                            }}
                             disabled={isSelf}
                             className="p-1.5 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                             aria-label={t('admin.users.delete')}
@@ -212,22 +219,23 @@ export default function AdminUsersPage() {
         </div>
 
         {/* Create User Dialog */}
-        {showCreate && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="bg-vault-card border border-vault-border rounded-xl w-full max-w-md shadow-2xl">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-vault-border">
-                <h2 className="text-lg font-semibold text-vault-text">
-                  {t('admin.users.createTitle')}
-                </h2>
-                <button
-                  onClick={() => setShowCreate(false)}
-                  className="p-1.5 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-                  aria-label={t('admin.users.cancel')}
-                >
-                  <X size={18} />
-                </button>
-              </div>
-              <form onSubmit={handleCreate} className="px-6 py-5 space-y-4">
+        <Dialog
+          open={showCreate}
+          onOpenChange={(o) => {
+            if (!o) setShowCreate(false)
+          }}
+          title={t('admin.users.createTitle')}
+          size="md"
+          footer={
+            <>
+              <Button onClick={() => setShowCreate(false)}>{t('admin.users.cancel')}</Button>
+              <Button type="submit" form="create-user-form" variant="primary" disabled={creating}>
+                {t('admin.users.create')}
+              </Button>
+            </>
+          }
+        >
+          <form id="create-user-form" onSubmit={handleCreate} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="block text-sm font-medium text-vault-text">
                     {t('admin.users.username')}
@@ -288,67 +296,27 @@ export default function AdminUsersPage() {
                     autoComplete="off"
                   />
                 </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreate(false)}
-                    className="px-4 py-2 rounded-lg text-sm text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-                  >
-                    {t('admin.users.cancel')}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creating}
-                    className="px-4 py-2 rounded-lg bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {t('admin.users.create')}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+          </form>
+        </Dialog>
 
         {/* Delete Confirmation Dialog */}
-        {deleteTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="bg-vault-card border border-vault-border rounded-xl w-full max-w-sm shadow-2xl">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-vault-border">
-                <h2 className="text-lg font-semibold text-vault-text">
-                  {t('admin.users.deleteTitle')}
-                </h2>
-                <button
-                  onClick={() => setDeleteTarget(null)}
-                  className="p-1.5 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-                  aria-label={t('admin.users.cancel')}
-                >
-                  <X size={18} />
-                </button>
-              </div>
-              <div className="px-6 py-5 space-y-5">
-                <p className="text-sm text-vault-text-secondary">
-                  {t('admin.users.deleteConfirm')}
-                </p>
-                <p className="text-sm font-medium text-vault-text">{deleteTarget.username}</p>
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setDeleteTarget(null)}
-                    className="px-4 py-2 rounded-lg text-sm text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-                  >
-                    {t('admin.users.cancel')}
-                  </button>
-                  <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {t('admin.users.delete')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <AlertDialog
+          open={deleteOpen}
+          onOpenChange={(o) => {
+            if (!o) setDeleteOpen(false)
+          }}
+          title={t('admin.users.deleteTitle')}
+          description={
+            <>
+              <span className="block">{t('admin.users.deleteConfirm')}</span>
+              <span className="mt-2 block font-medium text-vault-text">{deleteTarget?.username}</span>
+            </>
+          }
+          confirmLabel={t('admin.users.delete')}
+          onConfirm={handleDelete}
+          destructive
+          busy={deleting}
+        />
       </main>
     </PageContainer>
   )

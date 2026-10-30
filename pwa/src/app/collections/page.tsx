@@ -12,6 +12,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import type { Collection } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { AlertDialog } from '@/components/ui/alert-dialog'
 
 interface CollectionCardProps {
   collection: Collection
@@ -302,29 +303,18 @@ function CollectionsPageInner() {
       )}
 
       {/* Delete confirm dialog */}
-      {deletingId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-vault-card border border-vault-border rounded-xl p-6 max-w-sm w-full space-y-4">
-            <p className="text-vault-text text-sm">{t('collections.confirmDelete')}</p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setDeletingId(null)}
-                disabled={deleting}
-                className="px-4 py-2 bg-vault-card border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary text-sm rounded-lg transition-colors"
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                disabled={deleting}
-                className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                {deleting ? t('common.loading') : t('collections.delete')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AlertDialog
+        open={deletingId !== null}
+        onOpenChange={(o) => {
+          if (!o) setDeletingId(null)
+        }}
+        title={t('collections.delete')}
+        description={t('collections.confirmDelete')}
+        confirmLabel={deleting ? t('common.loading') : t('collections.delete')}
+        onConfirm={handleDeleteConfirm}
+        destructive
+        busy={deleting}
+      />
     </div>
   )
 }

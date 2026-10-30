@@ -187,14 +187,14 @@ describe('AdminSitesPage download editor', () => {
     await waitFor(() => expect(screen.getByRole('spinbutton', { name: RETRIES })).toHaveValue(4))
   })
 
-  it('full-screen editor on iOS standalone pads the safe-area insets so the header clears the status bar', async () => {
+  it('editor dialog is height-capped and pads the bottom safe-area so it clears the status bar and home indicator', async () => {
     await openEditor()
 
-    // viewport-fit=cover: without the --sat/--sab padding the header sits under
-    // the iOS status bar and the last buttons under the home indicator.
+    // viewport-fit=cover: max-h-[90dvh] keeps the top from reaching the iOS status
+    // bar; pb-(--sab) keeps the last buttons above the home indicator.
     const panel = screen.getByRole('dialog')
-    expect(panel.className).toContain('pt-[var(--sat)]')
-    expect(panel.className).toContain('pb-[var(--sab)]')
+    expect(panel.className).toContain('max-h-[90dvh]')
+    expect(panel.className).toContain('pb-(--sab)')
   })
 
   it('shows gallery-dl extractor default when sleep default is null', async () => {

@@ -37,6 +37,8 @@ import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
 import { useScrollReveal } from '@/hooks/useScrollReveal'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Dialog } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -101,6 +103,7 @@ function LibraryContent() {
   const [colCount, setColCount] = useState(4)
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
   const [batchTagInput, setBatchTagInput] = useState('')
+  const batchTagInputRef = useRef<HTMLInputElement>(null)
   const [batchTagList, setBatchTagList] = useState<string[]>([])
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   // Search block: sticky, slides away on scroll down and back on scroll up.
@@ -1073,18 +1076,41 @@ function LibraryContent() {
         </div>
       )}
 
-      {batchTagMode && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
-          onClick={() => setBatchTagMode(null)}
-        >
-          <div
-            className="bg-vault-card border border-vault-border rounded-lg p-4 w-96 max-w-[90vw]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-lg font-medium text-vault-text mb-3">
-              {batchTagMode === 'add' ? t('library.batchAddTags') : t('library.batchRemoveTags')}
-            </h3>
+      <Dialog
+        open={batchTagMode !== null}
+        onOpenChange={(o) => {
+          if (!o) setBatchTagMode(null)
+        }}
+        size="sm"
+        initialFocus={batchTagInputRef}
+        title={batchTagMode === 'add' ? t('library.batchAddTags') : t('library.batchRemoveTags')}
+        footer={
+          <>
+            <Button onClick={() => setBatchTagMode(null)}>{t('common.cancel')}</Button>
+            <Button
+              variant="primary"
+              disabled={batchTagList.length === 0}
+              onClick={async () => {
+                try {
+                  const res = await api.library.batchGalleries({
+                    action: batchTagMode === 'add' ? 'add_tags' : 'remove_tags',
+                    gallery_ids: [...selectedIds],
+                    tags: batchTagList,
+                  })
+                  toast.success(t('library.batchSuccess', { count: String(res.affected) }))
+                  setBatchTagMode(null)
+                  setBatchTagList([])
+                  await refresh()
+                } catch {
+                  toast.error(t('library.updateFailed'))
+                }
+              }}
+            >
+              {t('library.batchTagsConfirm')}
+            </Button>
+          </>
+        }
+      >
             <div className="flex gap-2 mb-3">
               <input
                 type="text"
@@ -1098,7 +1124,7 @@ function LibraryContent() {
                 }}
                 placeholder={t('library.batchTagsPlaceholder')}
                 className="flex-1 bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-border-hover"
-                autoFocus
+                ref={batchTagInputRef}
               />
             </div>
             <div className="flex flex-wrap gap-1 mb-3 min-h-[2rem]">
@@ -1117,38 +1143,7 @@ function LibraryContent() {
                 </span>
               ))}
             </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setBatchTagMode(null)}
-                className="px-3 py-1.5 text-vault-text-muted text-sm"
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                disabled={batchTagList.length === 0}
-                onClick={async () => {
-                  try {
-                    const res = await api.library.batchGalleries({
-                      action: batchTagMode === 'add' ? 'add_tags' : 'remove_tags',
-                      gallery_ids: [...selectedIds],
-                      tags: batchTagList,
-                    })
-                    toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                    setBatchTagMode(null)
-                    setBatchTagList([])
-                    await refresh()
-                  } catch {
-                    toast.error(t('library.updateFailed'))
-                  }
-                }}
-                className="px-3 py-1.5 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {t('library.batchTagsConfirm')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </Dialog>
     </div>
   )
 }

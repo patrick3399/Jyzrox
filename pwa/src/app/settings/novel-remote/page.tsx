@@ -13,6 +13,7 @@ import { t } from '@/lib/i18n'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import type { NovelHostKey } from '@/lib/api/novels'
+import { AlertDialog } from '@/components/ui/alert-dialog'
 
 const BTN =
   'px-3 py-1.5 rounded text-xs font-medium bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
@@ -50,6 +51,7 @@ export default function NovelRemoteSettingsPage() {
   const [hostKeys, setHostKeys] = useState<NovelHostKey[]>([])
   const [busy, setBusy] = useState(false)
   const [reclone, setReclone] = useState<{ reason: string; unpushed: number } | null>(null)
+  const [recloneOpen, setRecloneOpen] = useState(false)
 
   // Debounced copy of the typed URL: host trust is judged on what is typed, not
   // only on the saved remote (there is none before the first save).
@@ -124,11 +126,12 @@ export default function NovelRemoteSettingsPage() {
         ? await api.novels.remoteSave(url, true)
         : await api.novels.remoteSave(url)
       if (res.ok) {
-        setReclone(null)
+        setRecloneOpen(false)
         toast.success(t('novelRemote.saved'))
         await mutate()
       } else if (res.needsReclone) {
         setReclone({ reason: res.needsReclone.reason, unpushed: res.needsReclone.unpushed })
+        setRecloneOpen(true)
       } else {
         toast.error(res.message)
       }
@@ -251,37 +254,22 @@ export default function NovelRemoteSettingsPage() {
             </button>
           </div>
 
-          {reclone && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <div
-                role="dialog"
-                aria-modal="true"
-                className="bg-vault-card border border-vault-border rounded-xl p-5 max-w-md w-full space-y-4"
-              >
-                <h2 className="text-lg font-semibold text-vault-text">
-                  {t('novelRemote.recloneTitle')}
-                </h2>
-                <p className="text-sm text-vault-text-muted">
-                  {t('novelRemote.recloneBody', {
-                    reason: reclone.reason,
-                    unpushed: String(reclone.unpushed),
-                  })}
-                </p>
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => setReclone(null)} className={BTN}>
-                    {t('novelRemote.cancel')}
-                  </button>
-                  <button
-                    onClick={() => handleSave(true)}
-                    disabled={busy}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50"
-                  >
-                    {t('novelRemote.recloneConfirm')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <AlertDialog
+            open={recloneOpen}
+            onOpenChange={(o) => {
+              if (!o) setRecloneOpen(false)
+            }}
+            title={t('novelRemote.recloneTitle')}
+            description={t('novelRemote.recloneBody', {
+              reason: reclone?.reason ?? '',
+              unpushed: String(reclone?.unpushed ?? 0),
+            })}
+            confirmLabel={t('novelRemote.recloneConfirm')}
+            cancelLabel={t('novelRemote.cancel')}
+            onConfirm={() => handleSave(true)}
+            destructive
+            busy={busy}
+          />
         </>
       )}
     </div>

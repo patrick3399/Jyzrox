@@ -1389,8 +1389,7 @@ function BrowsePage() {
 
       {showImageSearch && (
         <div
-          role="dialog"
-          aria-modal="true"
+          role="region"
           aria-label={t('browse.searchByImage')}
           className="rounded-lg border border-vault-border bg-vault-card p-4 space-y-3"
         >
