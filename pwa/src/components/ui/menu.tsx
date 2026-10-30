@@ -33,7 +33,12 @@ export function AnchoredMenu({ open, onOpenChange, x, y, ariaLabel, items }: Anc
     <Menu.Root open={open} onOpenChange={overlayOpenChange(onOpenChange)}>
       <Menu.Portal>
         <Menu.Positioner anchor={anchor} side="bottom" align="start" collisionPadding={8} className="z-[110]">
-          <Menu.Popup aria-label={ariaLabel} className={cn(floatingPopupClass, 'min-w-44 py-1')}>
+          {/* Right-clicking inside an open context menu must not open the browser's native menu on top of it. */}
+          <Menu.Popup
+            aria-label={ariaLabel}
+            className={cn(floatingPopupClass, 'min-w-44 py-1')}
+            onContextMenu={(event) => event.preventDefault()}
+          >
             {items.map((item) => {
               const Icon = item.icon
               return (

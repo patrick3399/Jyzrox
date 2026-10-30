@@ -43,6 +43,15 @@ describe('AnchoredMenu', () => {
     expect(event.defaultPrevented).toBe(true)
     expect(windowEsc).not.toHaveBeenCalled()
   })
+
+  it('test_anchored_menu_right_click_inside_does_not_open_native_menu', () => {
+    render(<AnchoredMenu open onOpenChange={() => {}} x={0} y={0} ariaLabel="m" items={[{ id: 'a', label: 'A', onSelect: () => {} }]} />)
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    act(() => {
+      screen.getByRole('menu').dispatchEvent(event)
+    })
+    expect(event.defaultPrevented).toBe(true)
+  })
 })
 
 describe('Popover', () => {

@@ -14,6 +14,7 @@ interface AlertDialogProps {
   title: ReactNode
   description?: ReactNode
   confirmLabel: string
+  cancelLabel?: string
   onConfirm: () => void
   destructive?: boolean
   busy?: boolean
@@ -25,6 +26,7 @@ export function AlertDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel,
   onConfirm,
   destructive = false,
   busy = false,
@@ -42,7 +44,7 @@ export function AlertDialog({
               )}
             </div>
             <div className="flex justify-end gap-2 px-5 py-4">
-              <BaseAlertDialog.Close render={<Button disabled={busy} />}>{t('common.cancel')}</BaseAlertDialog.Close>
+              <BaseAlertDialog.Close render={<Button disabled={busy} />}>{cancelLabel ?? t('common.cancel')}</BaseAlertDialog.Close>
               <Button variant={destructive ? 'danger' : 'primary'} disabled={busy} onClick={onConfirm}>
                 {confirmLabel}
               </Button>

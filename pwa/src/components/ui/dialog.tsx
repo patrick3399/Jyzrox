@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -30,6 +30,8 @@ interface DialogProps {
   /** false for edge-to-edge bodies such as action lists. */
   padded?: boolean
   className?: string
+  /** Element to focus on open (defaults to the first tabbable). */
+  initialFocus?: RefObject<HTMLElement | null>
 }
 
 export function Dialog({
@@ -43,13 +45,14 @@ export function Dialog({
   dismissible = true,
   padded = true,
   className,
+  initialFocus,
 }: DialogProps) {
   return (
     <BaseDialog.Root open={open} onOpenChange={overlayOpenChange(onOpenChange, dismissible)}>
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={overlayBackdropClass} />
         <BaseDialog.Viewport className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-4">
-          <BaseDialog.Popup className={cn(sheetPopupClass, SIZE[size], className)}>
+          <BaseDialog.Popup className={cn(sheetPopupClass, SIZE[size], className)} initialFocus={initialFocus}>
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-vault-border px-5 py-3">
               <BaseDialog.Title className="min-w-0 truncate font-semibold">{title}</BaseDialog.Title>
               <BaseDialog.Close
