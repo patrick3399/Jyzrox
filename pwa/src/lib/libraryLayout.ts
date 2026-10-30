@@ -3,14 +3,14 @@ import type { GridDensityPreference } from '@/lib/uiPreferences'
 import { rootFontSize } from '@/lib/gridRowHeight'
 
 // Height reserved below the cover for a LibraryGalleryCard's info block. The
-// padding and text are rem-based and grow with the root font size: p-2.5 (20px)
-// + 2-line line-clamp title text-sm/leading-snug (~39) + gap-1.5 (6) + rating/
-// pages row pt-1 + text-base (~21) = 5.375rem (86px at a 16px root). Only the
-// card border is fixed px (2px, added on top).
+// padding and text are rem-based and grow with the root font size: p-2 (16px)
+// + 1-line truncated title leading-5 (20) + gap-1 (4) + rating/pages row h-4
+// (16) = 3.5rem (56px at a 16px root). Only the card border is fixed px (2px,
+// added on top).
 // This MUST NOT underestimate the real info height: `measureRows={false}` places
 // the next row at `rowHeight + gap`, so a too-small reserve makes the next row
 // overlap and cover the previous card's bottom edge — including its focus ring.
-const LIBRARY_CARD_INFO_REM = 5.375
+const LIBRARY_CARD_INFO_REM = 3.5
 const LIBRARY_CARD_BORDER_PX = 2
 
 const AUTO_COLUMNS: Record<GridDensityPreference, ColumnConfig> = {

@@ -20,9 +20,9 @@ import {
   getLibraryGridGap,
 } from '@/lib/libraryLayout'
 
-// Measured info block: p-2.5 (20) + 2-line title (~39) + gap-1.5 (6)
-// + rating/pages row (~20) = ~85px. The reserve must be at least this.
-const MIN_INFO_RESERVE = 85
+// Info block: p-2 (16) + 1-line title leading-5 (20) + gap-1 (4)
+// + rating/pages row h-4 (16) = 56px. The reserve must be at least this.
+const MIN_INFO_RESERVE = 56
 
 describe('estimateLibraryGridRowHeight', () => {
   it('test_estimate_reserves_full_info_block_height_below_cover', () => {
@@ -47,10 +47,23 @@ describe('estimateLibraryGridRowHeight', () => {
     const coverHeight = cardWidth * (4 / 3)
     const est = estimateLibraryGridRowHeight({ colCount, containerWidth, gap })
 
-    // coverHeight (~201) + info (~85) exceeds the old 280 cap; the cap must not
+    // coverHeight (~201) + info (56) exceeds the old 280 cap; the cap must not
     // clip it back down to 280, which would reintroduce the overlap.
-    expect(coverHeight + MIN_INFO_RESERVE).toBeGreaterThan(280)
+    expect(coverHeight + MIN_INFO_RESERVE).toBeGreaterThan(200)
     expect(est).toBeGreaterThanOrEqual(coverHeight + MIN_INFO_RESERVE)
+  })
+
+  it('test_estimate_does_not_reserve_an_empty_second_title_line_below_one_line_titles', () => {
+    // The card title is one truncated line. Reserving a second line (~20px) left a
+    // blank band under every card on top of the grid gap.
+    const gap = 12
+    const colCount = 4
+    const containerWidth = 640
+    const cardWidth = (containerWidth - gap * (colCount - 1)) / colCount
+    const coverHeight = cardWidth * (4 / 3)
+    const est = estimateLibraryGridRowHeight({ colCount, containerWidth, gap })
+
+    expect(est - coverHeight).toBeLessThan(MIN_INFO_RESERVE + 2 + 1)
   })
 })
 
@@ -60,8 +73,8 @@ describe('estimateLibraryGridRowHeight text reserve and the root font size', () 
   })
 
   it('test_estimate_is_unchanged_at_a_16px_root_font', () => {
-    // Tallest card at a 16px root: 179.333 cover + 86 text + 2 border = 267.333.
-    expect(estimateLibraryGridRowHeight({ colCount: 8, containerWidth: 1160, gap: 12 })).toBe(268)
+    // Tallest card at a 16px root: 179.333 cover + 56 text + 2 border = 237.333.
+    expect(estimateLibraryGridRowHeight({ colCount: 8, containerWidth: 1160, gap: 12 })).toBe(238)
   })
 
   it('test_estimate_reserve_grows_with_a_20_8px_root_font_so_larger_text_does_not_overlap_next_row', () => {
@@ -69,9 +82,9 @@ describe('estimateLibraryGridRowHeight text reserve and the root font size', () 
     document.documentElement.style.fontSize = '20.8px'
 
     // The info text is rem-based and grows with the root font, so the reserve
-    // must too: 179.333 cover + 5.375rem (111.8) + 2px border = 293.133. A fixed
-    // 88px reserve returns 268 here and the next row covers this card.
-    const tallestCard = 179.333 + 5.375 * 20.8 + 2
+    // must too: 179.333 cover + 3.5rem (72.8) + 2px border = 254.133. A fixed
+    // 58px reserve returns 238 here and the next row covers this card.
+    const tallestCard = 179.333 + 3.5 * 20.8 + 2
     const est = estimateLibraryGridRowHeight(layout)
 
     expect(est).toBeGreaterThanOrEqual(tallestCard)
@@ -82,7 +95,7 @@ describe('estimateLibraryGridRowHeight text reserve and the root font size', () 
     const layout = { colCount: 8, containerWidth: 1160, gap: 12 }
     document.documentElement.style.fontSize = '12.8px'
 
-    const tallestCard = 179.333 + 5.375 * 12.8 + 2
+    const tallestCard = 179.333 + 3.5 * 12.8 + 2
     const est = estimateLibraryGridRowHeight(layout)
 
     expect(est).toBeGreaterThanOrEqual(tallestCard)

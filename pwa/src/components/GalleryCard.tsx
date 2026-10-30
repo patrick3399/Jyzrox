@@ -173,6 +173,9 @@ export function LibraryGalleryCard({
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
   const sourceStyle = getSourceStyle(gallery)
+  const title = gallery.title || gallery.title_jpn
+  // Most library galleries are unrated: show a compact "★4" only when there is one.
+  const rating = Math.round(gallery.my_rating ?? gallery.rating ?? 0)
 
   const contextItems = useMemo(() => {
     if (!menuOpen) return []
@@ -305,15 +308,26 @@ export function LibraryGalleryCard({
           </div>
         </div>
 
-        {/* Info */}
-        <div className="flex flex-col gap-1.5 p-2.5 flex-1">
-          <h3 className="text-vault-text text-sm font-medium line-clamp-2 leading-snug">
-            {gallery.title || gallery.title_jpn}
+        {/* Info: one title line + one meta line, so the card height is a pure
+            function of its width (estimateLibraryGridRowHeight reserves exactly this) */}
+        <div className="flex flex-col gap-1 p-2">
+          <h3
+            className="text-vault-text text-sm font-medium truncate leading-5"
+            title={title}
+          >
+            {title}
           </h3>
 
-          <div className="flex items-center justify-between mt-auto pt-1">
-            <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
-            <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
+          <div className="flex items-center gap-1 h-4 text-xs leading-4">
+            {rating > 0 && (
+              <span
+                className="shrink-0 text-yellow-400 tabular-nums"
+                aria-label={t('common.ratingOf', { rating: String(rating) })}
+              >
+                ★{rating}
+              </span>
+            )}
+            <span className="ml-auto min-w-0 truncate text-vault-text-muted">{gallery.pages}p</span>
           </div>
         </div>
       </article>
