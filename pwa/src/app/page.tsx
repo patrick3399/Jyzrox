@@ -16,6 +16,8 @@ import { loadDashboardConfig, DASHBOARD_LINKS_CONFIG_KEY } from '@/components/Da
 import { passesFeatureFlag } from '@/lib/pageRegistry'
 import { useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 const DISMISSED_KEY = 'dashboard:dismissed_alerts'
 const COMPACT_LINKS_KEY = 'dashboard_compact_links'
@@ -137,7 +139,7 @@ function GalleryThumb({ gallery }: { gallery: Gallery }) {
   )
 }
 
-export default function Dashboard() {
+function DashboardInner() {
   const { connected } = useWsConnection()
 
   const { data: libraryData, isLoading: libraryLoading } = useSWR('dashboard/recent', () =>
@@ -230,11 +232,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
-        </div>
-      </div>
+      <PageHeader title={t('dashboard.title')} spacing="none" />
 
       {/* System Alerts */}
       {alerts.length > 0 && <SystemAlerts alerts={alerts} onDismiss={dismissAlert} />}
@@ -395,5 +393,13 @@ export default function Dashboard() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function Dashboard() {
+  return (
+    <PageContainer>
+      <DashboardInner />
+    </PageContainer>
   )
 }

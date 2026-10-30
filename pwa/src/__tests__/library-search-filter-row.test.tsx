@@ -118,8 +118,8 @@ describe('Library header', () => {
     render(<LibraryPage />)
 
     const heading = screen.getByRole('heading', { name: 'library.title' })
-    const header = heading.parentElement?.parentElement as HTMLElement
-    expect(header).toBeTruthy()
+    const header = heading.closest('header') as HTMLElement
+    expect(header).not.toBeNull()
     expect(within(header).getByTitle('browse.gridView')).toBeInTheDocument()
     expect(within(header).getByTitle('browse.listView')).toBeInTheDocument()
     const select = within(header).getByRole('button', { name: 'library.select' })

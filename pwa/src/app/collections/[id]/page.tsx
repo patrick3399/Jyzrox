@@ -13,6 +13,7 @@ import { Pagination } from '@/components/Pagination'
 import { t } from '@/lib/i18n'
 import { galleryHref } from '@/lib/galleryRoutes'
 import { useLocale } from '@/components/LocaleProvider'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 const PAGE_LIMIT = 24
 
@@ -242,6 +243,7 @@ function CollectionDetailInner() {
 
 export default function CollectionDetailPage() {
   return (
+    <PageContainer>
     <Suspense
       fallback={
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -251,5 +253,6 @@ export default function CollectionDetailPage() {
     >
       <CollectionDetailInner />
     </Suspense>
+    </PageContainer>
   )
 }

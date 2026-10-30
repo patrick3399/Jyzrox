@@ -2,8 +2,9 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { PageContainer } from '@/components/layout/PageContainer'
 
-export default function PixivFollowingPage() {
+function PixivFollowingPageInner() {
   const router = useRouter()
 
   useEffect(() => {
@@ -11,4 +12,12 @@ export default function PixivFollowingPage() {
   }, [router])
 
   return null
+}
+
+export default function PixivFollowingPage() {
+  return (
+    <PageContainer>
+      <PixivFollowingPageInner />
+    </PageContainer>
+  )
 }

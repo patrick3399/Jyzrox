@@ -35,6 +35,8 @@ import {
 import { libraryFilterChips, type LibraryFilterChipKey } from '@/lib/libraryFilterChips'
 import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
 import { useScrollReveal } from '@/hooks/useScrollReveal'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -496,50 +498,47 @@ function LibraryContent() {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <h1 className="text-2xl font-bold">{t('library.title')}</h1>
-          {total !== null && (
-            <span className="text-sm text-vault-text-muted whitespace-nowrap">
-              {`${formatNumber(total)} ${t('library.galleries')}`}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* View mode toggle */}
-          <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
+      <PageHeader
+        spacing="dense"
+        title={t('library.title')}
+        meta={total !== null ? `${formatNumber(total)} ${t('library.galleries')}` : undefined}
+        actions={
+          <>
+            {/* View mode toggle */}
+            <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
+              <button
+                onClick={() => handleViewModeChange('grid')}
+                title={t('browse.gridView')}
+                className={`px-3 py-2 transition-colors ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                onClick={() => handleViewModeChange('list')}
+                title={t('browse.listView')}
+                className={`px-3 py-2 transition-colors ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+              >
+                <List size={15} />
+              </button>
+            </div>
             <button
-              onClick={() => handleViewModeChange('grid')}
-              title={t('browse.gridView')}
-              className={`px-3 py-2 transition-colors ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+              type="button"
+              aria-pressed={selectMode}
+              onClick={() => {
+                setSelectMode(!selectMode)
+                setSelectedIds(new Set())
+              }}
+              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                selectMode
+                  ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
+                  : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent'
+              }`}
             >
-              <LayoutGrid size={15} />
+              {t('library.select')}
             </button>
-            <button
-              onClick={() => handleViewModeChange('list')}
-              title={t('browse.listView')}
-              className={`px-3 py-2 transition-colors ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
-            >
-              <List size={15} />
-            </button>
-          </div>
-          <button
-            type="button"
-            aria-pressed={selectMode}
-            onClick={() => {
-              setSelectMode(!selectMode)
-              setSelectedIds(new Set())
-            }}
-            className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-              selectMode
-                ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
-                : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent'
-            }`}
-          >
-            {t('library.select')}
-          </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div ref={searchSentinelRef} aria-hidden="true" />
       <div
@@ -1156,8 +1155,10 @@ function LibraryContent() {
 
 export default function LibraryPage() {
   return (
-    <Suspense fallback={<SkeletonGrid />}>
-      <LibraryContent />
-    </Suspense>
+    <PageContainer>
+      <Suspense fallback={<SkeletonGrid />}>
+        <LibraryContent />
+      </Suspense>
+    </PageContainer>
   )
 }

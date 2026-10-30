@@ -50,6 +50,8 @@ import type {
   JobListParams,
   MediaPolicy,
 } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // Module-level so the SWR key stays referentially stable across renders.
 const MANUAL_JOBS_PARAMS: JobListParams = { exclude_subscription: true }
@@ -584,7 +586,7 @@ function DownloadPreviewPanel({ preview }: { preview: DownloadPreview }) {
   )
 }
 
-export default function QueuePage() {
+function QueuePageInner() {
   const [urlInput, setUrlInput] = useState('')
   const [sitesOpen, setSitesOpen] = useState(false)
   const [debouncedUrl, setDebouncedUrl] = useState('')
@@ -853,7 +855,7 @@ export default function QueuePage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">{t('queue.title')}</h1>
+      <PageHeader title={t('queue.title')} />
 
       {/* Add Download Form */}
       <div className="bg-vault-card border border-vault-border rounded-lg p-4 mb-6">
@@ -1126,5 +1128,13 @@ export default function QueuePage() {
         />
       )}
     </div>
+  )
+}
+
+export default function QueuePage() {
+  return (
+    <PageContainer>
+      <QueuePageInner />
+    </PageContainer>
   )
 }

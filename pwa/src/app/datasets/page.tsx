@@ -9,6 +9,8 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useCreateDataset, useDatasets, useDeleteDataset } from '@/hooks/useDatasets'
 import { parseDatasetIds } from '@/lib/datasets'
 import { t } from '@/lib/i18n'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 function DatasetsPageInner() {
   useLocale()
@@ -72,19 +74,20 @@ function DatasetsPageInner() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-vault-text">{t('datasets.title')}</h1>
-          <p className="mt-1 text-sm text-vault-text-secondary">{t('datasets.subtitle')}</p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-vault-accent-fg transition-colors hover:bg-vault-accent-hover"
-        >
-          <Plus size={16} />
-          {t('datasets.create')}
-        </button>
-      </div>
+      <PageHeader
+        spacing="none"
+        title={t('datasets.title')}
+        subtitle={t('datasets.subtitle')}
+        actions={
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-vault-accent-fg transition-colors hover:bg-vault-accent-hover"
+          >
+            <Plus size={16} />
+            {t('datasets.create')}
+          </button>
+        }
+      />
 
       {showCreate && (
         <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-4">
@@ -220,14 +223,16 @@ function DatasetsPageInner() {
 
 export default function DatasetsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <LoadingSpinner size="lg" />
-        </div>
-      }
-    >
-      <DatasetsPageInner />
-    </Suspense>
+    <PageContainer>
+      <Suspense
+        fallback={
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <LoadingSpinner size="lg" />
+          </div>
+        }
+      >
+        <DatasetsPageInner />
+      </Suspense>
+    </PageContainer>
   )
 }

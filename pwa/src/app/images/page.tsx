@@ -17,6 +17,8 @@ import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { Heart } from 'lucide-react'
 import type { BrowseImage } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 function sourceDisplayName(value: string): string {
   const STATIC: Record<string, string> = {
@@ -32,9 +34,11 @@ function sourceDisplayName(value: string): string {
 
 export default function ImageBrowserPage() {
   return (
+    <PageContainer>
     <Suspense>
       <ImageBrowserInner />
     </Suspense>
+    </PageContainer>
   )
 }
 
@@ -386,7 +390,7 @@ function ImageBrowserInner() {
       className="hide-scrollbar fixed inset-0 lg:left-56 bottom-[calc(4rem+var(--sab))] lg:bottom-0 bg-vault-bg text-vault-text"
     >
       <div className="px-4 lg:px-6 xl:px-8 py-6 pt-[calc(1.5rem+var(--sat)/2)] lg:pt-6">
-        <h1 className="text-2xl font-bold mb-4">{t('images.title')}</h1>
+        <PageHeader title={t('images.title')} />
 
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-2 mb-4">

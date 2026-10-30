@@ -27,6 +27,7 @@ import { ehentaiBrowseAdapter, ehFavoritePatch, isEhGallery } from '@/lib/browse
 import { TagSearchPopover } from '@/components/TagSearchPopover'
 import useSWR from 'swr'
 import type { EhGallery } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 // ── Preview grid with scaled sprite offsets ─────────────────────────────
 
@@ -223,9 +224,11 @@ function formatDate(unix: number) {
 
 export default function EhGalleryDetailPage() {
   return (
+    <PageContainer>
     <Suspense>
       <EhGalleryDetail />
     </Suspense>
+    </PageContainer>
   )
 }
 

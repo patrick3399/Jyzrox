@@ -15,6 +15,8 @@ import { AppImage } from '@/components/AppImage'
 import { getSourceStyle } from '@/lib/galleryUtils'
 import { useInfiniteFollowedArtists, useCheckArtistUpdates } from '@/hooks/useFollowedArtists'
 import { toast } from 'sonner'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // Column count inferred from CSS breakpoints:
 // grid-cols-3 sm:4 md:5 lg:7 xl:8 2xl:10
@@ -119,7 +121,7 @@ function ArtistsPageInner() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-vault-text">{t('artists.title')}</h1>
+      <PageHeader title={t('artists.title')} spacing="none" />
 
       {/* View Mode Tabs */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -351,6 +353,7 @@ function ArtistsPageInner() {
 
 export default function ArtistsPage() {
   return (
+    <PageContainer>
     <Suspense
       fallback={
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -360,5 +363,6 @@ export default function ArtistsPage() {
     >
       <ArtistsPageInner />
     </Suspense>
+    </PageContainer>
   )
 }

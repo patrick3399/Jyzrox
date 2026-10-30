@@ -25,6 +25,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import type { PixivIllust, PixivSearchResult } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 type UserTab = 'works' | 'bookmarks'
 
@@ -111,7 +112,7 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
   )
 }
 
-export default function UserProfilePage({ params }: { params: Promise<{ id: string }> }) {
+function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
   useLocale()
   const router = useRouter()
   const { id } = use(params)
@@ -546,5 +547,13 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
         </div>
       )}
     </div>
+  )
+}
+
+export default function UserProfilePage(props: Parameters<typeof UserProfilePageInner>[0]) {
+  return (
+    <PageContainer>
+      <UserProfilePageInner {...props} />
+    </PageContainer>
   )
 }

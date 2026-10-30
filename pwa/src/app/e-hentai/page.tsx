@@ -53,6 +53,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import type { EhGallery, SavedSearch, TagItem } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 function SearchAutocompleteDropdown({
   suggestions,
@@ -188,9 +189,11 @@ function getInitialViewMode(): ViewMode {
 
 export default function BrowsePageWrapper() {
   return (
+    <PageContainer>
     <Suspense>
       <BrowsePage />
     </Suspense>
+    </PageContainer>
   )
 }
 

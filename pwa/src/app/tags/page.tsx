@@ -10,8 +10,10 @@ import type { TagItem } from '@/lib/types'
 import { useProfile } from '@/hooks/useProfile'
 import TagHealthPanel from '@/components/TagHealthPanel'
 import TagTranslationsPanel from '@/components/TagTranslationsPanel'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
-export default function TagsPage() {
+function TagsPageInner() {
   const { data: profile } = useProfile()
   const isAdmin = profile?.role === 'admin'
   const [tab, setTab] = useState<'browse' | 'translations' | 'health'>('browse')
@@ -170,7 +172,7 @@ export default function TagsPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold mb-6">{t('tags.title')}</h1>
+      <PageHeader title={t('tags.title')} />
 
       <div className="mb-6 flex bg-vault-input border border-vault-border rounded overflow-hidden w-fit">
         <button
@@ -518,5 +520,13 @@ export default function TagsPage() {
         </>
       )}
     </>
+  )
+}
+
+export default function TagsPage() {
+  return (
+    <PageContainer>
+      <TagsPageInner />
+    </PageContainer>
   )
 }

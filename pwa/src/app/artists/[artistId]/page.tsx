@@ -16,6 +16,7 @@ import { galleryHref } from '@/lib/galleryRoutes'
 import { useLocale } from '@/components/LocaleProvider'
 import { useFollowedArtists, useFollowArtist, useUnfollowArtist, usePatchFollow } from '@/hooks/useFollowedArtists'
 import { toast } from 'sonner'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 function getGalleryColCount() {
   if (typeof window === 'undefined') return 4
@@ -39,7 +40,7 @@ const SOURCE_COLORS: Record<string, string> = {
 const GALLERY_PAGE_SIZE = 48
 const IMAGE_PAGE_SIZE = 40
 
-export default function ArtistDetailPage() {
+function ArtistDetailPageInner() {
   useLocale()
   const router = useRouter()
   const params = useParams()
@@ -364,5 +365,13 @@ export default function ArtistDetailPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function ArtistDetailPage() {
+  return (
+    <PageContainer>
+      <ArtistDetailPageInner />
+    </PageContainer>
   )
 }

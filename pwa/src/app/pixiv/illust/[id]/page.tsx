@@ -24,8 +24,9 @@ import {
 import { detailHotkey } from '@/lib/detailHotkeys'
 import { smartBack } from '@/lib/navBack'
 import DOMPurify from 'dompurify'
+import { PageContainer } from '@/components/layout/PageContainer'
 
-export default function IllustDetailPage({ params }: { params: Promise<{ id: string }> }) {
+function IllustDetailPageInner({ params }: { params: Promise<{ id: string }> }) {
   useLocale()
   const { id } = use(params)
   const illustId = parseInt(id, 10)
@@ -321,5 +322,13 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
     </div>
+  )
+}
+
+export default function IllustDetailPage(props: Parameters<typeof IllustDetailPageInner>[0]) {
+  return (
+    <PageContainer>
+      <IllustDetailPageInner {...props} />
+    </PageContainer>
   )
 }

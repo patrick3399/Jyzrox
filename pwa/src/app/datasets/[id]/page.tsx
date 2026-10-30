@@ -30,6 +30,7 @@ import { parseDatasetIds } from '@/lib/datasets'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import type { DatasetFilterConfig, DatasetFilterReport } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 const PAGE_LIMIT = 48
 
@@ -651,6 +652,7 @@ function DatasetDetailInner() {
 
 export default function DatasetDetailPage() {
   return (
+    <PageContainer>
     <Suspense
       fallback={
         <div className="flex min-h-[60vh] items-center justify-center">
@@ -660,5 +662,6 @@ export default function DatasetDetailPage() {
     >
       <DatasetDetailInner />
     </Suspense>
+    </PageContainer>
   )
 }

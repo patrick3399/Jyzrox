@@ -10,6 +10,8 @@ import { AppImage } from '@/components/AppImage'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import type { Collection } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 interface CollectionCardProps {
   collection: Collection
@@ -218,8 +220,10 @@ function CollectionsPageInner() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-vault-text">{t('collections.title')}</h1>
+      <PageHeader
+        spacing="none"
+        title={t('collections.title')}
+        actions={
         <button
           onClick={() => setShowCreate(true)}
           className="flex items-center gap-1.5 px-3 py-2 bg-vault-accent hover:bg-vault-accent-hover text-vault-accent-fg text-sm font-medium rounded-lg transition-colors"
@@ -227,7 +231,8 @@ function CollectionsPageInner() {
           <Plus size={16} />
           {t('collections.create')}
         </button>
-      </div>
+        }
+      />
 
       {/* Create form */}
       {showCreate && (
@@ -326,6 +331,7 @@ function CollectionsPageInner() {
 
 export default function CollectionsPage() {
   return (
+    <PageContainer>
     <Suspense
       fallback={
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -335,5 +341,6 @@ export default function CollectionsPage() {
     >
       <CollectionsPageInner />
     </Suspense>
+    </PageContainer>
   )
 }

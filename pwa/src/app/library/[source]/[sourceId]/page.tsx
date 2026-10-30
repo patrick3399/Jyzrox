@@ -51,6 +51,7 @@ import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { estimateGalleryThumbRowHeight } from '@/lib/gridRowHeight'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 const DOWNLOAD_REFRESH_INTERVAL_MS = 3000
 
@@ -107,7 +108,7 @@ const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: stri
   },
 }
 
-export default function GalleryDetailPage() {
+function GalleryDetailPageInner() {
   const params = useParams<{ source: string; sourceId: string }>()
   const router = useRouter()
   const source = decodeRouteSegment(params?.source)
@@ -1681,5 +1682,13 @@ export default function GalleryDetailPage() {
         <LazySauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
       )}
     </div>
+  )
+}
+
+export default function GalleryDetailPage() {
+  return (
+    <PageContainer>
+      <GalleryDetailPageInner />
+    </PageContainer>
   )
 }

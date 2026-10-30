@@ -41,6 +41,7 @@ import { t } from '@/lib/i18n'
 import type { PixivIllust, PixivUserPreview } from '@/lib/types'
 import { useLocale } from '@/components/LocaleProvider'
 import { toast } from 'sonner'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 const SORT_OPTIONS = [
   { value: 'date_desc', label: () => t('pixiv.sortDateDesc') },
@@ -1157,6 +1158,7 @@ function PixivPageInner() {
 
 export default function PixivPage() {
   return (
+    <PageContainer>
     <Suspense
       fallback={
         <div className="flex min-h-[60vh] items-center justify-center">
@@ -1166,5 +1168,6 @@ export default function PixivPage() {
     >
       <PixivPageInner />
     </Suspense>
+    </PageContainer>
   )
 }
