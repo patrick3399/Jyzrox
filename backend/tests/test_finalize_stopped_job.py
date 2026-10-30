@@ -72,14 +72,16 @@ async def test_finalize_stopped_job_finishes_paused_job_without_execution(db_ses
     ctx["redis"].delete.assert_awaited_once()  # stop flag + pause flag cleared
 
 
-async def test_finalize_stopped_job_boundary_falls_back_to_stop_time_for_a_job_that_never_started(db_session, env):
+async def test_finalize_stopped_job_that_never_started_leaves_the_boundary_alone(db_session, env):
+    """A queued incremental check stopped before it ran fetched nothing: moving the boundary to the stop
+    click would give up every post since the last check for good."""
     from worker.download_stop import finalize_stopped_job
 
-    job = await add_job(db_session, status="queued", mode="subscription_initial", stop_requested_at=STOP_AT)
+    job = await add_job(db_session, status="queued", mode="subscription_incremental", stop_requested_at=STOP_AT)
 
     await finalize_stopped_job(_ctx(), str(job.id))
 
-    assert env.set_sub.await_args.kwargs["boundary"].replace(tzinfo=None) == STOP_AT.replace(tzinfo=None)
+    env.set_sub.assert_awaited_once_with(str(job.id), "stopped", boundary=None)
 
 
 async def test_finalize_stopped_job_second_delivery_is_ignored(db_session, env):

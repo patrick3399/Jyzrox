@@ -640,6 +640,23 @@ async def cancel_job(
         except StopNotAllowed as exc:
             raise HTTPException(status_code=400, detail=f"Cannot cancel: status={exc.status}") from exc
 
+    # Decide in the database, not from the snapshot above: a worker (or a stop's
+    # keep path, which claims the job `done` before keeping it) may have ended the
+    # job since. The row lock this UPDATE takes is held until the commit below, so
+    # a concurrent claim waits and then matches nothing.
+    cancelled = (
+        await db.execute(
+            update(DownloadJob)
+            .where(DownloadJob.id == job_id, DownloadJob.status.in_(ACTIVE_JOB_STATUSES))
+            .values(status="cancelled")
+            .returning(DownloadJob.id)
+        )
+    ).first()
+    if cancelled is None:
+        await db.rollback()
+        current = (await db.execute(select(DownloadJob.status).where(DownloadJob.id == job_id))).scalar_one_or_none()
+        raise HTTPException(status_code=400, detail=f"Cannot cancel: status={current}")
+
     # Kill the subprocess if it is running or paused
     redis = get_redis()
     pid_bytes = await redis.get(f"download:pid:{job_id}")
@@ -663,7 +680,6 @@ async def cancel_job(
     # Also set Redis cancel flag for native downloads (no PID)
     await redis.setex(f"download:cancel:{job_id}", 3600, "1")
 
-    job.status = "cancelled"
     await db.commit()
     from core.events import EventType, emit_safe
 

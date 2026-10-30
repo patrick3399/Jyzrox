@@ -22,22 +22,12 @@ from core.events import EventType, emit_safe
 from core.redis_client import publish_job_event
 from db.models import DownloadJob, Gallery
 from services.download_mode import REPAIR, effective_mode
+from services.download_stop import run_started_at
 from worker.constants import logger
 from worker.download import _import_staged_leftovers, _set_subscription_result
 from worker.helpers import _set_job_progress
 
 _ACTIVE_STATUSES = ("queued", "paused", "running")
-
-
-def _parse_started_at(progress: dict | None) -> datetime | None:
-    raw = (progress or {}).get("started_at")
-    if not isinstance(raw, str):
-        return None
-    try:
-        started = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    return started if started.tzinfo is not None else started.replace(tzinfo=UTC)
 
 
 def _collection_lock_key(row) -> str | None:
@@ -154,9 +144,8 @@ async def finalize_stopped_job(ctx: dict, db_job_id: str) -> dict:
             return {"status": "ignored"}
 
         progress = dict(row.progress or {})
-        boundary = _parse_started_at(progress) or row.stop_requested_at
-        if boundary.tzinfo is None:
-            boundary = boundary.replace(tzinfo=UTC)
+        # The run's own start; a job that never ran has none and leaves the boundary alone.
+        boundary = run_started_at(progress)
         done_progress = {**progress, "outcome": "stopped", "status_text": "Stopped", "gdl_state": "done"}
         await session.execute(
             update(DownloadJob)
@@ -185,6 +174,7 @@ async def finalize_stopped_job(ctx: dict, db_job_id: str) -> dict:
     mode = effective_mode(row.mode if isinstance(row.mode, str) else None, options)
 
     # ── 2. Subscription boundary ────────────────────────────────────────
+    # boundary=None still records the stopped status but never moves the cutoff.
     # Before the gallery work: it is quick, and a timeout or cancellation inside
     # the keep below must not leave the boundary unmoved for good (the job is
     # already `done`, so nothing would ever run this again).

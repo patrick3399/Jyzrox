@@ -126,6 +126,86 @@ async def _set_stop_flag(job_id: uuid.UUID | str, *, best_effort: bool = False) 
         logger.warning("[download_stop] could not re-assert stop flag for %s: %s", job_id, exc)
 
 
+def run_started_at(progress: dict | None) -> datetime | None:
+    """Start of the job's last execution from its persisted progress, or None if it never ran.
+
+    This is a stopped subscription's boundary. A job that never ran has no run
+    start, so its stop leaves the boundary alone: moving it to the click time
+    would give up every post since the last check without fetching any of them.
+    """
+    raw = (progress or {}).get("started_at")
+    if not isinstance(raw, str):
+        return None
+    try:
+        started = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return started if started.tzinfo is not None else started.replace(tzinfo=UTC)
+
+
+async def claim_stop_finish(job_id: str) -> str:
+    """End a stop-requested active job ``done`` before its keep path touches the gallery.
+
+    One conditional UPDATE decides the cancel/stop race: ``cancel_job`` writes
+    ``cancelled`` with the same active-status condition, so whichever commits
+    first wins and the other matches no row. Before this claim a cancel still
+    discards the run; after it a cancel is refused and the run is kept.
+
+    Returns ``"claimed"``, or the job's current status (``"cancelled"``,
+    ``"done"``, ...), or ``"missing"``.
+    """
+    from core.redis_client import publish_job_event
+
+    job_uuid = uuid.UUID(str(job_id))
+    async with AsyncSessionLocal() as session:
+        current = (
+            await session.execute(
+                select(DownloadJob.status, DownloadJob.progress, DownloadJob.user_id).where(DownloadJob.id == job_uuid)
+            )
+        ).one_or_none()
+        if current is None:
+            return "missing"
+        progress = {
+            **(current.progress or {}),
+            "outcome": "stopped",
+            "status_text": "Stopped",
+            "gdl_state": "done",
+        }
+        claimed = (
+            await session.execute(
+                update(DownloadJob)
+                .where(
+                    DownloadJob.id == job_uuid,
+                    DownloadJob.status.in_(_STOPPABLE_STATUSES),
+                    DownloadJob.stop_requested_at.is_not(None),
+                )
+                .values(status="done", finished_at=datetime.now(UTC), error=None, progress=progress)
+                .returning(DownloadJob.id)
+            )
+        ).first()
+        if claimed is None:
+            await session.rollback()
+            status = (
+                await session.execute(select(DownloadJob.status).where(DownloadJob.id == job_uuid))
+            ).scalar_one_or_none()
+            return status or "missing"
+        await session.commit()
+
+    try:
+        await publish_job_event(
+            {
+                "type": "job_update",
+                "job_id": str(job_id),
+                "status": "done",
+                "progress": progress,
+                "user_id": current.user_id,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 - the WS update is best effort
+        logger.debug("[download_stop] job_update publish failed for %s: %s", job_id, exc)
+    return "claimed"
+
+
 async def read_stop_intent(job_id: str) -> str | None:
     """Authoritative intent from the DB: ``"cancel"``, ``"stop"`` or ``None``.
 

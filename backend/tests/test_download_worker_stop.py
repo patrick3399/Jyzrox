@@ -38,6 +38,13 @@ def _importer(*, gallery_id=42, success=3, trashed=False):
     return imp
 
 
+async def _db_status(factory, job_id):
+    from db.models import DownloadJob
+
+    async with factory() as s:
+        return (await s.get(DownloadJob, job_id)).status
+
+
 def _result(status, downloaded=2, error=None):
     return MagicMock(status=status, downloaded=downloaded, total=downloaded, error=error, failed_pages=[])
 
@@ -133,7 +140,7 @@ async def test_stopped_result_keeps_gallery_and_finishes_done(db_session, db_ses
     imp.finalize_kept.assert_awaited_once_with(h.target_dir, mode=mode)
     imp.cleanup.assert_not_awaited()
     imp.abort.assert_not_awaited()
-    h.set_status.assert_awaited_with(str(job.id), "done")
+    assert await _db_status(db_session_factory, job.id) == "done"  # claimed before the gallery was kept
     progress = h.set_progress.await_args_list[-1].args[1]
     assert progress["outcome"] == "stopped"
     assert progress["status_text"] == "Stopped — kept 3"
@@ -173,8 +180,8 @@ async def test_stop_with_failed_result_still_keeps(db_session, db_session_factor
     assert h.outcome["outcome"] == "stopped"
     imp.finalize_kept.assert_awaited_once()
     imp.abort.assert_not_awaited()
-    statuses = [c.args[1] for c in h.set_status.await_args_list]
-    assert "failed" not in statuses and statuses[-1] == "done"
+    assert "failed" not in [c.args[1] for c in h.set_status.await_args_list]
+    assert await _db_status(db_session_factory, job.id) == "done"
     assert all(c.args[1] != "failed" for c in h.set_sub.await_args_list)
 
 
@@ -271,17 +278,16 @@ async def test_stop_with_no_gallery_discards_unlinked_archive_rows(db_session, d
     h.emit.assert_not_awaited()
 
 
-async def test_keep_path_failure_hands_job_to_finalize_stopped_job():
-    """If the keep path itself breaks, the job must not be left running: the detached task redoes it."""
+async def test_keep_path_failure_before_the_claim_hands_job_to_finalize_stopped_job():
+    """If the keep path breaks while the job is still active, it must not be left running: the detached task redoes it."""
     from worker.download import _finish_stopped
 
     imp = _importer()
-    imp.finalize_kept = AsyncMock(side_effect=RuntimeError("db gone"))
     handoff = AsyncMock()
     with (
         patch("worker.download.enqueue_finalize_stopped_job", handoff),
         patch("worker.download._import_staged_leftovers", AsyncMock(return_value=0)),
-        patch("worker.download._is_job_cancelled_in_db", AsyncMock(return_value=False)),
+        patch("worker.download.claim_stop_finish", AsyncMock(side_effect=RuntimeError("db gone"))),
     ):
         out = await _finish_stopped(
             importer=imp,
@@ -292,6 +298,7 @@ async def test_keep_path_failure_hands_job_to_finalize_stopped_job():
             db_job_id="0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
             mode="download",
             started_at=STARTED,
+            boundary=STARTED,
             credentials=None,
             credential_accounts=None,
             result=None,
@@ -299,6 +306,63 @@ async def test_keep_path_failure_hands_job_to_finalize_stopped_job():
 
     assert out["status"] == "stopping"
     handoff.assert_awaited_once_with("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
+    imp.finalize_kept.assert_not_awaited()
+
+
+async def test_keep_failure_after_the_claim_still_moves_the_boundary_and_ends_done(
+    db_session, db_session_factory, tmp_path
+):
+    """Once claimed `done` nothing would redo the boundary, so it moves before the gallery work; a failing keep
+    is aborted for reconciliation instead of being handed to a task that would ignore a finished job."""
+    job = await add_job(db_session, status="running", mode="subscription_incremental")
+    imp = _importer()
+    imp.finalize_kept = AsyncMock(side_effect=RuntimeError("db gone"))
+
+    h = await _run(
+        db_session_factory, tmp_path, job, imp, _stop_during_run(db_session_factory, job, _result("cancelled"))
+    )
+
+    assert h.outcome["outcome"] == "stopped"
+    assert await _db_status(db_session_factory, job.id) == "done"
+    h.set_sub.assert_awaited_once()
+    assert h.set_sub.await_args.args == (str(job.id), "stopped")
+    imp.abort.assert_awaited_once()
+    h.finalize_enqueue.assert_not_awaited()
+
+
+# ── stop before start: boundary of a job that never ran ───────────────────
+
+
+async def test_stop_before_start_of_a_job_that_never_ran_leaves_the_boundary_alone(
+    db_session, db_session_factory, tmp_path
+):
+    """A queued incremental check stopped before it ran fetched nothing; moving the boundary to "now" would
+    silently give up every post since the last check."""
+    job = await add_job(
+        db_session, status="running", mode="subscription_incremental", stop_requested_at=utc(2026, 10, 30, 8, 0)
+    )
+
+    h = await _run(
+        db_session_factory, tmp_path, job, _importer(gallery_id=None), _stop_during_run(db_session_factory, job, None)
+    )
+
+    h.plugin.download.assert_not_awaited()
+    h.set_sub.assert_awaited_once_with(str(job.id), "stopped", boundary=None)
+
+
+async def test_stop_before_start_of_a_resumed_job_uses_the_earlier_run_start(db_session, db_session_factory, tmp_path):
+    """A job that already ran once (recovered/resumed) keeps that run's start as its boundary, not this execution's."""
+    job = await add_job(
+        db_session,
+        status="running",
+        mode="subscription_incremental",
+        stop_requested_at=utc(2026, 10, 30, 8, 0),
+        progress={"started_at": STARTED.isoformat()},
+    )
+
+    h = await _run(db_session_factory, tmp_path, job, _importer(), _stop_during_run(db_session_factory, job, None))
+
+    h.set_sub.assert_awaited_once_with(str(job.id), "stopped", boundary=STARTED)
 
 
 # ── _set_subscription_result: boundary and repair rules ─────────────────

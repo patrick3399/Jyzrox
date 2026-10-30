@@ -198,6 +198,7 @@ async def test_cancel_after_stop_discards(db_session, db_session_factory):
 
     with (
         patch("core.database.AsyncSessionLocal", db_session_factory),
+        patch("services.download_stop.AsyncSessionLocal", db_session_factory),
         patch("worker.download._set_job_status", set_status),
         patch("worker.download._set_subscription_result", set_sub),
         patch("worker.download._import_staged_leftovers", AsyncMock(return_value=0)),
@@ -211,6 +212,7 @@ async def test_cancel_after_stop_discards(db_session, db_session_factory):
             db_job_id=str(job.id),
             mode="subscription_incremental",
             started_at=NOW,
+            boundary=NOW,
             credentials=None,
             credential_accounts=None,
             result=None,
@@ -219,7 +221,7 @@ async def test_cancel_after_stop_discards(db_session, db_session_factory):
     assert result == {"status": "cancelled"}
     importer.cleanup.assert_awaited_once()
     importer.finalize_kept.assert_not_awaited()
-    set_status.assert_awaited_once_with(str(job.id), "cancelled")
+    set_status.assert_not_awaited()  # the row already says cancelled; nothing rewrites it
     set_sub.assert_awaited_once_with(str(job.id), "cancelled")
 
 
@@ -269,3 +271,86 @@ async def test_stop_with_stale_snapshot_of_finished_job_returns_409(
     assert row.status == "done" and row.stop_requested_at is None
     redis_patched.setex.assert_not_awaited()
     enq.assert_not_awaited()
+
+
+async def test_cancel_with_stale_snapshot_does_not_overwrite_a_finished_job(
+    client, db_session, db_session_factory, enq, redis_patched
+):
+    """The worker (or a stop's keep path) ended the job after the request loaded it: cancel must not turn a
+    kept, `done` run into `cancelled`."""
+    from sqlalchemy import select, update
+
+    from db.models import DownloadJob
+
+    job = await add_job(db_session, status="running", admission_token=uuid.uuid4(), stop_requested_at=NOW)
+    async with db_session_factory() as other:
+        await other.execute(update(DownloadJob).where(DownloadJob.id == job.id).values(status="done"))
+        await other.commit()
+    assert job.status == "running"  # stale snapshot
+
+    resp = await client.delete(f"/api/download/jobs/{job.id}")
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Cannot cancel: status=done"
+    async with db_session_factory() as check:
+        assert (await check.execute(select(DownloadJob.status))).scalar_one() == "done"
+    redis_patched.setex.assert_not_awaited()
+
+
+async def test_cancel_while_the_keep_path_finalizes_is_refused_and_the_job_stays_done(
+    client, db_session, db_session_factory, enq, redis_patched
+):
+    """Stop, then cancel while the worker is keeping the gallery. The keep path claimed the job first, so the
+    cancel is refused: the job must not end `cancelled` with a kept gallery (or `done` after a cancel)."""
+    from sqlalchemy import select
+
+    from db.models import DownloadJob
+    from worker.download import _finish_stopped
+
+    job = await add_job(db_session, status="running", admission_token=uuid.uuid4(), stop_requested_at=NOW)
+    cancel_codes: list[int] = []
+
+    async def _finalize_kept(*_args, **_kwargs):
+        cancel_codes.append((await client.delete(f"/api/download/jobs/{job.id}")).status_code)
+        return 5
+
+    importer = MagicMock()
+    importer.gallery_id = 5
+    importer.skipped_trashed = False
+    importer.title = None
+    importer.import_failures = ()
+    importer.import_success_count = 1
+    importer.skipped_duplicate_count = importer.skipped_excluded_count = importer.skipped_invalid_count = 0
+    importer.cleanup = AsyncMock()
+    importer.finalize_kept = AsyncMock(side_effect=_finalize_kept)
+
+    with (
+        patch("core.database.AsyncSessionLocal", db_session_factory),
+        patch("services.download_stop.AsyncSessionLocal", db_session_factory),
+        patch("worker.helpers.AsyncSessionLocal", db_session_factory),
+        patch("worker.download._set_subscription_result", AsyncMock()),
+        patch("worker.download._import_staged_leftovers", AsyncMock(return_value=0)),
+        patch("worker.download._writeback_cookies", AsyncMock()),
+        patch("worker.download.emit_safe", AsyncMock()),
+    ):
+        result = await _finish_stopped(
+            importer=importer,
+            target_dir=MagicMock(),
+            url=job.url,
+            plugin=MagicMock(),
+            on_file=AsyncMock(),
+            db_job_id=str(job.id),
+            mode="download",
+            started_at=NOW,
+            boundary=NOW,
+            credentials=None,
+            credential_accounts=None,
+            result=None,
+        )
+
+    assert cancel_codes == [400]
+    assert result["outcome"] == "stopped"
+    importer.cleanup.assert_not_awaited()
+    async with db_session_factory() as check:
+        row = (await check.execute(select(DownloadJob.status, DownloadJob.progress))).one()
+    assert row.status == "done" and row.progress["outcome"] == "stopped"
