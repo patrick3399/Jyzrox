@@ -3,7 +3,7 @@
 import asyncio
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import text
@@ -32,6 +32,7 @@ from services.cas import (
     thumbnails_complete_at,
 )
 from services.gallery_categories import resolve_category
+from services.gallery_lifecycle import invalidate_sources_cache
 from services.link_sync import library_root_available, sync_link_gallery
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_MEDIA_EXTS
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
@@ -51,6 +52,10 @@ class _ImportRequest:
     gallery_id: int
     source_dir: str
     mode: str
+
+
+# How long a link gallery whose folder is gone waits for it before going to trash.
+VANISHED_LINK_GALLERY_GRACE = timedelta(days=30)
 
 
 class _LibraryMoveConflict(RuntimeError):
@@ -111,6 +116,72 @@ def _cover_image_for_gallery(
 
 def _has_thumb_160(blob: Blob) -> bool:
     return thumbnails_complete_at(thumb_dir(blob.sha256))
+
+
+def _page_file_exists(img: Image) -> bool:
+    if img.blob is None:
+        return bool(img.external_path) and Path(img.external_path).exists()
+    return resolve_blob_path(img.blob, img.external_path).exists()
+
+
+def _link_source_vanished(gallery: Gallery, images: list[Image]) -> bool:
+    """Return True when a link gallery's folder and every page file are gone.
+
+    From the database this is indistinguishable from a folder renamed while the
+    watcher was not looking, so it must not be treated as a deletion (ADR 0027).
+    Callers have already ruled out an unavailable library root.
+    """
+    if gallery.import_mode != "link" or not gallery.source_path or not images:
+        return False
+    if Path(gallery.source_path).is_dir():
+        return False
+    return not any(_page_file_exists(img) for img in images)
+
+
+def _hold_vanished_link_gallery(gallery: Gallery) -> str | None:
+    """Keep a vanished link gallery intact, trashing it once the grace period ends.
+
+    ``last_scanned_at`` is set when the gallery is first held and then left alone,
+    so it dates the grace period without a new column. Clearing the directory
+    mtime makes the next sync run the full diff that restores the gallery if the
+    folder comes back. Returns ``"held"`` or ``"trashed"`` on a state change.
+    """
+    now = datetime.now(UTC)
+    noticed_at = gallery.last_scanned_at
+    if gallery.download_status != "missing" or noticed_at is None:
+        gallery.download_status = "missing"
+        gallery.source_dir_mtime_ns = None
+        gallery.last_scanned_at = now
+        logger.warning(
+            "[link_source] gallery_id=%d: source %s is gone; keeping the gallery for %d days",
+            gallery.id,
+            gallery.source_path,
+            VANISHED_LINK_GALLERY_GRACE.days,
+        )
+        return "held"
+    if noticed_at.tzinfo is None:
+        noticed_at = noticed_at.replace(tzinfo=UTC)
+    if now - noticed_at < VANISHED_LINK_GALLERY_GRACE:
+        return None
+    gallery.deleted_at = now
+    logger.warning(
+        "[link_source] gallery_id=%d: source %s stayed gone; moved to trash", gallery.id, gallery.source_path
+    )
+    return "trashed"
+
+
+async def _announce_vanished_link_galleries(outcomes: list[tuple[int, str]]) -> None:
+    from core.events import EventType, emit_safe
+
+    for gallery_id, outcome in outcomes:
+        if outcome == "trashed":
+            await emit_safe(EventType.GALLERY_DELETED, resource_type="gallery", resource_id=gallery_id)
+        else:
+            await emit_safe(
+                EventType.GALLERY_UPDATED, resource_type="gallery", resource_id=gallery_id, reason="link_source_missing"
+            )
+    if any(outcome == "trashed" for _, outcome in outcomes):
+        await invalidate_sources_cache()
 
 
 async def _get_library_specs(session, *, monitored_only: bool = False) -> list[_LibrarySpec]:
@@ -331,6 +402,60 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
     return _ImportRequest(gallery_id=gallery_id, source_dir=source_path, mode=spec.import_mode)
 
 
+async def _vanished_link_source_paths(session) -> list[str]:
+    """List the source folders of live link galleries that no longer exist."""
+    rows = (
+        await session.execute(
+            select(Gallery.source_path, Gallery.library_path).where(
+                Gallery.source == "local",
+                Gallery.import_mode == "link",
+                Gallery.source_path.is_not(None),
+                Gallery.deleted_at.is_(None),
+            )
+        )
+    ).all()
+
+    def _scan() -> list[str]:
+        # An unavailable root makes all of its folders look gone; none of them moved.
+        available: dict[str | None, bool] = {}
+        vanished: list[str] = []
+        for source_path, library_path in rows:
+            if library_path not in available:
+                available[library_path] = library_root_available(library_path)
+            if available[library_path] and not os.path.isdir(source_path):
+                vanished.append(source_path)
+        return vanished
+
+    return await asyncio.to_thread(_scan)
+
+
+async def _reconnect_vanished_gallery(
+    ctx: dict, session, directory: Path, vanished: list[str], *, watcher_origin: bool
+) -> dict | None:
+    """Try to attach a newly seen folder to the gallery it was renamed from.
+
+    Returns the job result when the folder is accounted for (moved, or refused
+    because the match is ambiguous), or None when discovery should import it.
+    """
+    if not vanished:
+        return None
+    # The move runs in its own session; publish this one's work before it starts.
+    await session.commit()
+    result = await reconcile_library_path_job(
+        ctx, old_paths=vanished, new_path=str(directory), watcher_origin=watcher_origin
+    )
+    if result.get("status") == "conflict" and result.get("reason") == "content_mismatch":
+        return None
+    if result.get("status") == "moved":
+        logger.info(
+            "[link_source] gallery_id=%s: reconnected %s -> %s",
+            result.get("gallery_id"),
+            result.get("old_path"),
+            result.get("new_path"),
+        )
+    return result
+
+
 async def rescan_library_job(ctx: dict) -> dict:
     """
     Rescan all galleries in the database:
@@ -428,6 +553,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                 galleries_to_delete: list[int] = []
                 galleries_needing_thumbs: list[int] = []
                 galleries_needing_cover_thumbs: list[int] = []
+                vanished_outcomes: list[tuple[int, str]] = []
 
                 for gid in chunk_ids:
                     # The checks below are synchronous filesystem calls. Yield
@@ -452,6 +578,12 @@ async def rescan_library_job(ctx: dict) -> dict:
                             continue
 
                     images = images_by_gallery.get(gid, [])
+                    if _link_source_vanished(gallery, images):
+                        outcome = _hold_vanished_link_gallery(gallery)
+                        if outcome:
+                            vanished_outcomes.append((gid, outcome))
+                        continue
+
                     missing_thumb = False
                     missing_cover_thumb = False
                     removed = 0
@@ -570,6 +702,8 @@ async def rescan_library_job(ctx: dict) -> dict:
 
                 if shas_to_decrement:
                     await cleanup_unreferenced_thumbnails(session, shas_to_decrement)
+                if vanished_outcomes:
+                    await _announce_vanished_link_galleries(vanished_outcomes)
 
                 # Enqueue thumbnail jobs outside the transaction
                 for gid in galleries_needing_cover_thumbs:
@@ -655,8 +789,8 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         if gallery.import_mode == "link" and gallery.source_path and Path(gallery.source_path).is_dir():
             # A link gallery with a live source directory uses the stat-only
             # fingerprint sync (new files become pending pages, hashed later by
-            # link_hash_job). The legacy path below
-            # still handles a source directory that has vanished.
+            # link_hash_job). A vanished source directory continues below, where
+            # it is held unless some page file is still readable.
             await session.rollback()  # release the snapshot before the sync opens its own session
             sync_result = await sync_link_gallery(gallery_id, redis=ctx["redis"], force=True)
             return {
@@ -692,6 +826,19 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             .scalars()
             .all()
         )
+
+        if _link_source_vanished(gallery, images):
+            outcome = _hold_vanished_link_gallery(gallery)
+            await session.commit()
+            if outcome:
+                await _announce_vanished_link_galleries([(gallery_id, outcome)])
+            return {
+                "status": "source_missing",
+                "gallery_id": gallery_id,
+                "removed": 0,
+                "added": 0,
+                "pages": gallery.pages,
+            }
 
         # --- Step 1: Verify existing records ---
         known_sha256s: set[str] = set()
@@ -931,6 +1078,8 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
 
     discovered = 0
     skipped_existing = 0
+    reconnected = 0
+    vanished: list[str] | None = None
     import_requests: list[_ImportRequest] = []
     async with AsyncSessionLocal() as session:
         specs = await _get_library_specs(session, monitored_only=watcher_origin)
@@ -978,6 +1127,17 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
                     skipped_existing += 1
                     continue
 
+                if vanished is None:
+                    vanished = await _vanished_link_source_paths(session)
+                outcome = await _reconnect_vanished_gallery(
+                    ctx, session, current, vanished, watcher_origin=watcher_origin
+                )
+                if outcome is not None:
+                    if outcome.get("status") == "moved":
+                        reconnected += 1
+                        vanished = None
+                    continue
+
                 import_request = await _discover_single_library_dir(session, spec, current)
                 if import_request:
                     discovered += 1
@@ -997,8 +1157,9 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
         )
 
     logger.info(
-        "[auto_discover] Discovered %d new galleries; skipped %d existing galleries",
+        "[auto_discover] Discovered %d new galleries; reconnected %d; skipped %d existing galleries",
         discovered,
+        reconnected,
         skipped_existing,
     )
 
@@ -1223,6 +1384,17 @@ async def move_library_path_job(
                 filenames = [entry.name for entry in destination.iterdir() if entry.is_file()]
                 if _media_count(filenames) == 0:
                     return {"status": "ignored", "reason": "no_media", "new_path": new_real}
+                # The old path may be a stop along the way: an earlier rename of
+                # this folder could have gone unseen.
+                outcome = await _reconnect_vanished_gallery(
+                    ctx,
+                    session,
+                    destination,
+                    await _vanished_link_source_paths(session),
+                    watcher_origin=watcher_origin,
+                )
+                if outcome is not None:
+                    return outcome
                 import_request = await _discover_single_library_dir(session, destination_spec, destination)
                 if import_request is None:
                     await session.rollback()
@@ -1320,6 +1492,8 @@ async def move_library_path_job(
             gallery.source_id = new_source_id
             gallery.source_path = new_real
             gallery.library_path = destination_spec.path
+            if gallery.download_status == "missing":
+                gallery.download_status = "complete"
             await session.commit()
     except _LibraryMoveConflict as exc:
         logger.warning("[move_library_path] refusing %s -> %s: %s", old_real, new_real, exc)
@@ -1387,6 +1561,16 @@ async def rescan_by_path_job(ctx: dict, dir_path: str, watcher_origin: bool = Fa
             except OSError:
                 filenames = []
             if _media_count(filenames) > 0:
+                if matching_specs:
+                    outcome = await _reconnect_vanished_gallery(
+                        ctx,
+                        session,
+                        current,
+                        await _vanished_link_source_paths(session),
+                        watcher_origin=watcher_origin,
+                    )
+                    if outcome is not None:
+                        return outcome
                 for spec in matching_specs:
                     import_request = await _discover_single_library_dir(session, spec, current)
                     if import_request:

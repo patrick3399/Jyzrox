@@ -543,3 +543,269 @@ async def test_cross_root_move_matches_gallery_with_pending_pages(db_session, db
     assert result["status"] == "moved", result
     assert result["gallery_id"] == gallery_id
     assert hashed_paths.count("002.jpg") == 0, "the destination copy of a pending page is not hashed"
+
+
+async def _seed_link_gallery(db_session, root, source_dir, *, status):
+    image = source_dir / "001.jpg"
+    source_id = source_dir.name
+    await db_session.execute(
+        text("INSERT INTO users (username, password_hash, role) VALUES ('missed-user', 'hash', 'admin')")
+    )
+    user_id = (await db_session.execute(text("SELECT id FROM users WHERE username='missed-user'"))).scalar_one()
+    await db_session.execute(
+        text(
+            "INSERT INTO library_paths (path, label, pattern, import_mode, enabled, monitor) "
+            "VALUES (:path, 'root', '{title}', 'link', 1, 1)"
+        ),
+        {"path": str(root)},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, pages, import_mode, library_path, source_path, "
+            "download_status) VALUES ('local', :source_id, 'User title', 1, 'link', :root, :source_path, :status)"
+        ),
+        {"source_id": source_id, "root": str(root), "source_path": str(source_dir), "status": status},
+    )
+    gallery_id = (
+        await db_session.execute(text("SELECT id FROM galleries WHERE source_id=:sid"), {"sid": source_id})
+    ).scalar_one()
+    sha = hashlib.sha256(image.read_bytes()).hexdigest()
+    await db_session.execute(
+        text(
+            "INSERT INTO blobs (sha256, file_size, extension, storage, external_path, ref_count) "
+            "VALUES (:sha, :size, '.jpg', 'external', :path, 1)"
+        ),
+        {"sha": sha, "size": image.stat().st_size, "path": str(image)},
+    )
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :path)"),
+        {"sha": sha, "path": str(image)},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path) "
+            "VALUES (:gallery_id, 1, '001.jpg', :sha, :path)"
+        ),
+        {"gallery_id": gallery_id, "sha": sha, "path": str(image)},
+    )
+    await db_session.execute(
+        text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (:user_id, :gallery_id)"),
+        {"user_id": user_id, "gallery_id": gallery_id},
+    )
+    await db_session.commit()
+    return gallery_id
+
+
+def _missed_move_patches(db_session_factory, library_root):
+    scan_settings = MagicMock(library_monitor_enabled=True, data_library_path=str(library_root))
+    return (
+        patch("worker.scan.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan.get_all_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan.settings", scan_settings),
+        patch("services.cas.settings", MagicMock(data_library_path=str(library_root))),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+        patch("core.queue.enqueue", new_callable=AsyncMock),
+    )
+
+
+@pytest.mark.parametrize("status", ["complete", "missing"], ids=["before-hold", "already-held"])
+async def test_auto_discover_reconnects_folder_rename_the_watcher_missed(
+    status, db_session, db_session_factory, mock_redis, tmp_path
+):
+    from worker.scan import auto_discover_job
+
+    root = tmp_path / "root"
+    old_dir = root / "old-name"
+    old_dir.mkdir(parents=True)
+    (old_dir / "001.jpg").write_bytes(b"missed-move")
+    gallery_id = await _seed_link_gallery(db_session, root, old_dir, status=status)
+    new_dir = root / "new-name"
+    old_dir.rename(new_dir)
+
+    patches = _missed_move_patches(db_session_factory, tmp_path / "library")
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+        result = await auto_discover_job({"redis": mock_redis})
+
+    assert result["discovered"] == 0
+    enqueue.assert_not_awaited()
+    row = (
+        await db_session.execute(
+            text("SELECT source_id, source_path, title, download_status FROM galleries WHERE id=:g"), {"g": gallery_id}
+        )
+    ).one()
+    assert tuple(row) == ("new-name", str(new_dir), "User title", "complete")
+    assert (await db_session.execute(text("SELECT COUNT(*) FROM galleries"))).scalar_one() == 1
+    assert (
+        await db_session.execute(text("SELECT COUNT(*) FROM user_favorites WHERE gallery_id=:g"), {"g": gallery_id})
+    ).scalar_one() == 1
+    image_path = (
+        await db_session.execute(text("SELECT external_path FROM images WHERE gallery_id=:g"), {"g": gallery_id})
+    ).scalar_one()
+    assert image_path == str(new_dir / "001.jpg")
+
+
+async def test_auto_discover_imports_unrelated_folder_while_a_source_is_vanished(
+    db_session, db_session_factory, mock_redis, tmp_path
+):
+    from worker.scan import auto_discover_job
+
+    root = tmp_path / "root"
+    gone_dir = root / "gone"
+    gone_dir.mkdir(parents=True)
+    (gone_dir / "001.jpg").write_bytes(b"gone-content")
+    gallery_id = await _seed_link_gallery(db_session, root, gone_dir, status="complete")
+    (gone_dir / "001.jpg").unlink()
+    gone_dir.rmdir()
+    unrelated = root / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "001.jpg").write_bytes(b"different-longer-content")
+
+    patches = _missed_move_patches(db_session_factory, tmp_path / "library")
+    # The upsert's ON CONFLICT target only exists on Postgres; this test is about what reaches it.
+    discover = AsyncMock(return_value=None)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with patch("worker.scan._discover_single_library_dir", discover):
+            await auto_discover_job({"redis": mock_redis})
+
+    discover.assert_awaited_once()
+    assert discover.await_args.args[2] == unrelated
+    old_source_id = (
+        await db_session.execute(text("SELECT source_id FROM galleries WHERE id=:g"), {"g": gallery_id})
+    ).scalar_one()
+    assert old_source_id == "gone"
+
+
+async def test_auto_discover_skips_folder_matching_two_vanished_galleries(
+    db_session, db_session_factory, mock_redis, tmp_path
+):
+    """Fail closed (ADR 0009): an ambiguous match must not split off a third gallery."""
+    from worker.scan import auto_discover_job
+
+    root = tmp_path / "root"
+    first = root / "first"
+    first.mkdir(parents=True)
+    (first / "001.jpg").write_bytes(b"same-bytes")
+    gallery_id = await _seed_link_gallery(db_session, root, first, status="complete")
+    sha = hashlib.sha256(b"same-bytes").hexdigest()
+    second = root / "second"
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, pages, import_mode, library_path, source_path, "
+            "download_status) VALUES ('local', 'second', 'Twin', 1, 'link', :root, :source_path, 'complete')"
+        ),
+        {"root": str(root), "source_path": str(second)},
+    )
+    twin_id = (await db_session.execute(text("SELECT id FROM galleries WHERE source_id='second'"))).scalar_one()
+    await db_session.execute(
+        text("INSERT INTO blob_locations (blob_sha256, external_path) VALUES (:sha, :path)"),
+        {"sha": sha, "path": str(second / "001.jpg")},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, external_path) "
+            "VALUES (:g, 1, '001.jpg', :sha, :path)"
+        ),
+        {"g": twin_id, "sha": sha, "path": str(second / "001.jpg")},
+    )
+    await db_session.commit()
+    new_dir = root / "renamed"
+    first.rename(new_dir)
+
+    patches = _missed_move_patches(db_session_factory, tmp_path / "library")
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+        result = await auto_discover_job({"redis": mock_redis})
+
+    assert result["discovered"] == 0
+    enqueue.assert_not_awaited()
+    assert (await db_session.execute(text("SELECT COUNT(*) FROM galleries"))).scalar_one() == 2
+    source_id = (
+        await db_session.execute(text("SELECT source_id FROM galleries WHERE id=:g"), {"g": gallery_id})
+    ).scalar_one()
+    assert source_id == "first"
+
+
+async def test_auto_discover_does_not_treat_sources_under_an_empty_root_as_vanished(
+    db_session, db_session_factory, mock_redis, tmp_path
+):
+    """An unmounted root makes every source look gone; nothing there is a rename."""
+    from worker.scan import auto_discover_job
+
+    root = tmp_path / "root"
+    mounted_dir = root / "album"
+    mounted_dir.mkdir(parents=True)
+    (mounted_dir / "001.jpg").write_bytes(b"same-bytes")
+    gallery_id = await _seed_link_gallery(db_session, root, mounted_dir, status="complete")
+    other_root = tmp_path / "other-root"
+    copied = other_root / "album-copy"
+    copied.mkdir(parents=True)
+    (copied / "001.jpg").write_bytes(b"same-bytes")
+    await db_session.execute(
+        text(
+            "INSERT INTO library_paths (path, label, pattern, import_mode, enabled, monitor) "
+            "VALUES (:path, 'other', '{title}', 'link', 1, 1)"
+        ),
+        {"path": str(other_root)},
+    )
+    await db_session.commit()
+    (mounted_dir / "001.jpg").unlink()
+    mounted_dir.rmdir()
+
+    patches = _missed_move_patches(db_session_factory, tmp_path / "library")
+    discover = AsyncMock(return_value=None)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with patch("worker.scan._discover_single_library_dir", discover):
+            await auto_discover_job({"redis": mock_redis})
+
+    discover.assert_awaited_once()
+    assert discover.await_args.args[2] == copied
+    source_id = (
+        await db_session.execute(text("SELECT source_id FROM galleries WHERE id=:g"), {"g": gallery_id})
+    ).scalar_one()
+    assert source_id == "album"
+
+
+async def test_rescan_by_path_reconnects_folder_rename_the_watcher_missed(
+    db_session, db_session_factory, mock_redis, tmp_path
+):
+    """A file event inside the renamed folder must not fork a second gallery."""
+    from worker.scan import rescan_by_path_job
+
+    root = tmp_path / "root"
+    old_dir = root / "old-name"
+    old_dir.mkdir(parents=True)
+    (old_dir / "001.jpg").write_bytes(b"missed-move")
+    gallery_id = await _seed_link_gallery(db_session, root, old_dir, status="complete")
+    new_dir = root / "new-name"
+    old_dir.rename(new_dir)
+
+    patches = _missed_move_patches(db_session_factory, tmp_path / "library")
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+        result = await rescan_by_path_job({"redis": mock_redis}, str(new_dir))
+
+    assert result["status"] == "moved"
+    assert result["gallery_id"] == gallery_id
+    enqueue.assert_not_awaited()
+
+
+async def test_second_rename_after_a_missed_one_reconnects_through_the_move_job(
+    db_session, db_session_factory, mock_redis, tmp_path
+):
+    """A -> B while the worker was down, B -> C once it is back: the job only knows B."""
+    from worker.scan import move_library_path_job
+
+    root = tmp_path / "root"
+    old_dir = root / "first-name"
+    old_dir.mkdir(parents=True)
+    (old_dir / "001.jpg").write_bytes(b"missed-move")
+    gallery_id = await _seed_link_gallery(db_session, root, old_dir, status="complete")
+    final_dir = root / "third-name"
+    old_dir.rename(final_dir)
+
+    patches = _missed_move_patches(db_session_factory, tmp_path / "library")
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+        result = await move_library_path_job({"redis": mock_redis}, str(root / "second-name"), str(final_dir))
+
+    assert result["status"] == "moved"
+    assert result["gallery_id"] == gallery_id
+    enqueue.assert_not_awaited()
