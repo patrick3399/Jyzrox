@@ -45,7 +45,7 @@ describe('useScrollReveal', () => {
     const refs = makeRefs()
     const { result } = renderHook(() => useScrollReveal({ ...refs, locked: false }))
 
-    expect(result.current).toEqual({ stuck: false, hidden: false })
+    expect(result.current).toMatchObject({ stuck: false, hidden: false })
   })
 
   it('test_scrolling_down_past_the_block_hides_it', () => {
@@ -55,7 +55,7 @@ describe('useScrollReveal', () => {
     scrollTo(200)
     scrollTo(400)
 
-    expect(result.current).toEqual({ stuck: true, hidden: true })
+    expect(result.current).toMatchObject({ stuck: true, hidden: true })
   })
 
   it('test_scrolling_up_after_scrolling_down_reveals_the_stuck_block', () => {
@@ -66,7 +66,7 @@ describe('useScrollReveal', () => {
     scrollTo(800)
     scrollTo(760)
 
-    expect(result.current).toEqual({ stuck: true, hidden: false })
+    expect(result.current).toMatchObject({ stuck: true, hidden: false })
   })
 
   it('test_tiny_scroll_jitter_below_the_threshold_does_not_toggle_the_block', () => {
@@ -86,7 +86,7 @@ describe('useScrollReveal', () => {
 
     scrollTo(50)
 
-    expect(result.current).toEqual({ stuck: false, hidden: false })
+    expect(result.current).toMatchObject({ stuck: false, hidden: false })
   })
 
   it('test_locked_block_stays_visible_while_scrolling_down', () => {
@@ -97,7 +97,7 @@ describe('useScrollReveal', () => {
     scrollTo(400)
     scrollTo(800)
 
-    expect(result.current).toEqual({ stuck: true, hidden: false })
+    expect(result.current).toMatchObject({ stuck: true, hidden: false })
   })
 
   it('test_returning_to_the_top_unsticks_and_shows_the_block', () => {
@@ -107,6 +107,47 @@ describe('useScrollReveal', () => {
     scrollTo(800)
     scrollTo(0)
 
-    expect(result.current).toEqual({ stuck: false, hidden: false })
+    expect(result.current).toMatchObject({ stuck: false, hidden: false })
+  })
+
+  it('test_rebase_after_a_large_downward_jump_while_locked_leaves_the_block_visible_once_unlocked', () => {
+    // A layout switch locks the bar, then lands with a programmatic jump down.
+    // Without rebase() the jump is read as the user scrolling down and hides
+    // the bar the moment the lock releases.
+    const refs = makeRefs()
+    const { result, rerender } = renderHook(
+      ({ locked }) => useScrollReveal({ ...refs, locked }),
+      { initialProps: { locked: false } },
+    )
+    scrollTo(300)
+    scrollTo(280)
+    expect(result.current.hidden).toBe(false)
+
+    rerender({ locked: true })
+    scrollTo(5000)
+    act(() => {
+      result.current.rebase()
+    })
+    rerender({ locked: false })
+
+    expect(result.current).toMatchObject({ stuck: true, hidden: false })
+
+    // A later genuine scroll down still hides it: rebase only re-zeroes tracking.
+    scrollTo(5200)
+    expect(result.current.hidden).toBe(true)
+  })
+
+  it('test_without_rebase_the_same_downward_jump_hides_the_block_once_unlocked', () => {
+    // Control for the test above: pins that the jump alone is what hides it.
+    const refs = makeRefs()
+    const { result, rerender } = renderHook(
+      ({ locked }) => useScrollReveal({ ...refs, locked }),
+      { initialProps: { locked: true } },
+    )
+    scrollTo(300)
+    scrollTo(5000)
+    rerender({ locked: false })
+
+    expect(result.current.hidden).toBe(true)
   })
 })

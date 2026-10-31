@@ -2002,6 +2002,9 @@ const ja: Record<string, string> = {
 
   // ── Library filter panel ──
   'library.filters': 'フィルター',
+  'library.viewOptions': '表示オプション',
+  'library.density': '密度',
+  'library.densityFollowSettings': '設定に従う',
   'library.clearAllFilters': 'すべてクリア',
   'library.removeFilter': '{name} を解除',
   'library.titleFilter': 'タイトル',

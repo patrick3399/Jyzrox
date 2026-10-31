@@ -113,15 +113,22 @@ beforeEach(() => {
 })
 
 describe('Library header', () => {
-  it('test_header_holds_view_toggle_and_select_button', () => {
+  it('test_header_holds_select_button_and_count_while_view_toggle_lives_in_the_search_block', () => {
     search.total = 1234
     render(<LibraryPage />)
 
     const heading = screen.getByRole('heading', { name: 'library.title' })
     const header = heading.closest('header') as HTMLElement
     expect(header).not.toBeNull()
-    expect(within(header).getByTitle('browse.gridView')).toBeInTheDocument()
-    expect(within(header).getByTitle('browse.listView')).toBeInTheDocument()
+    // The view toggle moved out of the header into the sticky search block.
+    expect(within(header).queryByTitle('browse.gridView')).toBeNull()
+    expect(within(header).queryByTitle('browse.listView')).toBeNull()
+    expect(within(header).queryByTestId('library-view-inline')).toBeNull()
+    const block = screen.getByTestId('library-search-block')
+    const inline = within(block).getByTestId('library-view-inline')
+    expect(within(inline).getByRole('radio', { name: 'browse.gridView' })).toBeInTheDocument()
+    expect(within(inline).getByRole('radio', { name: 'browse.listView' })).toBeInTheDocument()
+
     const select = within(header).getByRole('button', { name: 'library.select' })
     expect(select).toHaveAttribute('aria-pressed', 'false')
     expect(header).toHaveTextContent('library.galleries')

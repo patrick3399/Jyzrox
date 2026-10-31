@@ -36,7 +36,13 @@ export interface VirtualGridProps<T> {
   onScrollToIndex?: (index: number) => void
   onColCountChange?: (count: number) => void
   onRegisterElement?: (index: number, el: HTMLElement | null) => void
-  onVisibleRangeChange?: (range: { startIndex: number; endIndex: number }) => void
+  // startIndex/endIndex include overscan; visibleStartIndex is the first item of
+  // the first row actually on screen.
+  onVisibleRangeChange?: (range: {
+    startIndex: number
+    endIndex: number
+    visibleStartIndex: number
+  }) => void
   onLayoutChange?: (layout: {
     colCount: number
     containerWidth: number
@@ -209,20 +215,30 @@ export function VirtualGrid<T>({
   // overlapping or gapping the grid until something else invalidated the memo.
   const fixedRowSize = measureRows ? null : rowHeight + gap
   const appliedFixedRowSizeRef = useRef(fixedRowSize)
+  // Passive effects of the commit that changed the row size flush before the
+  // re-render this layout effect schedules, so they would read stale row
+  // transforms. `renderedRowSize` trails `fixedRowSize` until measure() ran and
+  // gates the restore effect.
+  const [renderedRowSize, setRenderedRowSize] = useState(fixedRowSize)
   useIsomorphicLayoutEffect(() => {
     if (appliedFixedRowSizeRef.current === fixedRowSize) return
     appliedFixedRowSizeRef.current = fixedRowSize
     if (fixedRowSize !== null) virtualizer.measure()
+    setRenderedRowSize(fixedRowSize)
   }, [fixedRowSize, virtualizer])
 
   const virtualItems = virtualizer.getVirtualItems()
   const firstVirtualRow = virtualItems[0]?.index
   const lastVirtualRow = virtualItems[virtualItems.length - 1]?.index
+  // `range` excludes overscan; it is null before the first measure, and the
+  // overscan start is the same row near the top of the page.
+  const visibleStartRow = virtualizer.range?.startIndex ?? firstVirtualRow
 
   useEffect(() => {
     if (
       firstVirtualRow === undefined ||
       lastVirtualRow === undefined ||
+      visibleStartRow === undefined ||
       items.length === 0
     ) {
       return
@@ -230,8 +246,16 @@ export function VirtualGrid<T>({
     onVisibleRangeChange?.({
       startIndex: firstVirtualRow * colCount,
       endIndex: Math.min(items.length - 1, (lastVirtualRow + 1) * colCount - 1),
+      visibleStartIndex: visibleStartRow * colCount,
     })
-  }, [colCount, firstVirtualRow, items.length, lastVirtualRow, onVisibleRangeChange])
+  }, [
+    colCount,
+    firstVirtualRow,
+    items.length,
+    lastVirtualRow,
+    onVisibleRangeChange,
+    visibleStartRow,
+  ])
 
   // Keep a stable ref to the virtualizer so the scrollToIndex effect
   // doesn't need the virtualizer instance (which changes every render) as a dep
@@ -248,6 +272,7 @@ export function VirtualGrid<T>({
     virtualizerRef.current.scrollToIndex(rowIndex, { align: 'auto' })
   }, [focusedIndex, colCount])
 
+  const settledColCount = getColumnCount(containerWidth, columns)
   const restoreIssuedRef = useRef<string | null>(null)
   const restoreAppliedRef = useRef<string | null>(null)
   useEffect(() => {
@@ -257,11 +282,20 @@ export function VirtualGrid<T>({
       return
     }
     if (!hasMeasuredLayout) return
+    // A request committed together with new `columns` still sees the old
+    // colCount and a stale hasMeasuredLayout, and the anchor cell registered
+    // from the old layout: it would report applied before the layout changed.
+    if (colCount !== settledColCount) return
+    if (fixedRowSize !== renderedRowSize) return
     if (restoreRequest.index < 0 || restoreRequest.index >= items.length) return
     const token = `${restoreRequest.key}:${restoreRequest.index}`
+    // The issued token carries colCount so a pending request re-targets its row
+    // when the layout changes; the applied token does not, so a landed restore
+    // is not replayed.
+    const issuedToken = `${token}:${colCount}`
     if (restoreAppliedRef.current === token) return
-    if (restoreIssuedRef.current !== token) {
-      restoreIssuedRef.current = token
+    if (restoreIssuedRef.current !== issuedToken) {
+      restoreIssuedRef.current = issuedToken
       const rowIndex = Math.floor(restoreRequest.index / colCount)
       virtualizerRef.current.scrollToIndex(rowIndex, { align: 'start' })
     }
@@ -277,7 +311,17 @@ export function VirtualGrid<T>({
     // offset is recomputed. Retarget it at the landing so the restore has one
     // owner and ends here.
     virtualizerRef.current.scrollToOffset(window.scrollY)
-  }, [colCount, hasMeasuredLayout, items.length, onRestoreApplied, restoreAnchorRegistered, restoreRequest])
+  }, [
+    colCount,
+    fixedRowSize,
+    hasMeasuredLayout,
+    items.length,
+    onRestoreApplied,
+    renderedRowSize,
+    restoreAnchorRegistered,
+    restoreRequest,
+    settledColCount,
+  ])
 
   // Keep a ref to onLoadMore so the effect never needs it as a dependency
   const onLoadMoreRef = useRef(onLoadMore)

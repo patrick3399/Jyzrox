@@ -2,7 +2,11 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { VirtualGrid } from '@/components/VirtualGrid'
 
-const { scrollToIndex } = vi.hoisted(() => ({ scrollToIndex: vi.fn() }))
+const { scrollToIndex, rangeModel } = vi.hoisted(() => ({
+  scrollToIndex: vi.fn(),
+  // Virtualizer `range` excludes overscan; null before the first measure.
+  rangeModel: { value: undefined as undefined | null | { startIndex: number; endIndex: number } },
+}))
 
 vi.mock('@tanstack/react-virtual', () => ({
   useWindowVirtualizer: (options: { count: number; scrollMargin: number }) => ({
@@ -19,6 +23,7 @@ vi.mock('@tanstack/react-virtual', () => ({
     scrollToIndex,
     scrollToOffset: () => {},
     options: { scrollMargin: options.scrollMargin },
+    range: rangeModel.value,
   }),
 }))
 
@@ -39,7 +44,11 @@ const columns = { base: 2, md: 3 }
 function grid(
   items: Item[],
   callbacks: {
-    onVisibleRangeChange?: (range: { startIndex: number; endIndex: number }) => void
+    onVisibleRangeChange?: (range: {
+      startIndex: number
+      endIndex: number
+      visibleStartIndex: number
+    }) => void
     onLayoutChange?: (layout: {
       colCount: number
       containerWidth: number
@@ -66,6 +75,7 @@ function grid(
 describe('VirtualGrid browse-anchor contracts', () => {
   beforeEach(() => {
     resizeCallback = null
+    rangeModel.value = undefined
     scrollToIndex.mockReset()
     vi.stubGlobal('ResizeObserver', ControlledResizeObserver)
     Object.defineProperty(window, 'innerWidth', { value: 500, configurable: true })
@@ -101,7 +111,36 @@ describe('VirtualGrid browse-anchor contracts', () => {
       ),
     )
 
-    expect(onVisibleRangeChange).toHaveBeenLastCalledWith({ startIndex: 0, endIndex: 3 })
+    expect(onVisibleRangeChange).toHaveBeenLastCalledWith({
+      startIndex: 0,
+      endIndex: 3,
+      visibleStartIndex: 0,
+    })
+  })
+
+  it('test_visible_start_index_excludes_overscan_rows_above_the_viewport', () => {
+    // The mocked virtualizer renders rows 0..n (overscan included) while the
+    // viewport range starts at row 2: with 2 columns the first visible item is
+    // 4, and it must differ from the overscan start (0).
+    rangeModel.value = { startIndex: 2, endIndex: 3 }
+    const onVisibleRangeChange = vi.fn()
+    const items = Array.from({ length: 8 }, (_, i) => ({ id: String(i), label: String(i) }))
+    render(grid(items, { onVisibleRangeChange }))
+
+    const range = onVisibleRangeChange.mock.calls.at(-1)?.[0]
+    expect(range.startIndex).toBe(0)
+    expect(range.visibleStartIndex).toBe(4)
+    expect(range.visibleStartIndex).not.toBe(range.startIndex)
+  })
+
+  it('test_visible_start_index_falls_back_to_first_rendered_row_when_range_is_null', () => {
+    rangeModel.value = null
+    const onVisibleRangeChange = vi.fn()
+    render(grid([{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], { onVisibleRangeChange }))
+
+    expect(onVisibleRangeChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ startIndex: 0, visibleStartIndex: 0 }),
+    )
   })
 
   it('reports measured container layout after ResizeObserver corrects initial columns', () => {

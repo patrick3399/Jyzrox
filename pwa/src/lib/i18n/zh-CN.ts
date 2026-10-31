@@ -1877,6 +1877,9 @@ const zhCN: Record<string, string> = {
 
   // ── Library filter panel ──
   'library.filters': '筛选',
+  'library.viewOptions': '视图选项',
+  'library.density': '密度',
+  'library.densityFollowSettings': '跟随设置',
   'library.clearAllFilters': '清除全部',
   'library.removeFilter': '移除 {name}',
   'library.titleFilter': '标题',

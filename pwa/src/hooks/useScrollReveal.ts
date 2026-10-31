@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 interface UseScrollRevealOptions {
   /** Zero-height marker placed right before the sticky block (its natural position). */
@@ -23,7 +23,7 @@ export function useScrollReveal({
   blockRef,
   locked,
   threshold = 6,
-}: UseScrollRevealOptions): { stuck: boolean; hidden: boolean } {
+}: UseScrollRevealOptions): { stuck: boolean; hidden: boolean; rebase: () => void } {
   const [state, setState] = useState({ stuck: false, down: false })
   const lastYRef = useRef(0)
 
@@ -69,5 +69,12 @@ export function useScrollReveal({
     }
   }, [sentinelRef, blockRef, threshold])
 
-  return { stuck: state.stuck, hidden: !locked && state.stuck && state.down }
+  // Re-zero the direction tracking after a programmatic jump so it never reads
+  // as the user scrolling down.
+  const rebase = useCallback(() => {
+    lastYRef.current = window.scrollY
+    setState((prev) => (prev.down ? { ...prev, down: false } : prev))
+  }, [])
+
+  return { stuck: state.stuck, hidden: !locked && state.stuck && state.down, rebase }
 }

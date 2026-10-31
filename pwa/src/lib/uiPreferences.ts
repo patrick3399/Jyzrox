@@ -16,11 +16,14 @@ const DASHBOARD_LINKS_KEY = 'dashboard_quick_links'
 export const GRID_DENSITY_KEY = 'library_grid_density'
 export const GRID_COLUMNS_KEY = 'library_grid_columns'
 export const FONT_SCALE_KEY = 'vault_font_scale'
+// Device-only Library density override; never synced to the server.
+export const GRID_DENSITY_OVERRIDE_KEY = 'library_grid_density_override'
 
 export const UI_PREFERENCES_SWR_KEY = 'auth/ui-preferences'
 
 export type ThemePreference = 'light' | 'dark' | 'amoled' | 'custom' | 'system'
 export type GridDensityPreference = 'comfortable' | 'compact' | 'spacious'
+const GRID_DENSITIES: readonly GridDensityPreference[] = ['comfortable', 'compact', 'spacious']
 
 export interface SidebarPreference {
   order: string[]
@@ -131,6 +134,26 @@ function writeScalarStorage(key: string, value: string | number | undefined) {
   if (serialized === null) localStorage.removeItem(key)
   else localStorage.setItem(key, serialized)
   window.dispatchEvent(new StorageEvent('storage', { key, newValue: serialized }))
+}
+
+export function loadLibraryDensityOverride(): GridDensityPreference | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = localStorage.getItem(GRID_DENSITY_OVERRIDE_KEY)
+    return value && GRID_DENSITIES.includes(value as GridDensityPreference)
+      ? (value as GridDensityPreference)
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function saveLibraryDensityOverride(value: GridDensityPreference | null) {
+  try {
+    writeScalarStorage(GRID_DENSITY_OVERRIDE_KEY, value ?? undefined)
+  } catch {
+    // Storage unavailable (private mode / quota): the override just does not persist.
+  }
 }
 
 export function applyFontScale(scale: number | undefined) {

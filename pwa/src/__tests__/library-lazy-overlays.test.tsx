@@ -27,6 +27,17 @@ describe('Library overlays load on demand', () => {
     expect(staticallyImports(src, '@/components/library/AddToCollectionMenu')).toBe(false)
   })
 
+  it('test_library_page_and_view_controls_do_not_statically_import_the_view_menu', () => {
+    const controls = read('components/library/LibraryViewControls.tsx')
+    expect(staticallyImports(controls, '@/components/library/LibraryViewMenu')).toBe(false)
+    expect(staticallyImports(controls, '@/components/ui/popover')).toBe(false)
+    const page = read('app/library/page.tsx')
+    expect(staticallyImports(page, '@/components/library/LibraryViewMenu')).toBe(false)
+    expect(staticallyImports(page, '@/components/ui/popover')).toBe(false)
+    // The only route to the menu is the dynamic import inside the controls.
+    expect(controls).toMatch(/dynamic\(\s*\(\) => import\('@\/components\/library\/LibraryViewMenu'\)/)
+  })
+
   it('test_context_menu_renders_nothing_until_first_opened_then_shows_menu', async () => {
     const items = [{ label: 'Open', onClick: vi.fn() }]
     const { rerender } = render(

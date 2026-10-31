@@ -2,7 +2,7 @@
 
 import { useState, useCallback, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, X, LayoutGrid, List, Bookmark, BookmarkCheck, HelpCircle } from 'lucide-react'
+import { BookOpen, X, Bookmark, BookmarkCheck, HelpCircle } from 'lucide-react'
 import { useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
 import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import type { Gallery } from '@/lib/types'
@@ -16,6 +16,7 @@ import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { LibrarySearchBar } from '@/components/library/LibrarySearchBar'
+import { LibraryViewControls } from '@/components/library/LibraryViewControls'
 import { LibraryFilterChips } from '@/components/library/LibraryFilterChips'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -28,11 +29,13 @@ import { decideAnchorRestore, restoreAnchorOffset, type BrowseAnchor } from '@/l
 import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
 import {
   estimateLibraryGridRowHeight,
-  getLibraryGridColumns,
   getLibraryGridGap,
+  resolveLibraryGrid,
 } from '@/lib/libraryLayout'
+import { saveLibraryDensityOverride, type GridDensityPreference } from '@/lib/uiPreferences'
 import { libraryFilterChips, type LibraryFilterChipKey } from '@/lib/libraryFilterChips'
 import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
+import { useLibraryDensityOverride } from '@/hooks/useLibraryDensityOverride'
 import { useScrollReveal } from '@/hooks/useScrollReveal'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -50,6 +53,20 @@ const AddToCollectionMenu = dynamic(
     import('@/components/library/AddToCollectionMenu').then((module) => module.AddToCollectionMenu),
   { ssr: false },
 )
+
+const VIEW_MODE_KEY = 'library_view_mode'
+const LAYOUT_SWITCH_WATCHDOG_MS = 2000
+// Gap between the sticky search block and the card a layout switch lands on.
+const LAYOUT_SWITCH_GAP_PX = 8
+
+function loadViewMode(): 'grid' | 'list' {
+  if (typeof window === 'undefined') return 'grid'
+  try {
+    return localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'grid'
+  } catch {
+    return 'grid'
+  }
+}
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -122,32 +139,28 @@ function LibraryContent() {
   const [searchFocused, setSearchFocused] = useState(false)
   const searchSentinelRef = useRef<HTMLDivElement>(null)
   const searchBlockRef = useRef<HTMLDivElement>(null)
-  const { stuck: searchStuck, hidden: searchHidden } = useScrollReveal({
+  const [viewMenuOpen, setViewMenuOpen] = useState(false)
+  // A layout switch waiting to land on its anchor card keeps the bar revealed.
+  const [layoutSwitch, setLayoutSwitch] = useState<{ key: string; itemId: number } | undefined>()
+  const {
+    stuck: searchStuck,
+    hidden: searchHidden,
+    rebase: rebaseScrollReveal,
+  } = useScrollReveal({
     sentinelRef: searchSentinelRef,
     blockRef: searchBlockRef,
-    locked: searchFocused || filterPanelOpen,
+    locked: searchFocused || filterPanelOpen || viewMenuOpen || layoutSwitch !== undefined,
   })
   const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
   const displayPreferences = useDisplayPreferences()
-  const gridColumns = useMemo(
-    () =>
-      getLibraryGridColumns(
-        displayPreferences.gallery_grid_density,
-        displayPreferences.gallery_grid_columns,
-      ),
-    [displayPreferences.gallery_grid_columns, displayPreferences.gallery_grid_density],
+  const densityOverride = useLibraryDensityOverride()
+  const { density: gridDensity, columns: gridColumns } = useMemo(
+    () => resolveLibraryGrid(displayPreferences, densityOverride),
+    [displayPreferences, densityOverride],
   )
 
   // View mode: 'grid' | 'list', persisted to localStorage
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
-    if (typeof window === 'undefined') return 'grid'
-    return (localStorage.getItem('library_view_mode') as 'grid' | 'list') ?? 'grid'
-  })
-
-  const handleViewModeChange = useCallback((mode: 'grid' | 'list') => {
-    setViewMode(mode)
-    localStorage.setItem('library_view_mode', mode)
-  }, [])
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode)
 
   // Collections stay eager because they also populate the normal filter panel.
   const { data: collectionsData } = useCollections()
@@ -225,6 +238,15 @@ function LibraryContent() {
     anchor: BrowseAnchor | null
     layout: BrowseLayoutSnapshot | null
   } | null>(null)
+  // Layout switches land through their own channel: the session-restore effect
+  // below clears `pendingRestoreRef` whenever `displayGalleries` changes with no
+  // instruction, which would drop a switch that overlaps an append.
+  const pendingLayoutSwitchRef = useRef<{
+    key: string
+    itemId: number
+    anchor: BrowseAnchor
+  } | null>(null)
+  const layoutSwitchCounterRef = useRef(0)
   const previousIdentityRef = useRef(state.identityKey)
   const handledRestoreKeyRef = useRef<string | null>(null)
   const scheduledRestoreKeyRef = useRef<string | null>(null)
@@ -234,13 +256,56 @@ function LibraryContent() {
     index: number
   }>()
 
+  const clearLayoutSwitch = useCallback(() => {
+    pendingLayoutSwitchRef.current = null
+    setLayoutSwitch(undefined)
+  }, [])
+
   useEffect(() => {
     if (previousIdentityRef.current === state.identityKey) return
     previousIdentityRef.current = state.identityKey
     pendingRestoreRef.current = null
     liveViewRef.current = null
+    clearLayoutSwitch()
     setRestoreRequest(undefined)
-  }, [state.identityKey])
+  }, [clearLayoutSwitch, state.identityKey])
+
+  // The request's index is derived here rather than stored: child effects run
+  // before this component's effects, so an index kept from before a refresh
+  // could land on a different card.
+  const layoutSwitchIndex = useMemo(
+    () =>
+      layoutSwitch ? displayGalleries.findIndex((gallery) => gallery.id === layoutSwitch.itemId) : -1,
+    [displayGalleries, layoutSwitch],
+  )
+  const layoutSwitchRequest = useMemo(
+    () =>
+      layoutSwitch && layoutSwitchIndex >= 0
+        ? { key: layoutSwitch.key, index: layoutSwitchIndex }
+        : undefined,
+    [layoutSwitch, layoutSwitchIndex],
+  )
+  const layoutSwitchKey = layoutSwitch?.key
+  const layoutSwitchGone = layoutSwitchKey !== undefined && layoutSwitchIndex < 0
+
+  useEffect(() => {
+    if (layoutSwitchGone) clearLayoutSwitch()
+  }, [clearLayoutSwitch, layoutSwitchGone])
+
+  // iOS can queue the virtualizer's scroll during a fling, and a user takeover
+  // cancels it; the token is already issued, so without this the bar and the
+  // scroll capture would stay blocked.
+  useEffect(() => {
+    if (layoutSwitchKey === undefined) return
+    const timer = setTimeout(clearLayoutSwitch, LAYOUT_SWITCH_WATCHDOG_MS)
+    window.addEventListener('touchstart', clearLayoutSwitch, { passive: true })
+    window.addEventListener('wheel', clearLayoutSwitch, { passive: true })
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('touchstart', clearLayoutSwitch)
+      window.removeEventListener('wheel', clearLayoutSwitch)
+    }
+  }, [clearLayoutSwitch, layoutSwitchKey])
 
   useEffect(() => {
     if (!restoreInstruction || restoreInstruction.identityKey !== state.identityKey) {
@@ -380,7 +445,7 @@ function LibraryContent() {
     }
     const capture = () => {
       frame = undefined
-      if (pendingRestoreRef.current) return
+      if (pendingRestoreRef.current || pendingLayoutSwitchRef.current) return
       const view = { anchor: captureAnchorRef.current(), layout: layoutRef.current }
       liveViewRef.current = view
       updateView(view)
@@ -469,8 +534,123 @@ function LibraryContent() {
     [displayGalleries, registerElement],
   )
 
+  // First card whose bottom is below the sticky search block. `scrollMargin` can
+  // be stale after the filter panel opens (the grid observer is width-only), so
+  // the visible start is only a seed: walk backward over cards still under the
+  // bar, then forward to the first one that is.
+  const visibleAnchor = (): BrowseAnchor | null => {
+    const count = displayGalleries.length
+    if (count === 0) return null
+    const barBottom = Math.max(0, searchBlockRef.current?.getBoundingClientRect().bottom ?? 0)
+    const rectAt = (index: number) => {
+      const gallery = displayGalleries[index]
+      return gallery ? itemElementsRef.current.get(gallery.id)?.getBoundingClientRect() : undefined
+    }
+    let index = Math.min(visibleStartRef.current, count - 1)
+    const seed = rectAt(index)
+    if (seed && seed.bottom > barBottom) {
+      while (index > 0) {
+        const previous = rectAt(index - 1)
+        if (!previous || previous.bottom <= barBottom) break
+        index -= 1
+      }
+    } else {
+      let found = -1
+      for (let i = index + 1; i < count; i += 1) {
+        const rect = rectAt(i)
+        if (rect && rect.bottom > barBottom) {
+          found = i
+          break
+        }
+      }
+      if (found < 0) return null
+      index = found
+    }
+    const gallery = displayGalleries[index]
+    const rect = rectAt(index)
+    if (!gallery || !rect) return null
+    return {
+      itemId: gallery.id,
+      offset: searchStuck ? barBottom + LAYOUT_SWITCH_GAP_PX : rect.top,
+      scrollY: window.scrollY,
+    }
+  }
+
+  const switchLayout = ({
+    viewMode: nextViewMode = viewMode,
+    densityOverride: nextOverride = densityOverride,
+  }: {
+    viewMode?: 'grid' | 'list'
+    densityOverride?: GridDensityPreference | null
+  }) => {
+    if (nextViewMode === viewMode && nextOverride === densityOverride) return
+    const writePreferences = () => {
+      if (nextViewMode !== viewMode) {
+        try {
+          localStorage.setItem(VIEW_MODE_KEY, nextViewMode)
+        } catch {
+          // Storage unavailable: the choice just does not persist.
+        }
+      }
+      if (nextOverride !== densityOverride) saveLibraryDensityOverride(nextOverride)
+      setViewMode(nextViewMode)
+    }
+    // A pending session restore owns the view and re-issues for the new layout;
+    // saving a view here would overwrite the position being restored.
+    if (pendingRestoreRef.current) {
+      writePreferences()
+      return
+    }
+    // A second switch reuses the first anchor: measuring now reads a layout
+    // that is still mid-transition.
+    const anchor = pendingLayoutSwitchRef.current?.anchor ?? visibleAnchor()
+    writePreferences()
+    if (!anchor) return
+    const view = { anchor, layout: { ...layoutRef.current, mode: nextViewMode } }
+    liveViewRef.current = view
+    updateView(view)
+    checkpoint(view)
+    if (!searchStuck || typeof anchor.itemId !== 'number') return
+    layoutSwitchCounterRef.current += 1
+    const next = {
+      key: `layout-switch:${layoutSwitchCounterRef.current}`,
+      itemId: anchor.itemId,
+      anchor,
+    }
+    pendingLayoutSwitchRef.current = next
+    setLayoutSwitch({ key: next.key, itemId: next.itemId })
+  }
+
   const handleGridRestoreApplied = useCallback(
     (request: { key: string; index: number }) => {
+      const switching = pendingLayoutSwitchRef.current
+      if (switching && switching.key === request.key) {
+        const gallery = displayGalleries[request.index]
+        const element =
+          gallery && gallery.id === switching.itemId
+            ? itemElementsRef.current.get(gallery.id)
+            : undefined
+        // The grid has already marked this token applied and never retries.
+        if (!gallery || !element) {
+          clearLayoutSwitch()
+          return
+        }
+        const barBottom = Math.max(0, searchBlockRef.current?.getBoundingClientRect().bottom ?? 0)
+        window.scrollTo(
+          0,
+          window.scrollY + element.getBoundingClientRect().top - (barBottom + LAYOUT_SWITCH_GAP_PX),
+        )
+        clearLayoutSwitch()
+        rebaseScrollReveal()
+        const view = {
+          anchor: captureAnchor(gallery),
+          layout: { ...layoutRef.current, mode: viewMode },
+        }
+        liveViewRef.current = view
+        updateView(view)
+        checkpoint(view)
+        return
+      }
       const pending = pendingRestoreRef.current
       if (
         !pending ||
@@ -493,7 +673,17 @@ function LibraryContent() {
       handledRestoreKeyRef.current = pending.key
       acknowledgeRestore(pending.key)
     },
-    [acknowledgeRestore, displayGalleries, state.identityKey],
+    [
+      acknowledgeRestore,
+      captureAnchor,
+      checkpoint,
+      clearLayoutSwitch,
+      displayGalleries,
+      rebaseScrollReveal,
+      state.identityKey,
+      updateView,
+      viewMode,
+    ],
   )
 
   const toggleSelectedId = useCallback(
@@ -519,23 +709,6 @@ function LibraryContent() {
         meta={total !== null ? `${formatNumber(total)} ${t('library.galleries')}` : undefined}
         actions={
           <>
-            {/* View mode toggle */}
-            <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
-              <button
-                onClick={() => handleViewModeChange('grid')}
-                title={t('browse.gridView')}
-                className={`px-3 py-2 transition-colors ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
-              >
-                <LayoutGrid size={15} />
-              </button>
-              <button
-                onClick={() => handleViewModeChange('list')}
-                title={t('browse.listView')}
-                className={`px-3 py-2 transition-colors ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
-              >
-                <List size={15} />
-              </button>
-            </div>
             <button
               type="button"
               aria-pressed={selectMode}
@@ -561,8 +734,13 @@ function LibraryContent() {
         data-testid="library-search-block"
         data-stuck={searchStuck || undefined}
         data-scroll-hidden={searchHidden || undefined}
-        onFocusCapture={() => setSearchFocused(true)}
+        // Capture handlers also fire for portalled popups (React bubbles through
+        // portals); only focus inside the block counts.
+        onFocusCapture={(e) => {
+          if (e.currentTarget.contains(e.target as Node)) setSearchFocused(true)
+        }}
         onBlurCapture={(e) => {
+          if (!e.currentTarget.contains(e.target as Node)) return
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSearchFocused(false)
         }}
         style={{
@@ -593,6 +771,17 @@ function LibraryContent() {
           onToggleFavorited={() => setFilter('favorited', parsed.favorited ? null : 'true')}
           readingList={parsed.readingList}
           onToggleReadingList={() => setFilter('rl', parsed.readingList ? null : 'true')}
+          viewControls={
+            <LibraryViewControls
+              viewMode={viewMode}
+              onViewModeChange={(mode) => switchLayout({ viewMode: mode })}
+              density={gridDensity}
+              densityOverridden={densityOverride !== null}
+              onDensityChange={(density) => switchLayout({ densityOverride: density })}
+              onFollowSettings={() => switchLayout({ densityOverride: null })}
+              onMenuOpenChange={setViewMenuOpen}
+            />
+          }
         />
 
         {/* Collapsible filter panel — CSS transition via grid-rows */}
@@ -789,21 +978,22 @@ function LibraryContent() {
           items={displayGalleries}
           getItemKey={(gallery) => gallery.id}
           columns={viewMode === 'list' ? { base: 1 } : gridColumns}
-          gap={viewMode === 'list' ? 8 : getLibraryGridGap(displayPreferences.gallery_grid_density)}
+          gap={viewMode === 'list' ? 8 : getLibraryGridGap(gridDensity)}
           estimateHeight={viewMode === 'list' ? 150 : estimateLibraryGridRowHeight}
           measureRows={false}
           overscan={viewMode === 'list' ? 8 : 6}
           focusedIndex={focusedIndex}
           onColCountChange={setColCount}
           onRegisterElement={handleRegisterElement}
-          onVisibleRangeChange={({ startIndex }) => {
-            visibleStartRef.current = startIndex
+          onVisibleRangeChange={({ startIndex, visibleStartIndex }) => {
+            visibleStartRef.current = visibleStartIndex ?? startIndex
           }}
           onLayoutChange={({ colCount: columns, containerWidth }) => {
             layoutRef.current = { columns, width: containerWidth, mode: viewMode }
           }}
           restoreRequest={
-            restoreRequest?.identityKey === state.identityKey ? restoreRequest : undefined
+            layoutSwitchRequest ??
+            (restoreRequest?.identityKey === state.identityKey ? restoreRequest : undefined)
           }
           onRestoreApplied={handleGridRestoreApplied}
           onLoadMore={state.status === 'error' ? undefined : loadMore}

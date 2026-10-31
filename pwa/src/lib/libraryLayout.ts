@@ -15,7 +15,7 @@ const LIBRARY_CARD_BORDER_PX = 2
 
 const AUTO_COLUMNS: Record<GridDensityPreference, ColumnConfig> = {
   spacious: { base: 2, sm: 3, md: 4, lg: 5, xl: 6, xxl: 7 },
-  comfortable: { base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 },
+  comfortable: { base: 3, sm: 5, md: 6, lg: 8, xl: 10, xxl: 10 },
   compact: { base: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 12 },
 }
 
@@ -32,6 +32,21 @@ export function getLibraryGridColumns(
     lg: Math.min(Math.max(5, Math.ceil(max * 0.67)), max),
     xl: Math.min(Math.max(6, Math.ceil(max * 0.84)), max),
     xxl: max,
+  }
+}
+
+/** A density override wins over the Settings density and ignores fixed columns. */
+export function resolveLibraryGrid(
+  preferences: { gallery_grid_density: GridDensityPreference; gallery_grid_columns: number },
+  override: GridDensityPreference | null,
+): { density: GridDensityPreference; columns: ColumnConfig } {
+  if (override) return { density: override, columns: getLibraryGridColumns(override) }
+  return {
+    density: preferences.gallery_grid_density,
+    columns: getLibraryGridColumns(
+      preferences.gallery_grid_density,
+      preferences.gallery_grid_columns,
+    ),
   }
 }
 

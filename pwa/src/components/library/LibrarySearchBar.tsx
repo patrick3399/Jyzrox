@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Bookmark, BookmarkCheck, Heart, Search, SlidersHorizontal, X } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
@@ -17,6 +17,8 @@ interface LibrarySearchBarProps {
   onToggleFavorited: () => void
   readingList: boolean
   onToggleReadingList: () => void
+  /** Layout and density controls, shown after the filter button. */
+  viewControls?: ReactNode
 }
 
 const TOOLBAR_BUTTON =
@@ -43,6 +45,7 @@ export function LibrarySearchBar({
   onToggleFavorited,
   readingList,
   onToggleReadingList,
+  viewControls,
 }: LibrarySearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [focused, setFocused] = useState(false)
@@ -85,9 +88,10 @@ export function LibrarySearchBar({
 
       <div
         className={`shrink-0 overflow-hidden transition-[max-width,opacity] duration-200 ${
-          focused ? 'max-w-0 opacity-0' : 'max-w-36 opacity-100'
+          focused ? 'max-w-0 opacity-0' : 'max-w-48 sm:max-w-72 opacity-100'
         }`}
         aria-hidden={focused || undefined}
+        inert={focused}
       >
         <div className="flex items-center gap-2">
           {/* The search block locks its scroll reveal while it holds focus, so a tap must not leave focus on a toggle. */}
@@ -132,6 +136,7 @@ export function LibrarySearchBar({
               </span>
             )}
           </button>
+          {viewControls}
         </div>
       </div>
 
