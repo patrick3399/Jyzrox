@@ -150,13 +150,19 @@ describe('Library filter chips', () => {
     expect(screen.getByRole('button', { name: 'library.filters' })).toBeInTheDocument()
   })
 
-  it('test_filter_badge_counts_active_filters', () => {
-    search.parsed = { ...emptyParsed, source: 'pixiv', rating: 4, favorited: true }
+  it('test_filter_badge_counts_active_filters_except_the_toggles', () => {
+    search.parsed = {
+      ...emptyParsed,
+      source: 'pixiv',
+      rating: 4,
+      favorited: true,
+      readingList: true,
+    }
     render(<LibraryPage />)
 
     const button = screen.getByRole('button', { name: 'library.filters' })
-    expect(within(button).getByText('3')).toBeInTheDocument()
-    expect(removeButtons()).toHaveLength(3)
+    expect(within(button).getByText('2')).toBeInTheDocument()
+    expect(removeButtons()).toHaveLength(2)
   })
 
   it('test_filter_badge_absent_without_active_filters', () => {
@@ -181,42 +187,111 @@ describe('Library filter chips', () => {
     expect(search.clearFilters).not.toHaveBeenCalled()
   })
 
-  it('test_favorited_chip_remove_clears_only_favorited', () => {
-    search.parsed = { ...emptyParsed, favorited: true }
-    render(<LibraryPage />)
-
-    fireEvent.click(removeButtons()[0])
-
-    expect(search.setFilter).toHaveBeenCalledTimes(1)
-    expect(search.setFilter).toHaveBeenCalledWith('favorited', null)
-  })
-
   it('test_clear_all_hidden_with_single_chip_and_shown_with_two', () => {
-    search.parsed = { ...emptyParsed, favorited: true }
+    search.parsed = { ...emptyParsed, rating: 4, favorited: true, readingList: true }
     const view = render(<LibraryPage />)
     expect(screen.queryByText('library.clearAllFilters')).toBeNull()
     view.unmount()
 
-    search.parsed = { ...emptyParsed, favorited: true, readingList: true }
+    search.parsed = { ...emptyParsed, source: 'pixiv', rating: 4 }
     render(<LibraryPage />)
     fireEvent.click(screen.getByText('library.clearAllFilters'))
     expect(search.clearFilters).toHaveBeenCalledTimes(1)
   })
 })
 
-describe('Library search focus behaviour', () => {
-  it('test_focus_hides_filter_button_and_shows_cancel', () => {
+describe('Library favorite and reading-list toggles', () => {
+  const FAVORITES = 'library.favoritesOnly'
+  const READING_LIST = 'library.readingListOnly'
+
+  it('test_toggles_sit_between_search_input_and_filter_button', () => {
     render(<LibraryPage />)
     const input = screen.getByPlaceholderText(PLACEHOLDER)
-    const filterButton = () => screen.getByRole('button', { name: 'library.filters', hidden: true })
+    const favorites = screen.getByRole('button', { name: FAVORITES })
+    const readingList = screen.getByRole('button', { name: READING_LIST })
+    const filters = screen.getByRole('button', { name: 'library.filters' })
 
-    expect(filterButton().closest('[aria-hidden="true"]')).toBeNull()
+    const follows = (a: Element, b: Element) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+    expect(follows(input, favorites)).toBeTruthy()
+    expect(follows(favorites, readingList)).toBeTruthy()
+    expect(follows(readingList, filters)).toBeTruthy()
+  })
+
+  it('test_off_toggle_turns_only_its_own_filter_on', () => {
+    render(<LibraryPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: FAVORITES }))
+    expect(search.setFilter).toHaveBeenCalledTimes(1)
+    expect(search.setFilter).toHaveBeenLastCalledWith('favorited', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: READING_LIST }))
+    expect(search.setFilter).toHaveBeenCalledTimes(2)
+    expect(search.setFilter).toHaveBeenLastCalledWith('rl', 'true')
+  })
+
+  it('test_on_toggle_clears_only_its_own_filter', () => {
+    search.parsed = { ...emptyParsed, favorited: true, readingList: true }
+    render(<LibraryPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: READING_LIST }))
+
+    expect(search.setFilter).toHaveBeenCalledTimes(1)
+    expect(search.setFilter).toHaveBeenCalledWith('rl', null)
+  })
+
+  it('test_toggle_pressed_state_follows_the_parsed_query', () => {
+    search.parsed = { ...emptyParsed, favorited: true }
+    render(<LibraryPage />)
+
+    expect(screen.getByRole('button', { name: FAVORITES })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: READING_LIST })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+
+  it('test_active_toggles_add_no_chip_or_filter_badge', () => {
+    search.parsed = { ...emptyParsed, favorited: true, readingList: true }
+    render(<LibraryPage />)
+
+    expect(removeButtons()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'library.filters' })).toHaveTextContent('')
+  })
+
+  it('test_pointer_press_does_not_move_focus_so_the_scroll_reveal_stays_unlocked', () => {
+    render(<LibraryPage />)
+
+    // The search block locks its scroll reveal while it contains focus.
+    expect(fireEvent.mouseDown(screen.getByRole('button', { name: FAVORITES }))).toBe(false)
+    expect(fireEvent.mouseDown(screen.getByRole('button', { name: READING_LIST }))).toBe(false)
+  })
+
+  it('test_filter_panel_no_longer_holds_the_favorite_and_reading_list_checkboxes', () => {
+    const { container } = render(<LibraryPage />)
+
+    expect(container.querySelectorAll('#library-filter-panel input[type="checkbox"]')).toHaveLength(0)
+  })
+})
+
+describe('Library search focus behaviour', () => {
+  it('test_focus_hides_toolbar_buttons_and_shows_cancel', () => {
+    render(<LibraryPage />)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    const buttons = () =>
+      ['library.favoritesOnly', 'library.readingListOnly', 'library.filters'].map((name) =>
+        screen.getByRole('button', { name, hidden: true }),
+      )
+
+    for (const button of buttons()) expect(button.closest('[aria-hidden="true"]')).toBeNull()
     expect(screen.queryByRole('button', { name: 'common.cancel' })).toBeNull()
 
     fireEvent.focus(input)
 
-    expect(filterButton().closest('[aria-hidden="true"]')).not.toBeNull()
-    expect(filterButton()).toHaveAttribute('tabindex', '-1')
+    for (const button of buttons()) {
+      expect(button.closest('[aria-hidden="true"]')).not.toBeNull()
+      expect(button).toHaveAttribute('tabindex', '-1')
+    }
     expect(screen.getByRole('button', { name: 'common.cancel' })).toBeInTheDocument()
   })
 

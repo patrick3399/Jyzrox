@@ -8,8 +8,6 @@ export type LibraryFilterChipKey =
   | 'category'
   | 'collection'
   | 'sort'
-  | 'favorited'
-  | 'rl'
   | 'artist_id'
 
 export interface LibraryFilterChip {
@@ -24,7 +22,10 @@ export interface LibraryFilterChipContext {
   sortLabel: (value: string) => string
 }
 
-/** Active filters as removable chips, in a fixed order. Count = result length. */
+/**
+ * Active filters as removable chips, in a fixed order. Count = result length.
+ * Favorites and reading list have toggle buttons that show their state instead.
+ */
 export function libraryFilterChips(
   parsed: ParsedFilters,
   ctx: LibraryFilterChipContext,
@@ -52,12 +53,6 @@ export function libraryFilterChips(
   }
   if (parsed.sort && parsed.sort !== 'added_at') {
     chips.push({ key: 'sort', label: `${t('library.sort')}: ${ctx.sortLabel(parsed.sort)}` })
-  }
-  if (parsed.favorited) {
-    chips.push({ key: 'favorited', label: t('library.favoritesOnly') })
-  }
-  if (parsed.readingList) {
-    chips.push({ key: 'rl', label: t('library.readingListOnly') })
   }
   if (parsed.artistId) {
     chips.push({ key: 'artist_id', label: `${t('library.artistFilter')}: ${parsed.artistId}` })

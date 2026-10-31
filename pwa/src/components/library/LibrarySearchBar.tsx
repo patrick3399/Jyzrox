@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Search, SlidersHorizontal, X } from 'lucide-react'
+import { Bookmark, BookmarkCheck, Heart, Search, SlidersHorizontal, X } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface LibrarySearchBarProps {
@@ -13,11 +13,22 @@ interface LibrarySearchBarProps {
   activeFilterCount: number
   filtersOpen: boolean
   onToggleFilters: () => void
+  favorited: boolean
+  onToggleFavorited: () => void
+  readingList: boolean
+  onToggleReadingList: () => void
 }
 
+const TOOLBAR_BUTTON =
+  'relative flex h-10 w-10 items-center justify-center rounded-lg border transition-colors'
+const TOOLBAR_BUTTON_ACTIVE = 'border-vault-accent bg-vault-accent/10 text-vault-accent'
+const TOOLBAR_BUTTON_IDLE =
+  'border-vault-border bg-vault-input text-vault-text-secondary hover:text-vault-text hover:border-vault-border-hover'
+
 /**
- * One-row search: input + filter button. While the input is focused the filter
- * button collapses and a Cancel button takes its place.
+ * One-row search: input + favorite and reading-list toggles + filter button.
+ * While the input is focused those buttons collapse and a Cancel button takes
+ * their place.
  */
 export function LibrarySearchBar({
   value,
@@ -28,6 +39,10 @@ export function LibrarySearchBar({
   activeFilterCount,
   filtersOpen,
   onToggleFilters,
+  favorited,
+  onToggleFavorited,
+  readingList,
+  onToggleReadingList,
 }: LibrarySearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [focused, setFocused] = useState(false)
@@ -70,31 +85,54 @@ export function LibrarySearchBar({
 
       <div
         className={`shrink-0 overflow-hidden transition-[max-width,opacity] duration-200 ${
-          focused ? 'max-w-0 opacity-0' : 'max-w-12 opacity-100'
+          focused ? 'max-w-0 opacity-0' : 'max-w-36 opacity-100'
         }`}
         aria-hidden={focused || undefined}
       >
-        <button
-          type="button"
-          onClick={onToggleFilters}
-          aria-expanded={filtersOpen}
-          aria-controls="library-filter-panel"
-          tabIndex={focused ? -1 : undefined}
-          aria-label={t('library.filters')}
-          title={t('library.filters')}
-          className={`relative flex h-10 w-10 items-center justify-center rounded-lg border transition-colors ${
-            filtersOpen
-              ? 'border-vault-accent bg-vault-accent/10 text-vault-accent'
-              : 'border-vault-border bg-vault-input text-vault-text-secondary hover:text-vault-text hover:border-vault-border-hover'
-          }`}
-        >
-          <SlidersHorizontal size={16} />
-          {activeFilterCount > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-vault-accent text-white text-[10px] leading-4 text-center">
-              {activeFilterCount}
-            </span>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* The search block locks its scroll reveal while it holds focus, so a tap must not leave focus on a toggle. */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onToggleFavorited}
+            aria-pressed={favorited}
+            tabIndex={focused ? -1 : undefined}
+            aria-label={t('library.favoritesOnly')}
+            title={t('library.favoritesOnly')}
+            className={`${TOOLBAR_BUTTON} ${favorited ? TOOLBAR_BUTTON_ACTIVE : TOOLBAR_BUTTON_IDLE}`}
+          >
+            <Heart size={16} className={favorited ? 'fill-current' : undefined} />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onToggleReadingList}
+            aria-pressed={readingList}
+            tabIndex={focused ? -1 : undefined}
+            aria-label={t('library.readingListOnly')}
+            title={t('library.readingListOnly')}
+            className={`${TOOLBAR_BUTTON} ${readingList ? TOOLBAR_BUTTON_ACTIVE : TOOLBAR_BUTTON_IDLE}`}
+          >
+            {readingList ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+          </button>
+          <button
+            type="button"
+            onClick={onToggleFilters}
+            aria-expanded={filtersOpen}
+            aria-controls="library-filter-panel"
+            tabIndex={focused ? -1 : undefined}
+            aria-label={t('library.filters')}
+            title={t('library.filters')}
+            className={`${TOOLBAR_BUTTON} ${filtersOpen ? TOOLBAR_BUTTON_ACTIVE : TOOLBAR_BUTTON_IDLE}`}
+          >
+            <SlidersHorizontal size={16} />
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-vault-accent text-white text-[10px] leading-4 text-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       <div

@@ -74,10 +74,8 @@ describe('libraryFilterChips', () => {
     expect(c.label).toContain('re zero')
   })
 
-  it('test_favorited_and_reading_list_chips_are_label_only', () => {
-    const result = chips('favorited:true rl:true')
-    expect(result.map((c) => c.key)).toEqual(['favorited', 'rl'])
-    for (const c of result) expect(c.label).not.toContain(':')
+  it('test_favorited_and_reading_list_produce_no_chip_because_their_toggles_show_the_state', () => {
+    expect(chips('favorited:true rl:true')).toEqual([])
   })
 
   it('test_artist_id_chip_shows_value', () => {
@@ -96,8 +94,6 @@ describe('libraryFilterChips', () => {
       'category',
       'collection',
       'sort',
-      'favorited',
-      'rl',
       'artist_id',
     ])
   })

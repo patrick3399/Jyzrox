@@ -589,6 +589,10 @@ function LibraryContent() {
           activeFilterCount={filterChips.length}
           filtersOpen={filterPanelOpen}
           onToggleFilters={() => setFilterPanelOpen((v) => !v)}
+          favorited={parsed.favorited}
+          onToggleFavorited={() => setFilter('favorited', parsed.favorited ? null : 'true')}
+          readingList={parsed.readingList}
+          onToggleReadingList={() => setFilter('rl', parsed.readingList ? null : 'true')}
         />
 
         {/* Collapsible filter panel — CSS transition via grid-rows */}
@@ -719,30 +723,6 @@ function LibraryContent() {
                     ))}
                   </select>
                 </div>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={parsed.favorited}
-                    onChange={(e) => {
-                      setFilter('favorited', e.target.checked ? 'true' : null)
-                    }}
-                    className="w-4 h-4 accent-yellow-500"
-                  />
-                  <span className="text-sm text-vault-text-secondary">
-                    {t('library.favoritesOnly')}
-                  </span>
-                </label>
-
-                <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer whitespace-nowrap">
-                  <input
-                    type="checkbox"
-                    checked={parsed.readingList}
-                    onChange={(e) => setFilter('rl', e.target.checked ? 'true' : null)}
-                    className="rounded border-vault-border"
-                  />
-                  {t('library.readingListOnly')}
-                </label>
 
                 <button
                   type="button"
