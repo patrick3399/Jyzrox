@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from 'next'
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import Script from 'next/script'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { LocaleProvider } from '@/components/LocaleProvider'
 import { LayoutShell } from '@/components/LayoutShell'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { resolveLocale } from '@/lib/i18n'
+import { LOCALE_COOKIE, parseLocale, resolveLocale } from '@/lib/i18n/locales'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -27,7 +27,9 @@ export const viewport: Viewport = {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const initialLocale = resolveLocale((await headers()).get('accept-language'))
+  const initialLocale =
+    parseLocale((await cookies()).get(LOCALE_COOKIE)?.value) ??
+    resolveLocale((await headers()).get('accept-language'))
   return (
     <html lang={initialLocale} suppressHydrationWarning>
       <head>

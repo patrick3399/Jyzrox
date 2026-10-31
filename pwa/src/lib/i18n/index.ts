@@ -3,8 +3,8 @@
  *
  * To add a new language:
  *   1. Create a new file (e.g. `ja.ts`) with `export default { ... }`
- *   2. Import it below and add to `locales`
- *   3. Add the locale key to `SUPPORTED_LOCALES`
+ *   2. Add it to `localeLoaders` below and to `initialDictionaries.ts`
+ *   3. Add the locale key to `SUPPORTED_LOCALES` in `locales.ts`
  *   4. Add `common.locale.ja` key to all locale files
  *
  * Usage:
@@ -12,19 +12,26 @@
  *   <span>{t('nav.dashboard')}</span>
  */
 
-import en from './en'
+import { use } from 'react'
+import { initialDictionaries } from './initialDictionaries'
+import { DEFAULT_LOCALE, resolveLocale, type Locale } from './locales'
+import { SsrLocaleContext } from './ssrLocale'
 
-export const SUPPORTED_LOCALES = ['en', 'zh-TW', 'zh-CN', 'ja', 'ko'] as const
-export type Locale = (typeof SUPPORTED_LOCALES)[number]
-export const DEFAULT_LOCALE: Locale = 'en'
+export {
+  DEFAULT_LOCALE,
+  LOCALE_COOKIE,
+  parseLocale,
+  resolveLocale,
+  SUPPORTED_LOCALES,
+  type Locale,
+} from './locales'
 
 type Dictionary = Record<string, string>
 
-const locales: Partial<Record<Locale, Dictionary>> = {
-  en,
-}
+const locales: Partial<Record<Locale, Dictionary>> = { ...initialDictionaries }
 
-const localeLoaders: Record<Exclude<Locale, 'en'>, () => Promise<{ default: Dictionary }>> = {
+const localeLoaders: Record<Locale, () => Promise<{ default: Dictionary }>> = {
+  en: () => import('./en'),
   'zh-TW': () => import('./zh-TW'),
   'zh-CN': () => import('./zh-CN'),
   ja: () => import('./ja'),
@@ -34,35 +41,24 @@ const localeLoaders: Record<Exclude<Locale, 'en'>, () => Promise<{ default: Dict
 const pendingLocales = new Map<Locale, Promise<void>>()
 
 let currentLocale: Locale = DEFAULT_LOCALE
+let initialLocaleActive = false
+let initialLocalePreparing: Promise<void> | null = null
 
-/** Resolve browser or HTTP language preferences to one of the shipped UI locales. */
-export function resolveLocale(preferences?: string | readonly string[] | null): Locale {
-  const candidates = Array.isArray(preferences)
-    ? preferences
-    : typeof preferences === 'string'
-      ? preferences
-          .split(',')
-          .map((part, index) => {
-            const [language, ...parameters] = part.trim().split(';')
-            const q = parameters.find((parameter) => parameter.trim().startsWith('q='))
-            const weight = q ? Number(q.trim().slice(2)) : 1
-            return { language, weight: Number.isFinite(weight) ? weight : 0, index }
-          })
-          .sort((a, b) => b.weight - a.weight || a.index - b.index)
-          .map(({ language }) => language)
-      : []
-
-  for (const candidate of candidates) {
-    const language = candidate.toLowerCase()
-    if (language === 'zh-cn' || language.startsWith('zh-hans')) return 'zh-CN'
-    if (language === 'zh-tw' || language === 'zh-hk' || language.startsWith('zh-hant'))
-      return 'zh-TW'
-    if (language.startsWith('zh')) return 'zh-TW'
-    if (language.startsWith('ja')) return 'ja'
-    if (language.startsWith('ko')) return 'ko'
-    if (language.startsWith('en')) return 'en'
+/**
+ * Concurrent server renders share this module, so the server takes the locale
+ * from the render's context rather than module state. t() acts as a hook there;
+ * `use` throws when no render is in progress, which leaves the default locale.
+ */
+function activeLocale(): Locale {
+  if (typeof window === 'undefined') {
+    try {
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      return use(SsrLocaleContext) ?? currentLocale
+    } catch {
+      return currentLocale
+    }
   }
-  return DEFAULT_LOCALE
+  return currentLocale
 }
 
 /** Resolve the browser preference for client-side and offline use. */
@@ -75,7 +71,6 @@ export async function loadLocale(locale: Locale): Promise<void> {
   if (locales[locale]) return
   const existing = pendingLocales.get(locale)
   if (existing) return existing
-  if (locale === 'en') return
 
   const pending = localeLoaders[locale]()
     .then((module) => {
@@ -96,23 +91,46 @@ export function setLocale(locale: Locale) {
 }
 
 export function getLocale(): Locale {
-  return currentLocale
+  return activeLocale()
+}
+
+/**
+ * Make the server's locale active before the first client render, so hydration
+ * matches the server HTML. Returns a promise to suspend on while the dictionary
+ * loads, or null when it was active at once. A failed load falls back to English, and
+ * React then replaces the mismatched HTML.
+ */
+export function prepareInitialLocale(locale: Locale): Promise<void> | null {
+  if (typeof window === 'undefined') return null
+  // A render that suspended must call use() again when it resumes, so a promise
+  // handed out once keeps being returned; it is already settled by then.
+  if (initialLocalePreparing) return initialLocalePreparing
+  if (initialLocaleActive) return null
+  if (locales[locale]) {
+    currentLocale = locale
+    initialLocaleActive = true
+    return null
+  }
+  initialLocalePreparing = loadLocale(locale)
+    .catch(() => loadLocale('en'))
+    .catch(() => {})
+    .then(() => {
+      setLocale('en')
+      setLocale(locale)
+    })
+  return initialLocalePreparing
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
-  let value = locales[currentLocale]?.[key] ?? en[key] ?? key
+  const locale = activeLocale()
+  let value = locales[locale]?.[key] ?? locales.en?.[key] ?? key
 
   // Plural support: "singular|plural" format
   if (params && 'count' in params && value.includes('|')) {
     const forms = value.split('|')
     const count = Number(params.count)
     // CJK languages have no plural distinction — use first form
-    if (
-      currentLocale === 'zh-TW' ||
-      currentLocale === 'zh-CN' ||
-      currentLocale === 'ja' ||
-      currentLocale === 'ko'
-    ) {
+    if (locale === 'zh-TW' || locale === 'zh-CN' || locale === 'ja' || locale === 'ko') {
       value = forms[0]
     } else {
       value = count === 1 ? forms[0] : forms[1] || forms[0]
@@ -140,7 +158,7 @@ export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOpt
   try {
     const d = typeof date === 'string' ? new Date(date) : date
     if (isNaN(d.getTime())) return ''
-    const intlLocale = LOCALE_TO_INTL[currentLocale] || 'en-US'
+    const intlLocale = LOCALE_TO_INTL[activeLocale()] || 'en-US'
     return new Intl.DateTimeFormat(
       intlLocale,
       options ?? {
@@ -156,7 +174,7 @@ export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOpt
 
 /** Format a number according to the current locale */
 export function formatNumber(n: number, options?: Intl.NumberFormatOptions): string {
-  const intlLocale = LOCALE_TO_INTL[currentLocale] || 'en-US'
+  const intlLocale = LOCALE_TO_INTL[activeLocale()] || 'en-US'
   return new Intl.NumberFormat(intlLocale, options).format(n)
 }
 
