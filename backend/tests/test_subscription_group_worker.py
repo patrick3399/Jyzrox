@@ -4,13 +4,18 @@ Covers:
 - _cron_is_due: never-run, recently run, overdue
 - subscription_scheduler: no redis, no due groups, due group dispatched
 - check_subscription_group: not found, paused, no eligible subs, happy path
+- pause issued mid-run survives every path that releases the group
 - acquire_lock / release_lock helpers
 """
 
 import os
 import sys
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from sqlalchemy import text
 
 _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
@@ -537,6 +542,161 @@ class TestCheckSubscriptionGroup:
         # The function must have committed at least once (final status reset)
         assert result["status"] == "ok"
         session2.commit.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
+# TestPauseSurvivesRun
+# ---------------------------------------------------------------------------
+
+
+async def _insert_group_row(factory, status: str = "running") -> int:
+    async with factory() as session:
+        result = await session.execute(
+            text("INSERT INTO subscription_groups (name, status) VALUES ('Pausable', :status) RETURNING id"),
+            {"status": status},
+        )
+        group_id = result.scalar_one()
+        await session.commit()
+    return group_id
+
+
+async def _insert_sub_row(factory, group_id: int) -> None:
+    async with factory() as session:
+        await session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'grp', 'x', 'admin')")
+        )
+        await session.execute(
+            text(
+                "INSERT INTO subscriptions (user_id, url, name, source, enabled, auto_download, cron_expr, group_id) "
+                "VALUES (1, 'https://example.com/1', 'Sub', 'gallery_dl', 1, 1, '0 */2 * * *', :gid)"
+            ),
+            {"gid": group_id},
+        )
+        await session.commit()
+
+
+async def _pause(factory, group_id: int) -> None:
+    """Same write as POST /pause: unconditional, so it can land mid-run."""
+    async with factory() as session:
+        await session.execute(text("UPDATE subscription_groups SET status = 'paused' WHERE id = :id"), {"id": group_id})
+        await session.commit()
+
+
+async def _read_group(factory, group_id: int):
+    async with factory() as session:
+        return (
+            await session.execute(
+                text("SELECT status, last_completed_at FROM subscription_groups WHERE id = :id"), {"id": group_id}
+            )
+        ).one()
+
+
+class TestPauseSurvivesRun:
+    """A pause issued while a run is in flight must outlive that run."""
+
+    async def test_group_paused_during_run_stays_paused_after_completion(self, db_session_factory):
+        from worker.subscription_group import check_subscription_group
+
+        group_id = await _insert_group_row(db_session_factory)
+        await _insert_sub_row(db_session_factory, group_id)
+
+        async def _pause_mid_check(ctx, sub):
+            await _pause(db_session_factory, group_id)
+            return {"status": "ok"}
+
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", db_session_factory),
+            patch("worker.subscription._enqueue_for_subscription", side_effect=_pause_mid_check),
+            patch("worker.subscription_group._spacing_delay", return_value=0.0),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            result = await check_subscription_group(_make_ctx(), group_id=group_id)
+
+        row = await _read_group(db_session_factory, group_id)
+        assert result["status"] == "ok"
+        assert row.status == "paused"
+        assert row.last_completed_at is not None
+
+    async def test_unpaused_group_returns_to_idle_after_completion(self, db_session_factory):
+        from worker.subscription_group import check_subscription_group
+
+        group_id = await _insert_group_row(db_session_factory)
+        await _insert_sub_row(db_session_factory, group_id)
+
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", db_session_factory),
+            patch("worker.subscription._enqueue_for_subscription", AsyncMock(return_value={"status": "ok"})),
+            patch("worker.subscription_group._spacing_delay", return_value=0.0),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            await check_subscription_group(_make_ctx(), group_id=group_id)
+
+        row = await _read_group(db_session_factory, group_id)
+        assert row.status == "idle"
+        assert row.last_completed_at is not None
+
+    async def test_group_paused_with_no_eligible_subs_stays_paused(self, db_session_factory):
+        from worker.subscription_group import check_subscription_group
+
+        group_id = await _insert_group_row(db_session_factory)
+        opens = 0
+
+        @asynccontextmanager
+        async def _pause_before_second_open():
+            nonlocal opens
+            opens += 1
+            if opens == 2:
+                await _pause(db_session_factory, group_id)
+            async with db_session_factory() as session:
+                yield session
+
+        with patch("worker.subscription_group.AsyncSessionLocal", _pause_before_second_open):
+            result = await check_subscription_group(_make_ctx(), group_id=group_id)
+
+        row = await _read_group(db_session_factory, group_id)
+        assert result["checked"] == 0
+        assert row.status == "paused"
+        assert row.last_completed_at is not None
+
+    async def test_group_paused_before_unexpected_error_stays_paused(self, db_session_factory):
+        from worker.subscription_group import check_subscription_group
+
+        group_id = await _insert_group_row(db_session_factory)
+        await _insert_sub_row(db_session_factory, group_id)
+
+        async def _pause_then_fail(_delay):
+            await _pause(db_session_factory, group_id)
+            raise RuntimeError("boom")
+
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", db_session_factory),
+            patch("worker.subscription_group._start_jitter_delay", return_value=0.0),
+            patch("worker.subscription_group.asyncio.sleep", side_effect=_pause_then_fail),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            await check_subscription_group(_make_ctx(), group_id=group_id, start_jitter=True)
+
+        row = await _read_group(db_session_factory, group_id)
+        assert row.status == "paused"
+
+    async def test_group_paused_before_scheduler_enqueue_failure_stays_paused(self, db_session_factory):
+        from worker.subscription_group import subscription_scheduler
+
+        group_id = await _insert_group_row(db_session_factory, status="idle")
+
+        async def _pause_then_fail(*args, **kwargs):
+            await _pause(db_session_factory, group_id)
+            raise RuntimeError("redis down")
+
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", db_session_factory),
+            patch("worker.subscription_group.core.queue.enqueue", side_effect=_pause_then_fail),
+        ):
+            result = await subscription_scheduler(_make_ctx())
+
+        row = await _read_group(db_session_factory, group_id)
+        assert result["dispatched"] == 0
+        assert row.status == "paused"
 
 
 # ---------------------------------------------------------------------------
