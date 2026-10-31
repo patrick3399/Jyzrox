@@ -281,6 +281,41 @@ describe('Library favorite and reading-list toggles', () => {
   })
 })
 
+describe('Library view controls placement', () => {
+  const follows = (a: Element, b: Element) =>
+    a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+
+  it('test_view_controls_sit_left_of_the_search_input_apart_from_the_filters', () => {
+    render(<LibraryPage />)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    const favorites = screen.getByRole('button', { name: 'library.favoritesOnly' })
+
+    for (const testId of [
+      'library-view-menu-button',
+      'library-view-inline',
+      'library-density-button',
+    ]) {
+      const control = screen.getByTestId(testId)
+      expect(follows(control, input)).toBeTruthy()
+      // Not inside the filter group's wrapper.
+      expect(favorites.parentElement?.contains(control)).toBe(false)
+    }
+  })
+
+  it('test_focusing_the_input_collapses_the_view_controls_too', () => {
+    render(<LibraryPage />)
+    const control = screen.getByTestId('library-view-menu-button')
+    const wrapper = () => control.closest('[aria-hidden="true"]')
+
+    expect(wrapper()).toBeNull()
+
+    fireEvent.focus(screen.getByPlaceholderText(PLACEHOLDER))
+
+    expect(wrapper()).not.toBeNull()
+    expect(wrapper()).toHaveAttribute('inert')
+  })
+})
+
 describe('Library search focus behaviour', () => {
   it('test_focus_hides_toolbar_buttons_and_shows_cancel', () => {
     render(<LibraryPage />)

@@ -17,7 +17,7 @@ interface LibrarySearchBarProps {
   onToggleFavorited: () => void
   readingList: boolean
   onToggleReadingList: () => void
-  /** Layout and density controls, shown after the filter button. */
+  /** Layout and density controls, shown left of the input, apart from the filters. */
   viewControls?: ReactNode
 }
 
@@ -28,9 +28,9 @@ const TOOLBAR_BUTTON_IDLE =
   'border-vault-border bg-vault-input text-vault-text-secondary hover:text-vault-text hover:border-vault-border-hover'
 
 /**
- * One-row search: input + favorite and reading-list toggles + filter button.
- * While the input is focused those buttons collapse and a Cancel button takes
- * their place.
+ * One-row search: view controls + input + favorite and reading-list toggles +
+ * filter button. While the input is focused those buttons collapse and a Cancel
+ * button takes their place.
  */
 export function LibrarySearchBar({
   value,
@@ -52,6 +52,20 @@ export function LibrarySearchBar({
 
   return (
     <div className="flex items-center gap-2">
+      {viewControls && (
+        <div
+          // The negative margin cancels the row gap once collapsed, so the input
+          // reaches the left edge while typing.
+          className={`shrink-0 overflow-hidden transition-[max-width,margin,opacity] duration-200 ${
+            focused ? 'max-w-0 -mr-2 opacity-0' : 'max-w-12 sm:max-w-36 opacity-100'
+          }`}
+          aria-hidden={focused || undefined}
+          inert={focused}
+        >
+          <div className="flex items-center gap-2">{viewControls}</div>
+        </div>
+      )}
+
       <div className="relative flex-1 min-w-0">
         <Search
           size={16}
@@ -88,7 +102,7 @@ export function LibrarySearchBar({
 
       <div
         className={`shrink-0 overflow-hidden transition-[max-width,opacity] duration-200 ${
-          focused ? 'max-w-0 opacity-0' : 'max-w-48 sm:max-w-72 opacity-100'
+          focused ? 'max-w-0 opacity-0' : 'max-w-36 opacity-100'
         }`}
         aria-hidden={focused || undefined}
         inert={focused}
@@ -136,7 +150,6 @@ export function LibrarySearchBar({
               </span>
             )}
           </button>
-          {viewControls}
         </div>
       </div>
 
