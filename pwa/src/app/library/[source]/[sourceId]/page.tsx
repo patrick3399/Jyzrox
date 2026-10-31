@@ -107,6 +107,10 @@ const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: stri
     labelKey: 'library.statusImporting',
     className: 'bg-blue-900/40 border-blue-700/50 text-blue-400',
   },
+  missing: {
+    labelKey: 'library.statusMissing',
+    className: 'bg-red-900/40 border-red-700/50 text-red-400',
+  },
 }
 
 function GalleryDetailPageInner() {

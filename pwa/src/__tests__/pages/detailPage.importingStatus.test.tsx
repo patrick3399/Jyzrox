@@ -114,6 +114,14 @@ describe('gallery detail page importing status', () => {
     expect(screen.queryByText('Proxy Only')).not.toBeInTheDocument()
   })
 
+  it('renders the Source missing label for a held link gallery, not Proxy Only', () => {
+    h.gallery = makeGallery({ download_status: 'missing' })
+    render(<GalleryDetailPage />)
+
+    expect(screen.getByText('Source missing')).toBeInTheDocument()
+    expect(screen.queryByText('Proxy Only')).not.toBeInTheDocument()
+  })
+
   it('shows the in-progress banner while the gallery is importing', () => {
     render(<GalleryDetailPage />)
 
