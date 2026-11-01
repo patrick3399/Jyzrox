@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from PIL import Image as PILImage
 from sqlalchemy import text
 
@@ -1625,6 +1626,10 @@ class TestRescanCancel:
 # ---------------------------------------------------------------------------
 
 
+_MONITOR_STATUS_PAYLOADS = [None, json.dumps({"running": True, "paths": ["/mnt/library"]}).encode()]
+_MONITOR_STATUS_IDS = ["no_status", "with_status"]
+
+
 class TestMonitorStatus:
     """GET /api/import/monitor/status — file watcher status."""
 
@@ -1649,6 +1654,40 @@ class TestMonitorStatus:
         data = resp.json()
         assert data["running"] is True
         assert "/mnt/library" in data["watched_paths"]
+
+    @staticmethod
+    async def _get_enabled(client, mock_redis, *, status, stored, setting):
+        """Call the endpoint with the given watcher:status, watcher:enabled and startup default."""
+        values = {"watcher:status": status, "watcher:enabled": stored}
+        mock_redis.get = AsyncMock(side_effect=values.get)
+        with (
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_router.settings", MagicMock(library_monitor_enabled=setting)),
+        ):
+            resp = await client.get("/api/import/monitor/status")
+        assert resp.status_code == 200
+        return resp.json()["enabled"]
+
+    @pytest.mark.parametrize("status", _MONITOR_STATUS_PAYLOADS, ids=_MONITOR_STATUS_IDS)
+    @pytest.mark.parametrize("stored", [b"0", "0"], ids=["bytes", "str"])
+    async def test_monitor_status_admin_turned_off_is_disabled_when_setting_is_on(
+        self, client, mock_redis, status, stored
+    ):
+        """The admin's stored choice wins over the startup default, on both return paths."""
+        assert await self._get_enabled(client, mock_redis, status=status, stored=stored, setting=True) is False
+
+    @pytest.mark.parametrize("status", _MONITOR_STATUS_PAYLOADS, ids=_MONITOR_STATUS_IDS)
+    async def test_monitor_status_admin_turned_on_is_enabled_when_setting_is_off(self, client, mock_redis, status):
+        """A stored "1" means enabled even if the startup default says otherwise."""
+        assert await self._get_enabled(client, mock_redis, status=status, stored=b"1", setting=False) is True
+
+    @pytest.mark.parametrize("status", _MONITOR_STATUS_PAYLOADS, ids=_MONITOR_STATUS_IDS)
+    @pytest.mark.parametrize("setting", [True, False])
+    async def test_monitor_status_without_stored_choice_falls_back_to_setting(
+        self, client, mock_redis, status, setting
+    ):
+        """Before anything has written watcher:enabled, the startup default applies."""
+        assert await self._get_enabled(client, mock_redis, status=status, stored=None, setting=setting) is setting
 
     async def test_monitor_status_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""

@@ -720,6 +720,12 @@ class AddLibraryRequest(BaseModel):
     import_mode: str = DEFAULT_IMPORT_MODE
 
 
+async def _watcher_enabled() -> bool:
+    """Return the admin's stored watcher choice, or the startup default if none is stored."""
+    raw = await get_redis().get("watcher:enabled")
+    return settings.library_monitor_enabled if raw is None else raw not in (b"0", "0")
+
+
 async def _refresh_watcher_paths() -> None:
     """Have the worker re-read its monitored paths, unless the admin turned the watcher off.
 
@@ -727,9 +733,7 @@ async def _refresh_watcher_paths() -> None:
     paths again whenever it starts.
     """
     try:
-        raw = await get_redis().get("watcher:enabled")
-        enabled = settings.library_monitor_enabled if raw is None else raw not in (b"0", "0")
-        if enabled:
+        if await _watcher_enabled():
             await core.queue.enqueue("toggle_watcher_job", enabled=True)
     except Exception as exc:
         logger.warning("Could not refresh the library watcher: %s", exc)
@@ -803,16 +807,17 @@ async def remove_library(library_id: int, _: dict = Depends(_admin)):
 async def monitor_status(_: dict = Depends(_member)):
     """Return file watcher status (sourced from Redis, set by the worker process)."""
     r = get_redis()
+    enabled = await _watcher_enabled()
     data = await r.get("watcher:status")
     if not data:
         return {
-            "enabled": settings.library_monitor_enabled,
+            "enabled": enabled,
             "running": False,
             "watched_paths": [],
         }
     parsed = json.loads(data)
     return {
-        "enabled": settings.library_monitor_enabled,
+        "enabled": enabled,
         "running": parsed.get("running", False),
         "watched_paths": parsed.get("paths", []),
     }
