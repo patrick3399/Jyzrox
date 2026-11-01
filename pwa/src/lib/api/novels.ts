@@ -168,7 +168,82 @@ async function putNovelWrite(url: string, body: unknown): Promise<NovelWriteResu
   }
 }
 
+export interface NovelRemoteInfo {
+  url: string | null
+  repo_exists: boolean
+  has_key: boolean
+  public_key: string | null
+  key_fingerprint: string | null
+  host_trusted: boolean
+}
+export interface NovelHostKey {
+  type: string
+  fingerprint: string
+}
+export type NovelRemoteSaveResult =
+  | { ok: true; mode: 'cloned' | 'set_url' | 'recloned' }
+  | {
+      ok: false
+      status: number
+      message: string
+      needsReclone?: { reason: string; unpushed: number; dirty: boolean }
+    }
+
+async function putRemote(body: {
+  url: string
+  confirm_reclone: boolean
+}): Promise<NovelRemoteSaveResult> {
+  // Custom fetch (same reason as putNovelWrite): the 409 body drives the confirm dialog.
+  const csrf = getCookie('csrf_token')
+  const res = await fetch('/api/novels/remote', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+    body: JSON.stringify(body),
+  })
+  if (res.ok) {
+    return {
+      ok: true,
+      mode: ((await res.json()) as { mode: 'cloned' | 'set_url' | 'recloned' }).mode,
+    }
+  }
+  const detail = ((await res.json().catch(() => ({}))) as { detail?: unknown }).detail
+  if (res.status === 409 && typeof detail === 'object' && detail !== null && 'reason' in detail) {
+    const d = detail as { reason: string; unpushed: number; dirty: boolean }
+    return { ok: false, status: 409, message: d.reason, needsReclone: d }
+  }
+  return {
+    ok: false,
+    status: res.status,
+    message: typeof detail === 'string' ? detail : `HTTP ${res.status}`,
+  }
+}
+
 export const novels = {
+  // `url`: the address being typed, so host trust is judged before anything is saved.
+  remoteGet: (url?: string) =>
+    apiFetch<NovelRemoteInfo>(`/api/novels/remote${qs({ url: url || undefined })}`),
+  remoteGenerateKey: (regenerate = false) =>
+    apiFetch<{ public_key: string; key_fingerprint: string | null }>('/api/novels/remote/key', {
+      method: 'POST',
+      body: JSON.stringify({ regenerate }),
+    }),
+  remoteHostKeys: (url: string) =>
+    apiFetch<{ host: string; port: number | null; keys: NovelHostKey[] }>(
+      '/api/novels/remote/hostkeys',
+      { method: 'POST', body: JSON.stringify({ url }) },
+    ),
+  remoteTrust: (url: string, fingerprint: string) =>
+    apiFetch<{ ok: boolean }>('/api/novels/remote/trust', {
+      method: 'POST',
+      body: JSON.stringify({ url, fingerprint }),
+    }),
+  remoteTest: (url: string) =>
+    apiFetch<{ ok: boolean; empty: boolean; error: string }>('/api/novels/remote/test', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  remoteSave: (url: string, confirm_reclone = false) => putRemote({ url, confirm_reclone }),
   listWorks: () => apiFetch<{ works: NovelWork[] }>('/api/novels/works'),
   listChapters: (work: string) =>
     apiFetch<{ chapters: NovelChapter[]; categories: NovelCategoryCounts }>(

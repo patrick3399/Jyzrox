@@ -4,7 +4,11 @@ import json
 import logging
 from typing import Any
 
+from redis.exceptions import RedisError
+
+from core.config import settings
 from core.redis_client import get_redis
+from services.redis_memory import image_cache_writes_admitted
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +18,7 @@ logger = logging.getLogger(__name__)
 _TTL_GALLERY = 86400  # 24h — gallery metadata (rarely changes)
 _TTL_IMAGELIST = 604800  # 7d  — image token list (pTokens are stable)
 _TTL_PROXY_IMAGE = 86400  # 24h — proxied image bytes
+_TTL_CDN_THUMB = 86400  # 24h — EH CDN thumbnails
 _TTL_SEARCH = 300  # 5m  — search results
 
 MAX_IMAGE_CACHE_BYTES = 5 * 1024 * 1024  # Skip caching images > 5 MB
@@ -28,7 +33,11 @@ async def get_json(key: str) -> Any | None:
 
 
 async def set_json(key: str, value: Any, ttl: int) -> None:
-    await get_redis().setex(key, ttl, json.dumps(value, ensure_ascii=False))
+    """Best-effort: a cache that cannot be written must not fail its caller."""
+    try:
+        await get_redis().setex(key, ttl, json.dumps(value, ensure_ascii=False))
+    except RedisError as exc:
+        logger.warning("Cache write skipped for %s: %s", key, exc)
 
 
 async def get_bytes(key: str) -> bytes | None:
@@ -36,10 +45,23 @@ async def get_bytes(key: str) -> bytes | None:
 
 
 async def set_bytes(key: str, value: bytes, ttl: int) -> None:
+    """Cache image bytes, best-effort and only while Redis has room for them.
+
+    Redis runs `noeviction` because it also holds sessions, locks and queue
+    state (ADR 0006). Image bytes are the one cache large enough to fill it, so
+    they stop being admitted before that state is squeezed (ADR 0018).
+    """
     if len(value) > MAX_IMAGE_CACHE_BYTES:
         logger.debug("Skip cache %s: %d bytes exceeds limit", key, len(value))
         return
-    await get_redis().setex(key, ttl, value)
+    redis = get_redis()
+    if not await image_cache_writes_admitted(redis, settings.redis_image_cache_admit_max_pct):
+        logger.debug("Skip cache %s: Redis is above the image-cache admission watermark", key)
+        return
+    try:
+        await redis.setex(key, ttl, value)
+    except RedisError as exc:
+        logger.warning("Cache write skipped for %s: %s", key, exc)
 
 
 # ── Named cache operations ───────────────────────────────────────────
@@ -79,6 +101,14 @@ async def set_proxied_image(gid: int, page: int, data: bytes) -> None:
     await set_bytes(f"thumb:proxied:{gid}:{page}", data, _TTL_PROXY_IMAGE)
 
 
+async def get_cdn_thumb(url_hash: str) -> bytes | None:
+    return await get_bytes(f"thumb:cdn:{url_hash}")
+
+
+async def set_cdn_thumb(url_hash: str, data: bytes) -> None:
+    await set_bytes(f"thumb:cdn:{url_hash}", data, _TTL_CDN_THUMB)
+
+
 # ── Pixiv cache operations ───────────────────────────────────────────
 
 _TTL_PIXIV_SEARCH = 300  # 5min
@@ -86,13 +116,36 @@ _TTL_PIXIV_ILLUST = 3600  # 1h
 _TTL_PIXIV_USER = 1800  # 30min
 _TTL_PIXIV_IMAGE = 86400  # 24h
 
+_PIXIV_SEARCH_PREFIX = "pixiv:search:"
+
 
 async def get_pixiv_search_cache(key: str) -> dict | None:
-    return await get_json(f"pixiv:search:{key}")
+    return await get_json(f"{_PIXIV_SEARCH_PREFIX}{key}")
 
 
 async def set_pixiv_search_cache(key: str, data: dict) -> None:
-    await set_json(f"pixiv:search:{key}", data, _TTL_PIXIV_SEARCH)
+    await set_json(f"{_PIXIV_SEARCH_PREFIX}{key}", data, _TTL_PIXIV_SEARCH)
+
+
+async def invalidate_pixiv_search_cache(*scopes: str) -> None:
+    """Drop every cached page of the given lists, e.g. "my_bookmarks".
+
+    A scope is the leading segment of the key handed to set_pixiv_search_cache.
+    Best-effort: the pages expire on their own, so a failed purge must not fail
+    the write that made them stale.
+    """
+    try:
+        redis = get_redis()
+        for scope in scopes:
+            cursor = 0
+            while True:
+                cursor, keys = await redis.scan(cursor, match=f"{_PIXIV_SEARCH_PREFIX}{scope}:*", count=200)
+                if keys:
+                    await redis.delete(*keys)
+                if cursor == 0:
+                    break
+    except RedisError as exc:
+        logger.warning("Pixiv cache invalidation skipped for %s: %s", ", ".join(scopes), exc)
 
 
 async def get_pixiv_illust_cache(illust_id: int) -> dict | None:
@@ -119,14 +172,28 @@ async def set_pixiv_image_cache(url_hash: str, data: bytes) -> None:
     await set_bytes(f"pixiv:img:{url_hash}", data, _TTL_PIXIV_IMAGE)
 
 
+# Every prefix written through set_bytes, with the TTL it is written with. The
+# worker's trim ranks keys by age (TTL minus what remains), and only looks under
+# these prefixes: a new image cache must be registered here or it is unbounded.
+IMAGE_CACHE_TTLS: dict[str, int] = {
+    "thumb:proxied:": _TTL_PROXY_IMAGE,
+    "thumb:cdn:": _TTL_CDN_THUMB,
+    "pixiv:img:": _TTL_PIXIV_IMAGE,
+}
+
+
 async def push_system_alert(message: str) -> None:
-    r = get_redis()
-    raw = await r.lrange("system:alerts", 0, 49)
-    existing = {v.decode() if isinstance(v, bytes) else v for v in raw}
-    if message in existing:
-        return
-    await r.lpush("system:alerts", message)
-    await r.ltrim("system:alerts", 0, 49)  # Keep last 50
+    """Best-effort: alerts are raised from error paths and must not mask them."""
+    try:
+        r = get_redis()
+        raw = await r.lrange("system:alerts", 0, 49)
+        existing = {v.decode() if isinstance(v, bytes) else v for v in raw}
+        if message in existing:
+            return
+        await r.lpush("system:alerts", message)
+        await r.ltrim("system:alerts", 0, 49)  # Keep last 50
+    except RedisError as exc:
+        logger.warning("System alert not stored (%s): %s", message, exc)
 
 
 async def get_system_alerts() -> list[str]:
@@ -151,3 +218,33 @@ async def dismiss_system_alert(message: str) -> int:
 
 async def clear_system_alerts() -> None:
     await get_redis().delete("system:alerts")
+
+
+# ── Account-scoped browse caches ─────────────────────────────────────
+
+# Cached browse responses that depend on which site account made the request.
+_ACCOUNT_SCOPED_PATTERNS: dict[str, tuple[str, ...]] = {
+    "ehentai": ("eh:favorites:*", "eh:search:*"),
+    "pixiv": (
+        "pixiv:search:my_bookmarks:*",
+        "pixiv:search:my_following:*",
+        "pixiv:search:following_feed:*",
+    ),
+}
+
+
+async def purge_account_scoped_cache(source: str) -> int:
+    """Drop cached responses tied to the previous active account of ``source``.
+
+    Best-effort: if Redis is unavailable the stale entries simply live out their
+    TTL (at most five minutes), so this must never fail the account switch.
+    """
+    patterns = _ACCOUNT_SCOPED_PATTERNS.get(source, ())
+    removed = 0
+    try:
+        for pattern in patterns:
+            async for key in get_redis().scan_iter(match=pattern, count=200):
+                removed += int(await get_redis().unlink(key))
+    except RedisError as exc:
+        logger.warning("[cache] could not purge account-scoped cache for %s: %s", source, exc)
+    return removed

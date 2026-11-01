@@ -10,6 +10,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { MarkdownView } from '@/components/novels/MarkdownView'
 import { AppearanceTimeline } from '@/components/novels/AppearanceTimeline'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function NovelNotePage() {
   useLocale()
@@ -37,25 +39,29 @@ export default function NovelNotePage() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6">
-      <h1 className="mb-4 flex items-center gap-2 text-xl font-semibold text-vault-text">
-        <FileText className="size-5" />
-        <span className="truncate">{notePath.split('/').pop() ?? t('novels.entityCard')}</span>
-      </h1>
+    <PageContainer variant="secondary">
+      <div className="mx-auto max-w-3xl">
+        <PageHeader
+          title={notePath.split('/').pop() ?? t('novels.entityCard')}
+          icon={<FileText className="size-5" />}
+        />
 
-      {isLoading ? (
-        <LoadingSpinner />
-      ) : !file ? (
-        <EmptyState icon={FileText} title={t('novels.noteNotFound')} />
-      ) : (
-        <>
-          <MarkdownView content={file.content} acts={file.acts} />
-          <section className="mt-8">
-            <h2 className="mb-3 text-lg font-semibold text-vault-text">{t('novels.appearances')}</h2>
-            <AppearanceTimeline appearances={app?.appearances ?? []} />
-          </section>
-        </>
-      )}
-    </div>
+        {isLoading ? (
+          <LoadingSpinner />
+        ) : !file ? (
+          <EmptyState icon={FileText} title={t('novels.noteNotFound')} />
+        ) : (
+          <>
+            <MarkdownView content={file.content} acts={file.acts} />
+            <section className="mt-8">
+              <h2 className="mb-3 text-lg font-semibold text-vault-text">
+                {t('novels.appearances')}
+              </h2>
+              <AppearanceTimeline appearances={app?.appearances ?? []} />
+            </section>
+          </>
+        )}
+      </div>
+    </PageContainer>
   )
 }

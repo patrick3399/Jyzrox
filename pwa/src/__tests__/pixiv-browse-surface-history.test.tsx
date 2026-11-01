@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PixivBrowseItem } from '@/lib/browse/pixiv'
 
 type GridProps = {
@@ -8,17 +8,20 @@ type GridProps = {
 }
 
 const runtime = vi.hoisted(() => ({
+  // Writes to the URL: window.history.pushState/replaceState (commitBrowseUrl).
   events: [] as string[],
+  // Anything that reached the router instead.
+  routerCalls: [] as string[],
   search: '',
 }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: (url: string) => {
-      runtime.events.push(`push:${url}`)
+      runtime.routerCalls.push(`push:${url}`)
     },
     replace: (url: string) => {
-      runtime.events.push(`replace:${url}`)
+      runtime.routerCalls.push(`replace:${url}`)
     },
   }),
   useSearchParams: () => new URLSearchParams(runtime.search),
@@ -91,8 +94,21 @@ import PixivPage from '@/app/pixiv/page'
 describe('root Pixiv — which identity changes are reachable by back', () => {
   beforeEach(() => {
     runtime.events = []
+    runtime.routerCalls = []
     runtime.search = ''
     sessionStorage.clear()
+    vi.spyOn(window.history, 'pushState').mockImplementation((state, _title, url) => {
+      expect(state).toEqual({})
+      runtime.events.push(`push:${url}`)
+    })
+    vi.spyOn(window.history, 'replaceState').mockImplementation((state, _title, url) => {
+      expect(state).toEqual({})
+      runtime.events.push(`replace:${url}`)
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   // Regression: every surface change went through router.replace, so
@@ -141,5 +157,39 @@ describe('root Pixiv — which identity changes are reachable by back', () => {
     fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'private' } })
 
     expect(runtime.events).toEqual(['replace:/pixiv?tab=bookmarks&restrict=private'])
+  })
+
+  // Regression: identity commits went through router.push/replace, an RSC fetch
+  // per change for a page that is already rendered, and on iOS standalone Safari
+  // a document navigation with an empty query that landed on ranking (FE-T17).
+  it('never routes a same-page identity change through the Next router', () => {
+    render(<PixivPage />)
+
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'weekly' } })
+    fireEvent.click(screen.getByRole('button', { name: 'pixiv.feedTab' }))
+    fireEvent.change(screen.getByPlaceholderText('pixiv.searchPlaceholder'), {
+      target: { value: 'miku' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'pixiv.search' }))
+
+    expect(runtime.events.length).toBeGreaterThan(0)
+    expect(runtime.routerCalls).toEqual([])
+  })
+
+  it('still follows the URL when back/forward changes the surface', () => {
+    const view = render(<PixivPage />)
+    expect(screen.getByRole('button', { name: 'browse.ranking' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    runtime.search = 'tab=feed'
+    view.rerender(<PixivPage />)
+
+    expect(screen.getByRole('button', { name: 'pixiv.feedTab' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(runtime.events).toEqual([])
   })
 })

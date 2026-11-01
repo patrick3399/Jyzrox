@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
 const { push, replace, pixivApi, infinite } = vi.hoisted(() => ({
   push: vi.fn(),
@@ -17,6 +17,9 @@ const { push, replace, pixivApi, infinite } = vi.hoisted(() => ({
 }))
 
 let searchStr = ''
+// Same-page identity commits go through history (commitBrowseUrl), not the router.
+let pushState: MockInstance<History['pushState']>
+let replaceState: MockInstance<History['replaceState']>
 let profile: { data?: { username: string }; isLoading: boolean } = { isLoading: false }
 let credentials: { data?: { pixiv: { configured: boolean } }; isLoading: boolean } = {
   data: { pixiv: { configured: true } },
@@ -76,6 +79,13 @@ beforeEach(() => {
   profile = { data: { username: 'alice' }, isLoading: false }
   credentials = { data: { pixiv: { configured: true } }, isLoading: false }
   vi.clearAllMocks()
+  pushState = vi.spyOn(window.history, 'pushState').mockImplementation(() => {})
+  replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {})
+})
+
+afterEach(() => {
+  pushState.mockRestore()
+  replaceState.mockRestore()
 })
 
 describe('Pixiv URL identity owner', () => {
@@ -84,33 +94,35 @@ describe('Pixiv URL identity owner', () => {
     render(<PixivPage />)
 
     expect(screen.getByPlaceholderText('pixiv.searchPlaceholder')).toHaveValue('blue archive')
-    expect(replace).not.toHaveBeenCalledWith('/pixiv?tab=ranking', expect.anything())
+    expect(replaceState).not.toHaveBeenCalled()
+    expect(replace).not.toHaveBeenCalled()
   })
 
   it('synchronizes mounted state when back/forward supplies a new URL identity', () => {
     const view = render(<PixivPage />)
-    replace.mockClear()
+    replaceState.mockClear()
 
     searchStr = 'tab=search&q=back+target&sort=date_asc'
     view.rerender(<PixivPage />)
 
     expect(screen.getByPlaceholderText('pixiv.searchPlaceholder')).toHaveValue('back target')
-    expect(replace).not.toHaveBeenCalledWith('/pixiv?tab=ranking', expect.anything())
+    expect(replaceState).not.toHaveBeenCalled()
+    expect(replace).not.toHaveBeenCalled()
   })
 
   // Submitting a search moves off the ranking surface, so it pushes: the surface
   // the user came from has to stay reachable by back.
   it('emits exactly one outbound URL transition for a submitted search', () => {
     render(<PixivPage />)
-    replace.mockClear()
-    push.mockClear()
     const input = screen.getByPlaceholderText('pixiv.searchPlaceholder')
 
     fireEvent.change(input, { target: { value: 'miku' } })
     fireEvent.click(screen.getByRole('button', { name: 'pixiv.search' }))
 
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith('/pixiv?tab=search&q=miku', { scroll: false })
+    expect(pushState).toHaveBeenCalledTimes(1)
+    expect(pushState).toHaveBeenCalledWith({}, '', '/pixiv?tab=search&q=miku')
+    expect(replaceState).not.toHaveBeenCalled()
+    expect(push).not.toHaveBeenCalled()
     expect(replace).not.toHaveBeenCalled()
   })
 
@@ -119,19 +131,22 @@ describe('Pixiv URL identity owner', () => {
     render(<PixivPage />)
     const [sort, duration] = screen.getAllByRole('combobox')
 
-    replace.mockClear()
+    replaceState.mockClear()
     fireEvent.change(sort, { target: { value: 'popular_desc' } })
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace).toHaveBeenLastCalledWith('/pixiv?tab=search&q=miku&sort=popular_desc', {
-      scroll: false,
-    })
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenLastCalledWith(
+      {},
+      '',
+      '/pixiv?tab=search&q=miku&sort=popular_desc',
+    )
 
-    replace.mockClear()
+    replaceState.mockClear()
     fireEvent.change(duration, { target: { value: 'within_last_week' } })
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace).toHaveBeenLastCalledWith(
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenLastCalledWith(
+      {},
+      '',
       '/pixiv?tab=search&q=miku&sort=popular_desc&duration=within_last_week',
-      { scroll: false },
     )
   })
 
@@ -139,39 +154,35 @@ describe('Pixiv URL identity owner', () => {
     render(<PixivPage />)
     const [mode, content] = screen.getAllByRole('combobox')
 
-    replace.mockClear()
+    replaceState.mockClear()
     fireEvent.change(mode, { target: { value: 'weekly' } })
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace).toHaveBeenLastCalledWith('/pixiv?tab=ranking&mode=weekly', {
-      scroll: false,
-    })
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenLastCalledWith({}, '', '/pixiv?tab=ranking&mode=weekly')
 
-    replace.mockClear()
+    replaceState.mockClear()
     fireEvent.change(content, { target: { value: 'manga' } })
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace).toHaveBeenLastCalledWith('/pixiv?tab=ranking&mode=weekly&content=manga', {
-      scroll: false,
-    })
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenLastCalledWith(
+      {},
+      '',
+      '/pixiv?tab=ranking&mode=weekly&content=manga',
+    )
 
-    replace.mockClear()
+    replaceState.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'browse.r18' }))
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace).toHaveBeenLastCalledWith('/pixiv?tab=ranking&mode=weekly&r18=1', {
-      scroll: false,
-    })
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenLastCalledWith({}, '', '/pixiv?tab=ranking&mode=weekly&r18=1')
   })
 
   it('emits exactly one canonical URL transition for bookmark visibility', () => {
     render(<PixivPage />)
     fireEvent.click(screen.getByRole('button', { name: 'pixiv.bookmarks' }))
 
-    replace.mockClear()
+    replaceState.mockClear()
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'private' } })
 
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace).toHaveBeenLastCalledWith('/pixiv?tab=bookmarks&restrict=private', {
-      scroll: false,
-    })
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState).toHaveBeenLastCalledWith({}, '', '/pixiv?tab=bookmarks&restrict=private')
   })
 })
 

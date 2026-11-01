@@ -26,6 +26,24 @@ export function setIsRedirecting(value: boolean): void {
   isRedirecting = value
 }
 
+/**
+ * Error thrown for a non-2xx response. The message is unchanged (the translated
+ * error code, the plain `detail` string, or `HTTP <status>`); `status` and the
+ * parsed `detail` stay available for callers that branch on a structured body,
+ * such as the enqueue 409 `{code: "subscribed"}`.
+ */
+export class ApiError extends Error {
+  readonly status: number
+  readonly detail: unknown
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -86,7 +104,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     } else {
       msg = raw ? JSON.stringify(raw) : `HTTP ${res.status}`
     }
-    throw new Error(msg)
+    throw new ApiError(msg, res.status, raw)
   }
 
   // Some endpoints return no body (204)

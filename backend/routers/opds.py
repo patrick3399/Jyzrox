@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from core.auth import gallery_access_filter, require_opds_auth
@@ -15,7 +15,7 @@ from core.gallery_helpers import build_cover_sha_map, image_not_excluded_clause
 from core.redis_client import get_redis
 from core.source_display import get_display_config
 from db.models import Gallery, Image, UserFavorite
-from services.cas import cas_url
+from services.cas import image_file_url
 from services.cas import thumb_url as cas_thumb_url
 
 
@@ -101,12 +101,13 @@ def _make_feed(title: str, feed_id: str, request: Request) -> ET.Element:
     return root
 
 
-def _gallery_entry(gallery: Gallery, cover_thumb: str | None, request: Request) -> ET.Element:
+def _gallery_entry(gallery: Gallery, cover_thumb: str | None, request: Request, pending_pages: int = 0) -> ET.Element:
     base = _base_url(request)
     entry = ET.Element(f"{{{ATOM_NS}}}entry")
 
-    # PSE count (total pages)
-    entry.set(f"{{{PSE_NS}}}count", str(gallery.pages or 0))
+    # PSE count must match the page list served by opds_gallery(), which only
+    # contains hashed pages; gallery.pages also counts pending link pages.
+    entry.set(f"{{{PSE_NS}}}count", str(max((gallery.pages or 0) - pending_pages, 0)))
 
     title = gallery.title or gallery.title_jpn or f"Gallery {gallery.id}"
     title_el = ET.SubElement(entry, f"{{{ATOM_NS}}}title")
@@ -224,6 +225,7 @@ async def _build_acquisition_feed(
     # Collect cover thumbs in batch: first image per gallery (page_num=1)
     gallery_ids = [g.id for g in galleries]
     cover_thumbs: dict[int, str] = {}
+    pending_counts: dict[int, int] = {}
 
     if gallery_ids:
         source_map = {g.id: g.source or "" for g in galleries}
@@ -232,6 +234,21 @@ async def _build_acquisition_feed(
             cover_thumbs = {
                 gallery_id: cas_thumb_url(sha256)
                 for gallery_id, sha256 in (await build_cover_sha_map(session, gallery_ids, source_map)).items()
+            }
+            pending_counts = {
+                gallery_id: count
+                for gallery_id, count in (
+                    await session.execute(
+                        select(Image.gallery_id, func.count(Image.id))
+                        .where(
+                            Image.gallery_id.in_(gallery_ids),
+                            Image.visibility == "active",
+                            Image.blob_sha256.is_(None),
+                            Image.external_path.is_not(None),
+                        )
+                        .group_by(Image.gallery_id)
+                    )
+                ).all()
             }
 
     # Pagination links
@@ -252,7 +269,7 @@ async def _build_acquisition_feed(
         next_link.set("type", "application/atom+xml;profile=opds-catalog;kind=acquisition")
 
     for gallery in galleries:
-        entry = _gallery_entry(gallery, cover_thumbs.get(gallery.id), request)
+        entry = _gallery_entry(gallery, cover_thumbs.get(gallery.id), request, pending_counts.get(gallery.id, 0))
         root.append(entry)
 
     return _xml_response(root)
@@ -456,7 +473,13 @@ async def opds_gallery(
             (
                 await session.execute(
                     select(Image)
-                    .where(Image.gallery_id == gallery.id, Image.visibility == "active", image_not_excluded_clause())
+                    .where(
+                        Image.gallery_id == gallery.id,
+                        Image.visibility == "active",
+                        # Pending link pages have no blob to serve or thumbnail yet.
+                        Image.blob_sha256.is_not(None),
+                        image_not_excluded_clause(),
+                    )
                     .order_by(
                         Image.page_num.desc()
                         if get_display_config(gallery.source or "").image_order == "desc"
@@ -493,7 +516,8 @@ async def opds_gallery(
             # Full image link
             img_link = ET.SubElement(entry, f"{{{ATOM_NS}}}link")
             img_link.set("rel", "http://opds-spec.org/image")
-            img_link.set("href", f"{base}{cas_url(blob.sha256, blob.extension)}")
+            # A link page's bytes stay in the user's folder; it has no CAS file.
+            img_link.set("href", f"{base}{image_file_url(blob, img.external_path)}")
 
             # Determine image content type
             ext_map = {

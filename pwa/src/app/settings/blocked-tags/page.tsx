@@ -5,11 +5,13 @@ import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { X, Plus, Tag } from 'lucide-react'
 import type { BlockedTag } from '@/lib/types'
-import { inputClass, btnPrimary } from '@/components/settings/SettingsShared'
+import { inputClass } from '@/components/settings/SettingsShared'
+import { Button } from '@/components/ui/button'
 
 export default function BlockedTagsSettingsPage() {
   useLocale()
@@ -85,15 +87,17 @@ export default function BlockedTagsSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <div className="flex items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold text-vault-text">{t('settingsCategory.blockedTags')}</h1>
-        {blockedTags.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-sm text-vault-text-muted">
-            <Tag size={14} />
-            {blockedTags.length}
-          </span>
-        )}
-      </div>
+      <PageHeader
+        title={t('settingsCategory.blockedTags')}
+        meta={
+          blockedTags.length > 0 ? (
+            <span className="inline-flex items-center gap-1 text-sm text-vault-text-muted">
+              <Tag size={14} />
+              {blockedTags.length}
+            </span>
+          ) : undefined
+        }
+      />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5">
@@ -109,14 +113,16 @@ export default function BlockedTagsSettingsPage() {
               placeholder={t('settings.blockedTagPlaceholder')}
               className={inputClass + ' flex-1'}
             />
-            <button
+            <Button
+              variant="primary"
+              size="md"
+              className="shrink-0"
               onClick={handleAddBlockedTag}
               disabled={blockingTag || !newBlockedTag.trim()}
-              className={btnPrimary + ' flex items-center gap-1.5 shrink-0'}
             >
               <Plus size={14} />
               {blockingTag ? t('settings.saving') : t('settings.addBlockedTag')}
-            </button>
+            </Button>
           </div>
 
           {/* Blocked tag list */}
@@ -125,13 +131,14 @@ export default function BlockedTagsSettingsPage() {
               <p className="text-xs text-vault-text-muted uppercase tracking-wide">
                 {t('settings.blockedTags')}
               </p>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleLoadBlockedTags}
                 disabled={blockedTagsLoading}
-                className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
               >
                 {blockedTagsLoading ? t('settings.loading') : t('settings.refresh')}
-              </button>
+              </Button>
             </div>
 
             {blockedTagsLoading && blockedTags.length === 0 ? (

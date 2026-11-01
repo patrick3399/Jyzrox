@@ -20,7 +20,7 @@ from core.database import async_session
 from core.redis_client import get_redis
 from core.utils import detect_source, normalize_download_url
 from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
-from services.cas import cas_url, resolve_blob_path
+from services.cas import image_file_url, resolve_blob_path
 from services.cas import thumb_srcset as cas_thumb_srcset
 from services.cas import thumb_url as cas_thumb_url
 
@@ -41,7 +41,7 @@ async def _require_external_api_enabled():
 router = APIRouter(tags=["external"], dependencies=[Depends(_require_external_api_enabled)])
 
 
-async def verify_api_token(x_api_token: str = Header(...)):
+async def _authenticate_token(x_api_token: str, bucket: str, limit: int) -> dict:
     if not x_api_token:
         raise HTTPException(status_code=401, detail="Missing X-API-Token header")
 
@@ -60,7 +60,7 @@ async def verify_api_token(x_api_token: str = Header(...)):
     if not token:
         raise HTTPException(status_code=401, detail="Invalid or expired API token")
 
-    await _check_rate_limit(token.id)
+    await _check_rate_limit(token.id, bucket, limit)
 
     # Update last_used_at
     async with async_session() as session:
@@ -70,24 +70,38 @@ async def verify_api_token(x_api_token: str = Header(...)):
     return {"user_id": token.user_id, "token_id": token.id, "role": token.role or "viewer"}
 
 
+async def verify_api_token(x_api_token: str = Header(...)):
+    return await _authenticate_token(x_api_token, "ext", _RATE_LIMIT_REQUESTS)
+
+
+async def verify_api_token_for_page_file(x_api_token: str = Header(...)):
+    """Token check for page-file downloads, counted in their own bucket.
+
+    A reader requests one file per page, so sharing the metadata budget stalled
+    a chapter after about ten pages.
+    """
+    return await _authenticate_token(x_api_token, "ext-file", _FILE_RATE_LIMIT_REQUESTS)
+
+
 # ── Rate limiter ──────────────────────────────────────────────────────
 
-_RATE_LIMIT_REQUESTS = 10  # max requests per window
+_RATE_LIMIT_REQUESTS = 10  # max metadata/action requests per window
+_FILE_RATE_LIMIT_REQUESTS = 600  # max page-file requests per window
 _RATE_LIMIT_WINDOW = 60  # window size in seconds
 
 
-async def _check_rate_limit(token_id: int) -> None:
-    """Redis-based sliding-window rate limiter scoped to a token per minute."""
+async def _check_rate_limit(token_id: int, bucket: str, limit: int) -> None:
+    """Redis-based fixed-window rate limiter scoped to a token and bucket per minute."""
     minute = int(time.time()) // _RATE_LIMIT_WINDOW
-    key = f"ratelimit:ext:{token_id}:{minute}"
+    key = f"ratelimit:{bucket}:{token_id}:{minute}"
     r = get_redis()
     count = await r.incr(key)
     if count == 1:
         await r.expire(key, _RATE_LIMIT_WINDOW)
-    if count > _RATE_LIMIT_REQUESTS:
+    if count > limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Rate limit exceeded: max {_RATE_LIMIT_REQUESTS} requests per minute",
+            detail=f"Rate limit exceeded: max {limit} requests per minute",
         )
 
 
@@ -310,7 +324,7 @@ async def get_gallery_images(
             (
                 await session.execute(
                     select(Image)
-                    .where(Image.gallery_id == gallery_id)
+                    .where(Image.gallery_id == gallery_id, Image.blob_sha256.is_not(None))
                     .order_by(Image.page_num.desc())
                     .options(selectinload(Image.blob))
                 )
@@ -332,7 +346,8 @@ async def get_gallery_images(
                 "file_size": blob.file_size if blob else None,
                 "media_type": blob.media_type if blob else None,
                 "duration": blob.duration if blob else None,
-                "file_url": cas_url(blob.sha256, blob.extension) if blob else None,
+                # A link page's bytes stay in the user's folder; it has no CAS file.
+                "file_url": image_file_url(blob, r.external_path),
                 "thumb_url": cas_thumb_url(blob.sha256) if blob else None,
                 "thumb_srcset": cas_thumb_srcset(blob.sha256) if blob else None,
             }
@@ -345,7 +360,7 @@ async def get_gallery_images(
 async def get_image_file(
     gallery_id: int,
     page_num: int,
-    token_data: dict = Depends(verify_api_token),
+    token_data: dict = Depends(verify_api_token_for_page_file),
 ):
     """Stream an image file for external readers (Mihon)."""
     async with async_session() as session:
@@ -364,14 +379,19 @@ async def get_image_file(
             )
         ).scalar_one_or_none()
 
-    if not row or not row.blob:
+    if not row or (not row.blob and not row.external_path):
         raise HTTPException(status_code=404, detail="Image not found")
 
+    # A pending link page has no blob yet; its own DB-recorded external_path
+    # (never a request value) is the file to serve.
     file_path = resolve_blob_path(row.blob, row.external_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
     ext_map = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".png": "image/png",
@@ -379,7 +399,8 @@ async def get_image_file(
         ".webp": "image/webp",
         ".avif": "image/avif",
     }
-    content_type = ext_map.get(row.blob.extension.lower(), "application/octet-stream")
+    extension = row.blob.extension if row.blob else file_path.suffix
+    content_type = ext_map.get(extension.lower(), "application/octet-stream")
 
     from fastapi.responses import FileResponse
 
@@ -455,10 +476,11 @@ async def enqueue_download(
     resolved_url = normalize_download_url(resolved_url)
     job_id = _uuid.uuid4()
     source = detect_source(resolved_url)
-    from services.download_admission import admission_key_for
+    from services.egress_persona import resolve_admission_key
 
     # Persist first so workers can never observe a queue entry without its DB
     # identity. The partial unique index closes concurrent duplicate races.
+    admission_key = await resolve_admission_key(source, resolved_url, subscription_id=None)
     try:
         async with async_session() as session:
             session.add(
@@ -469,7 +491,7 @@ async def enqueue_download(
                     source=source,
                     status="queued",
                     user_id=token_data["user_id"],
-                    admission_key=admission_key_for(source, resolved_url),
+                    admission_key=admission_key,
                 )
             )
             await session.commit()

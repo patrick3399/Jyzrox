@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 
 interface PaginatorProps {
   page: number
@@ -45,29 +46,26 @@ export default function Paginator({
     setInputValue(String(page + 1))
   }
 
-  const btnClass =
-    'px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm ' +
-    'disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors'
 
   return (
     <div className="flex justify-center items-center gap-2 pt-2">
-      <button
+      <Button
+        variant="secondary"
         onClick={onFirst}
         disabled={loading || page === 0}
         title={t('common.firstPage')}
-        className={btnClass}
       >
         «
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant="secondary"
         onClick={onPrev}
         disabled={loading || !hasPrev}
         title={t('common.previousPage')}
-        className={btnClass}
       >
         ‹
-      </button>
+      </Button>
 
       {onJump ? (
         <input
@@ -90,14 +88,14 @@ export default function Paginator({
         </span>
       )}
 
-      <button
+      <Button
+        variant="secondary"
         onClick={onNext}
         disabled={loading || !hasNext}
         title={t('common.nextPage')}
-        className={btnClass}
       >
         ›
-      </button>
+      </Button>
     </div>
   )
 }

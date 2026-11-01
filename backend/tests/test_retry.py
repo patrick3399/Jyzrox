@@ -22,6 +22,7 @@ def _make_mock_job(
     url="https://e-hentai.org/g/123/abc/",
     source="ehentai",
     progress=None,
+    subscription_id=None,
 ):
     """Create a mock DownloadJob object."""
     job = MagicMock()
@@ -35,6 +36,7 @@ def _make_mock_job(
     job.finished_at = datetime.now(UTC)
     job.error = "Download failed: timeout"
     job.progress = progress or {}
+    job.subscription_id = subscription_id
     job.created_at = datetime.now(UTC) - timedelta(hours=1)
     return job
 
@@ -285,6 +287,54 @@ class TestRetryFailedDownloadsJob:
         # Check it's roughly 20 minutes from now
         now = datetime.now(UTC)
         assert mock_job.next_retry_at >= now + expected_backoff - timedelta(seconds=5)
+
+    async def test_retry_cron_restamps_manual_job_with_persona_key_but_not_subscription_job(self):
+        """Regression: the cron re-stamps the final queue key before redelivery.
+
+        A manual job on a persona-spread site must re-enter the persona FIFO with
+        its persona key; a subscription job never uses persona mode and keeps the
+        plain per-host key.
+        """
+        from core.site_config import DownloadParams
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+
+        manual_job = _make_mock_job(
+            status="failed", url="https://x.com/someone/media", source="twitter", subscription_id=None
+        )
+        subscription_job = _make_mock_job(
+            status="failed", url="https://x.com/other/media", source="twitter", subscription_id=7
+        )
+
+        mock_session = AsyncMock()
+        mock_stale_result = MagicMock()
+        mock_stale_result.scalars.return_value.all.return_value = []
+        mock_retry_result = MagicMock()
+        mock_retry_result.scalars.return_value.all.return_value = [manual_job, subscription_job]
+        mock_session.execute = AsyncMock(side_effect=[mock_stale_result, mock_stale_result, mock_retry_result])
+        mock_session.commit = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.retry._cron_record", new_callable=AsyncMock),
+            patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            from worker.retry import retry_failed_downloads_job
+
+            result = await retry_failed_downloads_job({"redis": mock_redis})
+
+        assert result["retried"] == 2
+        assert manual_job.admission_key == "gallery_dl:x.com#persona"
+        assert subscription_job.admission_key == "gallery_dl:x.com"
 
 
 class TestStaleReaperUsesHeartbeat:

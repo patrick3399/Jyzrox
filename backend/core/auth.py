@@ -15,7 +15,7 @@ from sqlalchemy import text
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
 from core.keys import session_hmac_key
-from core.rate_limit import get_client_ip
+from core.rate_limit import failed_attempts_lockout, get_client_ip, record_failed_attempt
 from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,44 @@ def require_role(*allowed_roles: str):
     return _check
 
 
+class BasicAuthLockedOut(Exception):
+    """The client spent its failed-attempt budget; the credentials were not checked."""
+
+    def __init__(self, retry_after: int):
+        super().__init__(retry_after)
+        self.retry_after = retry_after
+
+
+async def verify_basic_credentials(username: str, password: str, client_ip: str) -> dict | None:
+    """Return ``{"user_id", "role"}`` for valid HTTP Basic credentials, else None.
+
+    Basic auth has no login form in front of it, so failures are budgeted per
+    client IP with the login limits. bcrypt runs whether or not the username
+    exists, so response time doesn't reveal which usernames exist.
+    Raises BasicAuthLockedOut, without running bcrypt, once the budget is spent.
+    """
+    budget_key = f"basic_auth_failed:{client_ip}"
+    retry_after = await failed_attempts_lockout(budget_key)
+    if retry_after:
+        raise BasicAuthLockedOut(retry_after)
+
+    async with async_session() as session:
+        result = await session.execute(
+            text("SELECT id, password_hash, role FROM users WHERE username = :uname"),
+            {"uname": username},
+        )
+        user = result.fetchone()
+
+    hash_to_check = user.password_hash if user else _DUMMY_HASH
+    valid = await _checkpw_async(password.encode("utf-8"), hash_to_check.encode("utf-8"))
+    if not user or not valid:
+        await record_failed_attempt(budget_key)
+        return None
+    return {"user_id": user.id, "role": user.role or "viewer"}
+
+
 async def require_opds_auth(
+    request: Request,
     authorization: str | None = Header(default=None),
 ) -> dict:
     """FastAPI dependency: require HTTP Basic Auth for OPDS endpoints."""
@@ -187,24 +224,22 @@ async def require_opds_auth(
 
     username, password = decoded.split(":", 1)
 
-    async with async_session() as session:
-        result = await session.execute(
-            text("SELECT id, password_hash, role FROM users WHERE username = :uname"),
-            {"uname": username},
+    try:
+        user = await verify_basic_credentials(username, password, get_client_ip(request))
+    except BasicAuthLockedOut as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed attempts. Try again in {exc.retry_after}s.",
+            headers={"Retry-After": str(exc.retry_after)},
         )
-        user = result.fetchone()
-
-    # Always call checkpw to prevent timing-based username enumeration.
-    hash_to_check = user.password_hash if user else _DUMMY_HASH
-    valid = await _checkpw_async(password.encode("utf-8"), hash_to_check.encode("utf-8"))
-    if not user or not valid:
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
             headers={"WWW-Authenticate": 'Basic realm="Jyzrox OPDS"'},
         )
 
-    return {"user_id": user.id, "role": user.role or "viewer"}
+    return user
 
 
 def gallery_access_filter(auth: dict):

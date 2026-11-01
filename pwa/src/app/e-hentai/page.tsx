@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import {
   useState,
   useRef,
@@ -12,6 +13,7 @@ import {
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
 import { useProfile } from '@/hooks/useProfile'
+import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 import {
   EH_ADVANCED_SEARCH_BITS,
   initialFilters,
@@ -33,7 +35,9 @@ import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
 
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateEhGridRowHeight } from '@/lib/ehLayout'
 import { CredentialBanner } from '@/components/CredentialBanner'
+import { DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { CATEGORY_META, GridCard, isLightColor, ListCard } from '@/components/eh/EhBrowseCards'
@@ -47,8 +51,10 @@ import {
   Rss,
   Shuffle,
   Camera,
+  RefreshCw,
 } from 'lucide-react'
 import type { EhGallery, SavedSearch, TagItem } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 function SearchAutocompleteDropdown({
   suggestions,
@@ -100,6 +106,8 @@ const HISTORY_KEY = 'eh_search_history'
 const HISTORY_ENABLED_KEY = 'eh_search_history_enabled'
 const VIEW_MODE_KEY = 'eh_view_mode'
 const MAX_HISTORY = 10
+// Idle time after the last keystroke before a typed query is sent to E-Hentai.
+const SEARCH_IDLE_MS = 1500
 
 function getSearchHistory(): string[] {
   if (typeof window === 'undefined') return []
@@ -172,6 +180,7 @@ const CRON_PRESETS = [
   { label: 'browse.cron.every2Hours', value: '0 */2 * * *' },
   { label: 'browse.cron.every6Hours', value: '0 */6 * * *' },
   { label: 'browse.cron.daily', value: '0 0 * * *' },
+  { label: 'browse.cron.weekly', value: DEFAULT_SUBSCRIPTION_CRON },
 ]
 
 function getInitialViewMode(): ViewMode {
@@ -181,9 +190,11 @@ function getInitialViewMode(): ViewMode {
 
 export default function BrowsePageWrapper() {
   return (
+    <PageContainer>
     <Suspense>
       <BrowsePage />
     </Suspense>
+    </PageContainer>
   )
 }
 
@@ -195,6 +206,8 @@ function BrowsePage() {
     state,
     actions,
     loadMore,
+    refresh,
+    refreshing,
     favCategories,
     restoreInstruction,
     acknowledgeRestore,
@@ -238,8 +251,8 @@ function BrowsePage() {
   // Subscribe to search state
   const [showSubscribe, setShowSubscribe] = useState(false)
   const [subName, setSubName] = useState('')
-  const [subAutoDownload, setSubAutoDownload] = useState(true)
-  const [subCron, setSubCron] = useState('0 */2 * * *')
+  const [subAutoDownload, setSubAutoDownload] = useState(false)
+  const [subCron, setSubCron] = useState(DEFAULT_SUBSCRIPTION_CRON)
   const { trigger: createSub, isMutating: subCreating } = useCreateSubscription()
   const { data: watchedData, mutate: refreshWatched } = useSubscriptions({
     source: 'ehentai',
@@ -259,19 +272,23 @@ function BrowsePage() {
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState<string[]>([])
   const [autocompleteHighlight, setAutocompleteHighlight] = useState(-1)
+  // The suggestion list is an overlay on top of the category chips, so it needs
+  // its own open state: an unfinished token in the input is not enough reason to
+  // keep it up (the input is also seeded from the URL on mount/back-nav).
+  const [autocompleteOpen, setAutocompleteOpen] = useState(false)
   const searchBoxRef = useRef<HTMLDivElement>(null)
 
   const autocompleteFragment = useMemo(() => getEhAutocompleteFragment(inputValue), [inputValue])
   const { data: autocompleteData } = useSWR<TagItem[]>(
-    autocompleteFragment && inputValue.trim()
+    autocompleteOpen && autocompleteFragment && inputValue.trim()
       ? ['tags/autocomplete', autocompleteFragment.query]
       : null,
     () => api.tags.autocomplete(autocompleteFragment?.query ?? '', 10),
     { keepPreviousData: false },
   )
   const autocompleteSuggestions = useMemo(
-    () => (Array.isArray(autocompleteData) ? autocompleteData : []),
-    [autocompleteData],
+    () => (autocompleteOpen && Array.isArray(autocompleteData) ? autocompleteData : []),
+    [autocompleteData, autocompleteOpen],
   )
 
   // Mobile search expand
@@ -293,6 +310,17 @@ function BrowsePage() {
 
   // ── Data derivations ──
   const { tab, query, filters, items, total } = state
+  // Image-search results cannot be fetched again (the kernel refuses), and an
+  // empty list has nothing to refresh yet.
+  const canRefresh = items.length > 0 && !state.ephemeralSession && state.status !== 'expired'
+  const refreshFromTop = useCallback(async () => {
+    window.scrollTo({ top: 0 })
+    await refresh()
+  }, [refresh])
+  const { indicator: pullIndicator } = usePullToRefresh({
+    onRefresh: refreshFromTop,
+    enabled: canRefresh,
+  })
   const browseStatusGids = useMemo(
     () => Array.from(new Set(items.map((gallery) => gallery.gid))),
     [items],
@@ -326,9 +354,16 @@ function BrowsePage() {
   )
   useEffect(() => {
     if (!browseUserId || items.length !== 0 || !state.hasMore || state.status !== 'idle') return
-    // Favorites requires credentials. Deferring one task lets the coordinator's
-    // restore effect hydrate an existing snapshot before a seed request races it.
+    // Favorites requires credentials.
     if (tab === 'favorites' && !ehConfigured) return
+    // The kernel is inert until the browse-tab-scope claim resolves (>= 32 ms
+    // after every mount): it publishes 'loading' and ignores loadMore, so this
+    // effect cannot seed during that window. It does run in the commit where the
+    // claim flips `ready`. The kernel restores the snapshot in a layout effect
+    // of that commit, but this passive effect runs before the HYDRATE re-render
+    // and still sees the empty buffer. Deferring one task lets that re-render
+    // clear the timer; without it back-navigation fetches page one again next
+    // to the restored snapshot.
     const timer = setTimeout(() => void loadMore(), 0)
     return () => clearTimeout(timer)
   }, [browseUserId, ehConfigured, items.length, loadMore, seedKey, state.hasMore, state.status, tab])
@@ -503,13 +538,16 @@ function BrowsePage() {
 
   // Close dropdown on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    // pointerdown, not mousedown: iOS only synthesizes mouse events for taps on
+    // clickable elements, so a tap on empty page area would never dismiss.
+    const handler = (e: PointerEvent) => {
       if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
         setShowHistory(false)
+        setAutocompleteOpen(false)
       }
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('pointerdown', handler)
+    return () => document.removeEventListener('pointerdown', handler)
   }, [])
 
   // ── Handlers ────────────────────────────────────────────
@@ -527,9 +565,10 @@ function BrowsePage() {
     (value: string) => {
       setInputValue(value)
       setAutocompleteHighlight(-1)
+      setAutocompleteOpen(true)
       if (value.trim()) setShowHistory(false)
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => commitSearch(value), 600)
+      debounceRef.current = setTimeout(() => commitSearch(value), SEARCH_IDLE_MS)
     },
     [commitSearch],
   )
@@ -558,9 +597,11 @@ function BrowsePage() {
         )
       } else if (e.key === 'Enter') {
         if (debounceRef.current) clearTimeout(debounceRef.current)
+        setAutocompleteOpen(false)
         commitSearch(inputValue)
       } else if (e.key === 'Escape') {
         setShowHistory(false)
+        setAutocompleteOpen(false)
         setAutocompleteHighlight(-1)
       }
     },
@@ -601,7 +642,10 @@ function BrowsePage() {
     (value: string) => {
       setFavSearchInput(value)
       if (favDebounceRef.current) clearTimeout(favDebounceRef.current)
-      favDebounceRef.current = setTimeout(() => actions.setFilter({ favSearch: value }), 600)
+      favDebounceRef.current = setTimeout(
+        () => actions.setFilter({ favSearch: value }),
+        SEARCH_IDLE_MS,
+      )
     },
     [actions],
   )
@@ -626,7 +670,7 @@ function BrowsePage() {
   const clearSearch = useCallback(() => {
     setInputValue('')
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    actions.reset()
+    actions.clearSearch()
   }, [actions])
 
   const captureAnchor = useCallback(
@@ -639,7 +683,12 @@ function BrowsePage() {
               return !!rect && rect.bottom > 0
             })
           : items[fallbackIndex]
-      const gallery = preferred ?? listAnchor
+      // A picked gallery that is not rendered (open-random over a virtualized
+      // list) has no element to measure; anchoring on it would store offset 0 and
+      // scroll it to the top of the viewport on back. Keep the visible position.
+      const preferredRendered =
+        preferred && itemElementsRef.current.has(preferred.gid) ? preferred : undefined
+      const gallery = preferredRendered ?? listAnchor
       const element = gallery ? itemElementsRef.current.get(gallery.gid) : null
       return {
         itemId: gallery?.gid ?? null,
@@ -822,7 +871,7 @@ function BrowsePage() {
   }, [actions, imageSearchCovers, imageSearchExpunged, imageSearchFile, imageSearchSimilar])
 
   // ── Keyboard grid navigation ────────────────────────────
-  const { focusedIndex } = useGridKeyboard({
+  const { focusedIndex, registerElement } = useGridKeyboard({
     totalItems: items.length,
     colCount,
     onEnter: (i) => {
@@ -839,6 +888,7 @@ function BrowsePage() {
 
   return (
     <div className="space-y-4">
+      {pullIndicator}
       {/* Credential banner (shown when EH credentials are not configured) */}
       {!ehConfigured && <CredentialBanner source="ehentai" />}
 
@@ -860,6 +910,7 @@ function BrowsePage() {
               onFocus={() => {
                 refreshHistory()
                 setShowHistory(true)
+                setAutocompleteOpen(true)
               }}
               placeholder={t('browse.searchPlaceholder')}
               autoFocus
@@ -919,51 +970,47 @@ function BrowsePage() {
               />
             )}
           </div>
-          <button
+          <Button variant="ghost" size="icon" className="shrink-0"
             onClick={() => {
               setMobileSearchOpen(false)
               setShowHistory(false)
             }}
-            className="px-3 py-2.5 text-sm text-vault-text-secondary hover:text-vault-text transition-colors shrink-0"
           >
             <XIcon size={18} />
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Desktop + mobile compact row */}
       <div className={`flex gap-2 ${mobileSearchOpen ? 'hidden sm:flex' : ''}`}>
         {/* Mobile search icon button */}
-        <button
+        <Button variant="secondary" size="icon"
           type="button"
           onClick={() => setShowImageSearch(true)}
           title={t('browse.searchByImage')}
           aria-label={t('browse.searchByImage')}
-          className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors"
         >
           <Camera size={16} />
-        </button>
+        </Button>
 
-        <button
+        <Button variant="secondary" size="icon" className="sm:hidden shrink-0"
           onClick={() => setMobileSearchOpen(true)}
-          className="sm:hidden p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors shrink-0"
           aria-label={t('browse.search')}
         >
           <SearchIcon size={18} />
-        </button>
+        </Button>
 
         {/* Mobile saved searches button */}
         <div ref={mobileSavedSearchesRef} className="relative sm:hidden shrink-0">
-          <button
+          <Button variant="secondary" size="icon"
             onClick={() => {
               setShowSavedSearches((v) => !v)
               setShowSaveInput(false)
             }}
             title={t('browse.savedSearches')}
-            className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors"
           >
             {savedSearches.length > 0 ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
-          </button>
+          </Button>
 
           {/* Mobile saved searches dropdown */}
           {showSavedSearches && (
@@ -994,12 +1041,11 @@ function BrowsePage() {
                     autoFocus
                     className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                   />
-                  <button
+                  <Button variant="primary" size="sm" className="shrink-0"
                     onClick={handleSaveSearch}
-                    className="px-2 py-1 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-xs font-medium transition-colors shrink-0"
                   >
                     {t('browse.saveSearch')}
-                  </button>
+                  </Button>
                 </div>
               )}
 
@@ -1057,6 +1103,7 @@ function BrowsePage() {
             onFocus={() => {
               refreshHistory()
               setShowHistory(true)
+              setAutocompleteOpen(true)
             }}
             placeholder={t('browse.searchPlaceholder')}
             className="w-full bg-vault-card border border-vault-border rounded-lg px-4 py-2.5 text-sm
@@ -1113,28 +1160,27 @@ function BrowsePage() {
           )}
         </div>
 
-        <button
+        <Button variant="primary" size="md" className="hidden sm:inline-flex shrink-0"
           onClick={() => {
             if (debounceRef.current) clearTimeout(debounceRef.current)
+            setAutocompleteOpen(false)
             commitSearch(inputValue)
           }}
-          className="hidden sm:block px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
         >
           {t('browse.search')}
-        </button>
+        </Button>
 
         {/* Saved Searches button (desktop) */}
         <div ref={savedSearchesRef} className="relative hidden sm:block shrink-0">
-          <button
+          <Button variant="secondary" size="icon"
             onClick={() => {
               setShowSavedSearches((v) => !v)
               setShowSaveInput(false)
             }}
             title={t('browse.savedSearches')}
-            className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors"
           >
             {savedSearches.length > 0 ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
-          </button>
+          </Button>
 
           {/* Saved searches dropdown */}
           {showSavedSearches && (
@@ -1165,12 +1211,11 @@ function BrowsePage() {
                     autoFocus
                     className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                   />
-                  <button
+                  <Button variant="primary" size="sm" className="shrink-0"
                     onClick={handleSaveSearch}
-                    className="px-2 py-1 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-xs font-medium transition-colors shrink-0"
                   >
                     {t('browse.saveSearch')}
-                  </button>
+                  </Button>
                 </div>
               )}
 
@@ -1218,13 +1263,12 @@ function BrowsePage() {
         {/* Subscribe to search button (desktop) */}
         {query && (
           <div className="relative hidden sm:block shrink-0">
-            <button
+            <Button variant="secondary" size="icon"
               onClick={() => setShowSubscribe(!showSubscribe)}
               title={t('browse.subscribeToSearch')}
-              className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-accent transition-colors"
             >
               <Rss size={18} />
-            </button>
+            </Button>
             {showSubscribe && (
               <div className="absolute right-0 top-full mt-1 z-40 w-80 bg-vault-card border border-vault-border rounded-lg shadow-xl p-4 space-y-3">
                 <h3 className="text-sm font-medium text-vault-text">
@@ -1282,28 +1326,36 @@ function BrowsePage() {
                     </select>
                   </div>
                 </div>
-                <button
+                <Button variant="primary" size="sm" className="w-full"
                   onClick={handleSubscribe}
                   disabled={subCreating}
-                  className="w-full px-3 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
                 >
                   {subCreating ? t('subscriptions.adding') : t('subscriptions.add')}
-                </button>
+                </Button>
               </div>
             )}
           </div>
         )}
 
-        <button
+        <Button variant="secondary" size="icon" className="hidden sm:inline-flex"
+          type="button"
+          onClick={() => void refreshFromTop()}
+          disabled={!canRefresh || refreshing}
+          title={t('common.refresh')}
+          aria-label={t('common.refresh')}
+        >
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+        </Button>
+
+        <Button variant="secondary" size="icon"
           type="button"
           onClick={openRandomLoadedGallery}
           disabled={items.length === 0}
           title={t('browse.openRandom')}
           aria-label={t('browse.openRandom')}
-          className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Shuffle size={16} />
-        </button>
+        </Button>
 
         {/* View toggle */}
         <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
@@ -1326,21 +1378,19 @@ function BrowsePage() {
 
       {showImageSearch && (
         <div
-          role="dialog"
-          aria-modal="true"
+          role="region"
           aria-label={t('browse.searchByImage')}
           className="rounded-lg border border-vault-border bg-vault-card p-4 space-y-3"
         >
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-vault-text">{t('browse.searchByImage')}</h2>
-            <button
+            <Button variant="ghost" size="icon-sm"
               type="button"
               onClick={() => setShowImageSearch(false)}
-              className="text-vault-text-muted hover:text-vault-text"
               aria-label={t('common.close')}
             >
               <XIcon size={16} />
-            </button>
+            </Button>
           </div>
           <input
             type="file"
@@ -1375,14 +1425,13 @@ function BrowsePage() {
               {t('browse.includeExpunged')}
             </label>
           </div>
-          <button
+          <Button variant="primary" size="md"
             type="button"
             onClick={submitImageSearch}
             disabled={!imageSearchFile || imageSearchLoading}
-            className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {imageSearchLoading ? t('common.loading') : t('browse.search')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1840,9 +1889,8 @@ function BrowsePage() {
         >
           <p className="font-medium text-vault-text">{t('error.session_expired')}</p>
           <p className="text-sm text-vault-text-muted">{t('browse.imageSessionExpiredHelp')}</p>
-          <button
+          <Button variant="primary" size="md"
             type="button"
-            className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white hover:bg-vault-accent/90"
             onClick={() =>
               actions.commitIdentity(
                 { tab: 'search', query: '', filters: initialFilters },
@@ -1851,7 +1899,7 @@ function BrowsePage() {
             }
           >
             {t('browse.startNewSearch')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1883,10 +1931,14 @@ function BrowsePage() {
               getItemKey={(gallery) => gallery.gid}
               columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
               gap={8}
-              estimateHeight={220}
+              estimateHeight={estimateEhGridRowHeight}
+              measureRows={false}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onRegisterElement={(index, element) => {
+                // Keyboard navigation needs the rendered cells too: without them
+                // its first arrow key cannot find the visible start and jumps to 0.
+                registerElement(index, element)
                 const gallery = items[index]
                 if (!gallery) return
                 if (element) itemElementsRef.current.set(gallery.gid, element)
@@ -1924,12 +1976,11 @@ function BrowsePage() {
           {state.error && !loading && (
             <div className="flex flex-col items-center gap-2 py-4">
               <span className="text-xs text-red-400">{t('browse.failedLoadResults')}</span>
-              <button
+              <Button variant="secondary" size="sm" className="rounded-full text-xs"
                 onClick={() => loadMore()}
-                className="px-4 py-1.5 rounded-full text-xs font-medium border border-vault-border text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text transition-colors"
               >
                 {t('common.retry')}
-              </button>
+              </Button>
             </div>
           )}
 

@@ -10,8 +10,11 @@ import type { TagItem } from '@/lib/types'
 import { useProfile } from '@/hooks/useProfile'
 import TagHealthPanel from '@/components/TagHealthPanel'
 import TagTranslationsPanel from '@/components/TagTranslationsPanel'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
-export default function TagsPage() {
+function TagsPageInner() {
   const { data: profile } = useProfile()
   const isAdmin = profile?.role === 'admin'
   const [tab, setTab] = useState<'browse' | 'translations' | 'health'>('browse')
@@ -170,7 +173,7 @@ export default function TagsPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold mb-6">{t('tags.title')}</h1>
+      <PageHeader title={t('tags.title')} />
 
       <div className="mb-6 flex bg-vault-input border border-vault-border rounded overflow-hidden w-fit">
         <button
@@ -282,47 +285,51 @@ export default function TagsPage() {
               {/* Cursor-based pagination */}
               {isCursorMode && (hasPrevTag || hasNextTag) && (
                 <div className="flex gap-2 mt-4 items-center">
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     type="button"
                     onClick={handlePrevTagCursor}
                     disabled={!hasPrevTag}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
                   >
                     <ChevronLeft size={14} /> {t('tags.prev')}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     type="button"
                     onClick={handleNextTagCursor}
                     disabled={!hasNextTag}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
                   >
                     {t('tags.next')} <ChevronRight size={14} />
-                  </button>
+                  </Button>
                 </div>
               )}
 
               {/* Page-based pagination (offset mode) */}
               {!isCursorMode && totalPages > 1 && (
                 <div className="flex gap-2 mt-4 items-center">
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     type="button"
                     onClick={() => setPage(Math.max(0, page - 1))}
                     disabled={page === 0}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
                   >
                     <ChevronLeft size={14} /> {t('tags.prev')}
-                  </button>
+                  </Button>
                   <span className="text-sm text-vault-text-secondary">
                     {page + 1} / {totalPages} ({t('tags.total', { count: tagData?.total ?? 0 })})
                   </span>
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     type="button"
                     onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
                     disabled={page >= totalPages - 1}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
                   >
                     {t('tags.next')} <ChevronRight size={14} />
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -354,12 +361,14 @@ export default function TagsPage() {
                             <span className="text-vault-text-muted">{a.alias_namespace}:</span>
                             {a.alias_name}
                           </span>
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => handleDeleteAlias(a.alias_namespace, a.alias_name)}
-                            className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            className="text-red-400 hover:bg-red-500/10 hover:text-red-400"
                           >
                             <Trash2 size={14} />
-                          </button>
+                          </Button>
                         </li>
                       ))}
                     </ul>
@@ -382,12 +391,9 @@ export default function TagsPage() {
                       onChange={(e) => setAliasName(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleAddAlias()}
                     />
-                    <button
-                      onClick={handleAddAlias}
-                      className="flex items-center gap-1 px-3 py-2 bg-vault-accent hover:bg-vault-accent/90 rounded text-white text-sm font-medium transition-colors"
-                    >
+                    <Button variant="primary" size="sm" onClick={handleAddAlias}>
                       <Plus size={14} /> {t('tags.add')}
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -406,14 +412,16 @@ export default function TagsPage() {
                             <span className="text-vault-text-muted mx-1">&rarr;</span>
                             <span className="text-green-400">{imp.consequent}</span>
                           </span>
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() =>
                               handleDeleteImplication(imp.antecedent_id, imp.consequent_id)
                             }
-                            className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            className="text-red-400 hover:bg-red-500/10 hover:text-red-400"
                           >
                             <Trash2 size={14} />
-                          </button>
+                          </Button>
                         </li>
                       ))}
                     </ul>
@@ -437,12 +445,9 @@ export default function TagsPage() {
                       onChange={(e) => setImplTargetId(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleAddImplication()}
                     />
-                    <button
-                      onClick={handleAddImplication}
-                      className="flex items-center gap-1 px-3 py-2 bg-vault-accent hover:bg-vault-accent/90 rounded text-white text-sm font-medium transition-colors"
-                    >
+                    <Button variant="primary" size="sm" onClick={handleAddImplication}>
                       <Plus size={14} /> {t('tags.add')}
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -479,12 +484,9 @@ export default function TagsPage() {
                         className="p-2 flex-1 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text"
                         autoFocus
                       />
-                      <button
-                        onClick={handleSaveTranslation}
-                        className="px-3 py-2 bg-vault-accent hover:bg-vault-accent/90 rounded text-white text-sm font-medium transition-colors"
-                      >
+                      <Button variant="primary" size="sm" onClick={handleSaveTranslation}>
                         {t('tags.saveTranslation')}
-                      </button>
+                      </Button>
                     </div>
                   ) : (
                     <div className="flex items-center justify-between">
@@ -493,16 +495,18 @@ export default function TagsPage() {
                       >
                         {currentTranslation ?? t('tags.noTranslation')}
                       </span>
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => {
                           setTranslationValue(currentTranslation ?? '')
                           setEditingTranslation(true)
                         }}
-                        className="flex items-center gap-1 px-2 py-1 text-xs text-vault-text-secondary hover:text-vault-accent transition-colors"
+                        className="h-auto px-2 py-1 text-xs hover:text-vault-accent"
                       >
                         <Pencil size={12} />
                         {t('tags.editTranslation')}
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -518,5 +522,13 @@ export default function TagsPage() {
         </>
       )}
     </>
+  )
+}
+
+export default function TagsPage() {
+  return (
+    <PageContainer>
+      <TagsPageInner />
+    </PageContainer>
   )
 }

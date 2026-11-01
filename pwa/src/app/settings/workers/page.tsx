@@ -6,6 +6,7 @@ import { useAdminGuard } from '@/hooks/useAdminGuard'
 import { BackButton } from '@/components/BackButton'
 import { GalleryDlSection } from '@/components/settings/GalleryDlSection'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 
@@ -45,7 +46,7 @@ export default function WorkersSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.workers')}</h1>
+      <PageHeader title={t('settingsCategory.workers')} />
 
       {/* Worker Recovery */}
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden mb-6">

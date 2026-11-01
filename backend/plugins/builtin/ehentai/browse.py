@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import and_, select
 
 from core.auth import gallery_access_filter, require_auth
+from core.client_identity import browser_headers
 from core.config import settings as app_settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
@@ -35,6 +36,7 @@ from plugins.models import (
     SiteInfo,
 )
 from services import cache
+from services.browser_http import browser_client
 from services.cache import push_system_alert
 from services.credential import get_credential
 from services.eh_client import EhClient
@@ -179,8 +181,9 @@ class EhBrowsePlugin(BrowsePlugin):
             else:
                 cookies = credentials  # type: ignore[assignment]
 
-        async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=30) as http:
-            resp = await http.get(url)
+        referer = "https://exhentai.org/" if "exhentai" in (urlparse(url).hostname or "") else "https://e-hentai.org/"
+        async with browser_client(cookies=cookies, follow_redirects=True, timeout=30) as http:
+            resp = await http.get(url, headers=browser_headers("image", site="cross-site", referer=referer))
             resp.raise_for_status()
             data = resp.content
             media_type = detect_media_type(data)
@@ -1165,8 +1168,8 @@ async def thumb_proxy(
         url = urlunparse(parsed._replace(scheme="https", netloc="ehgt.org"))
         parsed = urlparse(url)  # re-parse for the referer logic below
 
-    cache_key = f"thumb:cdn:{hashlib.md5(url.encode()).hexdigest()}"
-    cached_bytes = await get_redis().get(cache_key)
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    cached_bytes = await cache.get_cdn_thumb(url_hash)
     if cached_bytes:
         return Response(
             content=cached_bytes,
@@ -1187,15 +1190,15 @@ async def thumb_proxy(
     async with _thumb_semaphore:
         try:
             referer = "https://exhentai.org/" if "exhentai" in (parsed.hostname or "") else "https://e-hentai.org/"
-            async with httpx.AsyncClient(cookies=cookies, timeout=30) as client:
-                resp = await client.get(url, headers={"Referer": referer})
+            async with browser_client(cookies=cookies, timeout=30) as client:
+                resp = await client.get(url, headers=browser_headers("image", site="cross-site", referer=referer))
                 resp.raise_for_status()
                 content = resp.content
                 media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Thumbnail fetch failed: {exc}")
 
-    await get_redis().setex(cache_key, 86400, content)  # 24h
+    await cache.set_cdn_thumb(url_hash, content)
     return Response(
         content=content,
         media_type=media_type,

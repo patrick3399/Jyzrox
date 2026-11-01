@@ -6,13 +6,24 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import useSWR from 'swr'
 import { useLibraryGallery, useInfiniteGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
+import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
+import { useLinkGallerySync } from '@/hooks/useLinkGallerySync'
+import { useGalleryEventRefresh } from '@/hooks/useGalleryEventRefresh'
 import { api } from '@/lib/api'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
+import { createRequestCoalescer } from '@/lib/requestCoalescer'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import { galleryStatusAction } from '@/lib/galleryUtils'
+import { detailHotkey } from '@/lib/detailHotkeys'
+import { smartBack } from '@/lib/navBack'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
+import { ThumbPlaceholder } from '@/components/library/ThumbPlaceholder'
+import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
+import { GalleryActionsSheet, type GalleryAction } from '@/components/library/GalleryActionsSheet'
+import { RepairGalleryDialog } from '@/components/download/DownloadActionDialogs'
+import { useProfile } from '@/hooks/useProfile'
 import { AppImage } from '@/components/AppImage'
 import type { GalleryImage } from '@/lib/types'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
@@ -27,12 +38,23 @@ import {
   BookmarkCheck,
   X,
   Share2,
-  GitMerge,
   History,
+  Star,
+  FolderHeart,
+  MoreHorizontal,
+  ChevronDown,
+  ExternalLink,
+  Users,
+  Trash2,
 } from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateGalleryThumbRowHeight } from '@/lib/gridRowHeight'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { Button } from '@/components/ui/button'
+
+const DOWNLOAD_REFRESH_INTERVAL_MS = 3000
 
 function getSourceLink(sourceUrl: string, source: string): { href: string; external: boolean } {
   if (source === 'ehentai') {
@@ -57,14 +79,13 @@ function getArtistDisplayName(gallery: {
   return separatorIndex >= 0 ? artistId.slice(separatorIndex + 1) : artistId
 }
 
-function formatSearchFilterValue(value: string): string {
-  const escaped = value.replace(/"/g, '\\"')
-  return /\s/.test(escaped) ? `"${escaped}"` : escaped
+// The artist page lists the same galleries and offers the read-everything entry point.
+function artistPageHref(artistId: string): string {
+  return `/artists/${encodeURIComponent(artistId)}`
 }
+const ACTION_BUTTON_CLASS =
+  'flex items-center justify-center gap-1.5 h-10 min-w-10 px-2.5 md:px-4 rounded border text-sm font-medium transition-colors disabled:opacity-50'
 
-function artistSearchHref(artistId: string): string {
-  return `/library?q=${encodeURIComponent(`artist_id:${formatSearchFilterValue(artistId)}`)}`
-}
 const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: string }> = {
   complete: {
     labelKey: 'library.statusComplete',
@@ -82,15 +103,32 @@ const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: stri
     labelKey: 'library.statusDownloading',
     className: 'bg-blue-900/40 border-blue-700/50 text-blue-400',
   },
+  importing: {
+    labelKey: 'library.statusImporting',
+    className: 'bg-blue-900/40 border-blue-700/50 text-blue-400',
+  },
+  missing: {
+    labelKey: 'library.statusMissing',
+    className: 'bg-red-900/40 border-red-700/50 text-red-400',
+  },
 }
 
-export default function GalleryDetailPage() {
+function GalleryDetailPageInner() {
   const params = useParams<{ source: string; sourceId: string }>()
   const router = useRouter()
   const source = decodeRouteSegment(params?.source)
   const sourceId = decodeRouteSegment(params?.sourceId)
   const { connected } = useWsConnection()
   const { lastJobUpdate } = useWsJobs()
+  // Every write on this page is member-only on the backend. Until the profile
+  // loads, treat the viewer as read-only rather than flashing write actions.
+  const { data: profile } = useProfile()
+  const canEdit = profile?.role === 'member' || profile?.role === 'admin'
+  const [moreOpen, setMoreOpen] = useState(false)
+  const closeMoreSheet = useCallback(() => setMoreOpen(false), [])
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false)
+  const [collectionMenuOpen, setCollectionMenuOpen] = useState(false)
 
   const {
     data: gallery,
@@ -106,6 +144,15 @@ export default function GalleryDetailPage() {
     loadMore: loadMoreImages,
     mutate: mutateImages,
   } = useInfiniteGalleryImages(source, sourceId, { limit: 120 })
+  useLinkGallerySync(gallery, () => {
+    void mutateGallery()
+    void mutateImages()
+  })
+  // SWR's global mutate(filter) skips useSWRInfinite keys, so the grid has to
+  // refetch itself when the backend finishes hashing pages in the background.
+  useGalleryEventRefresh(gallery?.id, () => {
+    void mutateImages()
+  })
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(
     source ?? '',
     sourceId ?? '',
@@ -128,6 +175,7 @@ export default function GalleryDetailPage() {
   const [pagesOutdated, setPagesOutdated] = useState<{ old: number; new: number } | null>(null)
   const updateCheckedRef = useRef<boolean>(false)
   const [isEnqueueingUpdate, setIsEnqueueingUpdate] = useState(false)
+  const [repairDialogOpen, setRepairDialogOpen] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [tagData, setTagData] = useState<
@@ -270,20 +318,40 @@ export default function GalleryDetailPage() {
       })
   }, [gallery, featureSettings, mutateGallery])
 
-  const handleEnqueueUpdate = useCallback(async () => {
-    if (!gallery?.source_url || isEnqueueingUpdate || activeJobId) return
-    setIsEnqueueingUpdate(true)
-    try {
-      const result = await api.download.enqueue(gallery.source_url)
-      toast.success(t('library.updateEnqueued'))
-      setPagesOutdated(null)
-      setActiveJobId(result.job_id)
-    } catch {
-      toast.error(t('library.updateFailed'))
-    } finally {
-      setIsEnqueueingUpdate(false)
-    }
-  }, [gallery?.source_url, isEnqueueingUpdate, activeJobId])
+  // "Update" (outdated) and "repair" go through the gallery action endpoint: the
+  // server knows whether this gallery belongs to a subscription (an update is
+  // then a subscription check, a repair inherits its download options).
+  const handleEnqueueUpdate = useCallback(
+    async (kind: 'repair' | 'update', includeExcluded = false) => {
+      const galleryId = gallery?.id
+      if (galleryId === undefined || !gallery?.source_url || isEnqueueingUpdate || activeJobId) {
+        return
+      }
+      setIsEnqueueingUpdate(true)
+      try {
+        const result = await api.download.galleryAction(galleryId, kind, includeExcluded)
+        toast.success(
+          t(
+            result.kind === 'subscription_check'
+              ? 'library.subscriptionCheckQueued'
+              : result.kind === 'repair'
+                ? 'library.repairQueued'
+                : 'library.updateEnqueued',
+          ),
+        )
+        setPagesOutdated(null)
+        setRepairDialogOpen(false)
+        // A subscription check enqueues its job later, so there is no job to follow yet;
+        // the gallery's own download status takes over once that job starts.
+        if (result.kind !== 'subscription_check') setActiveJobId(result.job_id)
+      } catch (err) {
+        toast.error(err instanceof Error && err.message ? err.message : t('library.updateFailed'))
+      } finally {
+        setIsEnqueueingUpdate(false)
+      }
+    },
+    [gallery?.id, gallery?.source_url, isEnqueueingUpdate, activeJobId],
+  )
 
   const refetchTagData = useCallback(() => {
     if (!source || !sourceId) return
@@ -312,35 +380,39 @@ export default function GalleryDetailPage() {
     [gallery, mutateGallery, refetchTagData],
   )
 
+  // Select mode, sheets, menus and image panels own the keyboard while open:
+  // nothing may open the reader or leave the page underneath them. Overlays
+  // that close on Escape also mark it handled, because the close can commit
+  // (and re-bind this listener without the overlay) before the key gets here.
+  const overlayOpen =
+    selectMode ||
+    moreOpen ||
+    repairDialogOpen ||
+    tagPopoverOpen ||
+    collectionMenuOpen ||
+    imageMenu !== null ||
+    similarImageId !== null ||
+    saucenaoImageId !== null
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement
-      )
+      const action = detailHotkey(e)
+      if (!action || overlayOpen) return
+      if (action === 'open') {
+        if (!gallery?.source || !gallery?.source_id) return
+        e.preventDefault()
+        router.push(readerHref(gallery.source, gallery.source_id))
         return
-      if (selectMode) return
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        if (gallery?.source && gallery?.source_id) {
-          router.push(readerHref(gallery.source, gallery.source_id))
-        }
       }
-      if (e.key === 'ArrowUp' || e.key === 'Escape') {
-        e.preventDefault()
-        if (history.length > 1) {
-          router.back()
-        } else {
-          router.push('/library')
-        }
-      }
+      e.preventDefault()
+      smartBack(router, '/library')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [gallery?.source, gallery?.source_id, router, selectMode])
+  }, [gallery?.source, gallery?.source_id, router, overlayOpen])
 
-  const isDownloading = gallery?.download_status === 'downloading'
+  // `importing` (link pages registered, hash pass running) is in progress too.
+  const isDownloading =
+    gallery?.download_status === 'downloading' || gallery?.download_status === 'importing'
   // Fallback poll — only runs when WS is down. While connected, the effect
   // below reacts to WS job-progress events instead (see wsInvalidation.tsx
   // module docstring for why download.* can't drive this via lastEvent).
@@ -356,13 +428,26 @@ export default function GalleryDetailPage() {
   // WS-driven refresh while downloading: progressive import sets
   // progress.gallery_id on job_update events (see worker/download.py) so a
   // matching update means new pages may have arrived for this gallery.
+  // A fast download sends several job_updates a second, so refreshes are
+  // coalesced. The effect keys on the gallery id, not the gallery object:
+  // each refetch returns a new object while pages grow, and re-running on it
+  // refetched again for the same job_update in a loop until nginx and the API
+  // rate-limited the client.
+  const downloadRefresh = useMemo(
+    () =>
+      createRequestCoalescer(async () => {
+        await Promise.all([mutateGallery(), mutateImages()])
+      }, DOWNLOAD_REFRESH_INTERVAL_MS),
+    [mutateGallery, mutateImages],
+  )
+  useEffect(() => () => downloadRefresh.cancel(), [downloadRefresh])
+  const galleryId = gallery?.id
   useEffect(() => {
-    if (!isDownloading || !gallery || !lastJobUpdate) return
+    if (!isDownloading || galleryId == null || !lastJobUpdate) return
     const progressGalleryId = lastJobUpdate.progress?.gallery_id
-    if (progressGalleryId !== gallery.id) return
-    mutateGallery()
-    mutateImages()
-  }, [lastJobUpdate, isDownloading, gallery, mutateGallery, mutateImages])
+    if (progressGalleryId !== galleryId) return
+    downloadRefresh.trigger()
+  }, [lastJobUpdate, isDownloading, galleryId, downloadRefresh])
 
   const { data: activeJob, mutate: mutateActiveJob } = useSWR(
     activeJobId ? ['download/job', activeJobId] : null,
@@ -424,6 +509,17 @@ export default function GalleryDetailPage() {
     [gallery, updateGallery, mutateGallery],
   )
 
+  const { data: categoryRegistry } = useCategoryRegistry()
+  const categoryOptions = useMemo(() => {
+    const names = (categoryRegistry?.categories ?? []).map((c) => c.name)
+    const current = gallery?.category ?? ''
+    // Keep an out-of-registry value (e.g. from a remote source) selectable so
+    // the control never shows a blank for a gallery that does have one.
+    return current && !names.some((n) => n.toLowerCase() === current.toLowerCase())
+      ? [...names, current]
+      : names
+  }, [categoryRegistry, gallery?.category])
+
   const handleCategoryChange = useCallback(
     async (category: string) => {
       if (!gallery || category === gallery.category) return
@@ -455,6 +551,73 @@ export default function GalleryDetailPage() {
       if (updated) mutateGallery(updated, false)
     } catch {
       toast.error(t('library.ratingError'))
+    }
+  }
+
+  const handleReadingListToggle = async () => {
+    if (!gallery || !source || !sourceId) return
+    try {
+      const updated = await api.library.updateGallery(source, sourceId, {
+        in_reading_list: !gallery.in_reading_list,
+      })
+      mutateGallery(updated, false)
+      toast.success(
+        gallery.in_reading_list
+          ? t('contextMenu.removeFromReadingList')
+          : t('contextMenu.addToReadingList'),
+      )
+    } catch {
+      toast.error(t('common.failedToLoad'))
+    }
+  }
+
+  const handleShare = async () => {
+    if (!gallery) return
+    try {
+      const result = await api.galleryManagement.createShare(gallery.id, 168, true)
+      const absolute = `${window.location.origin}${result.url}`
+      await navigator.clipboard.writeText(absolute)
+      toast.success(t('library.shareCopied'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const handleManageAccess = async () => {
+    if (!gallery) return
+    try {
+      const sharing = await api.galleryManagement.sharing(gallery.id)
+      const raw = window.prompt(
+        t('library.accessUserIds'),
+        sharing.permissions.map((item) => item.user_id).join(','),
+      )
+      if (raw === null) return
+      const permissions = raw
+        .split(',')
+        .map((value) => Number(value.trim()))
+        .filter(Number.isInteger)
+        .map((user_id) => ({ user_id, can_edit: false }))
+      const visibility = window.confirm(t('library.privateVisibilityConfirm'))
+        ? 'private'
+        : 'public'
+      await api.galleryManagement.updateSharing(gallery.id, { visibility, permissions })
+      toast.success(t('library.accessUpdated'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const handleLinkVersion = async () => {
+    if (!gallery) return
+    const value = window.prompt(t('library.linkVersionPrompt'))
+    const linkedId = Number(value)
+    if (!value || !Number.isInteger(linkedId)) return
+    try {
+      await api.galleryManagement.linkVersion(gallery.id, linkedId)
+      await mutateVersions()
+      toast.success(t('library.versionLinked'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -711,18 +874,23 @@ export default function GalleryDetailPage() {
 
   if (galleryError) {
     return (
-      <div className="min-h-screen bg-vault-bg flex items-center justify-center">
-        <div className="bg-red-900/30 border border-red-700 rounded-lg p-6 text-red-400 max-w-md text-center">
-          <p className="font-semibold mb-2">{t('library.failedToLoad')}</p>
-          <p className="text-sm">{galleryError.message}</p>
-          <button
-            onClick={() => router.back()}
-            className="mt-4 px-4 py-2 bg-vault-input border border-vault-border rounded text-vault-text-secondary text-sm hover:text-vault-text transition-colors"
-          >
-            {t('common.goBack')}
-          </button>
+      <>
+        <div className="min-h-screen bg-vault-bg flex items-center justify-center">
+          <div className="bg-red-900/30 border border-red-700 rounded-lg p-6 text-red-400 max-w-md text-center">
+            <p className="font-semibold mb-2">{t('library.failedToLoad')}</p>
+            <p className="text-sm">{galleryError.message}</p>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => smartBack(router, '/library')}
+              className="mt-4"
+            >
+              {t('common.goBack')}
+            </Button>
+          </div>
         </div>
-      </div>
+        <BackButton fallback="/library" />
+      </>
     )
   }
 
@@ -736,34 +904,92 @@ export default function GalleryDetailPage() {
     pagesOutdated: !!pagesOutdated,
   })
   const artistDisplayName = getArtistDisplayName(gallery)
+  const pageCount = gallery.pages ?? images.length
+  const favoriteLabel = gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')
+  const readingListLabel = gallery.in_reading_list
+    ? t('library.inReadingList')
+    : t('library.readLater')
+  const sourceLink = gallery.source_url ? getSourceLink(gallery.source_url, gallery.source) : null
+  const moreActionGroups: GalleryAction[][] = [
+    sourceLink
+      ? [
+          {
+            id: 'source',
+            label: t('library.viewSource'),
+            icon: ExternalLink,
+            href: sourceLink.href,
+            external: sourceLink.external,
+          },
+        ]
+      : [],
+    canEdit
+      ? [
+          { id: 'share', label: t('library.share'), icon: Share2, onSelect: handleShare },
+          {
+            id: 'access',
+            label: t('library.manageAccess'),
+            icon: Users,
+            onSelect: handleManageAccess,
+          },
+          {
+            id: 'versions',
+            label: t('library.versions'),
+            icon: History,
+            onSelect: () => setVersionsOpen(true),
+          },
+        ]
+      : [],
+    canEdit
+      ? [
+          {
+            id: 'delete',
+            label: isDeleting
+              ? t('library.deleting')
+              : gallery.import_mode === 'link'
+                ? t('library.delete.link.button')
+                : t('library.delete'),
+            icon: Trash2,
+            danger: true,
+            disabled: isDeleting,
+            onSelect: handleDelete,
+          },
+        ]
+      : [],
+  ]
+  const hasMoreActions = moreActionGroups.some((group) => group.length > 0)
 
   return (
     <div>
       {/* Back */}
       <BackButton fallback="/library" />
 
-      {/* Header */}
-      <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-        <div className="flex flex-col md:flex-row gap-5">
+      {/* Header — compact on phones: small cover beside the title, one action
+          row, the rest of the metadata behind "More info". */}
+      <div className="bg-vault-card border border-vault-border rounded-xl p-4 md:p-5 mb-5">
+        <div className="grid grid-cols-[5rem_minmax(0,1fr)] md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 md:gap-x-5 gap-y-3">
           {/* Thumbnail preview from first image */}
-          <div className="shrink-0">
+          <div className="md:row-span-3">
             {images[0]?.thumb_path ? (
               <AppImage
                 src={images[0].thumb_path}
                 alt={gallery.title}
-                className="w-40 h-56 object-cover rounded"
-                sizes="160px"
+                className="w-20 h-28 md:w-40 md:h-56 object-cover rounded"
+                sizes="(min-width: 768px) 160px, 80px"
               />
             ) : (
-              <div className="w-40 h-56 bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+              <ThumbPlaceholder
+                category={gallery.category}
+                categories={categoryRegistry?.categories}
+                className="w-20 h-28 md:w-40 md:h-56 rounded"
+              >
                 {t('library.noCover')}
-              </div>
+              </ThumbPlaceholder>
             )}
           </div>
 
-          {/* Meta */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2 mb-1">
+          {/* Title, artist, rating */}
+          <div className="min-w-0">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1.5 md:gap-2">
               {editingTitle ? (
                 <input
                   autoFocus
@@ -777,56 +1003,65 @@ export default function GalleryDetailPage() {
                     if (e.key === 'Enter') e.currentTarget.blur()
                     if (e.key === 'Escape') setEditingTitle(false)
                   }}
-                  className="text-xl font-bold text-vault-text leading-tight bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
+                  className="text-base md:text-xl font-bold text-vault-text leading-tight bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
                 />
               ) : (
                 <h1
-                  onClick={() => {
-                    setEditTitleValue(gallery.title)
-                    setEditingTitle(true)
-                  }}
-                  className="text-xl font-bold text-vault-text leading-tight cursor-pointer hover:text-vault-accent transition-colors"
-                  title={t('library.editTitle')}
+                  onClick={
+                    canEdit
+                      ? () => {
+                          setEditTitleValue(gallery.title)
+                          setEditingTitle(true)
+                        }
+                      : undefined
+                  }
+                  className={`text-base md:text-xl font-bold text-vault-text leading-tight break-words md:line-clamp-none ${
+                    infoOpen ? '' : 'line-clamp-4'
+                  } ${canEdit ? 'cursor-pointer hover:text-vault-accent transition-colors' : ''}`}
+                  title={canEdit ? t('library.editTitle') : undefined}
                 >
                   {gallery.title}
                 </h1>
               )}
-              {statusAction.kind !== 'none' ? (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {statusAction.kind === 'outdated' ? (
-                    <span className="px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
-                      {t('library.statusOutdated')}
-                    </span>
-                  ) : (
-                    <span
-                      className={`px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
-                    >
-                      {t(statusInfo.labelKey)}
-                    </span>
-                  )}
-                  {statusAction.canEnqueue && (
-                    <button
-                      onClick={handleEnqueueUpdate}
-                      disabled={isEnqueueingUpdate || !!activeJobId}
-                      className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isEnqueueingUpdate
-                        ? '...'
-                        : t(
-                            statusAction.kind === 'repair'
-                              ? 'library.repairNow'
-                              : 'library.updateNow',
-                          )}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <span
-                  className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
-                >
-                  {t(statusInfo.labelKey)}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {statusAction.kind === 'outdated' ? (
+                  <span className="px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
+                    {t('library.statusOutdated')}
+                  </span>
+                ) : (
+                  <span
+                    className={`px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
+                  >
+                    {t(statusInfo.labelKey)}
+                  </span>
+                )}
+                {statusAction.canEnqueue && canEdit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (statusAction.kind !== 'repair') {
+                        void handleEnqueueUpdate('update')
+                      } else if (excludedBlobs.length > 0) {
+                        // Purged images stay out of a repair unless the user asks for them back.
+                        setRepairDialogOpen(true)
+                      } else {
+                        void handleEnqueueUpdate('repair')
+                      }
+                    }}
+                    disabled={isEnqueueingUpdate || !!activeJobId}
+                    className="h-auto px-2 py-0.5 text-xs border border-vault-accent/50 bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30 hover:text-vault-accent"
+                  >
+                    {isEnqueueingUpdate
+                      ? '...'
+                      : t(
+                          statusAction.kind === 'repair'
+                            ? 'library.repairNow'
+                            : 'library.updateNow',
+                        )}
+                  </Button>
+                )}
+              </div>
             </div>
             {(gallery.title_jpn || editingTitleJpn) &&
               (editingTitleJpn ? (
@@ -842,32 +1077,149 @@ export default function GalleryDetailPage() {
                     if (e.key === 'Enter') e.currentTarget.blur()
                     if (e.key === 'Escape') setEditingTitleJpn(false)
                   }}
-                  className="text-sm text-vault-text-secondary mb-3 bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
+                  className="mt-1 text-sm text-vault-text-secondary bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
                 />
               ) : (
                 <p
-                  onClick={() => {
-                    setEditTitleJpnValue(gallery.title_jpn ?? '')
-                    setEditingTitleJpn(true)
-                  }}
-                  className="text-sm text-vault-text-secondary mb-3 cursor-pointer hover:text-vault-accent transition-colors"
-                  title={t('library.editTitle')}
+                  onClick={
+                    canEdit
+                      ? () => {
+                          setEditTitleJpnValue(gallery.title_jpn ?? '')
+                          setEditingTitleJpn(true)
+                        }
+                      : undefined
+                  }
+                  className={`${infoOpen ? 'block' : 'hidden'} md:block mt-1 text-sm text-vault-text-secondary break-words ${
+                    canEdit ? 'cursor-pointer hover:text-vault-accent transition-colors' : ''
+                  }`}
+                  title={canEdit ? t('library.editTitle') : undefined}
                 >
                   {gallery.title_jpn}
                 </p>
               ))}
+            {/* Artist and uploader have distinct meanings on E-Hentai. */}
+            {gallery.artist_id && artistDisplayName && (
+              <Link
+                href={artistPageHref(gallery.artist_id)}
+                className="mt-1 block truncate text-sm text-vault-text-secondary hover:text-vault-accent hover:underline transition-colors"
+              >
+                {artistDisplayName}
+              </Link>
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <span className="hidden md:inline text-sm text-vault-text-muted">
+                {t('library.metaRating')}
+              </span>
+              <RatingStars
+                rating={gallery.my_rating ?? 0}
+                readonly={isUpdating || !canEdit}
+                onChange={handleRatingChange}
+              />
+              <span className="text-xs md:text-sm text-vault-text-secondary">
+                {(gallery.my_rating ?? 0).toFixed(1)}
+              </span>
+            </div>
+          </div>
 
-            {/* Meta grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mb-4">
+          {/* Action row — labels collapse to icons on phones */}
+          <div className="col-span-2 md:col-span-1 md:col-start-2 flex items-center gap-2">
+            <Link
+              href={readerHref(gallery.source, gallery.source_id)}
+              className="flex-1 md:flex-none flex items-center justify-center h-10 px-4 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
+            >
+              {t('browse.read')}
+            </Link>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={handleFavoriteToggle}
+                disabled={isUpdating}
+                aria-label={favoriteLabel}
+                aria-pressed={!!gallery.is_favorited}
+                title={favoriteLabel}
+                className={`${ACTION_BUTTON_CLASS} ${
+                  gallery.is_favorited
+                    ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
+                }`}
+              >
+                <Star
+                  size={16}
+                  className={`md:hidden ${gallery.is_favorited ? 'fill-current' : ''}`}
+                />
+                <span className="hidden md:inline">{favoriteLabel}</span>
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={handleReadingListToggle}
+                disabled={isUpdating}
+                aria-label={readingListLabel}
+                aria-pressed={!!gallery.in_reading_list}
+                title={readingListLabel}
+                className={`${ACTION_BUTTON_CLASS} ${
+                  gallery.in_reading_list
+                    ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
+                }`}
+              >
+                {gallery.in_reading_list ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+                <span className="hidden md:inline">{readingListLabel}</span>
+              </button>
+            )}
+            <AddToCollectionMenu
+              galleryId={gallery.id}
+              ariaLabel={t('collections.addToCollection')}
+              onOpenChange={setCollectionMenuOpen}
+              className={`${ACTION_BUTTON_CLASS} bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent`}
+            >
+              <FolderHeart size={16} />
+              <span className="hidden md:inline">{t('collections.addToCollection')}</span>
+            </AddToCollectionMenu>
+            {hasMoreActions && (
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-label={t('library.moreActions')}
+                aria-haspopup="dialog"
+                title={t('library.moreActions')}
+                className={`${ACTION_BUTTON_CLASS} bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent`}
+              >
+                <MoreHorizontal size={16} />
+                <span className="hidden md:inline">{t('common.more')}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Secondary metadata — always shown from md, behind a toggle on phones */}
+          <div className="col-span-2 md:col-span-1 md:col-start-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => setInfoOpen((open) => !open)}
+              aria-expanded={infoOpen}
+              className="h-auto gap-1 px-1 py-1 text-xs md:hidden hover:bg-transparent"
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${infoOpen ? 'rotate-180' : ''}`}
+              />
+              {infoOpen ? t('library.lessInfo') : t('library.moreInfo')}
+            </Button>
+            <div
+              className={`${infoOpen ? 'grid' : 'hidden'} md:grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mt-2 md:mt-0`}
+            >
               {[
                 { labelKey: 'library.metaSource', value: gallery.source },
                 { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
                 {
                   labelKey: 'library.metaPages',
                   value:
-                    gallery.source_pages && gallery.source_pages > gallery.pages
-                      ? `${gallery.pages}/${gallery.source_pages}`
-                      : String(gallery.pages),
+                    gallery.source_pages && gallery.source_pages > pageCount
+                      ? `${pageCount}/${gallery.source_pages}`
+                      : String(pageCount),
                 },
                 {
                   labelKey: 'library.metaAdded',
@@ -876,267 +1228,96 @@ export default function GalleryDetailPage() {
                 ...(gallery.posted_at
                   ? [{ labelKey: 'library.metaPosted', value: formatDate(gallery.posted_at) }]
                   : []),
+                ...(gallery.content_updated_at
+                  ? [
+                      {
+                        labelKey: 'library.metaUpdated',
+                        value: formatDate(gallery.content_updated_at),
+                      },
+                    ]
+                  : []),
+                { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
               ].map(({ labelKey, value }) => (
-                <div key={labelKey}>
+                <div key={labelKey} className="min-w-0 truncate">
                   <span className="text-vault-text-muted">{t(labelKey)}: </span>
                   <span className="text-vault-text">{value}</span>
                 </div>
               ))}
-              {/* Category — inline select */}
-              <div>
+              {/* Category — inline select for members */}
+              <div className="col-span-2 md:col-span-1">
                 <span className="text-vault-text-muted">{t('library.metaCategory')}: </span>
-                <select
-                  value={gallery.category}
-                  onChange={(e) => handleCategoryChange(e.target.value)}
-                  className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
-                >
-                  <option value="">{t('library.categoryUncategorized')}</option>
-                  {[
-                    'Doujinshi',
-                    'Manga',
-                    'Artist CG',
-                    'Game CG',
-                    'Western',
-                    'Non-H',
-                    'Image Set',
-                    'Cosplay',
-                    'Asian Porn',
-                    'Misc',
-                  ].map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {/* Artist and uploader have distinct meanings on E-Hentai. */}
-              <div>
-                <span className="text-vault-text-muted">{t('library.artistFilter')}: </span>
-                {gallery.artist_id && artistDisplayName ? (
-                  <Link
-                    href={artistSearchHref(gallery.artist_id)}
-                    className="text-vault-text hover:text-vault-accent hover:underline transition-colors"
+                {canEdit ? (
+                  <select
+                    value={gallery.category ?? ''}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                    className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
                   >
-                    {artistDisplayName}
-                  </Link>
+                    <option value="">{t('library.categoryUncategorized')}</option>
+                    {categoryOptions.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
-                  <span className="text-vault-text">N/A</span>
+                  <span className="text-vault-text">
+                    {gallery.category || t('library.categoryUncategorized')}
+                  </span>
+                )}
+                {canEdit && gallery.source === 'local' && (
+                  <p className="mt-1 text-xs text-vault-text-muted">
+                    {t('categories.localFolderNote')}
+                  </p>
                 )}
               </div>
-              <div>
-                <span className="text-vault-text-muted">{t('library.metaUploader')}: </span>
-                <span className="text-vault-text">{gallery.uploader || 'N/A'}</span>
-              </div>
             </div>
-
-            {/* Rating */}
-            <div className="flex items-center gap-3 mb-4">
-              <span className="text-sm text-vault-text-muted">{t('library.metaRating')}</span>
-              <RatingStars
-                rating={gallery.my_rating ?? 0}
-                readonly={isUpdating}
-                onChange={handleRatingChange}
-              />
-              <span className="text-sm text-vault-text-secondary">
-                {(gallery.my_rating ?? 0).toFixed(1)}
-              </span>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={readerHref(gallery.source, gallery.source_id)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
-              >
-                {t('browse.read')}
-              </Link>
-              {gallery.artist_id && (
-                <Link
-                  href={artistSearchHref(gallery.artist_id)}
-                  className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
-                >
-                  {t('library.viewAllByArtist')}
-                </Link>
-              )}
-              {gallery.source_url &&
-                (() => {
-                  const { href, external } = getSourceLink(gallery.source_url, gallery.source)
-                  const btnClass =
-                    'px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors'
-                  return external ? (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className={btnClass}>
-                      {t('library.viewSource')}
-                    </a>
-                  ) : (
-                    <Link href={href} className={btnClass}>
-                      {t('library.viewSource')}
-                    </Link>
-                  )
-                })()}
-              <button
-                onClick={handleFavoriteToggle}
-                disabled={isUpdating}
-                className={`px-4 py-2 rounded text-sm font-medium border transition-colors ${
-                  gallery.is_favorited
-                    ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
-                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
-                }`}
-              >
-                {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    const updated = await api.library.updateGallery(source!, sourceId!, {
-                      in_reading_list: !gallery.in_reading_list,
-                    })
-                    mutateGallery(updated, false)
-                    toast.success(
-                      gallery.in_reading_list
-                        ? t('contextMenu.removeFromReadingList')
-                        : t('contextMenu.addToReadingList'),
-                    )
-                  } catch {
-                    toast.error(t('common.failedToLoad'))
-                  }
-                }}
-                disabled={isUpdating}
-                title={
-                  gallery.in_reading_list ? t('library.inReadingList') : t('library.readLater')
-                }
-                className={`px-4 py-2 rounded text-sm font-medium border transition-colors flex items-center gap-1.5 ${
-                  gallery.in_reading_list
-                    ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
-                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
-                }`}
-              >
-                {gallery.in_reading_list ? (
-                  <>
-                    <BookmarkCheck size={16} />
-                    {t('library.inReadingList')}
-                  </>
-                ) : (
-                  <>
-                    <Bookmark size={16} />
-                    {t('library.readLater')}
-                  </>
-                )}
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
-              >
-                {isDeleting
-                  ? t('library.deleting')
-                  : gallery.import_mode === 'link'
-                    ? t('library.delete.link.button')
-                    : t('library.delete')}
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                onClick={async () => {
-                  if (!gallery) return
-                  try {
-                    const result = await api.galleryManagement.createShare(gallery.id, 168, true)
-                    const absolute = `${window.location.origin}${result.url}`
-                    await navigator.clipboard.writeText(absolute)
-                    toast.success(t('library.shareCopied'))
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : String(error))
-                  }
-                }}
-              >
-                <Share2 size={16} /> {t('library.share')}
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                onClick={async () => {
-                  if (!gallery) return
-                  const sharing = await api.galleryManagement.sharing(gallery.id)
-                  const raw = window.prompt(
-                    t('library.accessUserIds'),
-                    sharing.permissions.map((item) => item.user_id).join(','),
-                  )
-                  if (raw === null) return
-                  const permissions = raw
-                    .split(',')
-                    .map((value) => Number(value.trim()))
-                    .filter(Number.isInteger)
-                    .map((user_id) => ({ user_id, can_edit: false }))
-                  const visibility = window.confirm(t('library.privateVisibilityConfirm'))
-                    ? 'private'
-                    : 'public'
-                  await api.galleryManagement.updateSharing(gallery.id, { visibility, permissions })
-                  toast.success(t('library.accessUpdated'))
-                }}
-              >
-                {t('library.manageAccess')}
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                onClick={() => setVersionsOpen((open) => !open)}
-              >
-                <History size={16} /> {t('library.versions')}
-              </button>
-              {versionsOpen && (
-                <button
-                  type="button"
-                  className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                  onClick={async () => {
-                    if (!gallery) return
-                    const value = window.prompt(t('library.linkVersionPrompt'))
-                    const linkedId = Number(value)
-                    if (!Number.isInteger(linkedId)) return
-                    await api.galleryManagement.linkVersion(gallery.id, linkedId)
-                    await mutateVersions()
-                    toast.success(t('library.versionLinked'))
-                  }}
-                >
-                  <History size={16} /> {t('library.linkVersion')}
-                </button>
-              )}
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded border border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-300 hover:bg-red-900/40"
-                onClick={async () => {
-                  if (!gallery) return
-                  const value = window.prompt(t('library.mergeGalleryPrompt'))
-                  const sourceGalleryId = Number(value)
-                  if (
-                    !Number.isInteger(sourceGalleryId) ||
-                    !window.confirm(t('library.mergeGalleryConfirm'))
-                  )
-                    return
-                  await api.galleryManagement.merge(gallery.id, sourceGalleryId)
-                  await Promise.all([mutateGallery(), mutateImages()])
-                  toast.success(t('library.galleryMerged'))
-                }}
-              >
-                <GitMerge size={16} /> {t('library.merge')}
-              </button>
-            </div>
-            {versionsOpen && versionData?.versions && versionData.versions.length > 1 && (
+            {versionsOpen && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-vault-text-muted">{t('library.versions')}:</span>
-                {versionData.versions.map((version) => (
-                  <Link
-                    key={version.id}
-                    href={`/library/${encodeURIComponent(version.source)}/${encodeURIComponent(version.source_id)}`}
-                    className={`rounded border px-2 py-1 ${version.id === gallery.id ? 'border-vault-accent text-vault-accent' : 'border-vault-border text-vault-text-secondary'}`}
-                  >
-                    {version.title || `#${version.id}`}
-                  </Link>
-                ))}
+                {(versionData?.versions ?? []).length > 1 &&
+                  versionData?.versions.map((version) => (
+                    <Link
+                      key={version.id}
+                      href={`/library/${encodeURIComponent(version.source)}/${encodeURIComponent(version.source_id)}`}
+                      className={`rounded border px-2 py-1 ${version.id === gallery.id ? 'border-vault-accent text-vault-accent' : 'border-vault-border text-vault-text-secondary'}`}
+                    >
+                      {version.title || `#${version.id}`}
+                    </Link>
+                  ))}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  className="h-auto px-2 py-1 hover:border-vault-accent"
+                  onClick={handleLinkVersion}
+                >
+                  <History size={14} /> {t('library.linkVersion')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  onClick={() => setVersionsOpen(false)}
+                  aria-label={t('common.close')}
+                >
+                  <X size={14} />
+                </Button>
               </div>
             )}
           </div>
         </div>
       </div>
 
+      <GalleryActionsSheet open={moreOpen} onClose={closeMoreSheet} groups={moreActionGroups} />
+
+      {repairDialogOpen && (
+        <RepairGalleryDialog
+          excludedCount={excludedBlobs.length}
+          busy={isEnqueueingUpdate}
+          onConfirm={(includeExcluded) => void handleEnqueueUpdate('repair', includeExcluded)}
+          onClose={() => setRepairDialogOpen(false)}
+        />
+      )}
 
       {isCheckingUpdate && (
         <p className="text-xs text-vault-text-muted animate-pulse mb-2">
@@ -1144,7 +1325,7 @@ export default function GalleryDetailPage() {
         </p>
       )}
 
-      {activeJobId && gallery.download_status !== 'downloading' && (
+      {activeJobId && !isDownloading && (
         <div className="bg-vault-accent/10 border border-vault-accent/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-vault-accent text-sm">
           <span className="flex gap-0.5">
             <span className="w-1.5 h-1.5 rounded-full bg-vault-accent animate-bounce [animation-delay:0ms]" />
@@ -1155,7 +1336,7 @@ export default function GalleryDetailPage() {
         </div>
       )}
 
-      {gallery.download_status === 'downloading' && (
+      {isDownloading && (
         <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-blue-400 text-sm">
           <span className="flex gap-0.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
@@ -1172,14 +1353,16 @@ export default function GalleryDetailPage() {
         translations={tagTranslations}
         tagData={tagData}
         onUpdateTag={handleUpdateTag}
+        canEdit={canEdit}
+        onPopoverOpenChange={setTagPopoverOpen}
       />
 
       {/* Image Thumbnails */}
       <div className="bg-vault-card border border-vault-border rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
-            {t('library.images')} ({gallery.pages}
-            {gallery.source_pages && gallery.source_pages > gallery.pages
+            {t('library.images')} ({pageCount}
+            {gallery.source_pages && gallery.source_pages > pageCount
               ? `/${gallery.source_pages}`
               : ''}{' '}
             {t('library.metaPages')})
@@ -1187,7 +1370,9 @@ export default function GalleryDetailPage() {
           <div className="flex items-center gap-2">
             {selectMode ? (
               <>
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={async () => {
                     const ids = [...selectedIds].slice(0, 6)
                     if (!ids.length) return
@@ -1202,59 +1387,71 @@ export default function GalleryDetailPage() {
                   }}
                   disabled={selectedIds.size === 0 || selectedIds.size > 6}
                   title={t('library.sourceLookupLimit')}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-50"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.findSources', { count: selectedIds.size })}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleHideSelected}
                   disabled={selectedIds.size === 0 || isHiding}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                  className="h-auto py-1 text-xs border border-red-700/50 bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-400"
                 >
                   {isHiding
                     ? t('library.hidingImages')
                     : t('library.hideSelected', { count: selectedIds.size })}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={selectAllLoaded}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.selectAll')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={invertSelection}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.invertSelection')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={exitSelectMode}
-                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                  className="h-auto py-1 text-xs"
                 >
                   {t('library.cancelSelect')}
-                </button>
+                </Button>
               </>
             ) : (
               <>
-                {images.length > 0 && (
-                  <button
+                {canEdit && images.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setSelectMode(true)}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                    className="h-auto py-1 text-xs"
                   >
                     {t('library.selectImages')}
-                  </button>
+                  </Button>
                 )}
-                {(hiddenImages.length > 0 || excludedBlobs.length > 0) && (
-                  <button
+                {canEdit && (hiddenImages.length > 0 || excludedBlobs.length > 0) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setShowExcluded(!showExcluded)}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-yellow-900/30 border-yellow-700/50 text-yellow-400 hover:bg-yellow-900/50 transition-colors"
+                    className="h-auto py-1 text-xs border border-yellow-700/50 bg-yellow-900/30 text-yellow-400 hover:bg-yellow-900/50 hover:text-yellow-400"
                   >
                     {showExcluded
                       ? t('library.hideExcluded')
                       : t('library.showExcluded', {
                           count: hiddenImages.length + excludedBlobs.length,
                         })}
-                  </button>
+                  </Button>
                 )}
               </>
             )}
@@ -1273,7 +1470,8 @@ export default function GalleryDetailPage() {
               items={images}
               columns={{ base: 4, sm: 6, md: 8, lg: 10 }}
               gap={8}
-              estimateHeight={180}
+              estimateHeight={estimateGalleryThumbRowHeight}
+              measureRows={false}
               overscan={4}
               onLoadMore={loadMoreImages}
               hasMore={!imagesReachingEnd}
@@ -1299,7 +1497,7 @@ export default function GalleryDetailPage() {
                         selectLpTargetRef.current = idx
                         selLpCtx(e)
                       }}
-                      className={`relative group rounded border-2 transition-colors select-none [-webkit-touch-callout:none] ${
+                      className={`relative group block w-full rounded border-2 transition-colors select-none [-webkit-touch-callout:none] ${
                         isSelected
                           ? 'border-red-500 ring-2 ring-red-500/30'
                           : 'border-vault-border hover:border-vault-border-hover'
@@ -1313,9 +1511,13 @@ export default function GalleryDetailPage() {
                           className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
                         />
                       ) : (
-                        <div className="w-full aspect-[3/4] bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+                        <ThumbPlaceholder
+                          category={gallery.category}
+                          categories={categoryRegistry?.categories}
+                          className="w-full aspect-[3/4] rounded"
+                        >
                           {image.page_num}
-                        </div>
+                        </ThumbPlaceholder>
                       )}
                       {isSelected && (
                         <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
@@ -1369,9 +1571,13 @@ export default function GalleryDetailPage() {
                         className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
                       />
                     ) : (
-                      <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
+                      <ThumbPlaceholder
+                        category={gallery.category}
+                        categories={categoryRegistry?.categories}
+                        className="w-full aspect-[3/4] rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
+                      >
                         {image.page_num}
-                      </div>
+                      </ThumbPlaceholder>
                     )}
                     {isFavorited(image.id) && (
                       <div className="absolute top-1 right-1">
@@ -1388,13 +1594,15 @@ export default function GalleryDetailPage() {
 
             {images.length === 0 && (
               <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-                {Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
-                  <Link
-                    key={i}
-                    href={readerHref(gallery.source, gallery.source_id, i + 1)}
-                    className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
-                  >
-                    {i + 1}
+                {Array.from({ length: Math.min(pageCount, 40) }).map((_, i) => (
+                  <Link key={i} href={readerHref(gallery.source, gallery.source_id, i + 1)}>
+                    <ThumbPlaceholder
+                      category={gallery.category}
+                      categories={categoryRegistry?.categories}
+                      className="w-full aspect-[3/4] rounded border border-vault-border hover:border-vault-border-hover transition-colors"
+                    >
+                      {i + 1}
+                    </ThumbPlaceholder>
                   </Link>
                 ))}
               </div>
@@ -1434,13 +1642,15 @@ export default function GalleryDetailPage() {
                       )}
                     </div>
                   </div>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleRestoreImage(image.id)}
                     disabled={restoringImageId === image.id}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
+                    className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
                   >
                     {restoringImageId === image.id ? '...' : t('library.restoreHidden')}
-                  </button>
+                  </Button>
                 </div>
               ))}
               {excludedBlobs.map((blob) => (
@@ -1458,13 +1668,15 @@ export default function GalleryDetailPage() {
                       </span>
                     )}
                   </div>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleRestore(blob.blob_sha256)}
                     disabled={restoringHash === blob.blob_sha256}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
+                    className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
                   >
                     {restoringHash === blob.blob_sha256 ? '...' : t('library.restoreExcluded')}
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -1502,5 +1714,13 @@ export default function GalleryDetailPage() {
         <LazySauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
       )}
     </div>
+  )
+}
+
+export default function GalleryDetailPage() {
+  return (
+    <PageContainer>
+      <GalleryDetailPageInner />
+    </PageContainer>
   )
 }

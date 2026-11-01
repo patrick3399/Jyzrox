@@ -242,8 +242,18 @@ export function GridCard({
             {gallery.uploader}
           </button>
         )}
-        <div className="flex items-center justify-between mt-1">
-          <RatingStars rating={gallery.rating} readonly />
+        {/* One compact rating: five stars plus the ♥/↓ marks overflow a 3-column phone card. */}
+        <div className="flex items-center justify-between gap-1 mt-1">
+          {gallery.rating > 0 ? (
+            <span
+              className="text-[11px] leading-4 text-yellow-400 tabular-nums"
+              aria-label={t('common.ratingOf', { rating: String(gallery.rating) })}
+            >
+              ★{gallery.rating.toFixed(1)}
+            </span>
+          ) : (
+            <span />
+          )}
           <span className="flex items-center gap-1 text-[11px]">
             {status?.is_local_favorite && <span className="text-pink-400">♥</span>}
             {status?.downloaded && <span className="text-green-400">↓</span>}

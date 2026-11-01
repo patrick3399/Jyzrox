@@ -164,14 +164,12 @@ class Jyzrox : HttpSource(), ConfigurableSource {
         val body = response.body.string()
         val result = json.decodeFromString<ImagesResponse>(body)
 
-        return result.images.mapIndexed { index, img ->
-            // Use the API file endpoint so X-API-Token auth works
-            val imageUrl = if (img.fileUrl != null) {
-                "$baseUrl${img.fileUrl}"
-            } else {
-                // Fallback to streaming endpoint
-                "$apiBase/galleries/${result.galleryId}/images/${img.pageNum}/file"
-            }
+        // The API lists pages last-first (page_num DESC); Mihon pages are in reading order.
+        return result.images.sortedBy { it.pageNum }.mapIndexed { index, img ->
+            // Always use the API file endpoint: file_url points at /media/*,
+            // which nginx authorizes by session cookie or HTTP Basic only and
+            // rejects an X-API-Token request with 401.
+            val imageUrl = "$apiBase/galleries/${result.galleryId}/images/${img.pageNum}/file"
             Page(index, "", imageUrl)
         }
     }

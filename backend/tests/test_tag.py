@@ -966,6 +966,35 @@ class TestAutocompleteTranslation:
         assert match is not None
         assert match["translation"] == "雷姆"
 
+    async def test_autocomplete_traditional_query_matches_simplified_translation(self, client, db_session):
+        """DB translations are simplified; a traditional q must still hit them."""
+        await _insert_tag(db_session, "general", "caviar_trans_test")
+        await _insert_translation(db_session, "general", "caviar_trans_test", "zh", "鱼子酱")
+
+        resp = await client.get("/api/tags/autocomplete", params={"q": "魚子醬"})
+        assert resp.status_code == 200
+        match = next((r for r in resp.json() if r["name"] == "caviar_trans_test"), None)
+        assert match is not None
+        assert match["translation"] == "鱼子酱"
+
+    async def test_autocomplete_simplified_query_matches_traditional_translation(self, client, db_session):
+        """A manually edited traditional translation must be found by a simplified q."""
+        await _insert_tag(db_session, "general", "caviar_trad_test")
+        await _insert_translation(db_session, "general", "caviar_trad_test", "zh", "魚子醬")
+
+        resp = await client.get("/api/tags/autocomplete", params={"q": "鱼子酱"})
+        assert resp.status_code == 200
+        assert any(r["name"] == "caviar_trad_test" for r in resp.json())
+
+    async def test_autocomplete_non_chinese_language_is_not_script_converted(self, client, db_session):
+        """Japanese kanji must not be rewritten as Chinese: q=鱼 must not hit ja 魚."""
+        await _insert_tag(db_session, "general", "fish_ja_test")
+        await _insert_translation(db_session, "general", "fish_ja_test", "ja", "魚")
+
+        resp = await client.get("/api/tags/autocomplete", params={"q": "鱼", "language": "ja"})
+        assert resp.status_code == 200
+        assert not any(r["name"] == "fish_ja_test" for r in resp.json())
+
     async def test_autocomplete_returns_translation_field(self, client, db_session):
         """Result items should include 'translation' field (may be null)."""
         await _insert_tag(db_session, "general", "autocomplete_test")

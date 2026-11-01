@@ -76,7 +76,7 @@ def mock_config_path(tmp_path):
     """Mock settings.gallery_dl_config to a temp file."""
     config_file = tmp_path / "gallery-dl.json"
     with patch("plugins.builtin.gallery_dl.source.settings") as mock_settings:
-        mock_settings.data_gallery_path = "/data/gallery"
+        mock_settings.data_gallery_path = "/data/download_temp"
         mock_settings.gallery_dl_config = str(config_file)
         mock_settings.gdl_archive_dsn = "postgresql://test:test@localhost:5432/test"
         yield config_file
@@ -91,10 +91,10 @@ async def test_legacy_cookie_format(mock_config_path):
     await _build_gallery_dl_config(credentials)
 
     config = json.loads(mock_config_path.read_text())
-    assert config["extractor"]["ehentai"]["cookies"] == {"ipb_member_id": "1", "ipb_pass_hash": "x"}
-    # Should propagate to extra extractors
     assert config["extractor"]["exhentai"]["cookies"] == {"ipb_member_id": "1", "ipb_pass_hash": "x"}
     assert config["extractor"]["e-hentai"]["cookies"] == {"ipb_member_id": "1", "ipb_pass_hash": "x"}
+    # The source id is not a gallery-dl category; nothing reads a section by that name.
+    assert "ehentai" not in config["extractor"]
 
 
 @pytest.mark.asyncio
@@ -212,6 +212,27 @@ async def test_v3_eh_has_conservative_backoff_override(mock_config_path):
 
 
 @pytest.mark.asyncio
+async def test_eh_site_settings_reach_the_category_gallery_dl_reads(mock_config_path, mock_site_config_service):
+    """EH request pacing and proxy went to an "ehentai" section, which gallery-dl never reads."""
+    from core.site_config import DownloadParams
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    mock_site_config_service.get_all_download_params.return_value = {
+        "ehentai": DownloadParams(sleep_request=(2.0, 4.0), proxy_url="http://proxy:3128"),
+    }
+    await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1"}'})
+    config = json.loads(mock_config_path.read_text())
+
+    eh = config["extractor"]["exhentai"]
+    assert eh["sleep-request"] == [2.0, 4.0]
+    assert eh["proxy"] == "http://proxy:3128"
+    # Merged into the backoff and cookies set for the same category, not replacing them.
+    assert eh["sleep-429"] == "exp:2:0:600=60"
+    assert eh["cookies"] == {"ipb_member_id": "1"}
+    assert "ehentai" not in config["extractor"]
+
+
+@pytest.mark.asyncio
 async def test_v3_config_has_file_unique(mock_config_path):
     from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
 
@@ -221,12 +242,15 @@ async def test_v3_config_has_file_unique(mock_config_path):
 
 
 @pytest.mark.asyncio
-async def test_v3_subscription_has_archive_mode_memory(mock_config_path):
+async def test_subscription_archive_is_written_per_file_not_buffered_in_memory(mock_config_path):
+    """Memory mode only flushes on an error-free exit, so one failed file or a
+    killed process would drop every archive entry of the run."""
     from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
 
     await _build_gallery_dl_config({}, job_context="subscription")
     config = json.loads(mock_config_path.read_text())
-    assert config["extractor"]["archive-mode"] == "memory"
+    assert "archive-mode" not in config["extractor"]
+    assert config["extractor"]["archive"].startswith("postgresql://")
 
 
 @pytest.mark.asyncio
@@ -244,7 +268,7 @@ async def test_v3_config_has_postprocessors(mock_config_path):
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
-    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "hash" in pp_names
     assert "mtime" in pp_names
 
@@ -255,7 +279,7 @@ async def test_v3_metadata_pp_with_include_filter(mock_config_path):
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
-    meta_pps = [pp for pp in config["postprocessors"] if pp["name"] == "metadata"]
+    meta_pps = [pp for pp in config["extractor"]["postprocessors"] if pp["name"] == "metadata"]
     assert len(meta_pps) == 1
     assert "include" in meta_pps[0]
     assert "title" in meta_pps[0]["include"]
@@ -301,7 +325,7 @@ async def test_v3_pixiv_has_ugoira_pp(mock_config_path):
 
     await _build_gallery_dl_config({"pixiv": "token123"})
     config = json.loads(mock_config_path.read_text())
-    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "ugoira" in pp_names
 
 
@@ -311,7 +335,7 @@ async def test_v3_non_pixiv_no_ugoira(mock_config_path):
 
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
-    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "ugoira" not in pp_names
 
 
@@ -342,9 +366,7 @@ async def test_v3_cookie_update_is_writeback_path_not_true(mock_config_path):
     )
     config = json.loads(path.read_text())
     expected = "/tmp/gdl-cookies-job-123-ehentai.txt"
-    assert config["extractor"]["ehentai"]["cookies-update"] == expected
-    # EH downloads run under the exhentai/e-hentai extractor categories,
-    # so the export path must be set there too.
+    # EH downloads run under the exhentai category ('e-hentai' kept in sync).
     assert config["extractor"]["exhentai"]["cookies-update"] == expected
     assert config["extractor"]["e-hentai"]["cookies-update"] == expected
 
@@ -366,7 +388,8 @@ async def test_v3_cookie_update_omitted_without_config_id(mock_config_path):
 
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
-    assert "cookies-update" not in config["extractor"]["ehentai"]
+    assert "cookies-update" not in config["extractor"]["exhentai"]
+    assert "cookies-update" not in config["extractor"]["e-hentai"]
 
 
 @pytest.mark.asyncio
@@ -447,8 +470,8 @@ async def test_v3_full_config_integration(mock_config_path):
     assert config["extractor"]["archive-table"] == "{category}"
     assert "archive-format" not in config["extractor"]
 
-    # N10a: subscription has archive-mode memory
-    assert config["extractor"]["archive-mode"] == "memory"
+    # Subscription archive entries are written per file (no memory buffering)
+    assert "archive-mode" not in config["extractor"]
 
     # N10b: file-unique
     assert config["extractor"]["file-unique"] is True
@@ -466,13 +489,13 @@ async def test_v3_full_config_integration(mock_config_path):
     assert config["downloader"]["adjust-extensions"] is True
 
     # N5: postprocessors
-    pp_names = [pp["name"] for pp in config["postprocessors"]]
+    pp_names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
     assert "hash" in pp_names
     assert "mtime" in pp_names
 
     # N10d: metadata PP with include filter (replaces --write-metadata)
     assert "metadata" in pp_names
-    meta_pp = next(pp for pp in config["postprocessors"] if pp["name"] == "metadata")
+    meta_pp = next(pp for pp in config["extractor"]["postprocessors"] if pp["name"] == "metadata")
     assert "include" in meta_pp
     assert "title" in meta_pp["include"]
     assert "tags" in meta_pp["include"]
@@ -481,8 +504,424 @@ async def test_v3_full_config_integration(mock_config_path):
     assert "ugoira" in pp_names
 
     # N8: cookies-update for EH (cookie-based auth) — job-scoped writeback path
-    assert config["extractor"]["ehentai"].get("cookies-update") == "/tmp/gdl-cookies-test-job-123-ehentai.txt"
+    assert config["extractor"]["exhentai"].get("cookies-update") == "/tmp/gdl-cookies-test-job-123-ehentai.txt"
 
     # Credentials merged correctly
-    assert config["extractor"]["ehentai"]["cookies"] == {"ipb_member_id": "1"}
+    assert config["extractor"]["exhentai"]["cookies"] == {"ipb_member_id": "1"}
     assert config["extractor"]["pixiv"]["refresh-token"] == "refresh_token_123"
+
+
+@pytest.mark.asyncio
+async def test_postprocessors_live_under_extractor_so_cli_print_cannot_replace_them(mock_config_path):
+    """gallery-dl's --Print does config.set((), "postprocessors", [...]), replacing a
+    root-level list wholesale. Only extractor-level entries survive (and run first)."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+
+    assert "postprocessors" not in config
+    names = [pp["name"] for pp in config["extractor"]["postprocessors"]]
+    assert names[:3] == ["hash", "mtime", "metadata"]
+
+
+@pytest.mark.asyncio
+async def test_hash_postprocessor_requests_sha256_with_the_option_gallery_dl_reads(mock_config_path):
+    """HashPP reads "hashes"/"mode"; the old "algorithm" key was ignored (md5+sha1)."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    hash_pp = config["extractor"]["postprocessors"][0]
+    assert hash_pp == {"name": "hash", "hashes": "sha256"}
+
+
+@pytest.mark.asyncio
+async def test_metadata_include_keeps_the_fields_artist_extraction_reads(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    include = next(pp for pp in config["extractor"]["postprocessors"] if pp["name"] == "metadata")["include"]
+    assert {"author", "username", "user_id", "user", "content"} <= set(include)
+
+
+# ── archive rows record their job ──
+
+
+@pytest.mark.asyncio
+async def test_archive_dsn_without_job_id_would_leave_rows_ownerless(mock_config_path, tmp_path):
+    """Each job's archive connection carries its id; the column default reads it."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    job_id = "0199e0a1-7c3e-7b1a-9d2f-3c5b8a4e6f70"
+    path = await _build_gallery_dl_config({}, config_id=job_id)
+    archive = json.loads(path.read_text())["extractor"]["archive"]
+
+    assert archive == (f"postgresql://test:test@localhost:5432/test?options=-c%20jyzrox.archive_job_id%3D{job_id}")
+
+
+def test_archive_dsn_keeps_existing_query_parameters_and_options():
+    from plugins.builtin.gallery_dl._archive import archive_dsn_for_job
+
+    job_id = "0199e0a1-7c3e-7b1a-9d2f-3c5b8a4e6f70"
+    dsn = archive_dsn_for_job("postgresql://u:p%40ss@db:5432/jyzrox?sslmode=require&options=-c%20a.b%3D1", job_id)
+
+    assert dsn == (
+        "postgresql://u:p%40ss@db:5432/jyzrox?sslmode=require"
+        f"&options=-c%20a.b%3D1%20-c%20jyzrox.archive_job_id%3D{job_id}"
+    )
+
+
+@pytest.mark.parametrize("job_id", [None, "", "local_test", "1; DROP TABLE twitter"])
+def test_archive_dsn_is_unchanged_when_job_id_is_not_a_uuid(job_id):
+    """A value the uuid cast rejects would fail every archive insert of the run."""
+    from plugins.builtin.gallery_dl._archive import archive_dsn_for_job
+
+    dsn = "postgresql://test:test@localhost:5432/test"
+    assert archive_dsn_for_job(dsn, job_id) == dsn
+
+
+# ── Unregistered gallery-dl categories ──
+#
+# Regression: a credential saved for a category that is not in GDL_SITES
+# resolved through get_site_config() to _DEFAULT_CONFIG and was written under
+# config["extractor"]["gallery_dl"], a section gallery-dl never reads. The
+# cookies never reached the site, every such category shared (and overwrote)
+# that one section, and the cookies-update export landed there too, so the
+# worker's _writeback_cookies() never received refreshed cookies.
+
+
+@pytest.mark.asyncio
+async def test_unregistered_category_cookies_are_keyed_by_the_raw_category_not_gallery_dl(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    path = await _build_gallery_dl_config({"newsite": '{"sessionid": "abc"}'}, config_id="job-789")
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["newsite"]["cookies"] == {"sessionid": "abc"}
+    assert config["extractor"]["newsite"]["cookies-update"] == "/tmp/gdl-cookies-job-789-newsite.txt"
+    assert "gallery_dl" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_unregistered_category_login_fragment_is_keyed_by_the_raw_category_not_gallery_dl(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({"newsite": '{"username": "user1", "password": "pass1"}'})
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["newsite"]["username"] == "user1"
+    assert config["extractor"]["newsite"]["password"] == "pass1"
+    assert "gallery_dl" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_two_unregistered_categories_do_not_overwrite_each_others_credentials(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({"newsite": '{"sid": "a"}', "othersite": '{"sid": "b"}'})
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["newsite"]["cookies"] == {"sid": "a"}
+    assert config["extractor"]["othersite"]["cookies"] == {"sid": "b"}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("newsite", "newsite"),  # unregistered: its own gallery-dl category
+        ("e-hentai", "e-hentai"),  # unregistered alias spelling stays raw
+        ("ehentai", "exhentai"),  # both EH domains run as gallery-dl's "exhentai"
+        ("exhentai", "exhentai"),  # _ALIASES
+        ("pixiv", "pixiv"),
+        ("sankaku", "sankakucomplex"),  # explicit extractor override
+    ],
+)
+def test_gdl_extractor_name_returns_raw_category_only_when_unregistered(source, expected):
+    from plugins.builtin.gallery_dl._sites import gdl_extractor_name
+
+    assert gdl_extractor_name(source) == expected
+
+
+# ── per-job media policy (options.media) ──
+
+_MEDIA_KEYS = ("file-range", "file-filter", "videos")
+
+
+@pytest.mark.asyncio
+async def test_media_policy_max_files_sets_file_range(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(max_files=200))
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-200"
+    # Videos stay included: no video filter or 'videos' switch may appear.
+    assert "file-filter" not in config["extractor"]
+    assert "videos" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_exclude_videos_sets_videos_false_and_filter(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(include_videos=False))
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+    # No count cap requested: no file-range.
+    assert "file-range" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_both_fields_set_range_and_video_filter(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(max_files=20, include_videos=False))
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-20"
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+
+
+@pytest.mark.asyncio
+async def test_no_media_policy_leaves_config_without_range_or_filter(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+
+    for key in _MEDIA_KEYS:
+        assert key not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_no_media_policy_config_is_identical_to_omitting_the_argument(mock_config_path):
+    """A job without media must get the exact config it got before the feature."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    without_arg = mock_config_path.read_text()
+    await _build_gallery_dl_config({}, media=None)
+
+    assert mock_config_path.read_text() == without_arg
+
+
+@pytest.mark.asyncio
+async def test_media_policy_does_not_leak_into_next_jobs_config(mock_config_path):
+    """Media keys live in one job's config; a later job without media must not inherit them."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config({}, media=MediaPolicy(max_files=5, include_videos=False))
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+
+    for key in _MEDIA_KEYS:
+        assert key not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_applies_under_force_full_scan(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    await _build_gallery_dl_config(
+        {},
+        job_context="subscription",
+        force_full_scan=True,
+        media=MediaPolicy(max_files=200, include_videos=False),
+    )
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-200"
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+    # The force path still drops the archive; media must not bring it back.
+    assert "archive" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_media_policy_applies_under_incremental_subscription(mock_config_path):
+    from datetime import UTC, datetime
+
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from services.download_policy import MediaPolicy
+
+    last = datetime(2026, 3, 15, 8, 0, 0, tzinfo=UTC)
+    await _build_gallery_dl_config(
+        {},
+        job_context="subscription",
+        last_completed_at=last,
+        media=MediaPolicy(max_files=200, include_videos=False),
+    )
+    config = json.loads(mock_config_path.read_text())
+
+    assert config["extractor"]["file-range"] == "1-200"
+    assert config["extractor"]["videos"] is False
+    assert config["extractor"]["file-filter"] == "extension not in ('mov', 'mp4', 'webm')"
+    # Incremental boundary is preserved alongside the policy.
+    assert config["extractor"]["skip"] == "abort:10"
+    assert config["extractor"]["date-after"] == "2026-03-14T08:00:00"
+
+
+@pytest.mark.asyncio
+async def test_download_with_invalid_media_options_fails_without_running_gallery_dl(tmp_path):
+    """A stored policy that no longer validates must fail the job, not download everything."""
+    from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+    with (
+        patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as spawn,
+        patch(
+            "plugins.builtin.gallery_dl.source._ensure_job_archive_table",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+            new_callable=AsyncMock,
+        ) as build_config,
+    ):
+        result = await GalleryDlPlugin().download(
+            url="https://example.com/gallery/1",
+            dest_dir=tmp_path,
+            credentials={},
+            options={"media": {"max_files": 0}},
+        )
+
+    assert result.status == "failed"
+    assert result.error is not None and result.error.startswith("Invalid media options:")
+    assert result.downloaded == 0
+    spawn.assert_not_called()
+    build_config.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_download_passes_valid_media_policy_to_config_builder(tmp_path):
+    """The call site must parse options.media and hand the policy to the config builder."""
+    from pathlib import Path
+
+    from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+    from services.download_policy import MediaPolicy
+
+    class _StopHere(Exception):
+        pass
+
+    with (
+        patch(
+            "plugins.builtin.gallery_dl.source._ensure_job_archive_table",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+            new_callable=AsyncMock,
+            side_effect=_StopHere,
+        ) as build_config,
+        patch("pathlib.Path.mkdir"),
+    ):
+        with pytest.raises(_StopHere):
+            await GalleryDlPlugin().download(
+                url="https://example.com/gallery/1",
+                dest_dir=Path(tmp_path),
+                credentials={},
+                options={"media": {"max_files": 20, "include_videos": False}},
+            )
+
+    assert build_config.call_args.kwargs["media"] == MediaPolicy(max_files=20, include_videos=False)
+
+
+# ── Egress persona network identity (ADR 0022) ──
+
+
+@pytest.mark.asyncio
+async def test_persona_config_routes_whole_job_through_persona_proxy_and_identity(
+    mock_config_path, mock_site_config_service
+):
+    from core.site_config import DownloadParams
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    # A per-site proxy/browser from site config must not survive in a persona job.
+    mock_site_config_service.get_all_download_params.return_value = {
+        "twitter": DownloadParams(proxy_url="http://site-proxy:1", browser_profile="chrome")
+    }
+    path = await _build_gallery_dl_config(
+        {"twitter": '{"auth_token": "b"}'},
+        config_id="job-1",
+        target_source_id="twitter",
+        persona={"proxy_url": "http://egress-12:8888", "user_agent": None, "browser_profile": "firefox"},
+    )
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["proxy"] == "http://egress-12:8888"
+    assert config["extractor"]["browser"] == "firefox"
+    assert "user-agent" not in config["extractor"]
+    assert config["downloader"]["proxy"] == "http://egress-12:8888"
+    for name, entry in config["extractor"].items():
+        if isinstance(entry, dict):
+            assert not {"proxy", "browser", "user-agent"} & entry.keys(), name
+
+
+@pytest.mark.asyncio
+async def test_persona_overrides_proxy_and_user_agent_from_credential_fragment(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    fragment = '{"cookies": {"auth_token": "b"}, "user-agent": "FragmentUA", "proxy": "http://frag:1"}'
+    path = await _build_gallery_dl_config(
+        {"twitter": fragment},
+        config_id="job-3",
+        target_source_id="twitter",
+        persona={"proxy_url": "http://egress-13:8888", "user_agent": None, "browser_profile": "chrome"},
+    )
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["twitter"]["cookies"] == {"auth_token": "b"}
+    assert "user-agent" not in config["extractor"]["twitter"]
+    assert "proxy" not in config["extractor"]["twitter"]
+    assert config["extractor"]["proxy"] == "http://egress-13:8888"
+
+
+@pytest.mark.asyncio
+async def test_persona_with_user_agent_sets_root_user_agent_only(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    ua = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+    path = await _build_gallery_dl_config(
+        {},
+        config_id="job-2",
+        target_source_id="danbooru",
+        persona={"proxy_url": None, "user_agent": ua, "browser_profile": None},
+    )
+    config = json.loads(path.read_text())
+
+    assert config["extractor"]["user-agent"] == ua
+    assert "proxy" not in config["extractor"]
+    assert "proxy" not in config["downloader"]
+
+
+@pytest.mark.asyncio
+async def test_config_without_persona_is_unchanged(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    a = json.loads((await _build_gallery_dl_config({}, config_id="j", target_source_id="twitter")).read_text())
+    b = json.loads(
+        (await _build_gallery_dl_config({}, config_id="j", target_source_id="twitter", persona=None)).read_text()
+    )
+    assert a == b
+    assert "proxy" not in a["extractor"] and "proxy" not in a["downloader"]
+
+
+def test_sync_diagnostic_reports_throttle_signals_sorted():
+    from plugins.builtin.gallery_dl.source import _DownloadState, _sync_diagnostic
+
+    state = _DownloadState()
+    state.throttle_signals.update({"http_429", "http_403"})
+    ctx: dict = {}
+    _sync_diagnostic(state, ctx)
+    assert ctx["throttle_signals"] == ["http_403", "http_429"]

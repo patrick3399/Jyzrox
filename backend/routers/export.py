@@ -290,6 +290,8 @@ async def export_kohya(
         for i, img in enumerate(images):
             file_path = _file_path(img)
             if not file_path:
+                if img.blob is None and img.external_path and img.visibility == "active":
+                    excluded_files.append({"filename": img.filename or f"image_{i}", "reason": "pending"})
                 continue
 
             raw_name = img.filename if img.filename else f"image_{i}"

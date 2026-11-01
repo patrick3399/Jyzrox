@@ -9,7 +9,9 @@ import { SaveStatus, type SaveStatusValue } from '@/components/settings/Settings
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import type { RateLimitSettings, SiteRateConfig } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 const SITE_LABELS: Record<string, string> = {
   ehentai: 'E-Hentai',
@@ -256,9 +258,7 @@ export default function RateLimitsSettingsPage() {
     return (
       <div className="max-w-2xl">
         <BackButton fallback="/settings" />
-        <h1 className="text-2xl font-bold mb-6 text-vault-text">
-          {t('settingsCategory.rateLimits')}
-        </h1>
+        <PageHeader title={t('settingsCategory.rateLimits')} />
         <div className="flex justify-center py-8">
           <LoadingSpinner />
         </div>
@@ -270,9 +270,7 @@ export default function RateLimitsSettingsPage() {
     return (
       <div className="max-w-2xl">
         <BackButton fallback="/settings" />
-        <h1 className="text-2xl font-bold mb-6 text-vault-text">
-          {t('settingsCategory.rateLimits')}
-        </h1>
+        <PageHeader title={t('settingsCategory.rateLimits')} />
         <p className="text-xs text-vault-text-muted">{t('common.failedToLoad')}</p>
       </div>
     )
@@ -287,9 +285,7 @@ export default function RateLimitsSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">
-        {t('settingsCategory.rateLimits')}
-      </h1>
+      <PageHeader title={t('settingsCategory.rateLimits')} />
 
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-4">
@@ -498,19 +494,21 @@ export default function RateLimitsSettingsPage() {
                 </p>
               )}
             </div>
-            <button
+            <Button
+              variant="ghost"
+              size="md"
+              className={
+                data.override_active
+                  ? 'shrink-0 border border-amber-500/40 bg-amber-600/20 text-amber-400 hover:bg-amber-600/30'
+                  : 'shrink-0 border border-green-500/40 bg-green-600/20 text-green-400 hover:bg-green-600/30'
+              }
               onClick={handleOverride}
               disabled={overrideLoading}
-              className={`px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 ${
-                data.override_active
-                  ? 'bg-amber-600/20 border border-amber-500/40 text-amber-400 hover:bg-amber-600/30'
-                  : 'bg-green-600/20 border border-green-500/40 text-green-400 hover:bg-green-600/30'
-              }`}
             >
               {data.override_active
                 ? t('settings.rateLimitsRestore')
                 : t('settings.rateLimitsUnlock')}
-            </button>
+            </Button>
           </div>
         </div>
 

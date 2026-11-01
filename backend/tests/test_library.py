@@ -992,6 +992,92 @@ class TestFindSimilarImages:
         resp = await client.get(f"/api/library/images/{img_id}/similar")
         assert resp.status_code == 400
 
+    async def _insert_private_image(self, db_session, *, owner_id: int, source_id: str, phash: str | None) -> int:
+        """Insert a private gallery owned by ``owner_id`` with one image; return the image id."""
+        gid = await _insert_gallery(db_session, source="local", source_id=source_id, title="Private")
+        await db_session.execute(
+            text("UPDATE galleries SET visibility = 'private', created_by_user_id = :uid WHERE id = :gid"),
+            {"uid": owner_id, "gid": gid},
+        )
+        sha = f"sha_{source_id}"
+        await db_session.execute(
+            text("INSERT INTO blobs (sha256, file_size, extension, phash) VALUES (:sha, 500, 'jpg', :phash)"),
+            {"sha": sha, "phash": phash},
+        )
+        await db_session.execute(
+            text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, 1, 'p.jpg', :sha)"),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
+        return (
+            await db_session.execute(text("SELECT id FROM images WHERE blob_sha256 = :sha"), {"sha": sha})
+        ).scalar_one()
+
+    async def test_find_similar_target_in_other_users_private_gallery_returns_404(self, make_client, db_session):
+        """A non-admin must not learn anything about an image in a gallery they cannot read.
+
+        Before the fix the target lookup had no gallery_access_filter, so this
+        returned 400 "Image has no perceptual hash" — confirming the image exists
+        and, for a hashed image, going on to return its phash and neighbours.
+        """
+        img_id = await self._insert_private_image(db_session, owner_id=1, source_id="sim_private_other", phash=None)
+
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get(f"/api/library/images/{img_id}/similar")
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Image not found"
+
+    async def test_find_similar_target_in_own_private_gallery_is_still_reachable(self, make_client, db_session):
+        """The access filter must not lock an owner out of their own private gallery."""
+        img_id = await self._insert_private_image(db_session, owner_id=2, source_id="sim_private_own", phash=None)
+
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get(f"/api/library/images/{img_id}/similar")
+
+        # Past the lookup: the only complaint left is the missing phash.
+        assert resp.status_code == 400
+
+    @pytest.mark.parametrize("threshold", [10, 20], ids=["indexed-prefilter", "full-scan"])
+    async def test_find_similar_candidate_query_applies_gallery_access_filter(self, make_client, db_session, threshold):
+        """Candidates from galleries the caller cannot read must be filtered in SQL.
+
+        The candidate query is PostgreSQL-only (bit_count / bit(64)), so it cannot
+        run on the SQLite test DB. Capture the statement instead and assert it joins
+        galleries and carries the caller's gallery_access_filter predicate.
+        """
+        from unittest.mock import MagicMock
+
+        from sqlalchemy.dialects import postgresql
+
+        from core.auth import gallery_access_filter
+
+        img_id = await self._insert_private_image(
+            db_session, owner_id=2, source_id=f"sim_candidates_{threshold}", phash="00ff00ff00ff00ff"
+        )
+
+        captured: list[str] = []
+        real_execute = db_session.execute
+
+        async def _capture_candidate_query(statement, *args, **kwargs):
+            sql = str(statement.compile(dialect=postgresql.dialect()))
+            if "bit_count" not in sql:
+                return await real_execute(statement, *args, **kwargs)
+            captured.append(sql)
+            return MagicMock(all=MagicMock(return_value=[]))
+
+        async with make_client(user_id=2, role="member") as ac:
+            with patch.object(db_session, "execute", _capture_candidate_query):
+                resp = await ac.get(f"/api/library/images/{img_id}/similar?threshold={threshold}")
+
+        assert resp.status_code == 200
+        assert len(captured) == 1
+        access_predicate = str(
+            gallery_access_filter({"user_id": 2, "role": "member"}).compile(dialect=postgresql.dialect())
+        )
+        assert "JOIN galleries" in captured[0]
+        assert access_predicate in captured[0]
+
 
 # ---------------------------------------------------------------------------
 # Regression: SQLAlchemy text() bind-param truncation with :: cast (commit a425a08)
@@ -1403,17 +1489,21 @@ class TestImageTimeRange:
     async def test_returns_min_max_timestamps(self, client, db_session):
         """Images with different added_at should return correct min/max (200 or 500 on SQLite)."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="tr001")
+        # The image browser only counts hashed pages, so each image needs a blob.
+        await db_session.execute(
+            text("INSERT INTO blobs (sha256, file_size, extension) VALUES ('tr001a', 1, 'jpg'), ('tr001b', 1, 'jpg')")
+        )
         await db_session.execute(
             text(
-                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
-                "VALUES (:gid, 1, 'a.jpg', '2025-01-01T00:00:00')"
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, added_at) "
+                "VALUES (:gid, 1, 'a.jpg', 'tr001a', '2025-01-01T00:00:00')"
             ),
             {"gid": gid},
         )
         await db_session.execute(
             text(
-                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
-                "VALUES (:gid, 2, 'b.jpg', '2025-06-01T00:00:00')"
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, added_at) "
+                "VALUES (:gid, 2, 'b.jpg', 'tr001b', '2025-06-01T00:00:00')"
             ),
             {"gid": gid},
         )
@@ -2643,6 +2733,12 @@ class TestUpdateGalleryMetadata:
 
     async def test_update_category_changes_category(self, client, db_session):
         """PATCH with category should update the gallery category."""
+        await db_session.execute(
+            text(
+                "INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES ('Artbook', 'gray', 1, 1)"
+            )
+        )
+        await db_session.commit()
         await _insert_gallery(db_session, source="local", source_id="edit_cat01", title="Cat Test", category="manga")
 
         resp = await client.patch(
@@ -2650,7 +2746,7 @@ class TestUpdateGalleryMetadata:
             json={"category": "artbook"},
         )
         assert resp.status_code == 200
-        assert resp.json()["category"] == "artbook"
+        assert resp.json()["category"] == "Artbook"
 
     async def test_update_title_jpn_changes_title_jpn(self, client, db_session):
         """PATCH with title_jpn should update the Japanese title."""
@@ -2945,13 +3041,17 @@ class TestUpdateGalleryEdgeCases:
 
     async def test_patch_category_updates_gallery(self, client, db_session):
         """PATCH with category field should update it."""
+        await db_session.execute(
+            text("INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES ('Manga', 'gray', 1, 1)")
+        )
+        await db_session.commit()
         await _insert_gallery(db_session, source="ehentai", source_id="patch02", category="doujinshi")
         resp = await client.patch(
             "/api/library/galleries/ehentai/patch02",
             json={"category": "manga"},
         )
         assert resp.status_code == 200
-        assert resp.json()["category"] == "manga"
+        assert resp.json()["category"] == "Manga"
 
     async def test_patch_favorited_true_adds_favorite(self, client, db_session):
         """PATCH favorited=true should add to user_favorites."""
@@ -3557,6 +3657,166 @@ class TestBatchAddToCollection:
             json={"action": "add_to_collection", "gallery_ids": [gid], "collection_id": 999999},
         )
         assert resp.status_code == 404
+
+    async def _setup_member_collection(self, make_client, db_session, user_id: int) -> int:
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'member')"),
+            {"id": user_id, "u": f"batch_member_{user_id}"},
+        )
+        result = await db_session.execute(
+            text("INSERT INTO collections (user_id, name) VALUES (:uid, 'Batch Col') RETURNING id"),
+            {"uid": user_id},
+        )
+        await db_session.commit()
+        return result.scalar_one()
+
+    async def _owned_gallery(self, db_session, source_id: str, owner: int | None, visibility: str = "public") -> int:
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        gid = await _insert_gallery(db_session, source_id=source_id)
+        await db_session.execute(
+            text("UPDATE galleries SET created_by_user_id = :o, visibility = :v WHERE id = :g"),
+            {"o": owner, "v": visibility, "g": gid},
+        )
+        await db_session.commit()
+        return gid
+
+    async def _member_rows(self, db_session, col_id: int) -> list[tuple[int, int]]:
+        rows = await db_session.execute(
+            text("SELECT gallery_id, position FROM collection_galleries WHERE collection_id = :c ORDER BY position"),
+            {"c": col_id},
+        )
+        return [(r[0], r[1]) for r in rows.all()]
+
+    async def test_batch_add_to_collection_private_gallery_of_other_user_is_denied(self, make_client, db_session):
+        """A member must not be able to add another user's private gallery via the batch path."""
+        col_id = await self._setup_member_collection(make_client, db_session, 31)
+        private_gid = await self._owned_gallery(db_session, "coll_priv01", owner=1, visibility="private")
+        public_gid = await self._owned_gallery(db_session, "coll_pub01", owner=1, visibility="public")
+
+        async with make_client(user_id=31, role="member") as mc:
+            resp = await mc.post(
+                "/api/library/galleries/batch",
+                json={"action": "add_to_collection", "gallery_ids": [private_gid, public_gid], "collection_id": col_id},
+            )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["affected"] == 1
+        assert data["denied"] == [private_gid]
+        assert [g for g, _ in await self._member_rows(db_session, col_id)] == [public_gid]
+
+    async def test_batch_add_to_collection_nonexistent_gallery_id_is_denied_not_500(self, client, db_session):
+        """A nonexistent gallery id must be reported in denied while the other ids are still added."""
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        gid = await _insert_gallery(db_session, source_id="coll_ghost01")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_collection", "gallery_ids": [gid, 888888], "collection_id": col_id},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["affected"] == 1
+        assert data["denied"] == [888888]
+        assert [g for g, _ in await self._member_rows(db_session, col_id)] == [gid]
+
+    async def test_batch_add_to_collection_trashed_gallery_is_denied(self, client, db_session):
+        """A soft-deleted (trashed) gallery must be denied by the batch path."""
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        gid = await _insert_gallery(db_session, source_id="coll_trash01")
+        await db_session.execute(text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :g"), {"g": gid})
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_collection", "gallery_ids": [gid], "collection_id": col_id},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["affected"] == 0
+        assert resp.json()["denied"] == [gid]
+        assert await self._member_rows(db_session, col_id) == []
+
+    async def test_batch_add_to_collection_permission_collaborator_can_add_private_gallery(
+        self, make_client, db_session
+    ):
+        """A GalleryPermission collaborator can see the gallery, so the batch path must accept it."""
+        col_id = await self._setup_member_collection(make_client, db_session, 32)
+        gid = await self._owned_gallery(db_session, "coll_perm01", owner=1, visibility="private")
+        await db_session.execute(
+            text("INSERT INTO gallery_permissions (gallery_id, user_id, can_edit) VALUES (:g, 32, 0)"), {"g": gid}
+        )
+        await db_session.commit()
+
+        async with make_client(user_id=32, role="member") as mc:
+            resp = await mc.post(
+                "/api/library/galleries/batch",
+                json={"action": "add_to_collection", "gallery_ids": [gid], "collection_id": col_id},
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["affected"] == 1
+        assert resp.json()["denied"] == []
+
+    async def test_batch_add_to_collection_skipped_existing_member_keeps_positions_contiguous(self, client, db_session):
+        """Positions follow the count of rows actually added; skipped existing ids leave no gap."""
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        g1 = await _insert_gallery(db_session, source_id="coll_pos01")
+        g2 = await _insert_gallery(db_session, source_id="coll_pos02")
+        g3 = await _insert_gallery(db_session, source_id="coll_pos03")
+        await db_session.execute(
+            text("INSERT INTO collection_galleries (collection_id, gallery_id, position) VALUES (:c, :g, 0)"),
+            {"c": col_id, "g": g1},
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_collection", "gallery_ids": [g1, g2, g3], "collection_id": col_id},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["affected"] == 2
+        assert resp.json()["denied"] == []
+        assert await self._member_rows(db_session, col_id) == [(g1, 0), (g2, 1), (g3, 2)]
+
+    async def test_batch_add_to_collection_emits_collection_updated_event(self, client, db_session):
+        """A successful batch add must emit COLLECTION_UPDATED for the collection."""
+        from unittest.mock import AsyncMock
+
+        from core.events import EventType
+
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        res = await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'C') RETURNING id"))
+        col_id = res.scalar_one()
+        await db_session.commit()
+        gid = await _insert_gallery(db_session, source_id="coll_evt01")
+
+        with patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit:
+            resp = await client.post(
+                "/api/library/galleries/batch",
+                json={"action": "add_to_collection", "gallery_ids": [gid], "collection_id": col_id},
+            )
+        assert resp.status_code == 200, resp.text
+        mock_emit.assert_awaited_once()
+        assert mock_emit.await_args.args[0] == EventType.COLLECTION_UPDATED
+        assert mock_emit.await_args.kwargs["resource_type"] == "collection"
+        assert mock_emit.await_args.kwargs["resource_id"] == col_id
 
     async def test_batch_empty_gallery_ids_returns_400(self, client):
         """Empty gallery_ids should return 400."""

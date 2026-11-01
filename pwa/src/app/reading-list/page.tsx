@@ -13,6 +13,9 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 export default function ReadingListPage() {
   useLocale()
@@ -41,14 +44,12 @@ export default function ReadingListPage() {
   const galleries = data?.galleries ?? []
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
-      <div className="flex items-center gap-3 mb-6">
-        <BookMarked size={24} className="text-vault-text-muted" />
-        <h1 className="text-xl font-bold text-vault-text">{t('readingList.title')}</h1>
-        {data?.total !== undefined && (
-          <span className="text-sm text-vault-text-muted">({data.total})</span>
-        )}
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('readingList.title')}
+        icon={<BookMarked size={24} className="text-vault-text-muted" />}
+        meta={data?.total !== undefined ? `(${data.total})` : undefined}
+      />
 
       {isLoading && (
         <div className="flex justify-center py-12">
@@ -90,23 +91,25 @@ export default function ReadingListPage() {
                 </div>
               </div>
               <div className="shrink-0">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={(e) => {
                     e.stopPropagation()
                     handleRemove(g)
                   }}
                   disabled={removingId === g.id}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium bg-vault-input border border-vault-border text-vault-text-secondary hover:border-red-500/50 hover:text-red-400 transition-colors disabled:opacity-50"
+                  className="gap-1 text-xs hover:border-red-500/50 hover:text-red-400"
                   aria-label={t('readingList.remove')}
                 >
                   <X size={12} />
                   {t('readingList.remove')}
-                </button>
+                </Button>
               </div>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

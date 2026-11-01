@@ -62,10 +62,39 @@ def extractor_source_dirs() -> list[str]:
     return [str(_BUNDLED_DIR)] if _module_names() else []
 
 
+def _register_declared_sites(name: str, module, classes) -> None:
+    """Register the module's ``JYZROX_SITE`` declaration(s) in the site registry.
+
+    Gives a drop-in extractor what a GDL_SITES entry gives a built-in one
+    (display name, title/tags for gallery sites, metadata rules, credentials)
+    without editing ``_sites.py``. A bad declaration only logs: the extractor
+    itself stays loaded and the site behaves as unregistered.
+    """
+    declared = getattr(module, "JYZROX_SITE", None)
+    if declared is None:
+        return
+    from plugins.builtin.gallery_dl._sites import register_site, site_config_from_declaration
+
+    categories = {c for cls in classes if isinstance(c := getattr(cls, "category", None), str) and c}
+    for declaration in declared if isinstance(declared, (list, tuple)) else (declared,):
+        try:
+            config, metadata_fields = site_config_from_declaration(declaration, categories)
+        except Exception as exc:  # SiteDeclarationError, or anything odd the file put there
+            logger.warning("[gallery_dl] ignoring JYZROX_SITE in custom extractor %r: %s", name, exc)
+            continue
+        if reason := register_site(config, metadata_fields):
+            logger.warning("[gallery_dl] ignoring JYZROX_SITE in custom extractor %r: %s", name, reason)
+            continue
+        logger.info(
+            "[gallery_dl] registered site %s (%s) from custom extractor %r", config.source_id, config.domain, name
+        )
+
+
 def load_inprocess() -> list[str]:
     """Register bundled extractors with the in-process ``gallery_dl.extractor``.
 
-    Returns the module names newly registered by this call.
+    Returns the module names newly registered by this call. A module's
+    ``JYZROX_SITE`` declaration is registered in the site registry alongside.
 
     Never raises: this runs from ``init_plugins()``, which is on the startup
     path of both the API and the worker (and of the test suite's import-time
@@ -114,6 +143,7 @@ def load_inprocess() -> list[str]:
             continue
         _loaded.add(name)
         loaded.append(name)
+        _register_declared_sites(name, module, classes)
 
     if loaded:
         # directory_fmt lookups are memoised per category and may already have

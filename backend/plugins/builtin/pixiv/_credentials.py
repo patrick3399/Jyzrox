@@ -58,9 +58,9 @@ async def verify_pixiv_credential(credentials: dict) -> CredentialStatus:
         return CredentialStatus(valid=False, error="No refresh token provided")
 
     try:
-        import pixivpy3
+        from services.pixiv_client import new_app_api
 
-        api = pixivpy3.AppPixivAPI()
+        api = new_app_api()
         await asyncio.to_thread(api.auth, refresh_token=refresh_token)
         detail = await asyncio.to_thread(api.user_detail, api.user_id)
         username = detail.user.name

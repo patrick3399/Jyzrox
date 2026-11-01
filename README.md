@@ -16,7 +16,7 @@ normalized into the same local library model:
 source browsing or local import
 → credential-aware download queue
 → CAS-backed gallery/image ingest
-→ thumbnails, thumbhash, pHash, optional AI tags
+→ thumbnails, thumbhash, pHash
 → dedup review, search, reader, OPDS/RSS/API access
 ```
 
@@ -45,8 +45,7 @@ readable, self-hosted library.
 - Review duplicates with SHA-256 exact matching, pHash scanning, heuristic
   classification, optional OpenCV verification, and a review queue.
 - Administer users, credentials, logs, scheduled tasks, site settings,
-  gallery-dl runtime, database backups, external API tokens, and optional AI
-  tagging.
+  gallery-dl runtime, database backups, and external API tokens.
 
 ## Tech Stack
 

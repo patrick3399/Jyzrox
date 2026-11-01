@@ -538,6 +538,41 @@ class TestEhThumbProxy:
         key = rate_limit.await_args.args[0]
         assert key.startswith("img_proxy:eh_thumb:")
 
+    async def test_thumb_proxy_returns_the_image_when_redis_rejects_the_cache_write(self, client, mock_redis):
+        """Incident 2026-10-10: Redis at maxmemory turned every fetched thumbnail into a 500.
+
+        The CDN fetch had already succeeded; only storing the bytes failed.
+        """
+        from redis.exceptions import OutOfMemoryError
+
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.setex = AsyncMock(
+            side_effect=OutOfMemoryError("command not allowed when used memory > 'maxmemory'.")
+        )
+        upstream = MagicMock()
+        upstream.content = b"thumb-bytes"
+        upstream.headers = {"content-type": "image/jpeg"}
+        upstream.raise_for_status = MagicMock()
+
+        with (
+            patch("plugins.builtin.ehentai.browse._is_private", return_value=True),
+            patch(
+                "plugins.builtin.ehentai.browse.get_credential",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("plugins.builtin.ehentai.browse.httpx.AsyncClient") as http_client,
+        ):
+            http_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=upstream)
+            resp = await client.get(
+                "/api/eh/thumb-proxy",
+                params={"url": "https://ehgt.org/t/uncached.jpg"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.content == b"thumb-bytes"
+        mock_redis.setex.assert_awaited_once()
+
     async def test_thumb_proxy_rejects_bad_domain_before_touching_rate_limit(self, client):
         """SSRF validation stays ahead of the limiter so bad URLs cost no quota."""
         with (

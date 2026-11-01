@@ -1,8 +1,10 @@
 'use client'
 
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 // Map of Tailwind breakpoints to column counts (px)
 export interface ColumnConfig {
@@ -34,7 +36,13 @@ export interface VirtualGridProps<T> {
   onScrollToIndex?: (index: number) => void
   onColCountChange?: (count: number) => void
   onRegisterElement?: (index: number, el: HTMLElement | null) => void
-  onVisibleRangeChange?: (range: { startIndex: number; endIndex: number }) => void
+  // startIndex/endIndex include overscan; visibleStartIndex is the first item of
+  // the first row actually on screen.
+  onVisibleRangeChange?: (range: {
+    startIndex: number
+    endIndex: number
+    visibleStartIndex: number
+  }) => void
   onLayoutChange?: (layout: {
     colCount: number
     containerWidth: number
@@ -79,12 +87,21 @@ export function VirtualGrid<T>({
   const [scrollMargin, setScrollMargin] = useState(0)
   const prevScrollMarginRef = useRef(0)
   const [hasMeasuredLayout, setHasMeasuredLayout] = useState(false)
-  const [materializedRestore, setMaterializedRestore] = useState<string | null>(null)
   const registeredElementsRef = useRef(new Map<number, HTMLElement>())
-  const restoreRequestRef = useRef(restoreRequest)
-  useEffect(() => {
-    restoreRequestRef.current = restoreRequest
-  }, [restoreRequest])
+  // Whether the restore anchor's cell is in the DOM as of the last commit. Read
+  // off the registry after every commit instead of latched when the cell
+  // mounts: the anchor can be on screen before the restore is able to run (the
+  // column count is still the window-width guess), drop out once the layout is
+  // measured, and come back only after the grid scrolls to its row. A latch set
+  // by the first appearance does not change on the second, so the restore
+  // effect never re-ran and the landing waited for an unrelated re-render —
+  // typically the next append — then yanked the viewport mid-scroll.
+  const [restoreAnchorRegistered, setRestoreAnchorRegistered] = useState(false)
+  useIsomorphicLayoutEffect(() => {
+    setRestoreAnchorRegistered(
+      restoreRequest !== undefined && registeredElementsRef.current.has(restoreRequest.index),
+    )
+  })
   const [colCount, setColCount] = useState<number>(() => {
     if (typeof window === 'undefined') return columns.base
     return getColumnCount(window.innerWidth, columns)
@@ -191,14 +208,37 @@ export function VirtualGrid<T>({
     scrollMargin,
   })
 
+  // The virtualizer memoizes row offsets on count/scrollMargin and on measured
+  // sizes, not on `estimateSize`. Measured rows correct themselves, but fixed
+  // rows have no measurement to fall back on: a width change that keeps the
+  // column count would resize every row while leaving it at its old offset,
+  // overlapping or gapping the grid until something else invalidated the memo.
+  const fixedRowSize = measureRows ? null : rowHeight + gap
+  const appliedFixedRowSizeRef = useRef(fixedRowSize)
+  // Passive effects of the commit that changed the row size flush before the
+  // re-render this layout effect schedules, so they would read stale row
+  // transforms. `renderedRowSize` trails `fixedRowSize` until measure() ran and
+  // gates the restore effect.
+  const [renderedRowSize, setRenderedRowSize] = useState(fixedRowSize)
+  useIsomorphicLayoutEffect(() => {
+    if (appliedFixedRowSizeRef.current === fixedRowSize) return
+    appliedFixedRowSizeRef.current = fixedRowSize
+    if (fixedRowSize !== null) virtualizer.measure()
+    setRenderedRowSize(fixedRowSize)
+  }, [fixedRowSize, virtualizer])
+
   const virtualItems = virtualizer.getVirtualItems()
   const firstVirtualRow = virtualItems[0]?.index
   const lastVirtualRow = virtualItems[virtualItems.length - 1]?.index
+  // `range` excludes overscan; it is null before the first measure, and the
+  // overscan start is the same row near the top of the page.
+  const visibleStartRow = virtualizer.range?.startIndex ?? firstVirtualRow
 
   useEffect(() => {
     if (
       firstVirtualRow === undefined ||
       lastVirtualRow === undefined ||
+      visibleStartRow === undefined ||
       items.length === 0
     ) {
       return
@@ -206,8 +246,16 @@ export function VirtualGrid<T>({
     onVisibleRangeChange?.({
       startIndex: firstVirtualRow * colCount,
       endIndex: Math.min(items.length - 1, (lastVirtualRow + 1) * colCount - 1),
+      visibleStartIndex: visibleStartRow * colCount,
     })
-  }, [colCount, firstVirtualRow, items.length, lastVirtualRow, onVisibleRangeChange])
+  }, [
+    colCount,
+    firstVirtualRow,
+    items.length,
+    lastVirtualRow,
+    onVisibleRangeChange,
+    visibleStartRow,
+  ])
 
   // Keep a stable ref to the virtualizer so the scrollToIndex effect
   // doesn't need the virtualizer instance (which changes every render) as a dep
@@ -224,6 +272,7 @@ export function VirtualGrid<T>({
     virtualizerRef.current.scrollToIndex(rowIndex, { align: 'auto' })
   }, [focusedIndex, colCount])
 
+  const settledColCount = getColumnCount(containerWidth, columns)
   const restoreIssuedRef = useRef<string | null>(null)
   const restoreAppliedRef = useRef<string | null>(null)
   useEffect(() => {
@@ -233,18 +282,46 @@ export function VirtualGrid<T>({
       return
     }
     if (!hasMeasuredLayout) return
+    // A request committed together with new `columns` still sees the old
+    // colCount and a stale hasMeasuredLayout, and the anchor cell registered
+    // from the old layout: it would report applied before the layout changed.
+    if (colCount !== settledColCount) return
+    if (fixedRowSize !== renderedRowSize) return
     if (restoreRequest.index < 0 || restoreRequest.index >= items.length) return
     const token = `${restoreRequest.key}:${restoreRequest.index}`
+    // The issued token carries colCount so a pending request re-targets its row
+    // when the layout changes; the applied token does not, so a landed restore
+    // is not replayed.
+    const issuedToken = `${token}:${colCount}`
     if (restoreAppliedRef.current === token) return
-    if (restoreIssuedRef.current !== token) {
-      restoreIssuedRef.current = token
+    if (restoreIssuedRef.current !== issuedToken) {
+      restoreIssuedRef.current = issuedToken
       const rowIndex = Math.floor(restoreRequest.index / colCount)
       virtualizerRef.current.scrollToIndex(rowIndex, { align: 'start' })
     }
     if (!registeredElementsRef.current.has(restoreRequest.index)) return
     restoreAppliedRef.current = token
     onRestoreApplied?.(restoreRequest)
-  }, [colCount, hasMeasuredLayout, items.length, materializedRestore, onRestoreApplied, restoreRequest])
+    // `scrollToIndex` leaves the virtualizer reconciling towards the anchor
+    // row's start until it observes the viewport there. The consumer has just
+    // landed on the exact saved position instead, which is rarely that offset:
+    // left alone the virtualizer either overrides the landing on its next frame
+    // (the row offset moved because rows above were measured) or stays armed for
+    // seconds and snaps the viewport back to the row start the next time that
+    // offset is recomputed. Retarget it at the landing so the restore has one
+    // owner and ends here.
+    virtualizerRef.current.scrollToOffset(window.scrollY)
+  }, [
+    colCount,
+    fixedRowSize,
+    hasMeasuredLayout,
+    items.length,
+    onRestoreApplied,
+    renderedRowSize,
+    restoreAnchorRegistered,
+    restoreRequest,
+    settledColCount,
+  ])
 
   // Keep a ref to onLoadMore so the effect never needs it as a dependency
   const onLoadMoreRef = useRef(onLoadMore)
@@ -360,10 +437,6 @@ export function VirtualGrid<T>({
                       ref={(el) => {
                         if (el) registeredElementsRef.current.set(globalIndex, el)
                         else registeredElementsRef.current.delete(globalIndex)
-                        const pendingRestore = restoreRequestRef.current
-                        if (el && pendingRestore?.index === globalIndex) {
-                          setMaterializedRestore(`${pendingRestore.key}:${pendingRestore.index}`)
-                        }
                         onRegisterElement?.(globalIndex, el)
                       }}
                       data-grid-index={globalIndex}

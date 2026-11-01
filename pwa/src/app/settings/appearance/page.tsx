@@ -3,6 +3,7 @@
 import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { BottomTabConfig } from '@/components/BottomTabConfig'
 import { SidebarConfig } from '@/components/SidebarConfig'
 import { DashboardLinksConfig } from '@/components/DashboardLinksConfig'
@@ -17,9 +18,7 @@ export default function AppearanceSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">
-        {t('settingsCategory.appearance')}
-      </h1>
+      <PageHeader title={t('settingsCategory.appearance')} />
 
       <div className="space-y-3">
         <ThemeSection />

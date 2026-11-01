@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # Remote image processing
 
     # Storage paths (inside container)
-    data_gallery_path: str = "/data/gallery"
+    data_gallery_path: str = "/data/download_temp"
     data_thumbs_path: str = "/data/thumbs"
     data_avatars_path: str = "/data/avatars"
     data_cas_path: str = "/data/cas"
@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     data_library_path: str = "/data/library"
     data_backups_path: str = "/data/backups"
     novel_repo_path: str = "/data/novel"
+    novel_ssh_dir: str = "/var/lib/jyzrox/novel_ssh"  # managed SSH key + known_hosts (api/worker only)
     backup_retention_count: int = 14
     backup_pg_dump_timeout: int = 3600
     # Disk space
@@ -77,6 +78,14 @@ class Settings(BaseSettings):
     # Redis alert threshold as a percentage of its configured maxmemory. Redis
     # stores control-plane state, so pressure must be visible before writes fail.
     redis_memory_alert_pct: float = 85.0
+    # Image-cache budget inside the control-plane Redis (ADR 0018), as
+    # percentages of maxmemory. The worker trims the oldest image bytes from
+    # `trim_high` down to `trim_target`; writers stop admitting new image bytes
+    # at `admit_max`. Keep trim_target < trim_high < redis_memory_alert_pct <
+    # admit_max so the alert means "trimming did not help".
+    redis_image_cache_trim_high_pct: float = 80.0
+    redis_image_cache_trim_target_pct: float = 60.0
+    redis_image_cache_admit_max_pct: float = 90.0
     # api self-sampling cadence (services/memory_watch.py); floor is 30s
     memory_watch_interval_sec: int = 300
     # Log top Python allocation sites each api memory sample (diagnosis only)
@@ -102,6 +111,7 @@ class Settings(BaseSettings):
     library_base_path: str = "/mnt"  # Default root for user-mounted external media
     watcher_use_polling: bool = False
     watcher_polling_interval: int = 60  # seconds
+    watcher_debounce_seconds: int = 5  # quiet period before a watcher event becomes a job
 
     @property
     def gdl_archive_dsn(self) -> str:
@@ -128,7 +138,7 @@ async def get_all_library_paths() -> list[str]:
 
     Only returns paths the user has explicitly added (via env var or DB).
     Does NOT include ``library_base_path`` (/mnt) automatically — users
-    must add paths themselves.  ``data_gallery_path`` (/data/gallery) is
+    must add paths themselves.  ``data_gallery_path`` (/data/download_temp) is
     never included as it is the download engine's internal workspace.
     """
 

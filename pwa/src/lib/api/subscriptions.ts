@@ -54,10 +54,19 @@ export const subscriptions = {
       method: 'POST',
     }),
 
+  /** Stop and keep every active job of this subscription; later checks only fetch newer posts. */
+  stop: (id: number) =>
+    apiFetch<{ status: string; stopped: number }>(`/api/subscriptions/${id}/stop`, {
+      method: 'POST',
+    }),
+
   backfill: (id: number) =>
     apiFetch<{ status: string; mode?: string }>(`/api/subscriptions/${id}/backfill`, {
       method: 'POST',
     }),
+
+  /** Newest job of every subscription, keyed by subscription id, in a single request. */
+  latestJobs: () => apiFetch<{ jobs: Record<string, DownloadJob> }>('/api/subscriptions/latest-jobs'),
 
   jobs: (id: number, limit = 10) =>
     apiFetch<{ jobs: DownloadJob[] }>(`/api/subscriptions/${id}/jobs${qs({ limit })}`),

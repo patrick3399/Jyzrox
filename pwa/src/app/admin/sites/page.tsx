@@ -15,11 +15,21 @@ import {
   useResetSiteField,
   useResetAdaptive,
 } from '@/hooks/useSiteConfigs'
-import type { SiteConfigItem, ProbeField, ProbeFieldMapping } from '@/lib/types'
+import type {
+  SiteConfigItem,
+  SiteDownloadKey,
+  SiteSleepValue,
+  ProbeField,
+  ProbeFieldMapping,
+} from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Dialog } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function formatSleep(val: SiteConfigItem['download']['sleep_request']): string {
+function formatSleep(val: SiteSleepValue | undefined): string {
   if (val === null || val === undefined) return '—'
   if (Array.isArray(val))
     return t('admin.sites.sleepRange', { min: String(val[0]), max: String(val[1]) })
@@ -32,52 +42,200 @@ function categoryLabel(cat: string): string {
 
 // ── Download Settings Form ────────────────────────────────────────────
 
+type SleepKey = 'sleep_request' | 'sleep_download'
+
 interface DownloadFormState {
   retries: number
   http_timeout: number
   sleep_request_raw: string // free text: "2", "1-5", or empty
+  sleep_download_raw: string // same format as sleep_request_raw
   concurrency: number
   inactivity_timeout: number
+  spread_personas: boolean
 }
 
-function parseFormToPayload(form: DownloadFormState): Record<string, unknown> {
-  const raw = form.sleep_request_raw.trim()
-  let sleep_request: number | [number, number] | null = null
-  if (raw) {
-    if (raw.includes('-')) {
-      const parts = raw.split('-').map(Number)
-      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-        sleep_request = [parts[0], parts[1]]
-      }
-    } else {
-      const n = Number(raw)
-      if (!isNaN(n)) sleep_request = n
-    }
-  }
-  return {
-    retries: form.retries,
-    http_timeout: form.http_timeout,
-    sleep_request,
-    concurrency: form.concurrency,
-    inactivity_timeout: form.inactivity_timeout,
-  }
+const SLEEP_FIXED_RE = /^\d+(?:\.\d+)?$/
+const SLEEP_RANGE_RE = /^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/
+
+/** Parse "2" / "1-5" / "" into a sleep value; `ok: false` for anything else. */
+function parseSleep(raw: string): { ok: true; value: SiteSleepValue } | { ok: false } {
+  const text = raw.trim()
+  if (!text) return { ok: true, value: null }
+  if (SLEEP_FIXED_RE.test(text)) return { ok: true, value: Number(text) }
+  const range = SLEEP_RANGE_RE.exec(text)
+  if (range) return { ok: true, value: [Number(range[1]), Number(range[2])] }
+  return { ok: false }
+}
+
+function sleepToRaw(val: SiteSleepValue | undefined): string {
+  if (val === null || val === undefined) return ''
+  if (Array.isArray(val)) return `${val[0]}-${val[1]}`
+  return String(val)
 }
 
 function siteToForm(site: SiteConfigItem): DownloadFormState {
-  const s = site.download.sleep_request
-  let sleep_request_raw = ''
-  if (s !== null && s !== undefined) {
-    if (Array.isArray(s)) sleep_request_raw = `${s[0]}-${s[1]}`
-    else sleep_request_raw = String(s)
-  }
   return {
     retries: site.download.retries,
     http_timeout: site.download.http_timeout,
-    sleep_request_raw,
+    sleep_request_raw: sleepToRaw(site.download.sleep_request),
+    sleep_download_raw: sleepToRaw(site.download.sleep_download),
     concurrency: site.download.concurrency,
     inactivity_timeout: site.download.inactivity_timeout,
+    spread_personas: site.download.spread_personas ?? false,
   }
 }
+
+interface DownloadChanges {
+  /** Only the keys whose form value differs from the value at load. */
+  payload: Record<string, unknown>
+  /** Overridden sleep fields the user cleared: reset instead of storing null. */
+  resets: SleepKey[]
+  /** A sleep field holds text that is neither a number nor a range. */
+  invalid: boolean
+}
+
+function computeDownloadChanges(site: SiteConfigItem, form: DownloadFormState): DownloadChanges {
+  const payload: Record<string, unknown> = {}
+  const resets: SleepKey[] = []
+  let invalid = false
+  const base = site.download
+
+  if (form.retries !== base.retries) payload.retries = form.retries
+  if (form.http_timeout !== base.http_timeout) payload.http_timeout = form.http_timeout
+  if (form.concurrency !== base.concurrency) payload.concurrency = form.concurrency
+  if (form.inactivity_timeout !== base.inactivity_timeout)
+    payload.inactivity_timeout = form.inactivity_timeout
+  if (form.spread_personas !== (base.spread_personas ?? false))
+    payload.spread_personas = form.spread_personas
+
+  const sleeps: [SleepKey, string][] = [
+    ['sleep_request', form.sleep_request_raw],
+    ['sleep_download', form.sleep_download_raw],
+  ]
+  for (const [key, raw] of sleeps) {
+    const parsed = parseSleep(raw)
+    if (!parsed.ok) {
+      invalid = true
+      continue
+    }
+    const before = JSON.stringify(base[key] ?? null)
+    if (JSON.stringify(parsed.value) === before) continue
+    if (parsed.value === null) {
+      // Cleared. Never PUT null: it would store an explicit null override.
+      if (site.overridden.includes(key)) resets.push(key)
+      continue
+    }
+    payload[key] = parsed.value
+  }
+  return { payload, resets, invalid }
+}
+
+/** Where a field's default comes from, as a short hint line. */
+function defaultHint(site: SiteConfigItem, key: SiteDownloadKey): string {
+  if (key === 'sleep_request' || key === 'sleep_download') {
+    const own = site.defaults[key]
+    if (own !== null && own !== undefined) {
+      return t('admin.sites.defaultValue', { value: formatSleep(own) })
+    }
+    const builtin = site.extractor_defaults[key]
+    if (builtin !== null && builtin !== undefined) {
+      return t('admin.sites.defaultExtractor', { value: formatSleep(builtin) })
+    }
+    return t('admin.sites.defaultNone')
+  }
+  if (key === 'spread_personas') {
+    return t('admin.sites.defaultValue', {
+      value: site.defaults.spread_personas ? t('admin.sites.valueOn') : t('admin.sites.valueOff'),
+    })
+  }
+  return t('admin.sites.defaultValue', { value: String(site.defaults[key]) })
+}
+
+interface FieldMarkersProps {
+  site: SiteConfigItem
+  fieldKey: SiteDownloadKey
+  label: string
+  busy: boolean
+  onReset: (key: SiteDownloadKey) => void
+}
+
+/** Overridden / auto-tuned markers plus the per-field reset button. */
+function FieldMarkers({ site, fieldKey, label, busy, onReset }: FieldMarkersProps) {
+  const overridden = site.overridden.includes(fieldKey)
+  const adaptive = !overridden && site.adaptive.includes(fieldKey)
+  if (!overridden && !adaptive) return null
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {overridden && (
+        <span className="px-1.5 py-0.5 rounded bg-vault-accent/15 text-vault-accent text-[10px] font-medium">
+          {t('admin.sites.overridden')}
+        </span>
+      )}
+      {adaptive && (
+        <span className="px-1.5 py-0.5 rounded bg-vault-card text-vault-text-secondary text-[10px] font-medium">
+          {t('admin.sites.autoTuned')}
+        </span>
+      )}
+      {overridden && (
+        <button
+          type="button"
+          onClick={() => onReset(fieldKey)}
+          disabled={busy}
+          title={t('admin.sites.resetField', { field: label })}
+          aria-label={t('admin.sites.resetField', { field: label })}
+          className="p-0.5 rounded text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-50"
+        >
+          <RotateCcw className="w-3 h-3" />
+        </button>
+      )}
+    </span>
+  )
+}
+
+type NumberFieldKey = 'retries' | 'http_timeout' | 'concurrency' | 'inactivity_timeout'
+
+const NUMBER_FIELDS: {
+  key: NumberFieldKey
+  labelKey:
+    | 'admin.sites.retries'
+    | 'admin.sites.httpTimeout'
+    | 'admin.sites.concurrency'
+    | 'admin.sites.inactivityTimeout'
+  withSeconds: boolean
+  min: number
+  max: number
+}[] = [
+  { key: 'retries', labelKey: 'admin.sites.retries', withSeconds: false, min: 0, max: 50 },
+  { key: 'http_timeout', labelKey: 'admin.sites.httpTimeout', withSeconds: true, min: 5, max: 300 },
+  { key: 'concurrency', labelKey: 'admin.sites.concurrency', withSeconds: false, min: 1, max: 20 },
+  {
+    key: 'inactivity_timeout',
+    labelKey: 'admin.sites.inactivityTimeout',
+    withSeconds: true,
+    min: 30,
+    max: 3600,
+  },
+]
+
+const SLEEP_FIELDS: {
+  key: SleepKey
+  rawKey: 'sleep_request_raw' | 'sleep_download_raw'
+  labelKey: 'admin.sites.sleepRequest' | 'admin.sites.sleepDownload'
+  hintKey: 'admin.sites.sleepRequestHint' | 'admin.sites.sleepDownloadHint'
+}[] = [
+  {
+    key: 'sleep_request',
+    rawKey: 'sleep_request_raw',
+    labelKey: 'admin.sites.sleepRequest',
+    hintKey: 'admin.sites.sleepRequestHint',
+  },
+  {
+    key: 'sleep_download',
+    rawKey: 'sleep_download_raw',
+    labelKey: 'admin.sites.sleepDownload',
+    hintKey: 'admin.sites.sleepDownloadHint',
+  },
+]
 
 // ── Editor Panel ──────────────────────────────────────────────────────
 
@@ -85,7 +243,8 @@ interface EditorPanelProps {
   site: SiteConfigItem
   probeResult?: { fields: ProbeField[]; mappings: ProbeFieldMapping[] } | null
   onClose: () => void
-  onSaved: () => void
+  /** Called with the server's SiteConfigItem after any successful mutation. */
+  onSaved: (updated: SiteConfigItem) => void
 }
 
 function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) {
@@ -109,18 +268,36 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
   const [savingMapping, setSavingMapping] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resettingAdaptive, setResettingAdaptive] = useState(false)
+  const [resettingKey, setResettingKey] = useState<SiteDownloadKey | null>(null)
 
   const { trigger: updateConfig } = useUpdateSiteConfig()
   const { trigger: updateMapping } = useUpdateFieldMapping()
   const { trigger: resetField } = useResetSiteField()
   const { trigger: resetAdaptive } = useResetAdaptive()
 
+  const changes = computeDownloadChanges(site, form)
+  const dirty =
+    changes.invalid || changes.resets.length > 0 || Object.keys(changes.payload).length > 0
+
   const handleSaveDownload = async () => {
+    const { payload, resets, invalid } = computeDownloadChanges(site, form)
+    if (invalid) {
+      toast.error(t('admin.sites.sleepInvalid'))
+      return
+    }
+    if (resets.length === 0 && Object.keys(payload).length === 0) return
     setSaving(true)
     try {
-      await updateConfig({ sourceId: site.source_id, data: { download: parseFormToPayload(form) } })
+      let latest: SiteConfigItem | undefined
+      // Resets first so the cross-field validation of the PUT sees the final state.
+      for (const key of resets) {
+        latest = await resetField({ sourceId: site.source_id, fieldPath: `download.${key}` })
+      }
+      if (Object.keys(payload).length > 0) {
+        latest = await updateConfig({ sourceId: site.source_id, data: { download: payload } })
+      }
       toast.success(t('admin.sites.saved'))
-      onSaved()
+      if (latest) onSaved(latest)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'))
     } finally {
@@ -128,12 +305,28 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
     }
   }
 
+  const handleResetField = async (key: SiteDownloadKey) => {
+    setResettingKey(key)
+    try {
+      const updated = await resetField({
+        sourceId: site.source_id,
+        fieldPath: `download.${key}`,
+      })
+      toast.success(t('admin.sites.resetDone'))
+      onSaved(updated)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.error'))
+    } finally {
+      setResettingKey(null)
+    }
+  }
+
   const handleSaveMapping = async () => {
     setSavingMapping(true)
     try {
-      await updateMapping({ sourceId: site.source_id, fieldMapping })
+      const updated = await updateMapping({ sourceId: site.source_id, fieldMapping })
       toast.success(t('admin.sites.mappingSaved'))
-      onSaved()
+      onSaved(updated)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'))
     } finally {
@@ -144,9 +337,9 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
   const handleResetDownload = async () => {
     setResetting(true)
     try {
-      await resetField({ sourceId: site.source_id, fieldPath: 'download' })
+      const updated = await resetField({ sourceId: site.source_id, fieldPath: 'download' })
       toast.success(t('admin.sites.resetDone'))
-      onSaved()
+      onSaved(updated)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'))
     } finally {
@@ -157,9 +350,9 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
   const handleResetAdaptive = async () => {
     setResettingAdaptive(true)
     try {
-      await resetAdaptive(site.source_id)
+      const updated = await resetAdaptive(site.source_id)
       toast.success(t('admin.sites.adaptiveReset'))
-      onSaved()
+      onSaved(updated)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'))
     } finally {
@@ -182,276 +375,246 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
   }, [probeResult?.mappings, fieldMapping])
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop */}
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-        aria-label={t('admin.sites.close')}
-      />
-      {/* Panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="site-editor-dialog-title"
-        className="relative w-full max-w-2xl bg-vault-bg border-l border-vault-border flex flex-col overflow-hidden shadow-2xl"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-vault-border shrink-0">
-          <div>
-            <h2 id="site-editor-dialog-title" className="text-vault-text font-semibold text-lg">
-              {t('admin.sites.editor')}
-            </h2>
-            <p className="text-vault-text-secondary text-sm mt-0.5">
-              {site.name} — {site.domain}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card transition-colors"
-            aria-label={t('admin.sites.close')}
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-          {/* Download Settings */}
-          <section>
-            <h3 className="text-vault-text font-medium mb-4">
-              {t('admin.sites.downloadSettings')}
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <label className="flex flex-col gap-1">
-                <span className="text-vault-text-secondary text-xs">
-                  {t('admin.sites.retries')}
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  max={50}
-                  value={form.retries}
-                  onChange={(e) => setForm((f) => ({ ...f, retries: Number(e.target.value) }))}
-                  className="vault-input rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-vault-text-secondary text-xs">
-                  {t('admin.sites.httpTimeout')} ({t('admin.sites.seconds')})
-                </span>
-                <input
-                  type="number"
-                  min={5}
-                  max={300}
-                  value={form.http_timeout}
-                  onChange={(e) => setForm((f) => ({ ...f, http_timeout: Number(e.target.value) }))}
-                  className="vault-input rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-vault-text-secondary text-xs">
-                  {t('admin.sites.concurrency')}
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={form.concurrency}
-                  onChange={(e) => setForm((f) => ({ ...f, concurrency: Number(e.target.value) }))}
-                  className="vault-input rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-vault-text-secondary text-xs">
-                  {t('admin.sites.inactivityTimeout')} ({t('admin.sites.seconds')})
-                </span>
-                <input
-                  type="number"
-                  min={30}
-                  max={3600}
-                  value={form.inactivity_timeout}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, inactivity_timeout: Number(e.target.value) }))
-                  }
-                  className="vault-input rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="col-span-2 flex flex-col gap-1">
-                <span className="text-vault-text-secondary text-xs">
-                  {t('admin.sites.sleepRequest')} ({t('admin.sites.seconds')},{' '}
-                  {t('admin.sites.sleepRequestExample')})
-                </span>
-                <input
-                  type="text"
-                  value={form.sleep_request_raw}
-                  onChange={(e) => setForm((f) => ({ ...f, sleep_request_raw: e.target.value }))}
-                  placeholder={t('admin.sites.sleepRequestExample')}
-                  className="vault-input rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={handleSaveDownload}
-                disabled={saving}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {saving ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4" />
-                )}
-                {t('admin.sites.save')}
-              </button>
-              <button
-                onClick={handleResetDownload}
-                disabled={resetting}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-vault-border text-vault-text-secondary text-sm hover:text-vault-text hover:border-vault-text transition-colors disabled:opacity-50"
-              >
-                {resetting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <RotateCcw className="w-4 h-4" />
-                )}
-                {t('admin.sites.resetToDefault')}
-              </button>
-              <button
-                onClick={handleResetAdaptive}
-                disabled={resettingAdaptive}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-vault-border text-vault-text-secondary text-sm hover:text-vault-text hover:border-vault-text transition-colors disabled:opacity-50"
-              >
-                {resettingAdaptive ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <RotateCcw className="w-4 h-4" />
-                )}
-                {t('admin.sites.resetAdaptive')}
-              </button>
-            </div>
-          </section>
-
-          {/* Field Mapping — only shown when probe data is available */}
-          {(jyzroxFields.length > 0 || probeResult?.fields) && (
-            <section>
-              <h3 className="text-vault-text font-medium mb-4">{t('admin.sites.fieldMapping')}</h3>
-              <div className="overflow-x-auto rounded-lg border border-vault-border">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-vault-border bg-vault-card">
-                      <th className="text-left px-4 py-2 text-vault-text-secondary font-medium">
-                        {t('admin.sites.jyzroxField')}
-                      </th>
-                      <th className="text-left px-4 py-2 text-vault-text-secondary font-medium">
-                        {t('admin.sites.gdlField')}
-                      </th>
-                      <th className="w-8 px-2 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {jyzroxFields.map((jField) => {
-                      const isSuggested =
-                        probeResult?.mappings?.find((m) => m.jyzrox_field === jField)?.suggested ??
-                        false
-                      return (
-                        <tr key={jField} className="border-b border-vault-border last:border-0">
-                          <td className="px-4 py-2 text-vault-text font-mono text-xs">{jField}</td>
-                          <td className="px-4 py-2">
-                            <select
-                              value={fieldMapping[jField] ?? ''}
-                              onChange={(e) =>
-                                setFieldMapping((m) => ({ ...m, [jField]: e.target.value || null }))
-                              }
-                              className="vault-input rounded px-2 py-1 text-xs w-full"
-                            >
-                              <option value="">{t('admin.sites.noMapping')}</option>
-                              {gdlFieldOptions.map((opt) => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-2 py-2">
-                            {isSuggested && (
-                              <Star
-                                className="w-3.5 h-3.5 text-yellow-400"
-                                aria-label={t('admin.sites.suggested')}
-                              />
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Probe fields reference table */}
-              {probeResult?.fields && probeResult.fields.length > 0 && (
-                <details className="mt-3">
-                  <summary className="text-vault-text-secondary text-xs cursor-pointer hover:text-vault-text select-none">
-                    {t('admin.sites.livePreview')}
-                  </summary>
-                  <div className="mt-2 overflow-x-auto rounded-lg border border-vault-border">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-vault-border bg-vault-card">
-                          <th className="text-left px-3 py-1.5 text-vault-text-secondary">
-                            {t('admin.sites.gdlField')}
-                          </th>
-                          <th className="text-left px-3 py-1.5 text-vault-text-secondary">
-                            {t('admin.sites.fieldType')}
-                          </th>
-                          <th className="text-left px-3 py-1.5 text-vault-text-secondary">
-                            {t('admin.sites.level')}
-                          </th>
-                          <th className="text-left px-3 py-1.5 text-vault-text-secondary">
-                            {t('admin.sites.sampleValue')}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {probeResult.fields.map((f) => (
-                          <tr key={f.key} className="border-b border-vault-border last:border-0">
-                            <td className="px-3 py-1.5 font-mono text-vault-text">{f.key}</td>
-                            <td className="px-3 py-1.5 text-vault-text-secondary">
-                              {f.field_type}
-                            </td>
-                            <td className="px-3 py-1.5 text-vault-text-secondary">{f.level}</td>
-                            <td
-                              className="px-3 py-1.5 text-vault-text-secondary truncate max-w-[160px]"
-                              title={f.sample_value}
-                            >
-                              {f.sample_value}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+      size="xl"
+      title={t('admin.sites.editor')}
+      description={`${site.name} — ${site.domain}`}
+    >
+      <div className="space-y-8">
+        {/* Download Settings */}
+        <section>
+          <h3 className="text-vault-text font-medium mb-4">{t('admin.sites.downloadSettings')}</h3>
+          <div className="grid grid-cols-2 gap-4">
+            {NUMBER_FIELDS.map(({ key, labelKey, withSeconds, min, max }) => {
+              const label = t(labelKey)
+              const id = `site-field-${key}`
+              return (
+                <div key={key} className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor={id} className="text-vault-text-secondary text-xs">
+                      {withSeconds ? `${label} (${t('admin.sites.seconds')})` : label}
+                    </label>
+                    <FieldMarkers
+                      site={site}
+                      fieldKey={key}
+                      label={label}
+                      busy={resettingKey === key}
+                      onReset={handleResetField}
+                    />
                   </div>
-                </details>
+                  <input
+                    id={id}
+                    type="number"
+                    min={min}
+                    max={max}
+                    value={form[key]}
+                    onChange={(e) => setForm((f) => ({ ...f, [key]: Number(e.target.value) }))}
+                    className="vault-input rounded-lg px-3 py-2 text-sm"
+                  />
+                  <p className="text-xs text-vault-text-muted">{defaultHint(site, key)}</p>
+                </div>
+              )
+            })}
+            <div className="col-span-2 flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-sm text-vault-text">
+                  <input
+                    type="checkbox"
+                    checked={form.spread_personas}
+                    onChange={(e) => setForm((f) => ({ ...f, spread_personas: e.target.checked }))}
+                    className="accent-vault-accent"
+                  />
+                  {t('admin.sites.spreadPersonas')}
+                </label>
+                <FieldMarkers
+                  site={site}
+                  fieldKey="spread_personas"
+                  label={t('admin.sites.spreadPersonas')}
+                  busy={resettingKey === 'spread_personas'}
+                  onReset={handleResetField}
+                />
+              </div>
+              <p className="text-xs text-vault-text-muted">
+                {t('admin.sites.spreadPersonasHint')} {defaultHint(site, 'spread_personas')}
+              </p>
+            </div>
+            {SLEEP_FIELDS.map(({ key, rawKey, labelKey, hintKey }) => {
+              const label = t(labelKey)
+              const id = `site-field-${key}`
+              return (
+                <div key={key} className="col-span-2 flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor={id} className="text-vault-text-secondary text-xs">
+                      {label} ({t('admin.sites.seconds')})
+                    </label>
+                    <FieldMarkers
+                      site={site}
+                      fieldKey={key}
+                      label={label}
+                      busy={resettingKey === key}
+                      onReset={handleResetField}
+                    />
+                  </div>
+                  <input
+                    id={id}
+                    type="text"
+                    value={form[rawKey]}
+                    onChange={(e) => setForm((f) => ({ ...f, [rawKey]: e.target.value }))}
+                    placeholder={t('admin.sites.sleepRequestExample')}
+                    className="vault-input rounded-lg px-3 py-2 text-sm"
+                  />
+                  <p className="text-xs text-vault-text-muted">
+                    {t(hintKey)} {defaultHint(site, key)}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <Button variant="primary" onClick={handleSaveDownload} disabled={saving || !dirty}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {t('admin.sites.save')}
+            </Button>
+            <Button variant="secondary" onClick={handleResetDownload} disabled={resetting}>
+              {resetting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RotateCcw className="w-4 h-4" />
               )}
+              {t('admin.sites.resetToDefault')}
+            </Button>
+            <Button variant="secondary" onClick={handleResetAdaptive} disabled={resettingAdaptive}>
+              {resettingAdaptive ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RotateCcw className="w-4 h-4" />
+              )}
+              {t('admin.sites.resetAdaptive')}
+            </Button>
+          </div>
+        </section>
 
-              <button
-                onClick={handleSaveMapping}
-                disabled={savingMapping}
-                className="flex items-center gap-2 mt-4 px-4 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {savingMapping ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4" />
-                )}
-                {t('admin.sites.save')}
-              </button>
-            </section>
-          )}
-        </div>
+        {/* Field Mapping — only shown when probe data is available */}
+        {(jyzroxFields.length > 0 || probeResult?.fields) && (
+          <section>
+            <h3 className="text-vault-text font-medium mb-4">{t('admin.sites.fieldMapping')}</h3>
+            <div className="overflow-x-auto rounded-lg border border-vault-border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-vault-border bg-vault-card">
+                    <th className="text-left px-4 py-2 text-vault-text-secondary font-medium">
+                      {t('admin.sites.jyzroxField')}
+                    </th>
+                    <th className="text-left px-4 py-2 text-vault-text-secondary font-medium">
+                      {t('admin.sites.gdlField')}
+                    </th>
+                    <th className="w-8 px-2 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {jyzroxFields.map((jField) => {
+                    const isSuggested =
+                      probeResult?.mappings?.find((m) => m.jyzrox_field === jField)?.suggested ??
+                      false
+                    return (
+                      <tr key={jField} className="border-b border-vault-border last:border-0">
+                        <td className="px-4 py-2 text-vault-text font-mono text-xs">{jField}</td>
+                        <td className="px-4 py-2">
+                          <select
+                            value={fieldMapping[jField] ?? ''}
+                            onChange={(e) =>
+                              setFieldMapping((m) => ({ ...m, [jField]: e.target.value || null }))
+                            }
+                            className="vault-input rounded px-2 py-1 text-xs w-full"
+                          >
+                            <option value="">{t('admin.sites.noMapping')}</option>
+                            {gdlFieldOptions.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-2">
+                          {isSuggested && (
+                            <Star
+                              className="w-3.5 h-3.5 text-yellow-400"
+                              aria-label={t('admin.sites.suggested')}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Probe fields reference table */}
+            {probeResult?.fields && probeResult.fields.length > 0 && (
+              <details className="mt-3">
+                <summary className="text-vault-text-secondary text-xs cursor-pointer hover:text-vault-text select-none">
+                  {t('admin.sites.livePreview')}
+                </summary>
+                <div className="mt-2 overflow-x-auto rounded-lg border border-vault-border">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-vault-border bg-vault-card">
+                        <th className="text-left px-3 py-1.5 text-vault-text-secondary">
+                          {t('admin.sites.gdlField')}
+                        </th>
+                        <th className="text-left px-3 py-1.5 text-vault-text-secondary">
+                          {t('admin.sites.fieldType')}
+                        </th>
+                        <th className="text-left px-3 py-1.5 text-vault-text-secondary">
+                          {t('admin.sites.level')}
+                        </th>
+                        <th className="text-left px-3 py-1.5 text-vault-text-secondary">
+                          {t('admin.sites.sampleValue')}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {probeResult.fields.map((f) => (
+                        <tr key={f.key} className="border-b border-vault-border last:border-0">
+                          <td className="px-3 py-1.5 font-mono text-vault-text">{f.key}</td>
+                          <td className="px-3 py-1.5 text-vault-text-secondary">{f.field_type}</td>
+                          <td className="px-3 py-1.5 text-vault-text-secondary">{f.level}</td>
+                          <td
+                            className="px-3 py-1.5 text-vault-text-secondary truncate max-w-[160px]"
+                            title={f.sample_value}
+                          >
+                            {f.sample_value}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+
+            <Button
+              variant="primary"
+              onClick={handleSaveMapping}
+              disabled={savingMapping}
+              className="mt-4"
+            >
+              {savingMapping ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              {t('admin.sites.save')}
+            </Button>
+          </section>
+        )}
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -486,62 +649,44 @@ function ProbeDialog({ onClose, onProbeSuccess }: ProbeDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-        aria-label={t('admin.sites.close')}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="site-probe-dialog-title"
-        className="relative w-full max-w-md bg-vault-bg border border-vault-border rounded-xl shadow-2xl p-6"
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 id="site-probe-dialog-title" className="text-vault-text font-semibold">
-            {t('admin.sites.probeUrl')}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded text-vault-text-secondary hover:text-vault-text transition-colors"
-            aria-label={t('admin.sites.close')}
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <form onSubmit={handleProbe} className="space-y-4">
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder={t('admin.sites.probeUrlPlaceholder')}
-            className="vault-input w-full rounded-lg px-3 py-2 text-sm"
-            autoFocus
-            required
-          />
-          <button
-            type="submit"
-            disabled={isMutating || !url.trim()}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
-          >
-            {isMutating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                {t('admin.sites.probing')}
-              </>
-            ) : (
-              <>
-                <Globe className="w-4 h-4" />
-                {t('admin.sites.probe')}
-              </>
-            )}
-          </button>
-        </form>
-      </div>
-    </div>
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+      size="md"
+      title={t('admin.sites.probeUrl')}
+    >
+      <form onSubmit={handleProbe} className="space-y-4">
+        <input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder={t('admin.sites.probeUrlPlaceholder')}
+          className="vault-input w-full rounded-lg px-3 py-2 text-sm"
+          autoFocus
+          required
+        />
+        <Button
+          variant="primary"
+          type="submit"
+          disabled={isMutating || !url.trim()}
+          className="w-full"
+        >
+          {isMutating ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {t('admin.sites.probing')}
+            </>
+          ) : (
+            <>
+              <Globe className="w-4 h-4" />
+              {t('admin.sites.probe')}
+            </>
+          )}
+        </Button>
+      </form>
+    </Dialog>
   )
 }
 
@@ -574,12 +719,14 @@ function SiteRow({ site, onEdit }: SiteRowProps) {
           </span>
         )}
       </div>
-      <button
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={() => onEdit(site)}
-        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border border-vault-border text-vault-text-secondary hover:text-vault-text hover:border-vault-accent transition-colors"
+        className="shrink-0 text-xs"
       >
         {t('admin.sites.edit')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -595,6 +742,8 @@ export default function AdminSitesPage() {
 
   const [search, setSearch] = useState('')
   const [selectedSite, setSelectedSite] = useState<SiteConfigItem | null>(null)
+  // Bumped after every mutation so the editor re-initialises from the response.
+  const [editorRev, setEditorRev] = useState(0)
   const [showProbe, setShowProbe] = useState(false)
   const [probeResult, setProbeResult] = useState<{
     fields: ProbeField[]
@@ -633,9 +782,11 @@ export default function AdminSitesPage() {
 
   if (profileLoading || !profile || !isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
-      </div>
+      <PageContainer variant="secondary">
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
+        </div>
+      </PageContainer>
     )
   }
 
@@ -653,27 +804,24 @@ export default function AdminSitesPage() {
     }
   }
 
-  const handleSaved = () => {
+  const handleSaved = (updated: SiteConfigItem) => {
+    setSelectedSite(updated)
+    setEditorRev((r) => r + 1)
     mutate()
-    if (selectedSite && sites) {
-      const updated = sites.find((s) => s.source_id === selectedSite.source_id)
-      if (updated) setSelectedSite(updated)
-    }
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-vault-text text-xl font-semibold">{t('admin.sites.title')}</h1>
-        <button
-          onClick={() => setShowProbe(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:opacity-90 transition-opacity"
-        >
-          <Globe className="w-4 h-4" />
-          {t('admin.sites.probe')}
-        </button>
-      </div>
+    <PageContainer variant="secondary" className="space-y-6">
+      <PageHeader
+        spacing="none"
+        title={t('admin.sites.title')}
+        actions={
+          <Button variant="primary" onClick={() => setShowProbe(true)}>
+            <Globe className="w-4 h-4" />
+            {t('admin.sites.probe')}
+          </Button>
+        }
+      />
 
       {/* Probe detected source banner */}
       {probeResult?.detectedSource && (
@@ -683,13 +831,15 @@ export default function AdminSitesPage() {
             {t('admin.sites.detectedSource')}:{' '}
             <span className="font-medium">{probeResult.detectedSource}</span>
           </span>
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setProbeResult(null)}
-            className="ml-auto p-1 text-vault-text-secondary hover:text-vault-text transition-colors"
+            className="ml-auto"
             aria-label={t('admin.sites.close')}
           >
             <X className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       )}
 
@@ -759,6 +909,7 @@ export default function AdminSitesPage() {
       {/* Editor panel */}
       {selectedSite && (
         <EditorPanel
+          key={`${selectedSite.source_id}:${editorRev}`}
           site={selectedSite}
           probeResult={probeResult}
           onClose={() => setSelectedSite(null)}
@@ -770,6 +921,6 @@ export default function AdminSitesPage() {
       {showProbe && (
         <ProbeDialog onClose={() => setShowProbe(false)} onProbeSuccess={handleProbeSuccess} />
       )}
-    </div>
+    </PageContainer>
   )
 }

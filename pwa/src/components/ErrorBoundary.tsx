@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 
 interface Props {
   children: React.ReactNode
@@ -62,12 +63,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <p className="text-sm text-vault-text-secondary max-w-md text-center">
               {this.state.error?.message || 'An unexpected error occurred'}
             </p>
-            <button
+            <Button
+              variant="primary"
               onClick={this.reset}
-              className="px-4 py-2 bg-vault-accent text-white rounded-lg hover:opacity-90 transition-opacity"
             >
               {t('common.retry')}
-            </button>
+            </Button>
           </div>
         </>
       )

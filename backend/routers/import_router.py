@@ -19,7 +19,6 @@ from core.auth import require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session, get_db
 from core.events import EventType, emit_safe
-from core.local_category_plan import normalize_category
 from core.local_patterns import (
     DEFAULT_IMPORT_MODE,
     DEFAULT_LIBRARY_PATTERN,
@@ -32,6 +31,7 @@ from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
 from db.models import Gallery, Image, ImportConflict, LibraryPath
 from services.cas import create_library_symlink, increment_ref_count, store_blob
+from services.gallery_categories import load_category_map, resolve_with_map
 from services.image_magic import validate_image_magic
 from services.media_formats import IMAGE_EXTENSIONS as _SUPPORTED_IMAGE_EXTS
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_EXTS
@@ -78,7 +78,10 @@ async def import_web_clip(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    suffix = Path(file.filename or "").suffix.lower()
+    # The multipart filename is client-controlled and arrives verbatim; keep only
+    # its last component so the image row and its library link agree.
+    filename = Path(file.filename or "").name
+    suffix = Path(filename).suffix.lower()
     if suffix not in _SUPPORTED_IMAGE_EXTS:
         raise HTTPException(status_code=400, detail="Web clip must be a supported image")
     temp = Path(settings.data_training_path) / "web-clips" / f".{uuid.uuid4().hex}{suffix}"
@@ -107,7 +110,7 @@ async def import_web_clip(
             source="webclip",
             source_id=source_id,
             source_url=source_url,
-            title=(title or "").strip() or Path(file.filename or "Web clip").stem,
+            title=(title or "").strip() or Path(filename).stem,
             pages=1,
             download_status="complete",
             import_mode="copy",
@@ -116,11 +119,11 @@ async def import_web_clip(
         )
         db.add(gallery)
         await db.flush()
-        image = Image(gallery_id=gallery.id, page_num=1, filename=file.filename, blob_sha256=sha256)
+        image = Image(gallery_id=gallery.id, page_num=1, filename=filename, blob_sha256=sha256)
         db.add(image)
         await increment_ref_count(sha256, db)
         await db.commit()
-        await create_library_symlink("webclip", source_id, file.filename or f"clip{suffix}", blob)
+        await create_library_symlink("webclip", source_id, filename, blob)
         await emit_safe(
             EventType.IMPORT_COMPLETED,
             actor_user_id=auth["user_id"],
@@ -181,11 +184,13 @@ def _build_pattern_regex(pattern: str) -> re.Pattern:
 async def batch_scan(
     req: BatchScanRequest,
     _: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
 ):
     """Scan root_dir using pattern to find importable gallery directories."""
     real_root = await _validate_root_dir(req.root_dir)
     pattern_re = _build_pattern_regex(req.pattern)
 
+    category_map = await load_category_map(db)
     matches = []
     unmatched = []
 
@@ -222,6 +227,7 @@ async def batch_scan(
                     "abs_path": abs_path,
                     "artist": artist,
                     "category": category,
+                    "category_resolved": resolve_with_map(category, category_map),
                     "title": title,
                     "file_count": len(media_files),
                 }
@@ -242,6 +248,7 @@ async def batch_start(
     req: BatchStartRequest,
     request: Request,
     auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
 ):
     """Start a batch import job for multiple galleries."""
     real_root = await _validate_root_dir(req.root_dir)
@@ -286,10 +293,13 @@ async def batch_start(
 
     # SAQ serializes job kwargs to JSON, so BatchGalleryItem instances cannot
     # be passed directly — model_dump() them into plain dicts. category is
-    # normalized here (not left to the worker alone) so a folder-name-derived
-    # or user-supplied value that Pydantic accepts as a `str` but is otherwise
-    # unusable (too long, etc.) never reaches the job payload.
-    galleries_payload = [{**g.model_dump(), "category": normalize_category(g.category)} for g in req.galleries]
+    # resolved against the registry here (and again in the worker) so a
+    # folder-name-derived or user-supplied value that Pydantic accepts as a
+    # `str` but is unusable or unregistered never reaches the job payload.
+    category_map = await load_category_map(db)
+    galleries_payload = [
+        {**g.model_dump(), "category": resolve_with_map(g.category, category_map)} for g in req.galleries
+    ]
     await core.queue.enqueue(
         "batch_import_job",
         root_dir=real_root,

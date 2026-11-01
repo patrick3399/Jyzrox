@@ -79,7 +79,12 @@ export function ImageContextMenu({
   // ── Dismiss on outside-click or Escape ───────────────────────────────
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      // Mark it handled so the Library detail page's window-level "go back"
+      // (detailHotkey) leaves it alone. Propagation is not stopped: the
+      // Reader's own Escape listener still sees the key.
+      e.preventDefault()
+      onClose()
     },
     [onClose],
   )

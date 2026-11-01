@@ -2,14 +2,26 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
-import { Rss, Plus, X, Trash2, List, Search, FolderOpen } from 'lucide-react'
+import {
+  Rss,
+  Plus,
+  X,
+  Trash2,
+  List,
+  Search,
+  FolderOpen,
+  Download,
+  Globe,
+  Clock,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { Button } from '@/components/ui/button'
 import { useWsJobs, useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
 import {
-  useSubscriptions,
+  useAllSubscriptions,
   useCreateSubscription,
   useUpdateSubscription,
   useDeleteSubscription,
@@ -26,12 +38,37 @@ import {
   useResumeGroup,
   useBulkMove,
 } from '@/hooks/useSubscriptionGroups'
+import { useDownloadJobs, useCheckUrl } from '@/hooks/useDownloadQueue'
+import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
+import { DEFAULT_MEDIA_POLICY, withMediaPolicy } from '@/lib/mediaPolicy'
+import {
+  activeSubscriptionIds,
+  sortActiveFirst,
+  withActiveSubscriptionJobs,
+} from '@/lib/downloadJobFilters'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { api } from '@/lib/api'
-import type { Subscription, SubscriptionGroup, DownloadJob } from '@/lib/types'
+import type {
+  Subscription,
+  SubscriptionGroup,
+  DownloadJob,
+  JobListParams,
+  MediaPolicy,
+} from '@/lib/types'
 import useSWR from 'swr'
 import { GroupCard } from '@/components/subscriptions/GroupCard'
-import { CRON_PRESETS } from '@/components/subscriptions/constants'
+import { CRON_PRESETS, DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
+import {
+  groupBySource,
+  groupBySyncAge,
+  readSubscriptionView,
+  sourceLabel,
+  syncAgeLabel,
+  writeSubscriptionView,
+  type SubscriptionView,
+} from '@/components/subscriptions/sourceGrouping'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 const GroupModal = dynamic(
   () => import('@/components/subscriptions/GroupModal').then((module) => module.GroupModal),
@@ -40,11 +77,19 @@ const GroupModal = dynamic(
 
 // ── Constants ────────────────────────────────────────────────────────
 
+// Module-level so the SWR key stays referentially stable across renders.
+// Shares its cache entry with the queue page's subscription-active section.
+const SUBSCRIPTION_ACTIVE_PARAMS: JobListParams = {
+  subscription_only: true,
+  active_only: true,
+  limit: 100,
+}
+
 export default function SubscriptionsPage() {
   useLocale()
 
   // Subscriptions data
-  const { data, mutate, isLoading } = useSubscriptions({ limit: 200 })
+  const { data, mutate, isLoading } = useAllSubscriptions()
   const { trigger: createSub, isMutating: creating } = useCreateSubscription()
   const { trigger: updateSub } = useUpdateSubscription()
   const { trigger: deleteSub } = useDeleteSubscription()
@@ -75,20 +120,13 @@ export default function SubscriptionsPage() {
   const { data: jobsData, mutate: mutateJobs } = useSWR(
     subIds.length > 0 ? ['sub-jobs', ...subIds] : null,
     async () => {
+      // One request for all subscriptions: a per-subscription fan-out tripped
+      // nginx's api_zone burst (503) once the list grew past ~60 entries.
+      const res = await api.subscriptions.latestJobs()
       const results: Record<number, DownloadJob> = {}
-      const promises = (data?.subscriptions ?? [])
-        .filter((s) => s.last_job_id)
-        .map(async (s) => {
-          try {
-            const res = await api.subscriptions.jobs(s.id, 1)
-            if (res.jobs.length > 0) {
-              results[s.id] = res.jobs[0]
-            }
-          } catch {
-            /* ignore */
-          }
-        })
-      await Promise.all(promises)
+      for (const [subId, job] of Object.entries(res.jobs)) {
+        results[Number(subId)] = job
+      }
       return results
     },
     // Event-driven while connected (lastSubCheck/lastJobUpdate effects below +
@@ -127,7 +165,7 @@ export default function SubscriptionsPage() {
       },
       { revalidate: false },
     )
-    if (['done', 'failed', 'partial'].includes(lastJobUpdate.status)) {
+    if (['done', 'failed', 'partial', 'cancelled'].includes(lastJobUpdate.status)) {
       mutateJobs()
     }
   }, [lastJobUpdate, mutateJobs])
@@ -153,11 +191,58 @@ export default function SubscriptionsPage() {
     )
   }, [data?.subscriptions, debouncedSearch])
 
-  // Group subscriptions by group_id
+  // Subscriptions that currently have an active download job
+  const { data: activeJobsData } = useDownloadJobs(SUBSCRIPTION_ACTIVE_PARAMS)
+  const activeIds = useMemo(
+    () => activeSubscriptionIds(activeJobsData?.jobs ?? []),
+    [activeJobsData?.jobs],
+  )
+  const activeCount = activeIds.size
+  // A run that started after the latest-job fetch only shows up in the active list.
+  const cardJobs = useMemo(
+    () => withActiveSubscriptionJobs(jobsData ?? {}, activeJobsData?.jobs ?? []),
+    [jobsData, activeJobsData?.jobs],
+  )
+  const [downloadingOnly, setDownloadingOnly] = useState(false)
+
+  // Nothing is downloading any more: drop the filter so the list does not look empty.
+  useEffect(() => {
+    if (activeCount === 0) setDownloadingOnly(false)
+  }, [activeCount])
+
+  const showDownloadingOnly = downloadingOnly && activeCount > 0
+
+  // Layout: by schedule group (default), by site, or by last check. Read after mount — storage is client-only.
+  const [view, setView] = useState<SubscriptionView>('group')
+  useEffect(() => setView(readSubscriptionView()), [])
+  const changeView = (next: SubscriptionView) => {
+    setView(next)
+    writeSubscriptionView(next)
+  }
+
+  const visibleSubs = useMemo(
+    () =>
+      showDownloadingOnly
+        ? filteredSubscriptions.filter((s) => activeIds.has(s.id))
+        : filteredSubscriptions,
+    [filteredSubscriptions, activeIds, showDownloadingOnly],
+  )
+
+  const sourceSections = useMemo(
+    () => groupBySource(visibleSubs, activeIds),
+    [visibleSubs, activeIds],
+  )
+
+  const syncAgeSections = useMemo(
+    () => groupBySyncAge(visibleSubs, activeIds),
+    [visibleSubs, activeIds],
+  )
+
+  // Group subscriptions by group_id (active downloads first inside every group)
   const groupedSubs = useMemo(() => {
     const byGroup: Record<number, Subscription[]> = {}
     const ungrouped: Subscription[] = []
-    for (const sub of filteredSubscriptions) {
+    for (const sub of visibleSubs) {
       if (sub.group_id !== null && sub.group_id !== undefined) {
         if (!byGroup[sub.group_id]) byGroup[sub.group_id] = []
         byGroup[sub.group_id].push(sub)
@@ -165,27 +250,40 @@ export default function SubscriptionsPage() {
         ungrouped.push(sub)
       }
     }
-    return { byGroup, ungrouped }
-  }, [filteredSubscriptions])
+    for (const key of Object.keys(byGroup)) {
+      byGroup[Number(key)] = sortActiveFirst(byGroup[Number(key)], activeIds)
+    }
+    return { byGroup, ungrouped: sortActiveFirst(ungrouped, activeIds) }
+  }, [visibleSubs, activeIds])
+
+  const hasVisibleSubs = visibleSubs.length > 0
 
   // Forms state
   const [showAdd, setShowAdd] = useState(false)
   const [showBatch, setShowBatch] = useState(false)
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
-  const [autoDownload, setAutoDownload] = useState(true)
-  const [cronExpr, setCronExpr] = useState('0 */2 * * *')
+  const [autoDownload, setAutoDownload] = useState(false)
+  const [cronExpr, setCronExpr] = useState(DEFAULT_SUBSCRIPTION_CRON)
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
   const [fanboxSubscriptionContent, setFanboxSubscriptionContent] = useState<
     'free_only' | 'accessible' | 'paid_only' | 'price_range'
   >('accessible')
   const [fanboxSubscriptionFeeMin, setFanboxSubscriptionFeeMin] = useState('')
   const [fanboxSubscriptionFeeMax, setFanboxSubscriptionFeeMax] = useState('')
+  const [mediaPolicy, setMediaPolicy] = useState<MediaPolicy>(DEFAULT_MEDIA_POLICY)
+  const [debouncedAddUrl, setDebouncedAddUrl] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAddUrl(url), 300)
+    return () => clearTimeout(timer)
+  }, [url])
+  const { data: addUrlCheck } = useCheckUrl(showAdd ? debouncedAddUrl : '')
+  const supportsMediaPolicy = addUrlCheck?.supports_media_policy === true
   const [checkingId, setCheckingId] = useState<number | null>(null)
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [batchUrls, setBatchUrls] = useState('')
-  const [batchAutoDownload, setBatchAutoDownload] = useState(true)
-  const [batchCron, setBatchCron] = useState('0 */2 * * *')
+  const [batchAutoDownload, setBatchAutoDownload] = useState(false)
+  const [batchCron, setBatchCron] = useState(DEFAULT_SUBSCRIPTION_CRON)
   const [batchProgress, setBatchProgress] = useState<{
     done: number
     total: number
@@ -200,6 +298,18 @@ export default function SubscriptionsPage() {
   // Handlers — subscriptions
   const handleAdd = async () => {
     if (!url.trim()) return
+    const fanboxOptions: Record<string, unknown> = url.includes('fanbox.cc')
+      ? {
+          fanbox: {
+            content: fanboxSubscriptionContent,
+            ...(fanboxSubscriptionFeeMin ? { fee_min: Number(fanboxSubscriptionFeeMin) } : {}),
+            ...(fanboxSubscriptionFeeMax ? { fee_max: Number(fanboxSubscriptionFeeMax) } : {}),
+          },
+        }
+      : {}
+    const downloadOptions = supportsMediaPolicy
+      ? withMediaPolicy(fanboxOptions, mediaPolicy)
+      : fanboxOptions
     try {
       const result = await createSub({
         url: url.trim(),
@@ -207,21 +317,7 @@ export default function SubscriptionsPage() {
         auto_download: autoDownload,
         cron_expr: cronExpr,
         group_id: selectedGroupId,
-        ...(url.includes('fanbox.cc')
-          ? {
-              download_options: {
-                fanbox: {
-                  content: fanboxSubscriptionContent,
-                  ...(fanboxSubscriptionFeeMin
-                    ? { fee_min: Number(fanboxSubscriptionFeeMin) }
-                    : {}),
-                  ...(fanboxSubscriptionFeeMax
-                    ? { fee_max: Number(fanboxSubscriptionFeeMax) }
-                    : {}),
-                },
-              },
-            }
-          : {}),
+        ...(Object.keys(downloadOptions).length > 0 ? { download_options: downloadOptions } : {}),
       })
       if (result?.duplicate) {
         toast.info(t('subscriptions.duplicateUpdated'))
@@ -231,11 +327,12 @@ export default function SubscriptionsPage() {
       setUrl('')
       setName('')
       setAutoDownload(true)
-      setCronExpr('0 */2 * * *')
+      setCronExpr(DEFAULT_SUBSCRIPTION_CRON)
       setSelectedGroupId(null)
       setFanboxSubscriptionContent('accessible')
       setFanboxSubscriptionFeeMin('')
       setFanboxSubscriptionFeeMax('')
+      setMediaPolicy(DEFAULT_MEDIA_POLICY)
       setShowAdd(false)
       mutate()
     } catch (err) {
@@ -308,6 +405,29 @@ export default function SubscriptionsPage() {
       mutate()
     } catch {
       toast.error(t('subscriptions.updateFailed'))
+    }
+  }
+
+  const handleCronChange = async (sub: Subscription, cron: string) => {
+    try {
+      await updateSub({ id: sub.id, data: { cron_expr: cron } })
+      toast.success(t('subscriptions.intervalUpdated'))
+      mutate()
+    } catch {
+      toast.error(t('subscriptions.updateFailed'))
+    }
+  }
+
+  const handleDownloadOptionsChange = async (
+    sub: Subscription,
+    download_options: Record<string, unknown>,
+  ) => {
+    try {
+      await updateSub({ id: sub.id, data: { download_options } })
+      toast.success(t('mediaPolicy.saved'))
+      mutate()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('subscriptions.updateFailed'))
     }
   }
 
@@ -486,59 +606,56 @@ export default function SubscriptionsPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 overflow-x-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 mb-6 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Rss size={24} className="text-vault-accent shrink-0" />
-          <h1 className="text-xl font-bold text-vault-text">{t('subscriptions.title')}</h1>
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {(data?.subscriptions?.length ?? 0) > 0 && (
-            <button
-              onClick={handleDeleteAll}
-              disabled={isDeletingAll}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-red-400 hover:bg-red-900/30 hover:border-red-700/50 transition-colors disabled:opacity-50"
+    <PageContainer variant="secondary" className="overflow-x-hidden">
+      <PageHeader
+        title={t('subscriptions.title')}
+        icon={<Rss size={24} className="text-vault-accent shrink-0" />}
+        actions={
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(data?.subscriptions?.length ?? 0) > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleDeleteAll}
+                disabled={isDeletingAll}
+                className="text-red-400 hover:text-red-400 hover:bg-red-900/30 hover:border-red-700/50"
+              >
+                <Trash2 size={14} />
+                <span className="hidden sm:inline">
+                  {isDeletingAll ? t('subscriptions.deletingAll') : t('subscriptions.deleteAll')}
+                </span>
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={openNewGroup}>
+              <FolderOpen size={14} />
+              {t('subscriptions.groupNew')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setShowBatch(!showBatch)
+                if (showAdd) setShowAdd(false)
+              }}
+              className={showBatch ? 'text-vault-text' : undefined}
             >
-              <Trash2 size={14} />
-              <span className="hidden sm:inline">
-                {isDeletingAll ? t('subscriptions.deletingAll') : t('subscriptions.deleteAll')}
-              </span>
-            </button>
-          )}
-          <button
-            onClick={openNewGroup}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
-          >
-            <FolderOpen size={14} />
-            {t('subscriptions.groupNew')}
-          </button>
-          <button
-            onClick={() => {
-              setShowBatch(!showBatch)
-              if (showAdd) setShowAdd(false)
-            }}
-            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              showBatch
-                ? 'bg-vault-input border border-vault-border text-vault-text'
-                : 'bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text'
-            }`}
-          >
-            {showBatch ? <X size={14} /> : <List size={14} />}
-            {showBatch ? t('common.cancel') : t('subscriptions.batchImport')}
-          </button>
-          <button
-            onClick={() => {
-              setShowAdd(!showAdd)
-              if (showBatch) setShowBatch(false)
-            }}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors"
-          >
-            {showAdd ? <X size={14} /> : <Plus size={14} />}
-            {showAdd ? t('common.cancel') : t('subscriptions.addNew')}
-          </button>
-        </div>
-      </div>
+              {showBatch ? <X size={14} /> : <List size={14} />}
+              {showBatch ? t('common.cancel') : t('subscriptions.batchImport')}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setShowAdd(!showAdd)
+                if (showBatch) setShowBatch(false)
+              }}
+            >
+              {showAdd ? <X size={14} /> : <Plus size={14} />}
+              {showAdd ? t('common.cancel') : t('subscriptions.addNew')}
+            </Button>
+          </div>
+        }
+      />
 
       {/* Add form */}
       {showAdd && (
@@ -594,6 +711,9 @@ export default function SubscriptionsPage() {
                 </>
               )}
             </div>
+          )}
+          {supportsMediaPolicy && (
+            <MediaPolicyFields value={mediaPolicy} onChange={setMediaPolicy} disabled={creating} />
           )}
           <div>
             <label className="text-xs text-vault-text-muted block mb-1">
@@ -666,13 +786,9 @@ export default function SubscriptionsPage() {
               ))}
             </div>
           </div>
-          <button
-            onClick={handleAdd}
-            disabled={creating || !url.trim()}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
-          >
+          <Button variant="primary" onClick={handleAdd} disabled={creating || !url.trim()}>
             {creating ? t('subscriptions.adding') : t('subscriptions.add')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -731,10 +847,10 @@ export default function SubscriptionsPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button
+            <Button
+              variant="primary"
               onClick={handleBatchImport}
               disabled={!!batchProgress || !batchUrls.trim()}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
             >
               {batchProgress
                 ? t('subscriptions.batchImporting', {
@@ -742,7 +858,7 @@ export default function SubscriptionsPage() {
                     total: batchProgress.total,
                   })
                 : t('subscriptions.batchImport')}
-            </button>
+            </Button>
             {batchProgress && (
               <div className="flex-1 h-2 bg-vault-border rounded-full overflow-hidden">
                 <div
@@ -757,29 +873,77 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
-      {/* Search */}
+      {/* Search + downloading filter */}
       {(data?.subscriptions?.length ?? 0) > 0 && (
-        <div className="relative mb-4">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-vault-text-muted"
-          />
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder={t('subscriptions.searchPlaceholder')}
-            className="w-full pl-9 pr-8 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder-vault-text-muted"
-          />
-          {searchInput && (
+        <div className="flex flex-wrap items-center gap-2 mb-4 sm:flex-nowrap">
+          <div className="relative w-full min-w-0 sm:w-auto sm:flex-1">
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-vault-text-muted"
+            />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={t('subscriptions.searchPlaceholder')}
+              className="w-full pl-9 pr-8 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder-vault-text-muted"
+            />
+            {searchInput && (
+              <button
+                onClick={() => {
+                  setSearchInput('')
+                  setDebouncedSearch('')
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <div
+            role="group"
+            aria-label={t('subscriptions.viewLabel')}
+            className="flex min-w-0 flex-1 rounded-lg border border-vault-border bg-vault-input p-0.5 sm:flex-none sm:shrink-0"
+          >
+            {(
+              [
+                ['group', FolderOpen, t('subscriptions.viewByGroup')],
+                ['source', Globe, t('subscriptions.viewBySource')],
+                ['time', Clock, t('subscriptions.viewBySyncAge')],
+              ] as const
+            ).map(([value, Icon, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => changeView(value)}
+                aria-pressed={view === value}
+                title={label}
+                aria-label={label}
+                // Phones get a labelled segment with a 40px tap target; icons only from `sm` up.
+                className={`flex min-h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs transition-colors sm:min-h-0 sm:flex-none sm:p-1.5 ${
+                  view === value
+                    ? 'bg-vault-accent/20 text-vault-accent'
+                    : 'text-vault-text-muted hover:text-vault-text'
+                }`}
+              >
+                <Icon size={15} className="shrink-0" />
+                <span className="truncate sm:hidden">{label}</span>
+              </button>
+            ))}
+          </div>
+          {(activeCount > 0 || downloadingOnly) && (
             <button
-              onClick={() => {
-                setSearchInput('')
-                setDebouncedSearch('')
-              }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text"
+              type="button"
+              onClick={() => setDownloadingOnly((on) => !on)}
+              aria-pressed={showDownloadingOnly}
+              className={`shrink-0 flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors sm:min-h-0 ${
+                showDownloadingOnly
+                  ? 'bg-vault-accent/20 border-vault-accent/40 text-vault-accent'
+                  : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
+              }`}
             >
-              <X size={14} />
+              <Download size={14} />
+              {t('subscriptions.filterDownloading', { count: activeCount })}
             </button>
           )}
         </div>
@@ -803,15 +967,32 @@ export default function SubscriptionsPage() {
           <Search size={40} className="mx-auto text-vault-text-muted mb-3" />
           <p className="text-sm text-vault-text-muted">{t('subscriptions.noResults')}</p>
         </div>
-      ) : (
+      ) : showDownloadingOnly && !hasVisibleSubs ? (
+        <div className="text-center py-12">
+          <Download size={40} className="mx-auto text-vault-text-muted mb-3" />
+          <p className="text-sm text-vault-text-muted">{t('subscriptions.noDownloading')}</p>
+        </div>
+      ) : view === 'source' || view === 'time' ? (
         <div className="space-y-3">
-          {/* Named groups */}
-          {groups.map((group) => (
+          {(view === 'source'
+            ? sourceSections.map((section) => ({
+                key: section.source ?? '__other',
+                title: sourceLabel(section.source),
+                subs: section.subs,
+              }))
+            : syncAgeSections.map((section) => ({
+                key: section.bucket,
+                title: syncAgeLabel(section.bucket),
+                subs: section.subs,
+              }))
+          ).map((section) => (
             <GroupCard
-              key={group.id}
-              group={group}
-              subs={groupedSubs.byGroup[group.id] ?? []}
-              jobsData={jobsData ?? {}}
+              key={section.key}
+              group={null}
+              title={section.title}
+              showSubGroup
+              subs={section.subs}
+              jobsData={cardJobs}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}
@@ -824,17 +1005,51 @@ export default function SubscriptionsPage() {
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}
               onRenameSub={handleRename}
+              onCronChangeSub={handleCronChange}
+              onDownloadOptionsChangeSub={handleDownloadOptionsChange}
               checkingId={checkingId}
-              defaultExpanded={true}
+              defaultExpanded={view !== 'source'}
             />
           ))}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Named groups (empty ones are hidden while filtering to active downloads) */}
+          {groups
+            .filter(
+              (group) => !showDownloadingOnly || (groupedSubs.byGroup[group.id]?.length ?? 0) > 0,
+            )
+            .map((group) => (
+              <GroupCard
+                key={group.id}
+                group={group}
+                subs={groupedSubs.byGroup[group.id] ?? []}
+                jobsData={cardJobs}
+                groups={groups}
+                onEdit={openEditGroup}
+                onRun={handleGroupRun}
+                onPauseResume={handleGroupPauseResume}
+                onDelete={handleGroupDelete}
+                onToggleSub={handleToggle}
+                onCheckSub={handleCheck}
+                onBackfillSub={handleBackfill}
+                onDeleteSub={handleDelete}
+                onAutoDownloadToggle={handleAutoDownloadToggle}
+                onMoveToGroup={handleMoveToGroup}
+                onRenameSub={handleRename}
+                onCronChangeSub={handleCronChange}
+                onDownloadOptionsChangeSub={handleDownloadOptionsChange}
+                checkingId={checkingId}
+                defaultExpanded={true}
+              />
+            ))}
 
           {/* Ungrouped section — only show when there are ungrouped subs */}
           {groupedSubs.ungrouped.length > 0 && (
             <GroupCard
               group={null}
               subs={groupedSubs.ungrouped}
-              jobsData={jobsData ?? {}}
+              jobsData={cardJobs}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}
@@ -847,8 +1062,10 @@ export default function SubscriptionsPage() {
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}
               onRenameSub={handleRename}
+              onCronChangeSub={handleCronChange}
+              onDownloadOptionsChangeSub={handleDownloadOptionsChange}
               checkingId={checkingId}
-              defaultExpanded={groups.length === 0}
+              defaultExpanded={true}
             />
           )}
         </div>
@@ -865,6 +1082,6 @@ export default function SubscriptionsPage() {
           onSave={handleGroupSave}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }

@@ -1,12 +1,43 @@
-import useSWR from 'swr'
+import useSWR, { mutate as globalMutate } from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { api } from '@/lib/api'
 
-export function useCollections(enabled = true) {
-  return useSWR(enabled ? 'collections' : null, () => api.collections.list(), {
-    // WebSocket events are best-effort and are not replayed after reconnect.
-    revalidateOnFocus: true,
-  })
+/**
+ * Collections list. When `galleryId` is given each collection also carries
+ * `contains_gallery`. The membership-aware key still starts with
+ * `'collections'`, so prefix invalidation (WS bridge, `revalidateCollections`)
+ * covers both variants.
+ */
+export function useCollections(enabled = true, galleryId?: number) {
+  const key = !enabled
+    ? null
+    : galleryId === undefined
+      ? 'collections'
+      : (['collections', 'gallery', galleryId] as const)
+  return useSWR(
+    key,
+    () =>
+      galleryId === undefined
+        ? api.collections.list()
+        : api.collections.list({ gallery_id: galleryId }),
+    {
+      // WebSocket events are best-effort and are not replayed after reconnect.
+      revalidateOnFocus: true,
+    },
+  )
+}
+
+/**
+ * Revalidate every cache entry that depends on collection membership: the
+ * collections list (all variants) and the open collection pages. Both
+ * `'collections'` and `'collection'` keys share the `'collection'` prefix.
+ */
+export function revalidateCollections() {
+  return globalMutate(
+    (key) =>
+      (typeof key === 'string' && key.startsWith('collection')) ||
+      (Array.isArray(key) && typeof key[0] === 'string' && key[0].startsWith('collection')),
+  )
 }
 
 export function useCollection(id: number | null, params: { page?: number; limit?: number } = {}) {

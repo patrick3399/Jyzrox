@@ -1,12 +1,23 @@
 'use client'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
-import type { GalleryImage } from '@/lib/types'
+import type { Gallery, GalleryImage } from '@/lib/types'
 import type { ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings } from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
 import { t } from '@/lib/i18n'
 import { api } from '@/lib/api'
 import { galleryHref } from '@/lib/galleryRoutes'
+import { smartBack } from '@/lib/navBack'
 import { toast } from 'sonner'
 import {
   useReaderState,
@@ -20,6 +31,7 @@ import {
   saveReaderSettings,
 } from './hooks'
 import VideoPlayer from './VideoPlayer'
+import { THUMB_STRIP_CELL_HEIGHT, THUMB_STRIP_PADDING_Y } from './layout'
 import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
@@ -90,6 +102,13 @@ function getScaleImageClass(scaleMode: ScaleMode): string {
   }
 }
 
+// ── Retry layer ───────────────────────────────────────────────────────
+// The paged views stack their tap zones over the page, and the image scale
+// classes switch pointer events off, so a Retry button rendered inside the page
+// can never take a tap. Those views expose a layer above the zones and a failed
+// page renders its notice there. With no layer (webtoon) the notice stays inline.
+const RetryLayerContext = createContext<HTMLElement | null>(null)
+
 // ── ReaderImg (load-error handling + auto-retry) ─────────────────────
 
 interface ReaderImgProps {
@@ -141,26 +160,34 @@ export function ReaderImg({
   // Cancel any pending auto-retry on unmount.
   useEffect(() => () => clearTimeout(retryTimerRef.current), [])
 
+  const retryLayer = useContext(RetryLayerContext)
+
   if (failed) {
-    return (
-      <div
-        className={`flex flex-col items-center justify-center gap-2 bg-black/50 ${className ?? ''}`}
-        style={{ minHeight: '200px', minWidth: '200px', ...style }}
-      >
+    const notice = (
+      <div className="flex flex-col items-center gap-2">
         <span className="text-3xl text-white/40" aria-hidden>
           ⚠
         </span>
         <p className="text-xs text-white/60">{t('reader.imageLoadFailed')}</p>
         <button
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation()
             setFailed(false)
             setAutoRetriesUsed(0)
             setAttempt((a) => a + 1)
           }}
-          className="rounded bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/20"
+          className="pointer-events-auto rounded bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/20"
         >
           {t('reader.retry')}
         </button>
+      </div>
+    )
+    return (
+      <div
+        className={`flex flex-col items-center justify-center bg-black/50 ${className ?? ''}`}
+        style={{ minHeight: '200px', minWidth: '200px', ...style }}
+      >
+        {retryLayer ? createPortal(notice, retryLayer) : notice}
       </div>
     )
   }
@@ -289,12 +316,80 @@ function MediaElement({
   )
 }
 
+// ── PageSlot ──────────────────────────────────────────────────────────
+
+// Inline rather than a class: the scale classes carry `block`, and an inline
+// declaration is the only one guaranteed to win over it.
+const RETAINED_SLOT_STYLE: React.CSSProperties = { display: 'none' }
+const NO_PAGES: ReadonlySet<number> = new Set()
+
+interface PageSlotProps {
+  image: ReaderImage
+  isCurrent: boolean
+  className: string
+  onCurrentLoaded: () => void
+  onCurrentError: () => void
+  onSlotLoaded: (pageNum: number) => void
+  onToggleOverlay: () => void
+  overlayVisible: boolean
+}
+
+/**
+ * One page of the single-page view. The view keeps the previous and next page
+ * mounted next to the current one, hidden, so turning back reuses an element
+ * that already holds its image instead of requesting it again.
+ */
+function PageSlot({
+  image,
+  isCurrent,
+  className,
+  onCurrentLoaded,
+  onCurrentError,
+  onSlotLoaded,
+  onToggleOverlay,
+  overlayVisible,
+}: PageSlotProps) {
+  // Load outcome of the element this slot holds, tagged with the URL so a page
+  // that gains or changes its URL starts over as pending.
+  const [settled, setSettled] = useState<{
+    url: string | null
+    status: 'loaded' | 'error'
+  } | null>(null)
+  const status = settled && settled.url === image.url ? settled.status : 'pending'
+
+  // A retained slot has usually finished loading while hidden, and its element
+  // will not fire `load` again. Replaying the outcome when the slot becomes
+  // current keeps the parent spinner from waiting on an event that already
+  // happened.
+  useEffect(() => {
+    if (!isCurrent) return
+    if (status === 'loaded') onCurrentLoaded()
+    else if (status === 'error') onCurrentError()
+  }, [isCurrent, status, onCurrentLoaded, onCurrentError])
+
+  return (
+    <MediaElement
+      image={image}
+      className={className}
+      style={isCurrent ? undefined : RETAINED_SLOT_STYLE}
+      draggable={false}
+      onLoad={() => {
+        setSettled({ url: image.url, status: 'loaded' })
+        onSlotLoaded(image.pageNum)
+      }}
+      onError={() => setSettled({ url: image.url, status: 'error' })}
+      onToggleOverlay={onToggleOverlay}
+      overlayVisible={overlayVisible}
+    />
+  )
+}
+
 // ── Props ─────────────────────────────────────────────────────────────
 
 interface ReaderProps {
   source: string
   sourceId: string
-  downloadStatus: 'proxy_only' | 'partial' | 'complete' | 'downloading'
+  downloadStatus: Gallery['download_status']
   images: GalleryImage[]
   totalPages: number
   initialPage?: number
@@ -308,6 +403,11 @@ interface ReaderProps {
   onHideImage?: (pageNum: number) => Promise<void>
   /** Pre-fetched favorited image IDs from the parent page (avoids duplicate fetch) */
   initialFavoritedImageIds?: number[]
+  /** Where every exit goes when history has nothing to go back to (share link,
+   *  new tab, PWA relaunch) or the URL was restored by a nav tab. Required: a
+   *  reader route has no app chrome and no swipe-back, so without it an exit on
+   *  a one-entry history would trap the user. */
+  backHref: string
 }
 
 // ── SinglePageView ────────────────────────────────────────────────────
@@ -321,6 +421,10 @@ interface ImageLongPressHandlers {
 
 interface SinglePageViewProps {
   image: ReaderImage
+  prevImage: ReaderImage | null
+  nextImage: ReaderImage | null
+  /** Pages the prefetcher has finished with; a neighbour is only mounted once it is here. */
+  prefetchedPages: ReadonlySet<number>
   isLoading: boolean
   onNext: () => void
   onPrev: () => void
@@ -337,6 +441,9 @@ interface SinglePageViewProps {
 
 function SinglePageView({
   image,
+  prevImage,
+  nextImage,
+  prefetchedPages,
   isLoading,
   onNext,
   onPrev,
@@ -374,7 +481,29 @@ function SinglePageView({
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
-  const isVideo = image.mediaType === 'video'
+  // A mounted player takes the centre tap itself and shows its controls with
+  // the overlay, so the edge zones only have to step aside while those are up
+  // (FE-T8). A video with no file yet mounts no player and is tapped like an image.
+  const playerMounted = image.mediaType === 'video' && image.url != null
+  const edgeZones = !isZoomed && (!playerMounted || !showOverlay)
+
+  // Pages whose bytes are known to be local: loaded here as a slot, or reported
+  // by the prefetcher. Only these are retained, so keeping a neighbour mounted
+  // pins it in memory but never starts a download next to the prefetcher's.
+  const [loadedPages, setLoadedPages] = useState<ReadonlySet<number>>(() => new Set())
+  const markSlotLoaded = useCallback((pageNum: number) => {
+    setLoadedPages((prev) => (prev.has(pageNum) ? prev : new Set(prev).add(pageNum)))
+  }, [])
+  // Videos are never retained: a hidden <video> still buffers (FE-T16).
+  const retainable = (candidate: ReaderImage | null): candidate is ReaderImage =>
+    candidate != null &&
+    candidate.mediaType === 'image' &&
+    candidate.url != null &&
+    (loadedPages.has(candidate.pageNum) || prefetchedPages.has(candidate.pageNum))
+  const slots = [prevImage, image, nextImage].filter(
+    (slot): slot is ReaderImage => slot === image || retainable(slot),
+  )
+  const [retryLayer, setRetryLayer] = useState<HTMLDivElement | null>(null)
 
   return (
     <div
@@ -394,22 +523,32 @@ function SinglePageView({
         }}
         className="w-full h-full flex items-center justify-center"
       >
-        <MediaElement
-          image={image}
-          className={getScaleImageClass(scaleMode)}
-          draggable={false}
-          onLoad={onImageLoaded}
-          onError={onImageError}
-          onToggleOverlay={onToggleOverlay}
-          overlayVisible={showOverlay}
-        />
+        {slots.map((slot) => (
+          // Only the page on screen may put its notice in the layer; a retained
+          // neighbour is hidden and keeps its own inside its hidden box.
+          <RetryLayerContext.Provider key={slot.pageNum} value={slot === image ? retryLayer : null}>
+            <PageSlot
+              image={slot}
+              isCurrent={slot === image}
+              className={getScaleImageClass(scaleMode)}
+              onCurrentLoaded={onImageLoaded}
+              onCurrentError={onImageError}
+              onSlotLoaded={markSlotLoaded}
+              onToggleOverlay={onToggleOverlay}
+              overlayVisible={showOverlay}
+            />
+          </RetryLayerContext.Provider>
+        ))}
       </div>
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
+        <div
+          data-testid="reader-page-loading"
+          className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none"
+        >
           <Spinner />
         </div>
       )}
-      {!isVideo && (
+      {!playerMounted && (
         <>
           {/* Center zone — always visible (even when zoomed) for overlay toggle */}
           <div
@@ -425,8 +564,12 @@ function SinglePageView({
             }}
             aria-label={t('reader.toggleControls')}
           />
+        </>
+      )}
+      {edgeZones && (
+        <>
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
-          {!isZoomed && readingDirection === 'vertical' && (
+          {readingDirection === 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -454,7 +597,7 @@ function SinglePageView({
               />
             </>
           )}
-          {!isZoomed && readingDirection !== 'vertical' && (
+          {readingDirection !== 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -488,6 +631,11 @@ function SinglePageView({
           )}
         </>
       )}
+      {/* Above the tap zones: see RetryLayerContext. */}
+      <div
+        ref={setRetryLayer}
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      />
     </div>
   )
 }
@@ -514,7 +662,6 @@ function WebtoonView({
 }: WebtoonViewProps) {
   const elRefs = useRef<Map<number, HTMLElement>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
   const lastPage = images.length > 0 ? images[images.length - 1].pageNum : 0
   // Tracks the last page number reported by the IntersectionObserver (i.e. from scrolling).
   const lastReportedPage = useRef<number>(0)
@@ -586,12 +733,10 @@ function WebtoonView({
     return () => clearTimeout(programmaticScrollTimerRef.current)
   }, [])
 
-  const handleImageLoaded = useCallback((pageNum: number) => {
-    setLoadedPages((prev) => new Set([...prev, pageNum]))
+  const registerPage = useCallback((pageNum: number, el: HTMLElement | null) => {
+    if (el) elRefs.current.set(pageNum, el)
+    else elRefs.current.delete(pageNum)
   }, [])
-
-  // Show spinner if the last visible image hasn't loaded yet
-  const showBottomSpinner = lastPage > 0 && !loadedPages.has(lastPage)
 
   const scaleClass = (() => {
     switch (scaleMode) {
@@ -610,6 +755,7 @@ function WebtoonView({
   return (
     <div
       ref={scrollRef}
+      data-reader-scroll
       className="reader-webtoon-scroll flex flex-col items-center w-full h-full overflow-y-auto"
       onClick={(e) => {
         // Toggle overlay when clicking in the center zone (middle 50% width, middle 33% height)
@@ -621,37 +767,99 @@ function WebtoonView({
         }
       }}
     >
-      {images.map((img) => {
-        const lpHandlers =
-          imageLongPress && img.url ? imageLongPress(img.pageNum, img.url) : undefined
-        return (
-          <div
-            key={img.pageNum}
-            onTouchStart={lpHandlers?.onTouchStart}
-            onTouchMove={lpHandlers?.onTouchMove}
-            onTouchEnd={lpHandlers?.onTouchEnd}
-            onContextMenu={lpHandlers?.onContextMenu}
-          >
-            <MediaElement
-              innerRef={(el: HTMLImageElement | HTMLVideoElement | null) => {
-                if (el) elRefs.current.set(img.pageNum, el)
-                else elRefs.current.delete(img.pageNum)
-              }}
-              image={img}
-              className={scaleClass}
-              dataPage={img.pageNum}
-              onLoad={() => handleImageLoaded(img.pageNum)}
-              onError={() => handleImageLoaded(img.pageNum)}
-            />
-          </div>
-        )
-      })}
-      {showBottomSpinner && (
+      {images.map((img) => (
+        <WebtoonPage
+          key={img.pageNum}
+          image={img}
+          isLast={img.pageNum === lastPage}
+          scaleMode={scaleMode}
+          scaleClass={scaleClass}
+          register={registerPage}
+          imageLongPress={imageLongPress}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Space an unloaded webtoon image takes. Lazy loading only works when pages
+ * below the fold have a height: as 0px boxes they all sit in the viewport and
+ * the browser fetches every original in the gallery.
+ */
+function webtoonPlaceholderStyle(image: ReaderImage, scaleMode: ScaleMode): React.CSSProperties {
+  const { width, height } = image
+  if (!width || !height) return { width: '100%', height: '100vh' }
+  switch (scaleMode) {
+    case 'fit-height':
+      return { width: '100%', height: '100vh' }
+    case 'original':
+      return { width: '100%', height: `${height}px` }
+    case 'fit-width':
+      return { width: '100%', aspectRatio: `${width} / ${height}` }
+    case 'fit-both':
+    default:
+      return { width: '100%', aspectRatio: `${width} / ${height}`, maxHeight: '100vh' }
+  }
+}
+
+interface WebtoonPageProps {
+  image: ReaderImage
+  isLast: boolean
+  scaleMode: ScaleMode
+  scaleClass: string
+  register: (pageNum: number, el: HTMLElement | null) => void
+  imageLongPress?: (pageNum: number, imageUrl: string) => ImageLongPressHandlers
+}
+
+/**
+ * One webtoon page. Its load state is its own, so a settling image re-renders
+ * this page only, not the whole list.
+ */
+function WebtoonPage({
+  image,
+  isLast,
+  scaleMode,
+  scaleClass,
+  register,
+  imageLongPress,
+}: WebtoonPageProps) {
+  const [settled, setSettled] = useState(false)
+  const settle = useCallback(() => setSettled(true), [])
+  const lpHandlers =
+    imageLongPress && image.url ? imageLongPress(image.pageNum, image.url) : undefined
+  // Still-downloading pages size themselves. A video settles on its metadata,
+  // which it only fetches near the screen, and keeps its box afterwards: away
+  // from the screen it drops its source and would shrink to its poster, or to
+  // 300x150 before the poster decodes. iOS Safari has no scroll anchoring, so
+  // each shrink above the viewport jumped the page during a fast scroll.
+  const reserve = image.url != null && (!settled || image.mediaType === 'video')
+  return (
+    <>
+      <div
+        ref={(el) => register(image.pageNum, el)}
+        data-page={image.pageNum}
+        style={reserve ? webtoonPlaceholderStyle(image, scaleMode) : undefined}
+        onTouchStart={lpHandlers?.onTouchStart}
+        onTouchMove={lpHandlers?.onTouchMove}
+        onTouchEnd={lpHandlers?.onTouchEnd}
+        onContextMenu={lpHandlers?.onContextMenu}
+      >
+        <MediaElement
+          image={image}
+          className={scaleClass}
+          loading="lazy"
+          onLoad={settle}
+          onError={settle}
+        />
+      </div>
+      {/* Spinner if the last page hasn't loaded yet */}
+      {isLast && !settled && (
         <div className="flex justify-center py-8">
           <Spinner />
         </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -720,7 +928,13 @@ function DoublePageView({
   const secondImage = readingDirection === 'rtl' ? leftImage : rightImage
 
   const imgClass = getScaleImageClass(scaleMode === 'fit-both' ? 'fit-both' : scaleMode)
-  const hasVideo = leftImage?.mediaType === 'video' || rightImage?.mediaType === 'video'
+  const [firstRetryLayer, setFirstRetryLayer] = useState<HTMLDivElement | null>(null)
+  const [secondRetryLayer, setSecondRetryLayer] = useState<HTMLDivElement | null>(null)
+  // Same rule as SinglePageView: edge zones yield only to visible player controls.
+  const playerMounted = [leftImage, rightImage].some(
+    (candidate) => candidate?.mediaType === 'video' && candidate.url != null,
+  )
+  const edgeZones = !isZoomed && (!playerMounted || !showOverlay)
 
   return (
     <div
@@ -751,15 +965,17 @@ function DoublePageView({
                   onTouchEnd={lp?.onTouchEnd}
                   onContextMenu={lp?.onContextMenu}
                 >
-                  <MediaElement
-                    image={firstImage}
-                    className={imgClass}
-                    draggable={false}
-                    onLoad={onImageLoaded}
-                    onError={onImageError}
-                    onToggleOverlay={onToggleOverlay}
-                    overlayVisible={showOverlay}
-                  />
+                  <RetryLayerContext.Provider value={firstRetryLayer}>
+                    <MediaElement
+                      image={firstImage}
+                      className={imgClass}
+                      draggable={false}
+                      onLoad={onImageLoaded}
+                      onError={onImageError}
+                      onToggleOverlay={onToggleOverlay}
+                      overlayVisible={showOverlay}
+                    />
+                  </RetryLayerContext.Provider>
                 </div>
               )
             })()
@@ -782,15 +998,17 @@ function DoublePageView({
                   onTouchEnd={lp?.onTouchEnd}
                   onContextMenu={lp?.onContextMenu}
                 >
-                  <MediaElement
-                    image={secondImage}
-                    className={imgClass}
-                    draggable={false}
-                    onLoad={onImageLoaded}
-                    onError={onImageError}
-                    onToggleOverlay={onToggleOverlay}
-                    overlayVisible={showOverlay}
-                  />
+                  <RetryLayerContext.Provider value={secondRetryLayer}>
+                    <MediaElement
+                      image={secondImage}
+                      className={imgClass}
+                      draggable={false}
+                      onLoad={onImageLoaded}
+                      onError={onImageError}
+                      onToggleOverlay={onToggleOverlay}
+                      overlayVisible={showOverlay}
+                    />
+                  </RetryLayerContext.Provider>
                 </div>
               )
             })()
@@ -804,7 +1022,7 @@ function DoublePageView({
           <Spinner />
         </div>
       )}
-      {!hasVideo && (
+      {!playerMounted && (
         <>
           {/* Center zone — always visible (even when zoomed) for overlay toggle */}
           <div
@@ -820,8 +1038,12 @@ function DoublePageView({
             }}
             aria-label={t('reader.toggleControls')}
           />
+        </>
+      )}
+      {edgeZones && (
+        <>
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
-          {!isZoomed && readingDirection === 'vertical' && (
+          {readingDirection === 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -849,7 +1071,7 @@ function DoublePageView({
               />
             </>
           )}
-          {!isZoomed && readingDirection !== 'vertical' && (
+          {readingDirection !== 'vertical' && (
             <>
               <div
                 className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -883,6 +1105,11 @@ function DoublePageView({
           )}
         </>
       )}
+      {/* Above the tap zones, one half per page: see RetryLayerContext. */}
+      <div className="pointer-events-none absolute inset-0 flex flex-row">
+        <div ref={setFirstRetryLayer} className="flex h-full w-1/2 items-center justify-center" />
+        <div ref={setSecondRetryLayer} className="flex h-full w-1/2 items-center justify-center" />
+      </div>
     </div>
   )
 }
@@ -1328,14 +1555,17 @@ function ThumbnailStrip({
       )}
       <div
         ref={stripRef}
-        className="reader-thumb-strip flex bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
-        style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}
+        className="reader-thumb-strip flex bg-black/70 px-2 backdrop-blur-sm overflow-x-auto"
+        style={{
+          paddingTop: THUMB_STRIP_PADDING_Y,
+          paddingBottom: `calc(${THUMB_STRIP_PADDING_Y}px + env(safe-area-inset-bottom))`,
+        }}
       >
         <div
           style={{
             width: displayImages.length * THUMB_TOTAL_W,
             position: 'relative',
-            height: 80,
+            height: THUMB_STRIP_CELL_HEIGHT,
             flexShrink: 0,
           }}
         >
@@ -1344,7 +1574,7 @@ function ThumbnailStrip({
             const isActive = img.pageNum === currentPage
             const previewRaw = previews?.[String(img.pageNum)]
             const thumbW = 60
-            const thumbH = 80
+            const thumbH = THUMB_STRIP_CELL_HEIGHT
 
             return (
               <div
@@ -1383,6 +1613,7 @@ export default function Reader({
   onSeekToPage,
   onHideImage,
   initialFavoritedImageIds,
+  backHref,
 }: ReaderProps) {
   const router = useRouter()
   const isProxyMode = downloadStatus === 'proxy_only'
@@ -1503,7 +1734,13 @@ export default function Reader({
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const handleImageLoaded = useCallback(() => {
-    loadedPagesRef.current.add(state.currentPage)
+    // Remember the load only while the page-change effect has not run for this
+    // page yet (load fired first). After that the entry has no consumer and
+    // would outlive this visit, making the next visit to the page skip the
+    // spinner timer even though the image has to load again.
+    if (loadingPageRef.current !== state.currentPage) {
+      loadedPagesRef.current.add(state.currentPage)
+    }
     if (loadingTimerRef.current) {
       clearTimeout(loadingTimerRef.current)
       loadingTimerRef.current = undefined
@@ -1562,11 +1799,14 @@ export default function Reader({
     [setPage, onSeekToPage],
   )
 
-  useSequentialPrefetch(images, state.currentPage, isProxyMode)
+  const prefetchedPages = useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(source, sourceId, state.currentPage, !isProxyMode)
 
   const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
-  const handleBack = useCallback(() => router.back(), [router])
+  // Reader routes have no chrome and no swipe-back, so every exit must resolve
+  // like the back FAB: a no-op router.back() on a one-entry history would trap
+  // the user, and a tab-restored URL must climb instead of leaving the section.
+  const handleBack = useCallback(() => smartBack(router, backHref), [router, backHref])
 
   // Track viewMode in ref so swipe callbacks stay stable across mode changes
   const viewModeRef = useRef(state.viewMode)
@@ -1661,12 +1901,12 @@ export default function Reader({
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (state.isGridOpen) return
-        router.back()
+        handleBack()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [router, state.isGridOpen])
+  }, [handleBack, state.isGridOpen])
 
   // Help overlay
   const [showHelp, setShowHelp] = useState(false)
@@ -1789,7 +2029,7 @@ export default function Reader({
 
       if (remainingImages.length === 0) {
         // All images hidden — leave the reader
-        router.back()
+        handleBack()
         return
       }
 
@@ -1816,7 +2056,7 @@ export default function Reader({
     hiddenPages,
     state.currentPage,
     setPage,
-    router,
+    handleBack,
     onHideImage,
   ])
 
@@ -1871,6 +2111,7 @@ export default function Reader({
   }, [])
 
   const currentImage = images.find((i) => i.pageNum === state.currentPage)
+  const prevImage = images.find((i) => i.pageNum === state.currentPage - 1) ?? null
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
   // When downloading progressively, the current page may not have been imported yet.
@@ -1936,6 +2177,12 @@ export default function Reader({
         {state.viewMode === 'single' && currentImage && (
           <SinglePageView
             image={currentImage}
+            prevImage={prevImage}
+            nextImage={nextImage}
+            // Proxy mode: a prefetch that errored (pToken not in Redis yet) is
+            // also reported as settled, and pre-mounting it would start
+            // ReaderImg's auto-retry backoff before the user arrives (FE-T15).
+            prefetchedPages={isProxyMode ? NO_PAGES : prefetchedPages}
             isLoading={pageLoading}
             onNext={rawNextPage}
             onPrev={rawPrevPage}

@@ -7,6 +7,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, type PageDef } from '@/lib/pageRegistry'
 import { useDragReorder } from '@/hooks/useDragReorder'
 import { persistUiPreferences } from '@/lib/uiPreferences'
+import { Button } from '@/components/ui/button'
 
 const ALL_DASHBOARD_LINKS: PageDef[] = PAGE_REGISTRY.filter((p) => p.dashboard)
 
@@ -166,12 +167,14 @@ export function DashboardLinksConfig() {
 
       {/* Reset */}
       <div className="mt-4 flex justify-end">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleReset}
-          className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors underline underline-offset-2"
+          className="text-xs underline underline-offset-2"
         >
           {t('settings.dashboardLinksReset')}
-        </button>
+        </Button>
       </div>
     </div>
   )

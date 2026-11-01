@@ -1,4 +1,4 @@
-"""Gallery sharing, merge, and version-management endpoints."""
+"""Gallery sharing and version-management endpoints."""
 
 import hashlib
 import secrets
@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import gallery_access_filter, has_gallery_write_access, require_role
@@ -19,14 +19,9 @@ from db.models import (
     Gallery,
     GalleryPermission,
     GalleryShareLink,
-    GalleryTag,
     GalleryVersion,
     Image,
-    ReadProgress,
     User,
-    UserFavorite,
-    UserRating,
-    UserReadingList,
 )
 from services.cas import resolve_blob_path
 
@@ -46,10 +41,6 @@ class ShareCreate(BaseModel):
 
 class VersionCreate(BaseModel):
     gallery_id: int
-
-
-class MergeRequest(BaseModel):
-    source_gallery_id: int
 
 
 async def _gallery(db: AsyncSession, gallery_id: int, auth: dict) -> Gallery:
@@ -238,13 +229,16 @@ async def public_share_image(token: str, image_id: int, db: AsyncSession = Depen
     row = (
         await db.execute(
             select(Image, Blob)
-            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .outerjoin(Blob, Blob.sha256 == Image.blob_sha256)
             .where(Image.id == image_id, Image.gallery_id == gallery.id, Image.visibility == "active")
         )
     ).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
     image, blob = row
+    if blob is None and not image.external_path:
+        raise HTTPException(status_code=404, detail="Image not found")
+    # A pending link page has no blob: serve the row's own external_path.
     path = resolve_blob_path(blob, image.external_path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Image file not found")
@@ -306,95 +300,3 @@ async def link_version(
             db.add(GalleryVersion(gallery_id=item.id, group_id=group_id, linked_by_user_id=auth["user_id"]))
     await db.commit()
     return {"status": "ok", "group_id": str(group_id)}
-
-
-@router.post("/galleries/{target_gallery_id}/merge")
-async def merge_gallery(
-    target_gallery_id: int, body: MergeRequest, auth: dict = Depends(_member), db: AsyncSession = Depends(get_db)
-):
-    if target_gallery_id == body.source_gallery_id:
-        raise HTTPException(status_code=400, detail="A gallery cannot be merged into itself")
-    target = await _gallery(db, target_gallery_id, auth)
-    source = await _gallery(db, body.source_gallery_id, auth)
-    await _require_write(db, target, auth)
-    await _require_write(db, source, auth)
-    max_page = (
-        await db.execute(select(func.max(Image.page_num)).where(Image.gallery_id == target.id))
-    ).scalar_one() or 0
-    source_images = (
-        (await db.execute(select(Image).where(Image.gallery_id == source.id).order_by(Image.page_num))).scalars().all()
-    )
-    for offset, image in enumerate(source_images, start=1):
-        image.gallery_id = target.id
-        image.page_num = max_page + offset
-
-    existing_tag_ids = set(
-        (await db.execute(select(GalleryTag.tag_id).where(GalleryTag.gallery_id == target.id))).scalars().all()
-    )
-    source_tags = (await db.execute(select(GalleryTag).where(GalleryTag.gallery_id == source.id))).scalars().all()
-    for item in source_tags:
-        if item.tag_id not in existing_tag_ids:
-            db.add(GalleryTag(gallery_id=target.id, tag_id=item.tag_id, confidence=item.confidence, source=item.source))
-            existing_tag_ids.add(item.tag_id)
-    target.tags_array = sorted(set(target.tags_array or []) | set(source.tags_array or []))
-
-    for model in (UserFavorite, UserReadingList):
-        source_rows = (await db.execute(select(model).where(model.gallery_id == source.id))).scalars().all()
-        target_users = set(
-            (await db.execute(select(model.user_id).where(model.gallery_id == target.id))).scalars().all()
-        )
-        for row in source_rows:
-            if row.user_id not in target_users:
-                db.add(model(user_id=row.user_id, gallery_id=target.id))
-    source_ratings = (await db.execute(select(UserRating).where(UserRating.gallery_id == source.id))).scalars().all()
-    target_ratings = {
-        row.user_id: row
-        for row in (await db.execute(select(UserRating).where(UserRating.gallery_id == target.id))).scalars().all()
-    }
-    for row in source_ratings:
-        current = target_ratings.get(row.user_id)
-        if current is None:
-            db.add(UserRating(user_id=row.user_id, gallery_id=target.id, rating=row.rating))
-        elif row.rating > current.rating:
-            current.rating = row.rating
-    source_progress = (
-        (await db.execute(select(ReadProgress).where(ReadProgress.gallery_id == source.id))).scalars().all()
-    )
-    target_progress = {
-        row.user_id: row
-        for row in (await db.execute(select(ReadProgress).where(ReadProgress.gallery_id == target.id))).scalars().all()
-    }
-    for row in source_progress:
-        merged_page = max_page + row.last_page
-        current = target_progress.get(row.user_id)
-        if current is None:
-            db.add(
-                ReadProgress(
-                    user_id=row.user_id,
-                    gallery_id=target.id,
-                    last_page=merged_page,
-                    last_image_id=row.last_image_id,
-                    last_read_at=row.last_read_at,
-                )
-            )
-        elif merged_page > current.last_page:
-            current.last_page = merged_page
-            current.last_image_id = row.last_image_id
-            current.last_read_at = max(current.last_read_at, row.last_read_at)
-
-    target.pages = len(source_images) + max_page
-    target.rating = max(target.rating or 0, source.rating or 0)
-    target.favorited = bool(target.favorited or source.favorited)
-    source.deleted_at = datetime.now(UTC)
-    for model in (GalleryTag, UserFavorite, UserReadingList, UserRating, ReadProgress):
-        await db.execute(delete(model).where(model.gallery_id == source.id))
-    await db.commit()
-    await emit_safe(
-        EventType.GALLERY_UPDATED,
-        actor_user_id=auth["user_id"],
-        resource_type="gallery",
-        resource_id=target.id,
-        action="merged",
-        source_gallery_id=source.id,
-    )
-    return {"status": "merged", "gallery_id": target.id, "merged_gallery_id": source.id, "pages": target.pages}

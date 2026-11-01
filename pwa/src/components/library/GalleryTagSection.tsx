@@ -6,6 +6,7 @@ import { Pencil } from 'lucide-react'
 import { TagAutocomplete } from '@/components/TagAutocomplete'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
 import { t } from '@/lib/i18n'
+import { tagNameSearchTerm } from '@/lib/queryParser'
 
 type TagPrediction = { namespace: string; name: string; confidence: number; source: string }
 
@@ -15,6 +16,10 @@ type GalleryTagSectionProps = {
   translations?: Record<string, string>
   tagData: TagPrediction[]
   onUpdateTag: (tag: string, action: 'add' | 'remove') => void
+  /** Tag edits are member-only; viewers get the read-only list. */
+  canEdit?: boolean
+  /** Told when the tag search popover opens or closes, so page-level shortcuts can pause. */
+  onPopoverOpenChange?: (open: boolean) => void
 }
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
@@ -51,15 +56,21 @@ export function GalleryTagSection({
   translations: tagTranslations,
   tagData,
   onUpdateTag,
+  canEdit = true,
+  onPopoverOpenChange,
 }: GalleryTagSectionProps) {
   const router = useRouter()
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
   const [editingTags, setEditingTags] = useState(false)
-  const [tagPopover, setTagPopover] = useState<{
+  const [tagPopover, setTagPopoverState] = useState<{
     anchor: HTMLElement
     tag: string
     source: string
   } | null>(null)
+  const setTagPopover = (next: typeof tagPopover) => {
+    setTagPopoverState(next)
+    onPopoverOpenChange?.(next !== null)
+  }
   const manualTagSet = useMemo(
     () =>
       new Set(
@@ -80,19 +91,21 @@ export function GalleryTagSection({
         <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
           {t('common.tags')}
         </h2>
-        <button
-          onClick={() => setEditingTags(!editingTags)}
-          className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
-            editingTags
-              ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
-              : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
-          }`}
-        >
-          <Pencil size={12} />
-          {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setEditingTags(!editingTags)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+              editingTags
+                ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
+                : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
+            }`}
+          >
+            <Pencil size={12} />
+            {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
+          </button>
+        )}
       </div>
-      {editingTags && (
+      {canEdit && editingTags && (
         <div className="mb-3">
           <TagAutocomplete
             onSelect={(tag) => onUpdateTag(tag, 'add')}
@@ -131,7 +144,7 @@ export function GalleryTagSection({
                             const bare = fullTag.includes(':')
                               ? fullTag.split(':').slice(1).join(':')
                               : fullTag
-                            router.push(`/library?q=${encodeURIComponent(bare)}`)
+                            router.push(`/library?q=${encodeURIComponent(tagNameSearchTerm(bare))}`)
                           } else {
                             setTagPopover({
                               anchor: e.currentTarget,
@@ -200,7 +213,7 @@ export function GalleryTagSection({
                     onClick={(e) => {
                       const src = source
                       if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
-                        router.push(`/library?q=${encodeURIComponent(tag.name)}`)
+                        router.push(`/library?q=${encodeURIComponent(tagNameSearchTerm(tag.name))}`)
                       } else {
                         setTagPopover({ anchor: e.currentTarget, tag: aiFullTag, source: src })
                       }

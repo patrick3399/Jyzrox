@@ -4,6 +4,7 @@ import { t } from '@/lib/i18n'
 import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
 import {
   persistUiPreferences,
+  saveLibraryDensityOverride,
   saveLocalDisplayPreferences,
   type GridDensityPreference,
 } from '@/lib/uiPreferences'
@@ -16,6 +17,10 @@ export function DisplayPreferencesSection() {
 
   function update(patch: Parameters<typeof saveLocalDisplayPreferences>[0]) {
     saveLocalDisplayPreferences(patch)
+    // A new Settings density or column choice replaces the Library's per-device override.
+    if ('gallery_grid_density' in patch || 'gallery_grid_columns' in patch) {
+      saveLibraryDensityOverride(null)
+    }
     void persistUiPreferences(patch)
   }
 

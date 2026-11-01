@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql import column as sql_column
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
 from sqlalchemy.sql.elements import ColumnElement
@@ -58,9 +59,11 @@ from db.models import (
 )
 from services.cas import (
     cas_url,
+    decrement_ref_count,
+    existing_base_thumbs,
+    image_file_url,
     library_dir,
     library_url,
-    thumb_dir,
 )
 from services.cas import thumb_srcset as cas_thumb_srcset
 from services.cas import thumb_url as cas_thumb_url
@@ -71,6 +74,8 @@ from services.gallery_lifecycle import (
     invalidate_sources_cache as _invalidate_sources_cache,
 )
 from services.library_sidecar import SIDECAR_FILENAME
+from services.link_sync import LinkSyncResult, sync_link_gallery
+from services.media_formats import media_type_for_extension
 from services.settings_store import get_toggle as _get_toggle
 from services.site_catalog import get_site_config as _get_gdl_site_config
 
@@ -124,6 +129,7 @@ def _encode_cursor(gallery: Gallery, sort: str) -> str:
     """
     sort_val = {
         "added_at": gallery.added_at.isoformat() if gallery.added_at else "",
+        "content_updated_at": gallery.content_updated_at.isoformat() if gallery.content_updated_at else "",
         "rating": gallery.rating,
         "pages": gallery.pages if gallery.pages is not None else 0,
     }[sort]
@@ -294,7 +300,7 @@ async def list_galleries(
     category: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    sort: Literal["added_at", "rating", "pages"] = Query(default="added_at"),
+    sort: Literal["added_at", "content_updated_at", "rating", "pages"] = Query(default="added_at"),
     cursor: str | None = Query(default=None),
     collection: int | None = Query(default=None),
     auth: dict = Depends(require_auth),
@@ -366,7 +372,12 @@ async def list_galleries(
     if blocked_tags:
         stmt = stmt.where(not_(Gallery.tags_array.overlap(blocked_tags)))
 
-    sort_col = {"added_at": Gallery.added_at, "rating": Gallery.rating, "pages": Gallery.pages}[sort]
+    sort_col = {
+        "added_at": Gallery.added_at,
+        "content_updated_at": Gallery.content_updated_at,
+        "rating": Gallery.rating,
+        "pages": Gallery.pages,
+    }[sort]
 
     if cursor is not None:
         # Keyset pagination — no COUNT(*), no OFFSET
@@ -390,6 +401,19 @@ async def list_galleries(
                 or_(
                     Gallery.added_at < parsed,
                     and_(Gallery.added_at == parsed, Gallery.id < cursor_id),
+                )
+            )
+        elif sort == "content_updated_at":
+            from datetime import datetime as _dt
+
+            try:
+                parsed = _dt.fromisoformat(cursor_val)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor value")
+            stmt = stmt.where(
+                or_(
+                    Gallery.content_updated_at < parsed,
+                    and_(Gallery.content_updated_at == parsed, Gallery.id < cursor_id),
                 )
             )
         elif sort == "rating":
@@ -508,7 +532,7 @@ def _decode_image_cursor(cursor: str) -> dict:
     return json.loads(payload)
 
 
-def _i_browse(img: Image) -> dict:
+def _i_browse(img: Image, thumbs: set[str]) -> dict:
     blob = img.blob
     gallery = img.gallery
     return {
@@ -517,11 +541,10 @@ def _i_browse(img: Image) -> dict:
         "page_num": img.page_num,
         "width": blob.width if blob else None,
         "height": blob.height if blob else None,
-        "thumb_path": _thumb_url(blob),
-        "thumb_srcset": _thumb_srcset(blob),
-        "file_path": _to_url(blob, img.external_path),
+        **_thumb_fields(blob, thumbs),
+        "file_path": image_file_url(blob, img.external_path),
         "thumbhash": blob.thumbhash if blob else None,
-        "media_type": blob.media_type if blob else "image",
+        "media_type": _media_type(img),
         "added_at": img.added_at.isoformat() if img.added_at else None,
         "source": gallery.source if gallery else None,
         "source_id": gallery.source_id if gallery else None,
@@ -535,6 +558,9 @@ async def _apply_image_filters(stmt, *, source, gallery_id, auth, db, category=N
     """Apply common image browser filters (source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
     stmt = stmt.where(Image.visibility == "active")
+    # Pending link pages have no thumbnail or dimensions: keep them out of the
+    # grid, the timeline scrubber and the time range alike.
+    stmt = stmt.where(Image.blob_sha256.is_not(None))
 
     if gallery_id is not None:
         stmt = stmt.where(Image.gallery_id == gallery_id)
@@ -731,9 +757,10 @@ async def browse_images(
         next_cursor = _encode_image_cursor(last)
 
     fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images_out])
+    thumbs = await existing_base_thumbs(img.blob_sha256 for img in images_out)
 
     return {
-        "images": [_i_browse(img) for img in images_out],
+        "images": [_i_browse(img, thumbs) for img in images_out],
         "next_cursor": next_cursor,
         "has_next": has_next,
         "favorited_image_ids": sorted(fav_ids),
@@ -782,7 +809,7 @@ async def list_artists(
     sort_col = {
         "gallery_count": desc(func.count()),
         "total_pages": desc(func.coalesce(func.sum(Gallery.pages), 0)),
-        "latest": desc(func.max(Gallery.added_at)),
+        "latest": desc(func.max(Gallery.content_updated_at)),
     }[sort]
     base = base.order_by(sort_col).offset(page * limit).limit(limit)
 
@@ -931,6 +958,7 @@ async def list_artist_images(
         .options(selectinload(Image.blob))
     )
     rows = (await db.execute(stmt)).all()
+    thumbs = await existing_base_thumbs(row[0].blob_sha256 for row in rows)
 
     images = []
     for row in rows:
@@ -947,13 +975,13 @@ async def list_artist_images(
                 "filename": img.filename,
                 "width": blob.width if blob else None,
                 "height": blob.height if blob else None,
-                "file_path": _to_url(blob, img.external_path),
-                "thumb_path": _thumb_url(blob),
-                "thumb_srcset": _thumb_srcset(blob),
-                "file_size": blob.file_size if blob else None,
+                "file_path": image_file_url(blob, img.external_path),
+                **_thumb_fields(blob, thumbs),
+                "file_size": _file_size(img),
                 "file_hash": blob.sha256 if blob else None,
-                "media_type": blob.media_type if blob else "image",
+                "media_type": _media_type(img),
                 "duration": blob.duration if blob else None,
+                "pending": _is_pending(img),
                 "gallery_title": gallery_title,
                 "gallery_source": gallery_source,
                 "gallery_source_id": gallery_source_id,
@@ -988,7 +1016,7 @@ async def source_stats(
             Gallery.import_mode,
             func.count(func.distinct(Gallery.id)).label("gallery_count"),
             func.count(Image.id).label("file_count"),
-            func.coalesce(func.sum(Blob.file_size), 0).label("disk_size"),
+            func.coalesce(func.sum(func.coalesce(Blob.file_size, Image.source_size)), 0).label("disk_size"),
         )
         .outerjoin(Image, Image.gallery_id == Gallery.id)
         .outerjoin(Blob, Blob.sha256 == Image.blob_sha256)
@@ -1032,7 +1060,7 @@ async def list_files(
     total = (await db.execute(select(func.count()).select_from(Gallery).where(*filters))).scalar_one()
 
     image_counts = func.count(Image.id).label("file_count")
-    disk_size = func.coalesce(func.sum(Blob.file_size), 0).label("disk_size")
+    disk_size = func.coalesce(func.sum(func.coalesce(Blob.file_size, Image.source_size)), 0).label("disk_size")
     stmt = (
         select(Gallery, image_counts, disk_size)
         .outerjoin(Image, Image.gallery_id == Gallery.id)
@@ -1141,6 +1169,7 @@ async def list_gallery_files(
         )
         db_images = (await db.execute(img_stmt)).scalars().all()
         img_map = {img.filename: img for img in db_images if img.filename is not None}
+    thumbs = await existing_base_thumbs(img.blob_sha256 for img in img_map.values())
 
     files = []
     for f in sorted(raw_files, key=lambda x: x["filename"]):
@@ -1153,10 +1182,9 @@ async def list_gallery_files(
                 "width": blob.width if blob else None,
                 "height": blob.height if blob else None,
                 "file_size": f["file_size"],
-                "media_type": blob.media_type if blob else "image",
-                "thumb_path": _thumb_url(blob),
-                "thumb_srcset": _thumb_srcset(blob),
-                "file_path": _to_url(blob, img.external_path if img else None),
+                "media_type": _media_type(img) if img else "image",
+                **_thumb_fields(blob, thumbs),
+                "file_path": image_file_url(blob, img.external_path if img else None),
                 "is_symlink": f["is_symlink"],
                 "is_broken": f["is_broken"],
                 "symlink_target": f["symlink_target"],
@@ -1286,43 +1314,23 @@ async def batch_galleries(
     elif body.action == "add_to_collection":
         if body.collection_id is None:
             raise HTTPException(status_code=400, detail="collection_id required for add_to_collection")
-        from db.models import Collection, CollectionGallery
+        from core.events import EventType, emit_safe
+        from db.models import Collection
+        from services.collection_membership import add_galleries_to_collection
 
         collection = await db.get(Collection, body.collection_id)
         if not collection or collection.user_id != auth["user_id"]:
             raise HTTPException(status_code=404, detail="Collection not found")
 
-        max_pos_result = (
-            await db.execute(
-                select(func.coalesce(func.max(CollectionGallery.position), -1)).where(
-                    CollectionGallery.collection_id == body.collection_id
-                )
-            )
-        ).scalar_one()
-
-        added = 0
-        for i, gid in enumerate(gallery_ids):
-            existing = (
-                await db.execute(
-                    select(CollectionGallery).where(
-                        CollectionGallery.collection_id == body.collection_id,
-                        CollectionGallery.gallery_id == gid,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing:
-                continue
-            cg = CollectionGallery(
-                collection_id=body.collection_id,
-                gallery_id=gid,
-                position=max_pos_result + 1 + i,
-            )
-            db.add(cg)
-            added += 1
-
-        collection.updated_at = datetime.now(UTC)
+        added, denied = await add_galleries_to_collection(db, collection, gallery_ids, auth)
         await db.commit()
-        return {"status": "ok", "affected": added}
+        await emit_safe(
+            EventType.COLLECTION_UPDATED,
+            actor_user_id=auth["user_id"],
+            resource_type="collection",
+            resource_id=body.collection_id,
+        )
+        return {"status": "ok", "affected": added, "denied": denied}
 
     elif body.action == "add_tags":
         if not body.tags:
@@ -1673,6 +1681,27 @@ async def get_gallery_images(
     }
 
 
+@router.post("/galleries/{source}/{source_id}/sync")
+async def sync_gallery_with_source(
+    source: str,
+    source_id: str,
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reconcile a link-mode gallery with its folder before it is read.
+
+    Anyone who can read the gallery may call this: the sync mirrors the folder
+    on the system's behalf and is not a user edit (ADR 0014). The sync only
+    stats files (ADR 0015); hashing the new pages is queued by the service.
+    """
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    if g.import_mode != "link" or not g.source_path:
+        return LinkSyncResult(status="not_link", pages=g.pages).as_dict()
+
+    result = await sync_link_gallery(g.id, redis=get_redis())
+    return result.as_dict()
+
+
 @router.get("/galleries/{source}/{source_id}/hidden")
 async def list_hidden_images(
     source: str,
@@ -1695,7 +1724,12 @@ async def list_hidden_images(
         .all()
     )
     fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
-    return {"gallery_id": g.id, "images": [_i(img) for img in images], "favorited_image_ids": sorted(fav_ids)}
+    thumbs = await existing_base_thumbs(img.blob_sha256 for img in images)
+    return {
+        "gallery_id": g.id,
+        "images": [_i(img, thumbs) for img in images],
+        "favorited_image_ids": sorted(fav_ids),
+    }
 
 
 @router.post("/images/{image_id}/favorite")
@@ -2422,7 +2456,7 @@ async def find_similar_images(
     image_id: int,
     threshold: int = Query(default=10, ge=0, le=32),
     limit: int = Query(default=20, ge=1, le=100),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Find visually similar images by perceptual hash Hamming distance.
@@ -2434,10 +2468,17 @@ async def find_similar_images(
     32 = very loose match.
     """
     img_row = (
-        await db.execute(select(Image).where(Image.id == image_id).options(selectinload(Image.blob)))
+        await db.execute(
+            select(Image)
+            .join(Gallery, Image.gallery_id == Gallery.id)
+            .where(Image.id == image_id, gallery_access_filter(auth))
+            .options(selectinload(Image.blob))
+        )
     ).scalar_one_or_none()
     if not img_row:
         raise HTTPException(status_code=404, detail="Image not found")
+    if _is_pending(img_row):
+        raise HTTPException(status_code=409, detail="Image is still being processed")
     if not img_row.blob or not img_row.blob.phash:
         raise HTTPException(status_code=400, detail="Image has no perceptual hash")
 
@@ -2455,11 +2496,12 @@ async def find_similar_images(
     ]
 
     max_quarter_dist = threshold // 4  # floor(T/4) — pigeonhole guarantee
+    params: dict = {"phash_int": phash_int_val, "image_id": image_id, "threshold": threshold}
 
     if max_quarter_dist > 2 or threshold > 11:
         # For loose thresholds the neighbor sets become large (>137 per quarter);
         # fall back to full scan on phash_int with exact bit_count filter.
-        stmt = sql_text("""
+        candidates = sql_text("""
             SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                    i.external_path, b.phash,
                    bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
@@ -2468,20 +2510,7 @@ async def find_similar_images(
             WHERE b.phash_int IS NOT NULL
               AND i.id != :image_id
               AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
-            ORDER BY distance ASC
-            LIMIT :limit
         """)
-        results = (
-            await db.execute(
-                stmt,
-                {
-                    "phash_int": phash_int_val,
-                    "image_id": image_id,
-                    "threshold": threshold,
-                    "limit": limit,
-                },
-            )
-        ).all()
     else:
         # Phase 1: generate Hamming neighborhoods for each quarter
         neighbors = _hamming_neighbors_all(quarters, max_quarter_dist)
@@ -2490,7 +2519,7 @@ async def find_similar_images(
         # become counterproductive — fall back to the full scan path instead.
         total_neighbors = sum(len(s) for s in neighbors)
         if total_neighbors > 10000:
-            stmt = sql_text("""
+            candidates = sql_text("""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                        i.external_path, b.phash,
                        bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
@@ -2499,30 +2528,11 @@ async def find_similar_images(
                 WHERE b.phash_int IS NOT NULL
                   AND i.id != :image_id
                   AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
-                ORDER BY distance ASC
-                LIMIT :limit
             """)
-            results = (
-                await db.execute(
-                    stmt,
-                    {
-                        "phash_int": phash_int_val,
-                        "image_id": image_id,
-                        "threshold": threshold,
-                        "limit": limit,
-                    },
-                )
-            ).all()
         else:
             # Phase 2: indexed pre-filter — OR across all four quarter columns,
             # then exact bit_count check on the surviving candidates only.
             conditions = []
-            params: dict = {
-                "image_id": image_id,
-                "phash_int": phash_int_val,
-                "threshold": threshold,
-                "limit": limit,
-            }
             for qi, neighbor_set in enumerate(neighbors):
                 param_name = f"q{qi}_neighbors"
                 conditions.append(f"b.phash_q{qi} = ANY(:{param_name})")
@@ -2530,7 +2540,7 @@ async def find_similar_images(
 
             where_prefilter = " OR ".join(conditions)
 
-            stmt = sql_text(f"""
+            candidates = sql_text(f"""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                        i.external_path, b.phash,
                        bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
@@ -2540,10 +2550,30 @@ async def find_similar_images(
                   AND i.id != :image_id
                   AND ({where_prefilter})
                   AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
-                ORDER BY distance ASC
-                LIMIT :limit
             """)
-            results = (await db.execute(stmt, params)).all()
+
+    # Candidates carry CAS URLs (capabilities, see docs/security-model.md BR-006),
+    # so drop the ones from galleries the caller cannot read before ranking.
+    sim = candidates.columns(
+        sql_column("id"),
+        sql_column("gallery_id"),
+        sql_column("filename"),
+        sql_column("sha256"),
+        sql_column("extension"),
+        sql_column("external_path"),
+        sql_column("phash"),
+        sql_column("distance"),
+    ).subquery("sim")
+    results = (
+        await db.execute(
+            select(sim)
+            .join(Gallery, Gallery.id == sim.c.gallery_id)
+            .where(gallery_access_filter(auth))
+            .order_by(sim.c.distance.asc())
+            .limit(limit),
+            params,
+        )
+    ).all()
 
     def _row_to_url(r) -> str:
         if r.external_path:
@@ -2621,6 +2651,25 @@ async def restore_excluded_blob(
     if not blob:
         raise HTTPException(status_code=404, detail="Excluded blob not found")
     await db.delete(blob)
+    # A link page whose hash was excluded keeps its row as visibility='excluded'
+    # so the next folder sync does not register the file again. Dropping the
+    # exclusion must drop that row too, otherwise the file stays hidden forever.
+    excluded_rows = (
+        (
+            await db.execute(
+                select(Image.id).where(
+                    Image.gallery_id == gallery_id,
+                    Image.blob_sha256 == sha256,
+                    Image.visibility == "excluded",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if excluded_rows:
+        await db.execute(sa_delete(Image).where(Image.id.in_(excluded_rows)))
+        await decrement_ref_count(sha256, db, amount=len(excluded_rows))
     await db.commit()
     return {"status": "ok"}
 
@@ -2697,31 +2746,35 @@ async def _build_updated_response(
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _to_url(blob, external_path: str | None = None) -> str | None:
-    """Convert an image-bound Blob to its nginx-served URL."""
-    if not blob:
-        return None
-    if external_path:
-        return library_url(external_path)
-    if blob.storage == "external" and blob.external_path:
-        # Compatibility for callers/tests without an Image binding. Migrated
-        # production Image rows carry their own external_path.
-        return library_url(blob.external_path)
-    return cas_url(blob.sha256, blob.extension)
+def _is_pending(img: Image) -> bool:
+    """True for a link page that is registered but not hashed yet."""
+    return img.blob_sha256 is None and img.external_path is not None
 
 
-def _thumb_url(blob) -> str | None:
-    """Return the 160px thumbnail URL for a blob."""
-    if not blob or not blob.sha256:
-        return None
-    if not (thumb_dir(blob.sha256) / "thumb_160.webp").exists():
-        return None
-    return cas_thumb_url(blob.sha256)
+def _pending_media_type(img: Image) -> str:
+    """Media type of a page without a blob, derived from its file extension."""
+    return media_type_for_extension(img.filename or img.external_path or "") or "image"
 
 
-def _thumb_srcset(blob) -> str | None:
-    """Return all responsive thumbnail candidates when a base thumb exists."""
-    return cas_thumb_srcset(blob.sha256) if _thumb_url(blob) else None
+def _media_type(img: Image) -> str:
+    blob = img.blob
+    return blob.media_type if blob else _pending_media_type(img)
+
+
+def _file_size(img: Image) -> int | None:
+    blob = img.blob
+    return blob.file_size if blob else img.source_size
+
+
+def _thumb_fields(blob, thumbs: set[str]) -> dict:
+    """Return a blob's thumbnail URLs, or None when its base thumb is missing.
+
+    ``thumbs`` comes from ``existing_base_thumbs`` for the whole response, so
+    serializing a page does no filesystem I/O.
+    """
+    if blob is None or blob.sha256 not in thumbs:
+        return {"thumb_path": None, "thumb_srcset": None}
+    return {"thumb_path": cas_thumb_url(blob.sha256), "thumb_srcset": cas_thumb_srcset(blob.sha256)}
 
 
 async def _get_or_404_by_source(db: AsyncSession, source: str, source_id: str, auth: dict | None = None) -> Gallery:
@@ -2779,6 +2832,7 @@ def _g(
         "missing_pages": (max(g.source_pages - (g.pages or 0), 0) if g.source_pages is not None else None),
         "posted_at": g.posted_at.isoformat() if g.posted_at else None,
         "added_at": g.added_at.isoformat() if g.added_at else None,
+        "content_updated_at": g.content_updated_at.isoformat() if g.content_updated_at else None,
         "rating": g.rating,
         "favorited": False,
         "is_favorited": is_favorited,
@@ -2798,7 +2852,7 @@ def _g(
     }
 
 
-def _i(img: Image) -> dict:
+def _i(img: Image, thumbs: set[str]) -> dict:
     blob = img.blob
     return {
         "id": img.id,
@@ -2807,14 +2861,14 @@ def _i(img: Image) -> dict:
         "filename": img.filename,
         "width": blob.width if blob else None,
         "height": blob.height if blob else None,
-        "file_path": _to_url(blob, img.external_path),
-        "thumb_path": _thumb_url(blob),
-        "thumb_srcset": _thumb_srcset(blob),
-        "file_size": blob.file_size if blob else None,
+        "file_path": image_file_url(blob, img.external_path),
+        **_thumb_fields(blob, thumbs),
+        "file_size": _file_size(img),
         "file_hash": blob.sha256 if blob else None,
-        "media_type": blob.media_type if blob else "image",
+        "media_type": _media_type(img),
         "duration": blob.duration if blob else None,
         "thumbhash": blob.thumbhash if blob else None,
+        "pending": _is_pending(img),
         "visibility": img.visibility,
         "source_item_id": img.source_item_id,
         "source_item_url": img.source_item_url,
@@ -2844,9 +2898,10 @@ async def _images_with_source_items(db: AsyncSession, images: list[Image]) -> li
     if row_ids:
         items = (await db.execute(select(GallerySourceItem).where(GallerySourceItem.id.in_(row_ids)))).scalars().all()
         item_map = {item.id: item for item in items}
+    thumbs = await existing_base_thumbs(image.blob_sha256 for image in images)
     result = []
     for image in images:
-        data = _i(image)
+        data = _i(image, thumbs)
         item = item_map.get(image.source_item_row_id)
         if item:
             match = _re.search(r":p(\d+)$", image.source_item_id or "")

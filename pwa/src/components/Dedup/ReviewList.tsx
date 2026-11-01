@@ -8,6 +8,7 @@ import { RelationshipCard } from './RelationshipCard'
 import { ImageModal } from './ImageModal'
 import { useDedupReview, useDedupSettings } from '@/hooks/useDedup'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui/button'
 
 const FILTERS = [
   { key: '', label: () => t('dedup.filterAll') },
@@ -116,14 +117,10 @@ export function ReviewList() {
           </div>
           {hasMore && (
             <div className="flex justify-center pt-2">
-              <button
-                onClick={loadMore}
-                disabled={isLoading}
-                className="px-4 py-2 rounded text-sm font-medium bg-vault-card border border-vault-border text-vault-text-muted hover:text-vault-text transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
+              <Button variant="secondary" onClick={loadMore} disabled={isLoading}>
                 {isLoading && <LoadingSpinner size="sm" />}
                 {t('dedup.loadMore')}
-              </button>
+              </Button>
             </div>
           )}
         </>

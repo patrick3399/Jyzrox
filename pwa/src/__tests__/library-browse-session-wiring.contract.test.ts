@@ -32,7 +32,7 @@ describe('Library browse-session page wiring contract', () => {
     expect(reading).toMatch(/refresh\(/)
 
     const batchSection =
-      source.match(/\{selectMode && selectedIds\.size > 0[\s\S]*?\{batchTagMode &&/)?.[0] ?? ''
+      source.match(/\{selectMode && selectedIds\.size > 0[\s\S]*?<Dialog\s+open=\{batchTagMode/)?.[0] ?? ''
     const batchMutationCount = batchSection.match(/api\.library\.batchGalleries\(/g)?.length ?? 0
     const batchRefreshCount = batchSection.match(/refresh\(/g)?.length ?? 0
     expect(batchMutationCount).toBeGreaterThan(0)
@@ -89,5 +89,9 @@ describe('Library browse-session page wiring contract', () => {
     expect(source).toContain('handledRestoreKeyRef')
     expect(source).toMatch(/restoreInstruction\.identityKey[\s\S]{0,120}state\.identityKey/)
     expect(source).toMatch(/acknowledgeRestore\(restoreInstruction\.key\)/)
+  })
+
+  it('clamps the restored anchor offset to the anchor card height', () => {
+    expect(source).toMatch(/restoreAnchorOffset\(\s*pending\.offset,\s*rect\.height\s*\)/)
   })
 })

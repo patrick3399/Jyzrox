@@ -5,8 +5,10 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useAdminGuard } from '@/hooks/useAdminGuard'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui/button'
 
 export default function TagDatabaseSettingsPage() {
   useLocale()
@@ -31,20 +33,24 @@ export default function TagDatabaseSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.tagDatabase')}</h1>
+      <PageHeader title={t('settingsCategory.tagDatabase')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5">
           <p className="text-xs text-vault-text-muted mt-4 mb-4">{t('settings.tagDatabaseDesc')}</p>
           <div>
-            <button
+            <Button
+              variant="ghost"
+              size="md"
+              className="border border-blue-700/50 bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
               onClick={handleImportEhtag}
               disabled={isImporting}
-              className="px-4 py-2 bg-blue-900/30 border border-blue-700/50 text-blue-400 hover:bg-blue-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isImporting ? t('settings.importingEhtag') : t('settings.importEhtag')}
-            </button>
-            <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.importEhtagDesc')}</p>
+            </Button>
+            <p className="text-[10px] text-vault-text-muted mt-1">
+              {t('settings.importEhtagDesc')}
+            </p>
           </div>
         </div>
       </div>

@@ -11,16 +11,18 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import delete, select, text
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, text
 
 from core.auth import require_auth, require_role
+from core.client_identity import browser_headers, pixiv_app_headers
 from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import BlobRelationship, Credential
+from db.models import BlobRelationship
+from services.browser_http import browser_client
 from services.cache import dismiss_system_alert, get_system_alerts, push_system_alert
-from services.credential import get_credential, list_credentials, set_credential
+from services.credential import ACCOUNT_PATTERN, delete_account, get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
 from services.settings_store import (
     get_float_setting as _get_float_setting,
@@ -45,27 +47,33 @@ _member = require_role("member")
 # ── Models ───────────────────────────────────────────────────────────
 
 
-class EhCookieRequest(BaseModel):
+class _AccountScoped(BaseModel):
+    """Save requests may name the account to write; omitted means the active account."""
+
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
+
+
+class EhCookieRequest(_AccountScoped):
     ipb_member_id: str
     ipb_pass_hash: str
     sk: str | None = None
     igneous: str | None = None
 
 
-class EhLoginRequest(BaseModel):
+class EhLoginRequest(_AccountScoped):
     username: str
     password: str
 
 
-class PixivTokenRequest(BaseModel):
+class PixivTokenRequest(_AccountScoped):
     refresh_token: str
 
 
-class PixivCookieRequest(BaseModel):
+class PixivCookieRequest(_AccountScoped):
     phpsessid: str
 
 
-class PixivOAuthCallbackRequest(BaseModel):
+class PixivOAuthCallbackRequest(_AccountScoped):
     code: str
     code_verifier: str
 
@@ -83,19 +91,19 @@ class EhSitePreference(BaseModel):
     use_ex: bool
 
 
-class GenericCookieRequest(BaseModel):
+class GenericCookieRequest(_AccountScoped):
     source: str
     cookies: dict[str, str]
 
 
-class SiteCredentialRequest(BaseModel):
+class SiteCredentialRequest(_AccountScoped):
     source: str
     cookies: str | None = None
     username: str | None = None
     password: str | None = None
 
 
-class SaucenaoApiKeyRequest(BaseModel):
+class SaucenaoApiKeyRequest(_AccountScoped):
     api_key: str
 
 
@@ -108,7 +116,7 @@ async def list_credentials_endpoint(_: dict = Depends(_admin)):
     all_creds = await list_credentials()
     result = {}
     for c in all_creds:
-        result[c["source"]] = {"configured": True}
+        result[c["source"]] = {"configured": True, "account": c.get("account"), "accounts": c.get("accounts", 1)}
     return result
 
 
@@ -118,7 +126,7 @@ async def eh_login_with_password(
     _: dict = Depends(_admin),
 ):
     """Login to E-Hentai with username/password to auto-obtain cookies (EhViewer-style)."""
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+    async with browser_client(follow_redirects=True, timeout=30) as client:
         resp = await client.post(
             "https://forums.e-hentai.org/index.php?act=Login&CODE=01",
             data={
@@ -128,11 +136,12 @@ async def eh_login_with_password(
                 "CookieDate": "1",
                 "temporary_https": "off",
             },
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                "Referer": "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
-                "Origin": "https://forums.e-hentai.org",
-            },
+            headers=browser_headers(
+                "document",
+                site="same-origin",
+                referer="https://forums.e-hentai.org/index.php?act=Login&CODE=00",
+                origin="https://forums.e-hentai.org",
+            ),
         )
 
     ipb_member_id = resp.cookies.get("ipb_member_id")
@@ -141,16 +150,14 @@ async def eh_login_with_password(
         raise HTTPException(status_code=400, detail="Login failed: incorrect username or password")
 
     # Fetch sk cookie from main EH page
-    async with httpx.AsyncClient(
+    async with browser_client(
         cookies={"ipb_member_id": ipb_member_id, "ipb_pass_hash": ipb_pass_hash},
         follow_redirects=True,
         timeout=15,
     ) as client:
         resp2 = await client.get(
             "https://e-hentai.org/",
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            },
+            headers=browser_headers("document", site="none"),
         )
     sk = resp2.cookies.get("sk", "")
 
@@ -159,16 +166,14 @@ async def eh_login_with_password(
     # Try to obtain igneous cookie for ExHentai access
     igneous = None
     try:
-        async with httpx.AsyncClient(
+        async with browser_client(
             cookies=cookies,
             follow_redirects=True,
             timeout=15,
         ) as ex_client:
             ex_resp = await ex_client.get(
                 "https://exhentai.org/",
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                },
+                headers=browser_headers("document", site="none"),
             )
             igneous = ex_resp.cookies.get("igneous")
             if not igneous:
@@ -199,7 +204,7 @@ async def eh_login_with_password(
         logger.error("EH cookie validation failed: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to validate cookies with E-Hentai") from None
 
-    await set_credential("ehentai", json.dumps(cookies), "cookie")
+    await set_credential("ehentai", json.dumps(cookies), "cookie", account=req.account)
     return {"status": "ok", "account": account, "use_ex": use_ex}
 
 
@@ -218,7 +223,7 @@ async def set_eh_credentials(
     if req.igneous:
         cookies["igneous"] = req.igneous
 
-    await set_credential("ehentai", json.dumps(cookies), "cookie")
+    await set_credential("ehentai", json.dumps(cookies), "cookie", account=req.account)
 
     # Try to fetch account info but don't fail if it doesn't work
     account: dict = {}
@@ -241,9 +246,9 @@ async def set_pixiv_credentials(
     try:
         import asyncio as _asyncio
 
-        import pixivpy3
+        from services.pixiv_client import new_app_api
 
-        api = pixivpy3.AppPixivAPI()
+        api = new_app_api()
         await _asyncio.to_thread(api.auth, refresh_token=req.refresh_token)
         detail = await _asyncio.to_thread(api.user_detail, api.user_id)
         username = detail.user.name
@@ -251,7 +256,7 @@ async def set_pixiv_credentials(
         logger.error("Pixiv auth failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Pixiv auth failed: {exc}")
 
-    await set_credential("pixiv", req.refresh_token, "oauth_token")
+    await set_credential("pixiv", req.refresh_token, "oauth_token", account=req.account)
     return {"status": "ok", "username": username}
 
 
@@ -304,13 +309,10 @@ async def pixiv_oauth_callback(
             "redirect_uri": "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback",
             "include_policy": "true",
         }
-        headers = {
-            "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-            "App-OS-Version": "11",
-            "App-OS": "android",
-        }
         async with httpx.AsyncClient() as client:
-            resp = await client.post("https://oauth.secure.pixiv.net/auth/token", data=data, headers=headers)
+            resp = await client.post(
+                "https://oauth.secure.pixiv.net/auth/token", data=data, headers=pixiv_app_headers()
+            )
             resp.raise_for_status()
             token_data = resp.json()
             refresh_token = token_data.get("refresh_token")
@@ -322,7 +324,7 @@ async def pixiv_oauth_callback(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Pixiv OAuth failed: {exc}")
 
-    await set_credential("pixiv", refresh_token, "oauth_token")
+    await set_credential("pixiv", refresh_token, "oauth_token", account=req.account)
     return {"status": "ok", "username": username}
 
 
@@ -354,12 +356,8 @@ async def set_pixiv_cookie_credentials(
         # Step 1: Hit the OAuth URL with the provided PHPSESSID cookie
         # follow_redirects=False is crucial here to capture the 302 response
         cookies = {"PHPSESSID": req.phpsessid}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-
-        async with httpx.AsyncClient(follow_redirects=False) as client:
-            resp = await client.get(auth_url, cookies=cookies, headers=headers)
+        async with browser_client(follow_redirects=False) as client:
+            resp = await client.get(auth_url, cookies=cookies, headers=browser_headers("document", site="none"))
 
             # The expected success response is a 302 redirect back to the app-api.pixiv.net URL
             if resp.status_code != 302:
@@ -388,13 +386,10 @@ async def set_pixiv_cookie_credentials(
             "redirect_uri": redirect_uri,
             "include_policy": "true",
         }
-        headers_exchange = {
-            "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-            "App-OS-Version": "11",
-            "App-OS": "android",
-        }
         async with httpx.AsyncClient() as client:
-            resp = await client.post("https://oauth.secure.pixiv.net/auth/token", data=data, headers=headers_exchange)
+            resp = await client.post(
+                "https://oauth.secure.pixiv.net/auth/token", data=data, headers=pixiv_app_headers()
+            )
             resp.raise_for_status()
             token_data = resp.json()
             refresh_token = token_data.get("refresh_token")
@@ -408,7 +403,7 @@ async def set_pixiv_cookie_credentials(
         raise HTTPException(status_code=400, detail=f"Pixiv cookie auth failed: {exc}")
 
     # Step 3: Save the credential
-    await set_credential("pixiv", refresh_token, "oauth_token")
+    await set_credential("pixiv", refresh_token, "oauth_token", account=req.account)
     return {"status": "ok", "username": username}
 
 
@@ -424,7 +419,7 @@ async def set_saucenao_credential(
     api_key = req.api_key.strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="API key is required")
-    await set_credential("saucenao", api_key, "api_key")
+    await set_credential("saucenao", api_key, "api_key", account=req.account)
     return {"status": "ok"}
 
 
@@ -438,7 +433,7 @@ async def set_generic_cookie(
         raise HTTPException(status_code=400, detail="Source name is required")
     if not req.cookies:
         raise HTTPException(status_code=400, detail="At least one cookie is required")
-    await set_credential(req.source.strip().lower(), json.dumps(req.cookies), "cookie")
+    await set_credential(req.source.strip().lower(), json.dumps(req.cookies), "cookie", account=req.account)
     return {"status": "ok", "source": req.source.strip().lower()}
 
 
@@ -464,7 +459,7 @@ async def set_site_credential(req: SiteCredentialRequest, _: dict = Depends(_adm
     if not fragment:
         raise HTTPException(status_code=400, detail="Cookies or username is required")
 
-    await set_credential(source, json.dumps(fragment), "gdl_fragment")
+    await set_credential(source, json.dumps(fragment), "gdl_fragment", account=req.account)
     return {"status": "ok", "source": source}
 
 
@@ -492,14 +487,12 @@ async def delete_credential_endpoint(
     source: str,
     _: dict = Depends(_admin),
 ):
-    """Delete stored credential for a source."""
-    async with async_session() as session:
-        result = await session.execute(select(Credential).where(Credential.source == source))
-        cred = result.scalar_one_or_none()
-        if not cred:
-            raise HTTPException(status_code=404, detail="No credential found")
-        await session.delete(cred)
-        await session.commit()
+    """Delete the stored credential of a source that has a single account."""
+    outcome = await delete_account(source)
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="No credential found")
+    if outcome == "active_in_use":
+        raise HTTPException(status_code=409, detail="This source has several accounts; delete them one by one")
     return {"status": "ok"}
 
 
@@ -1138,6 +1131,9 @@ async def set_rate_limit_override(
         await redis.set("rate_limit:override:unlocked", "1")
     else:
         await redis.delete("rate_limit:override:unlocked")
+    # The download dashboard serves a 3s cached snapshot that embeds boost_mode;
+    # drop it so the next read reflects this toggle instead of the old state.
+    await redis.delete("dashboard:snapshot")
     return {"override_active": req.unlocked}
 
 

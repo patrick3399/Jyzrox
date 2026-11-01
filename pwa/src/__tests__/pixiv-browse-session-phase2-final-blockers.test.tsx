@@ -1,11 +1,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type SessionItem =
   | { kind: 'illust'; illust: Record<string, unknown> }
   | { kind: 'user'; preview: Record<string, unknown> }
+
+type SessionPatch = {
+  updateItem: (item: SessionItem, identityKey: string) => SessionItem | null
+}
 
 type GridProps = {
   items: SessionItem[]
@@ -27,16 +31,22 @@ const testState = vi.hoisted(() => {
   const refresh = vi.fn(async () => undefined)
   const retry = vi.fn(async () => undefined)
   const replacePage = vi.fn()
+  const patchItems = vi.fn<(patch: SessionPatch) => void>()
   const updateView = vi.fn()
   const acknowledgeRestore = vi.fn()
   return {
+    // Router calls; same-page identity commits must not reach these.
     push: vi.fn(),
     replace: vi.fn(),
+    // window.history writes (commitBrowseUrl).
+    pushState: vi.fn(),
+    replaceState: vi.fn(),
     checkpoint,
     loadMore,
     refresh,
     retry,
     replacePage,
+    patchItems,
     updateView,
     acknowledgeRestore,
     search: '',
@@ -60,6 +70,7 @@ const testState = vi.hoisted(() => {
       refresh,
       retry,
       replacePage,
+      patchItems,
       updateView,
       acknowledgeRestore,
       restoreInstruction: null as null | {
@@ -184,6 +195,8 @@ function user(id: number): SessionItem {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.spyOn(window.history, 'pushState').mockImplementation(testState.pushState)
+  vi.spyOn(window.history, 'replaceState').mockImplementation(testState.replaceState)
   testState.search = ''
   testState.gridProps = undefined
   testState.gridHistory = []
@@ -204,6 +217,10 @@ beforeEach(() => {
   Object.defineProperty(window, 'scrollY', { configurable: true, value: 100 })
   window.scrollTo = vi.fn()
   window.scrollBy = vi.fn()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('Pixiv Phase 2 final blockers', () => {
@@ -266,7 +283,7 @@ describe('Pixiv Phase 2 final blockers', () => {
     )
   })
 
-  it('does not flatten a multi-page buffer for bookmark/follow mutations and refreshes at loaded depth', async () => {
+  it('does not flatten a multi-page buffer for bookmark/follow mutations and patches the items in place', async () => {
     const first = illust(1)
     const second = illust(2)
     Object.assign(testState.session.state, {
@@ -279,17 +296,32 @@ describe('Pixiv Phase 2 final blockers', () => {
     const view = render(<PixivPage />)
     fireEvent.click(screen.getAllByRole('button', { name: '☆' })[0])
 
+    expect(testState.patchItems).toHaveBeenCalledTimes(1)
+    expect(testState.refresh).not.toHaveBeenCalled()
     expect(testState.replacePage).not.toHaveBeenCalled()
-    expect(testState.refresh).toHaveBeenCalledTimes(1)
+    const bookmarkPatch = testState.patchItems.mock.calls[0][0]
+    expect(bookmarkPatch.updateItem(illust(1), 'pixiv:a')).toMatchObject({
+      kind: 'illust',
+      illust: { id: 1, is_bookmarked: true },
+    })
+    expect(bookmarkPatch.updateItem(second, 'pixiv:a')).toBe(second)
 
     Object.assign(testState.session.state, { items: [user(9)], pages: [[user(9)]] })
     view.rerender(<PixivPage />)
     fireEvent.click(screen.getByRole('button', { name: 'pixiv.unfollow' }))
-    await waitFor(() => expect(testState.refresh).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(testState.patchItems).toHaveBeenCalledTimes(2))
+    expect(testState.refresh).not.toHaveBeenCalled()
     expect(testState.replacePage).not.toHaveBeenCalled()
+    const followPatch = testState.patchItems.mock.calls[1][0]
+    expect(followPatch.updateItem(user(9), 'pixiv:a')).toMatchObject({
+      kind: 'user',
+      preview: { user: { id: 9, is_followed: false } },
+    })
 
+    // The kernel's default refresh still re-fetches at loaded depth; only an
+    // explicit { depth: 'first' } narrows it to one page.
     expect(sessionSource).toMatch(
-      /kind:\s*'refresh'[\s\S]{0,120}targetDepth:\s*Math\.max\(1,\s*current\.pages\.length\)/,
+      /kind:\s*'refresh'[\s\S]{0,120}targetDepth:\s*options\?\.depth\s*===\s*'first'\s*\?\s*1\s*:\s*Math\.max\(1,\s*current\.pages\.length\)/,
     )
   })
 
@@ -347,12 +379,14 @@ describe('Pixiv Phase 2 final blockers', () => {
       render(<PixivPage />)
       transition()
 
-      const used = expectedMethod === 'push' ? testState.push : testState.replace
-      const unused = expectedMethod === 'push' ? testState.replace : testState.push
+      const used = expectedMethod === 'push' ? testState.pushState : testState.replaceState
+      const unused = expectedMethod === 'push' ? testState.replaceState : testState.pushState
 
       expect(testState.checkpoint).toHaveBeenCalledTimes(1)
       expect(used).toHaveBeenCalledTimes(1)
       expect(unused).not.toHaveBeenCalled()
+      expect(testState.push).not.toHaveBeenCalled()
+      expect(testState.replace).not.toHaveBeenCalled()
       expect(testState.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(
         used.mock.invocationCallOrder[0],
       )

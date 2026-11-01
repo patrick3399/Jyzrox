@@ -128,6 +128,9 @@ async def select_cover_images(
             .where(
                 Image.gallery_id.in_(ids),
                 Image.visibility == "active",
+                # A pending link page has no blob, so it cannot be a cover
+                # (no thumbnail to render): fall through to the first hashed page.
+                Image.blob_sha256.is_not(None),
                 image_not_excluded_clause(),
             )
             .subquery()

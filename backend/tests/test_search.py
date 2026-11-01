@@ -896,6 +896,50 @@ class TestSearchNameOnlyTag:
             assert "Character Rem" not in titles
 
 
+class TestSearchMultiWordTag:
+    """Tags whose name contains spaces (e.g. E-Hentai "cosplayer:jun ye tako")."""
+
+    def test_tag_token_namespaced_quoted_value_keeps_spaces_and_drops_quotes(self):
+        """cosplayer:"jun ye tako" must become the stored tag string, quotes removed."""
+        from routers.search import _tag_token, _tokenize_query
+
+        tokens = _tokenize_query('cosplayer:"jun ye tako" source:ehentai')
+
+        assert tokens == ['cosplayer:"jun ye tako"', "source:ehentai"]
+        assert _tag_token(tokens[0]) == "cosplayer:jun ye tako"
+
+    def test_tag_token_bare_quoted_phrase_drops_quotes(self):
+        from routers.search import _tag_token
+
+        assert _tag_token('"jun ye tako"') == "jun ye tako"
+
+    def test_tag_token_unquoted_is_unchanged(self):
+        from routers.search import _tag_token
+
+        assert _tag_token("female:rem") == "female:rem"
+        assert _tag_token("rem") == "rem"
+
+    async def test_search_quoted_bare_phrase_matches_as_one_term_not_literal_quotes(self, client, db_session):
+        """A quoted phrase is one search term; the quotes must not reach the pattern.
+
+        Uses the text-metadata half of the bare-term path, which runs on SQLite.
+        """
+        await _insert_gallery(db_session, source="mw_test", source_id="mw1", title="Jun Ye Tako Black Swan")
+        await _insert_gallery(db_session, source="mw_test", source_id="mw2", title="Tako Ye Jun Reversed")
+
+        resp = await client.get("/api/search/", params={"q": '"jun ye tako" source:mw_test'})
+
+        assert resp.status_code == 200
+        titles = [item["title"] for item in resp.json()["items"]]
+        assert titles == ["Jun Ye Tako Black Swan"]
+
+    def test_tag_token_quoted_exclude_value_drops_quotes(self):
+        """-female:"big breasts" excludes the stored tag string, not a quoted variant."""
+        from routers.search import _tag_token
+
+        assert _tag_token('-female:"big breasts"'[1:]) == "female:big breasts"
+
+
 class TestSearchCollectionFilter:
     """collection:N returns only galleries belonging to that collection."""
 

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Users, RefreshCw } from 'lucide-react'
 import { useInfiniteArtists } from '@/hooks/useArtists'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateArtistRowHeight } from '@/lib/gridRowHeight'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
@@ -14,6 +15,9 @@ import { AppImage } from '@/components/AppImage'
 import { getSourceStyle } from '@/lib/galleryUtils'
 import { useInfiniteFollowedArtists, useCheckArtistUpdates } from '@/hooks/useFollowedArtists'
 import { toast } from 'sonner'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // Column count inferred from CSS breakpoints:
 // grid-cols-3 sm:4 md:5 lg:7 xl:8 2xl:10
@@ -118,7 +122,7 @@ function ArtistsPageInner() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-vault-text">{t('artists.title')}</h1>
+      <PageHeader title={t('artists.title')} spacing="none" />
 
       {/* View Mode Tabs */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -151,7 +155,9 @@ function ArtistsPageInner() {
         </div>
 
         {viewMode === 'followed' && (
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={async () => {
               try {
                 await checkUpdates()
@@ -161,11 +167,10 @@ function ArtistsPageInner() {
               }
             }}
             disabled={isChecking}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-vault-accent text-vault-text-muted hover:text-white text-sm transition-colors"
           >
             <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
             {isChecking ? t('artists.checkingUpdates') : t('artists.checkUpdates')}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -209,13 +214,16 @@ function ArtistsPageInner() {
           {isLoading ? (
             <div className="text-center py-12 text-vault-text-secondary">{t('common.loading')}</div>
           ) : !artists.length ? (
-            <div className="text-center py-12 text-vault-text-secondary">{t('artists.noArtists')}</div>
+            <div className="text-center py-12 text-vault-text-secondary">
+              {t('artists.noArtists')}
+            </div>
           ) : (
             <VirtualGrid
               items={artists}
               columns={{ base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }}
               gap={8}
-              estimateHeight={210}
+              estimateHeight={estimateArtistRowHeight}
+              measureRows={false}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onLoadMore={loadMoreArtists}
@@ -259,7 +267,7 @@ function ArtistsPageInner() {
                     <p className="font-medium text-sm text-vault-text truncate">
                       {a.artist_name || a.artist_id}
                     </p>
-                    <p className="text-xs text-vault-text-secondary">
+                    <p className="text-xs text-vault-text-secondary truncate">
                       {t('artists.galleryCount', { count: String(a.gallery_count) })}
                       {' · '}
                       {t('artists.totalPages', { count: String(a.total_pages) })}
@@ -286,7 +294,8 @@ function ArtistsPageInner() {
               items={followedArtists}
               columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
               gap={16}
-              estimateHeight={250}
+              estimateHeight={estimateArtistRowHeight}
+              measureRows={false}
               onLoadMore={loadMoreFollowed}
               hasMore={!followedReachingEnd}
               isLoading={followedLoadingMore}
@@ -348,14 +357,16 @@ function ArtistsPageInner() {
 
 export default function ArtistsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <LoadingSpinner size="lg" />
-        </div>
-      }
-    >
-      <ArtistsPageInner />
-    </Suspense>
+    <PageContainer>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <LoadingSpinner size="lg" />
+          </div>
+        }
+      >
+        <ArtistsPageInner />
+      </Suspense>
+    </PageContainer>
   )
 }

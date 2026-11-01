@@ -89,3 +89,30 @@ describe('useUnifiedSearch URL ownership', () => {
     expect(navigation.replace).not.toHaveBeenCalled()
   })
 })
+
+describe('useUnifiedSearch clearSearch', () => {
+  it('empties the input and the committed query in the same tick', () => {
+    navigation.search = 'q=artist%3Afirst'
+    const { result } = renderHook(() => useUnifiedSearch())
+    expect(result.current.inputValue).toBe('artist:first')
+
+    act(() => result.current.clearSearch())
+
+    expect(result.current.inputValue).toBe('')
+    expect(result.current.rawQuery).toBe('')
+    advance(500)
+    expect(navigation.replace).toHaveBeenCalledWith('/library', { scroll: false })
+  })
+
+  it('does not let a still-pending typed query come back after clearing', () => {
+    navigation.search = 'q=initial'
+    const { result } = renderHook(() => useUnifiedSearch())
+
+    act(() => result.current.handleInputChange('initial typed'))
+    act(() => result.current.clearSearch())
+    advance(300)
+
+    expect(result.current.inputValue).toBe('')
+    expect(result.current.rawQuery).toBe('')
+  })
+})

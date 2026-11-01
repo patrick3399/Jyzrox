@@ -6,6 +6,7 @@ import useSWR from 'swr'
 import { api, type NovelFile } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { Button } from '@/components/ui/button'
 
 const draftKey = (path: string, baseSha: string) => `novel:draft:${path}:${baseSha}`
 
@@ -115,26 +116,28 @@ export function Editor({
         >
           <span className="text-vault-text">{t('novels.draftRestored')}</span>
           <span className="flex gap-2">
-            <button
-              type="button"
-              className="rounded border border-vault-accent px-2 py-1 text-xs text-vault-text"
+            <Button
+              variant="secondary"
+              size="sm"
+              className="text-xs border-vault-accent"
               onClick={() => {
                 setContent(draftFound)
                 setDraftFound(null)
               }}
             >
               {t('novels.restoreDraft')}
-            </button>
-            <button
-              type="button"
-              className="rounded border border-vault-border px-2 py-1 text-xs text-vault-text-muted"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="text-xs"
               onClick={() => {
                 clearDraft()
                 setDraftFound(null)
               }}
             >
               {t('novels.discardDraft')}
-            </button>
+            </Button>
           </span>
         </div>
       )}
@@ -165,21 +168,21 @@ export function Editor({
       />
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          className="rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:text-vault-text"
+        <Button
+          variant="secondary"
+          size="md"
           onClick={onCancel}
         >
           {t('novels.cancel')}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="primary"
+          size="md"
           disabled={saving}
-          className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           onClick={handleSave}
         >
           {t('novels.save')}
-        </button>
+        </Button>
       </div>
     </div>
   )

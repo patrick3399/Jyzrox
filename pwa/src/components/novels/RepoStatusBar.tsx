@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useProfile } from '@/hooks/useProfile'
 import { hasRole } from '@/lib/pageRegistry'
+import { Button } from '@/components/ui/button'
 
 export function RepoStatusBar() {
   const { data, mutate } = useSWR('novel-status', () => api.novels.status())
@@ -59,25 +60,27 @@ export function RepoStatusBar() {
         {data.ahead > 0 && (
           <span data-testid="unpushed-count">{t('novels.unpushed', { count: data.ahead })}</span>
         )}
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
+          className="text-xs"
           disabled={busy}
-          className="inline-flex items-center gap-1 rounded border border-vault-border px-2 py-1 hover:border-vault-accent disabled:opacity-50"
           onClick={handleSync}
         >
           <RefreshCw className={`size-3 ${busy ? 'animate-spin' : ''}`} />
           {t('novels.sync')}
-        </button>
+        </Button>
         {isAdmin && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
+            className="text-red-400 hover:border-red-500 text-xs"
             disabled={busy}
-            className="inline-flex items-center gap-1 rounded border border-vault-border px-2 py-1 text-red-400 hover:border-red-500 disabled:opacity-50"
             onClick={handleReset}
           >
             <RotateCcw className="size-3" />
             {t('novels.reset')}
-          </button>
+          </Button>
         )}
       </div>
     </div>

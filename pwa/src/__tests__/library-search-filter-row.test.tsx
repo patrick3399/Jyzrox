@@ -1,0 +1,423 @@
+/**
+ * Library header + one-row search/filter bar.
+ */
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const emptyParsed = {
+  tags: [],
+  nameOnlyTags: [],
+  excludeTags: [],
+  title: null,
+  source: null,
+  rating: null,
+  favorited: false,
+  readingList: false,
+  collection: null,
+  artistId: null,
+  category: null,
+  importMode: null,
+  sort: null,
+} as Record<string, unknown>
+
+const search = vi.hoisted(() => ({
+  inputValue: '',
+  parsed: {} as Record<string, unknown>,
+  setFilter: vi.fn(),
+  clearSearch: vi.fn(),
+  clearFilters: vi.fn(),
+  commitSearch: vi.fn(),
+  handleInputChange: vi.fn(),
+  setSelectMode: vi.fn(),
+  selectMode: false,
+  total: 0,
+}))
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('@/lib/i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/i18n')>()),
+  t: (key: string, params?: Record<string, string | number>) =>
+    params ? `${key} ${Object.values(params).join(' ')}` : key,
+}))
+vi.mock('@/hooks/useUnifiedSearch', () => ({
+  useUnifiedSearch: () => ({
+    rawQuery: search.inputValue,
+    inputValue: search.inputValue,
+    parsed: search.parsed,
+    setFilter: search.setFilter,
+    commitSearch: search.commitSearch,
+    clearSearch: search.clearSearch,
+    clearFilters: search.clearFilters,
+    handleInputChange: search.handleInputChange,
+    selectMode: search.selectMode,
+    setSelectMode: search.setSelectMode,
+    selectedIds: new Set<number>(),
+    setSelectedIds: vi.fn(),
+  }),
+}))
+vi.mock('@/hooks/useLibraryBrowseSession', () => ({
+  useLibraryBrowseSession: () => ({
+    state: {
+      identityKey: 'library:A',
+      items: [],
+      total: search.total,
+      status: 'idle',
+      error: null,
+      hasMore: false,
+    },
+    loadMore: vi.fn(),
+    refresh: vi.fn(),
+    retry: vi.fn(),
+    checkpoint: vi.fn(),
+    updateView: vi.fn(),
+    restoreInstruction: null,
+    acknowledgeRestore: vi.fn(),
+  }),
+}))
+vi.mock('@/hooks/useProfile', () => ({
+  useProfile: () => ({ data: { username: 'member', role: 'member' } }),
+}))
+vi.mock('@/hooks/useGalleries', () => ({
+  useGalleryCategories: () => ({ data: { categories: [] } }),
+  useLibrarySources: () => ({ data: [] }),
+}))
+vi.mock('@/hooks/useCollections', () => ({
+  useCollections: () => ({ data: { collections: [] } }),
+}))
+vi.mock('@/hooks/useDatasets', () => ({
+  useDatasets: () => ({ data: { datasets: [] } }),
+  useAddDatasetMembers: () => ({ trigger: vi.fn() }),
+}))
+vi.mock('@/hooks/useDisplayPreferences', () => ({
+  useDisplayPreferences: () => ({ gallery_grid_density: 'comfortable', gallery_grid_columns: 4 }),
+}))
+vi.mock('@/hooks/useGridKeyboard', () => ({
+  useGridKeyboard: () => ({ focusedIndex: null, registerElement: vi.fn() }),
+}))
+vi.mock('@/components/VirtualGrid', () => ({ VirtualGrid: () => null }))
+vi.mock('@/components/GalleryCard', () => ({ LibraryGalleryCard: () => null }))
+vi.mock('@/components/GalleryListCard', () => ({ GalleryListCard: () => null }))
+vi.mock('@/lib/api', () => ({ api: { library: {} } }))
+
+import LibraryPage from '@/app/library/page'
+
+const PLACEHOLDER = 'library.searchPlaceholder'
+const removeButtons = () => screen.queryAllByRole('button', { name: /^library\.removeFilter/ })
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  search.inputValue = ''
+  search.parsed = { ...emptyParsed }
+  search.selectMode = false
+  search.total = 0
+})
+
+describe('Library header', () => {
+  it('test_header_holds_select_button_and_count_while_view_toggle_lives_in_the_search_block', () => {
+    search.total = 1234
+    render(<LibraryPage />)
+
+    const heading = screen.getByRole('heading', { name: 'library.title' })
+    const header = heading.closest('header') as HTMLElement
+    expect(header).not.toBeNull()
+    // The view toggle moved out of the header into the sticky search block.
+    expect(within(header).queryByTitle('browse.gridView')).toBeNull()
+    expect(within(header).queryByTitle('browse.listView')).toBeNull()
+    expect(within(header).queryByTestId('library-view-inline')).toBeNull()
+    const block = screen.getByTestId('library-search-block')
+    const inline = within(block).getByTestId('library-view-inline')
+    expect(within(inline).getByRole('radio', { name: 'browse.gridView' })).toBeInTheDocument()
+    expect(within(inline).getByRole('radio', { name: 'browse.listView' })).toBeInTheDocument()
+
+    const select = within(header).getByRole('button', { name: 'library.select' })
+    expect(select).toHaveAttribute('aria-pressed', 'false')
+    expect(header).toHaveTextContent('library.galleries')
+
+    fireEvent.click(select)
+    expect(search.setSelectMode).toHaveBeenCalled()
+  })
+
+  it('test_select_button_reflects_pressed_state_when_select_mode_is_on', () => {
+    search.selectMode = true
+    render(<LibraryPage />)
+
+    expect(screen.getByRole('button', { name: 'library.select' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+})
+
+describe('Library filter chips', () => {
+  it('test_no_chip_row_without_active_filters', () => {
+    render(<LibraryPage />)
+
+    expect(removeButtons()).toHaveLength(0)
+    expect(screen.queryByText('library.clearAllFilters')).toBeNull()
+    expect(screen.getByRole('button', { name: 'library.filters' })).toBeInTheDocument()
+  })
+
+  it('test_filter_badge_counts_active_filters_except_the_toggles', () => {
+    search.parsed = {
+      ...emptyParsed,
+      source: 'pixiv',
+      rating: 4,
+      favorited: true,
+      readingList: true,
+    }
+    render(<LibraryPage />)
+
+    const button = screen.getByRole('button', { name: 'library.filters' })
+    expect(within(button).getByText('2')).toBeInTheDocument()
+    expect(removeButtons()).toHaveLength(2)
+  })
+
+  it('test_filter_badge_absent_without_active_filters', () => {
+    render(<LibraryPage />)
+
+    const button = screen.getByRole('button', { name: 'library.filters' })
+    expect(button).toHaveTextContent('')
+  })
+
+  it('test_chip_remove_clears_only_that_filter', () => {
+    search.parsed = { ...emptyParsed, source: 'local', importMode: 'link', rating: 4 }
+    render(<LibraryPage />)
+    expect(removeButtons()).toHaveLength(2) // source+import pair is one chip
+
+    const sourceRemove = removeButtons()[0] // source precedes rating in chip order
+    fireEvent.click(sourceRemove)
+
+    expect(search.setFilter).toHaveBeenCalledTimes(2)
+    expect(search.setFilter).toHaveBeenCalledWith('source', null)
+    expect(search.setFilter).toHaveBeenCalledWith('import', null)
+    expect(search.setFilter).not.toHaveBeenCalledWith('rating', null)
+    expect(search.clearFilters).not.toHaveBeenCalled()
+  })
+
+  it('test_clear_all_hidden_with_single_chip_and_shown_with_two', () => {
+    search.parsed = { ...emptyParsed, rating: 4, favorited: true, readingList: true }
+    const view = render(<LibraryPage />)
+    expect(screen.queryByText('library.clearAllFilters')).toBeNull()
+    view.unmount()
+
+    search.parsed = { ...emptyParsed, source: 'pixiv', rating: 4 }
+    render(<LibraryPage />)
+    fireEvent.click(screen.getByText('library.clearAllFilters'))
+    expect(search.clearFilters).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Library favorite and reading-list toggles', () => {
+  const FAVORITES = 'library.favoritesOnly'
+  const READING_LIST = 'library.readingListOnly'
+
+  it('test_toggles_sit_between_search_input_and_filter_button', () => {
+    render(<LibraryPage />)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    const favorites = screen.getByRole('button', { name: FAVORITES })
+    const readingList = screen.getByRole('button', { name: READING_LIST })
+    const filters = screen.getByRole('button', { name: 'library.filters' })
+
+    const follows = (a: Element, b: Element) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+    expect(follows(input, favorites)).toBeTruthy()
+    expect(follows(favorites, readingList)).toBeTruthy()
+    expect(follows(readingList, filters)).toBeTruthy()
+  })
+
+  it('test_off_toggle_turns_only_its_own_filter_on', () => {
+    render(<LibraryPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: FAVORITES }))
+    expect(search.setFilter).toHaveBeenCalledTimes(1)
+    expect(search.setFilter).toHaveBeenLastCalledWith('favorited', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: READING_LIST }))
+    expect(search.setFilter).toHaveBeenCalledTimes(2)
+    expect(search.setFilter).toHaveBeenLastCalledWith('rl', 'true')
+  })
+
+  it('test_on_toggle_clears_only_its_own_filter', () => {
+    search.parsed = { ...emptyParsed, favorited: true, readingList: true }
+    render(<LibraryPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: READING_LIST }))
+
+    expect(search.setFilter).toHaveBeenCalledTimes(1)
+    expect(search.setFilter).toHaveBeenCalledWith('rl', null)
+  })
+
+  it('test_toggle_pressed_state_follows_the_parsed_query', () => {
+    search.parsed = { ...emptyParsed, favorited: true }
+    render(<LibraryPage />)
+
+    expect(screen.getByRole('button', { name: FAVORITES })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: READING_LIST })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+
+  it('test_active_toggles_add_no_chip_or_filter_badge', () => {
+    search.parsed = { ...emptyParsed, favorited: true, readingList: true }
+    render(<LibraryPage />)
+
+    expect(removeButtons()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'library.filters' })).toHaveTextContent('')
+  })
+
+  it('test_pointer_press_does_not_move_focus_so_the_scroll_reveal_stays_unlocked', () => {
+    render(<LibraryPage />)
+
+    // The search block locks its scroll reveal while it contains focus.
+    expect(fireEvent.mouseDown(screen.getByRole('button', { name: FAVORITES }))).toBe(false)
+    expect(fireEvent.mouseDown(screen.getByRole('button', { name: READING_LIST }))).toBe(false)
+  })
+
+  it('test_filter_panel_no_longer_holds_the_favorite_and_reading_list_checkboxes', () => {
+    const { container } = render(<LibraryPage />)
+
+    expect(container.querySelectorAll('#library-filter-panel input[type="checkbox"]')).toHaveLength(0)
+  })
+})
+
+describe('Library view controls placement', () => {
+  const follows = (a: Element, b: Element) =>
+    a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+
+  it('test_view_controls_sit_left_of_the_search_input_apart_from_the_filters', () => {
+    render(<LibraryPage />)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    const favorites = screen.getByRole('button', { name: 'library.favoritesOnly' })
+
+    for (const testId of [
+      'library-view-menu-button',
+      'library-view-inline',
+      'library-density-button',
+    ]) {
+      const control = screen.getByTestId(testId)
+      expect(follows(control, input)).toBeTruthy()
+      // Not inside the filter group's wrapper.
+      expect(favorites.parentElement?.contains(control)).toBe(false)
+    }
+  })
+
+  it('test_focusing_the_input_collapses_the_view_controls_too', () => {
+    render(<LibraryPage />)
+    const control = screen.getByTestId('library-view-menu-button')
+    const wrapper = () => control.closest('[aria-hidden="true"]')
+
+    expect(wrapper()).toBeNull()
+
+    fireEvent.focus(screen.getByPlaceholderText(PLACEHOLDER))
+
+    expect(wrapper()).not.toBeNull()
+    expect(wrapper()).toHaveAttribute('inert')
+  })
+})
+
+describe('Library search focus behaviour', () => {
+  it('test_focus_hides_toolbar_buttons_and_shows_cancel', () => {
+    render(<LibraryPage />)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    const buttons = () =>
+      ['library.favoritesOnly', 'library.readingListOnly', 'library.filters'].map((name) =>
+        screen.getByRole('button', { name, hidden: true }),
+      )
+
+    for (const button of buttons()) expect(button.closest('[aria-hidden="true"]')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'common.cancel' })).toBeNull()
+
+    fireEvent.focus(input)
+
+    for (const button of buttons()) {
+      expect(button.closest('[aria-hidden="true"]')).not.toBeNull()
+      expect(button).toHaveAttribute('tabindex', '-1')
+    }
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toBeInTheDocument()
+  })
+
+  it('test_cancel_clears_text', () => {
+    search.inputValue = 'rem'
+    render(<LibraryPage />)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    act(() => input.focus())
+    expect(document.activeElement).toBe(input)
+
+    const cancel = screen.getByRole('button', { name: 'common.cancel' })
+    fireEvent.click(cancel)
+
+    expect(search.clearSearch).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).not.toBe(input)
+  })
+
+  it('test_enter_commits_and_blurs', () => {
+    search.inputValue = 'rem source:pixiv'
+    render(<LibraryPage />)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    act(() => input.focus())
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(search.commitSearch).toHaveBeenCalledWith('rem source:pixiv')
+    expect(document.activeElement).not.toBe(input)
+  })
+
+  it('test_typing_calls_handle_input_change_with_text', () => {
+    render(<LibraryPage />)
+    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER), { target: { value: 'ram' } })
+
+    expect(search.handleInputChange).toHaveBeenCalledWith('ram')
+  })
+})
+
+describe('Library filter panel', () => {
+  it('test_filter_button_expands_the_inline_panel_instead_of_opening_a_dialog', () => {
+    const { container } = render(<LibraryPage />)
+    const button = screen.getByRole('button', { name: 'library.filters' })
+    const panel = container.querySelector('#library-filter-panel')
+
+    expect(panel).not.toBeNull()
+    expect(button).toHaveAttribute('aria-controls', 'library-filter-panel')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    // Collapsed: the controls stay in the DOM but out of the tab order.
+    expect(panel).toHaveAttribute('inert')
+
+    fireEvent.click(button)
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(panel).not.toHaveAttribute('inert')
+    expect(panel?.querySelectorAll('select').length).toBeGreaterThan(0)
+
+    fireEvent.click(button)
+
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    expect(panel).toHaveAttribute('inert')
+  })
+
+  it('test_syntax_help_stays_hidden_until_its_toggle_in_the_panel_is_pressed', () => {
+    render(<LibraryPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
+    expect(screen.queryByText(/library\.syntaxTagSearch/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /library\.syntaxHelp/ }))
+
+    expect(screen.getByText(/library\.syntaxTagSearch/)).toBeInTheDocument()
+  })
+})
+
+describe('Library search block scroll reveal', () => {
+  it('test_search_block_is_sticky_below_the_status_bar_and_holds_search_panel_and_chips', () => {
+    const { container } = render(<LibraryPage />)
+    const block = screen.getByTestId('library-search-block')
+
+    expect(block.className).toMatch(/(^|\s)sticky(\s|$)/)
+    expect(block.style.top).toBe('var(--sat)')
+    expect(block).toContainElement(screen.getByPlaceholderText(PLACEHOLDER))
+    expect(block).toContainElement(container.querySelector('#library-filter-panel') as HTMLElement)
+    // At the top of the page nothing is slid away.
+    expect(block).not.toHaveAttribute('data-scroll-hidden')
+    expect(block.style.transform).toBe('')
+  })
+})

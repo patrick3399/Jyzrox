@@ -8,7 +8,9 @@ partial success, can_handle, resolve_output_dir, parse_metadata.
 
 import asyncio
 import json
+import os
 import signal
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -187,9 +189,9 @@ class TestGalleryDlCanHandle:
         root.
 
         Regression: returning the root (``base_path``) means finalize()/cleanup()
-        rmtree of the download dir wipes the entire /data/gallery tree — deleting
+        rmtree of the download dir wipes the entire /data/download_temp tree — deleting
         the staging dirs of any concurrently downloading gallery (e.g. an EH
-        gallery under /data/gallery/ehentai/<gid>/). See EH gid 3746208 incident.
+        gallery under /data/download_temp/ehentai/<gid>/). See EH gid 3746208 incident.
         """
         from plugins.builtin.gallery_dl.source import GalleryDlPlugin
 
@@ -228,8 +230,8 @@ class TestGalleryDlDownloadHappyPath:
     async def test_download_success_returns_done_status(self, tmp_path):
         """When gallery-dl exits 0 with JYZROX_FILE lines, status=done is returned."""
         lines = [
-            b"JYZROX_FILE\t/data/gallery/test/img001.jpg\tabc123\n",
-            b"JYZROX_FILE\t/data/gallery/test/img002.jpg\tdef456\n",
+            b"JYZROX_FILE\t/data/download_temp/test/img001.jpg\tabc123\n",
+            b"JYZROX_FILE\t/data/download_temp/test/img002.jpg\tdef456\n",
         ]
         proc = _make_fake_process(lines, returncode=0)
 
@@ -253,6 +255,28 @@ class TestGalleryDlDownloadHappyPath:
 
         assert result.status == "done"
         assert result.downloaded == 2
+
+    async def test_download_subprocess_env_loads_happy_eyeballs(self, tmp_path):
+        """gallery-dl must start with the Happy Eyeballs sitecustomize on PYTHONPATH."""
+        from plugins.builtin.gallery_dl._subprocess_env import SITE_DIR
+
+        proc = _make_fake_process([b"JYZROX_FILE\t/data/x.jpg\tabc123\n"], returncode=0)
+        with (
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc) as create_proc,
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
+            patch("pathlib.Path.mkdir"),
+        ):
+            from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+            await GalleryDlPlugin().download(url="https://example.com/gallery/1", dest_dir=tmp_path, credentials={})
+
+        env = create_proc.call_args.kwargs["env"]
+        assert env["PYTHONPATH"].split(os.pathsep)[0] == str(SITE_DIR)
+        assert env["PYTHONUNBUFFERED"] == "1"
 
     async def test_download_calls_pid_callback(self, tmp_path):
         """When pid_callback is provided, it should be called with the process PID."""
@@ -470,6 +494,50 @@ class TestGalleryDlDownloadErrors:
         assert captured_cmd[idx2 + 1] == "60"
         assert captured_kwargs["start_new_session"] is True
 
+    async def test_print_format_without_brace_or_space_is_rejected_as_a_field_name(self, tmp_path):
+        """gallery-dl's --Print reads a format with no "{" and no space as a
+        metadata field name. "skip:JYZROX_SKIP" therefore printed the value of
+        a field called JYZROX_SKIP ("None") instead of the marker, so skipped
+        files were never counted and an all-archived re-download ended as 0/0.
+        """
+        from plugins.builtin.gallery_dl.source import (
+            _PRINT_SKIP_PREFIX,
+            GalleryDlPlugin,
+            _DownloadState,
+            _read_stdout,
+        )
+
+        proc = _make_fake_process([], returncode=0)
+        captured_cmd = []
+
+        async def _capture_exec(*cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return proc
+
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_capture_exec),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
+            patch("pathlib.Path.mkdir"),
+        ):
+            await GalleryDlPlugin().download(url="https://example.com/x", dest_dir=tmp_path, credentials={})
+
+        formats = [captured_cmd[i + 1] for i, arg in enumerate(captured_cmd) if arg == "--Print"]
+        by_event = dict(fmt.split(":", 1) for fmt in formats)
+        assert set(by_event) == {"after", "skip", "prepare"}
+        for event, fmt in by_event.items():
+            assert "{" in fmt or " " in fmt, f"{event}: gallery-dl would print the field named {fmt!r}"
+        assert by_event["skip"].startswith(_PRINT_SKIP_PREFIX)
+
+        # The line gallery-dl prints for that format still counts as a skip.
+        state = _DownloadState()
+        rendered = by_event["skip"].replace("{filename}", "001").encode() + b"\n"
+        await _read_stdout(_make_fake_process([rendered], returncode=0), state, on_file=None, on_progress=None)
+        assert state.skipped_count == 1
+
 
 # ---------------------------------------------------------------------------
 # GalleryDlPlugin.parse_metadata
@@ -567,8 +635,8 @@ class TestGalleryDlParseMetadata:
 class TestConfigGeneration:
     """Tests for _build_gallery_dl_config — config file generation logic."""
 
-    async def test_subscription_mode_sets_archive_mode_without_initial_skip(self, tmp_path):
-        """Initial subscription downloads use archive-mode but no abort skip before a success cutoff exists."""
+    async def test_subscription_mode_writes_archive_per_file_without_initial_skip(self, tmp_path):
+        """Initial subscription downloads write the archive per file and set no abort skip before a success cutoff exists."""
         from unittest.mock import MagicMock, patch
 
         from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
@@ -584,7 +652,7 @@ class TestConfigGeneration:
 
         config = json.loads(path.read_text())
         assert "skip" not in config["extractor"]
-        assert config["extractor"].get("archive-mode") == "memory"
+        assert "archive-mode" not in config["extractor"]
 
     async def test_manual_mode_does_not_set_skip(self, tmp_path):
         """Default (manual) job_context should NOT set skip or archive-mode in extractor config."""
@@ -604,6 +672,76 @@ class TestConfigGeneration:
         config = json.loads(path.read_text())
         assert "skip" not in config["extractor"]
         assert "archive-mode" not in config["extractor"]
+
+    @staticmethod
+    async def _build_with_params(tmp_path, svc, params_by_source, **kwargs):
+        from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+        config_file = tmp_path / "gallery-dl.json"
+        mock_settings = MagicMock()
+        mock_settings.data_gallery_path = str(tmp_path / "gallery")
+        mock_settings.gdl_archive_dsn = "postgresql://test/archive"
+        mock_settings.gallery_dl_config = str(config_file)
+        svc.get_all_download_params = AsyncMock(return_value=params_by_source)
+
+        with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+            path = await _build_gallery_dl_config({}, **kwargs)
+        return json.loads(path.read_text())
+
+    async def test_build_config_sleep_download_override_writes_extractor_sleep(
+        self, tmp_path, mock_site_config_for_source
+    ):
+        """sleep_download is the only knob that paces file downloads (sleep-request covers API/pages only)."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path,
+            mock_site_config_for_source,
+            {
+                "instagram": DownloadParams(sleep_download=(1.0, 3.0)),
+                "twitter": DownloadParams(sleep_download=2.0),
+            },
+        )
+
+        assert config["extractor"]["instagram"]["sleep"] == [1.0, 3.0]
+        assert config["extractor"]["twitter"]["sleep"] == 2.0
+
+    async def test_build_config_without_sleep_download_omits_sleep(self, tmp_path, mock_site_config_for_source):
+        """A null sleep_download must leave gallery-dl's own extractor default in force."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path, mock_site_config_for_source, {"instagram": DownloadParams(sleep_request=(2.0, 4.0))}
+        )
+
+        assert "sleep" not in config["extractor"]["instagram"]
+        assert "sleep" not in config["extractor"]
+
+    async def test_build_config_explicit_zero_sleep_download_is_written(self, tmp_path, mock_site_config_for_source):
+        """0 means 'explicitly no sleep' and must not be dropped as falsy."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path, mock_site_config_for_source, {"instagram": DownloadParams(sleep_download=0)}
+        )
+
+        assert config["extractor"]["instagram"]["sleep"] == 0
+
+    async def test_build_config_persona_job_keeps_per_extractor_sleep_download(
+        self, tmp_path, mock_site_config_for_source
+    ):
+        """ADR 0022 strips only proxy/browser/user-agent from per-extractor entries; pacing survives."""
+        from core.site_config import DownloadParams
+
+        config = await self._build_with_params(
+            tmp_path,
+            mock_site_config_for_source,
+            {"instagram": DownloadParams(sleep_download=2.0, proxy_url="http://proxy:3128")},
+            persona={"proxy_url": "http://persona:3128", "browser_profile": "chrome"},
+        )
+
+        assert config["extractor"]["instagram"]["sleep"] == 2.0
+        assert "proxy" not in config["extractor"]["instagram"]
 
 
 # ---------------------------------------------------------------------------
@@ -699,3 +837,104 @@ class TestProcessLifecycle:
         assert result.status == "done"
         assert result.downloaded == 1
         assert result.total == 3  # 1 downloaded + 2 skipped
+
+
+# ---------------------------------------------------------------------------
+# GalleryDlPlugin.download — archive table prepared before gallery-dl starts
+# ---------------------------------------------------------------------------
+
+
+class TestGalleryDlDownloadArchiveTable:
+    """A drop-in extractor's category gets its archive table without init.sql."""
+
+    @staticmethod
+    def _identity(category: str):
+        from plugins.builtin.gallery_dl._identity import UrlIdentity
+
+        return UrlIdentity(category, "gallery=1", False, category)
+
+    @staticmethod
+    def _session_factory():
+        session = AsyncMock()
+        factory = MagicMock()
+        factory.return_value.__aenter__.return_value = session
+        return factory, session
+
+    async def _download(self, tmp_path, ensure, *, options=None, category="newsite"):
+        factory, session = self._session_factory()
+        calls: list[str] = []
+
+        async def _ensure(sess, cat):
+            calls.append(f"ensure:{cat}")
+            return await ensure(sess, cat)
+
+        async def _exec(*args, **kwargs):
+            calls.append("exec")
+            return _make_fake_process([], returncode=0)
+
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_exec) as exec_mock,
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ) as build_mock,
+            patch("plugins.builtin.gallery_dl._identity.resolve_url_identity", return_value=self._identity(category)),
+            patch("plugins.builtin.gallery_dl.source.ensure_archive_table", side_effect=_ensure),
+            patch("core.database.AsyncSessionLocal", factory),
+            patch("pathlib.Path.mkdir"),
+        ):
+            from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+            result = await GalleryDlPlugin().download(
+                url="https://newsite.example/g/1", dest_dir=tmp_path, credentials={}, options=options
+            )
+        return result, calls, exec_mock, build_mock, session
+
+    async def test_archive_table_is_created_for_the_url_category_before_gallery_dl_starts(self, tmp_path):
+        result, calls, _, _, session = await self._download(tmp_path, AsyncMock(return_value="created"))
+
+        assert calls == ["ensure:newsite", "exec"]
+        session.commit.assert_awaited_once()
+        assert result.status == "done"
+
+    async def test_category_naming_a_non_archive_table_fails_without_starting_gallery_dl(self, tmp_path):
+        from plugins.builtin.gallery_dl._archive import ArchiveTableConflict
+
+        conflict = AsyncMock(side_effect=ArchiveTableConflict("'galleries' is not an archive table"))
+        result, calls, exec_mock, build_mock, session = await self._download(tmp_path, conflict, category="galleries")
+
+        assert result.status == "failed"
+        assert "galleries" in result.error
+        exec_mock.assert_not_called()
+        build_mock.assert_not_awaited()
+        session.commit.assert_not_awaited()
+
+    async def test_archive_table_database_error_still_downloads(self, tmp_path):
+        result, calls, _, _, _ = await self._download(tmp_path, AsyncMock(side_effect=OSError("db down")))
+
+        assert calls == ["ensure:newsite", "exec"]
+
+    async def test_legacy_force_full_scan_maps_to_repair_and_archives_into_a_shadow_table(self, tmp_path):
+        """force_full_scan is a legacy alias of repair: the real table is prepared and the run uses a per-job shadow."""
+        job_id = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+        ensure = AsyncMock(return_value="created")
+        shadow_calls: list[tuple[str, str]] = []
+
+        async def _ensure_shadow(session, real, shadow):
+            shadow_calls.append((real, shadow))
+
+        with patch("plugins.builtin.gallery_dl.source.ensure_repair_archive_table", side_effect=_ensure_shadow):
+            _, calls, _, build_mock, session = await self._download(
+                tmp_path, ensure, options={"force_full_scan": True, "config_id": job_id}
+            )
+
+        expected_shadow = f"newsite__repair_{uuid.UUID(job_id).hex}"
+        # The real table is prepared first (repair no longer skips it), then the
+        # shadow is created like it, then gallery-dl starts.
+        assert calls == ["ensure:newsite", "exec"]
+        assert shadow_calls == [("newsite", expected_shadow)]
+        session.commit.assert_awaited()
+        kwargs = build_mock.await_args.kwargs
+        assert kwargs["mode"] == "repair"
+        assert kwargs["archive_table"] == expected_shadow

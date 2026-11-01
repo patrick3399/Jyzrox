@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import {
   Suspense,
   useCallback,
@@ -9,20 +10,29 @@ import {
   useRef,
   useState,
 } from 'react'
-import { LayoutGrid, List } from 'lucide-react'
+import { LayoutGrid, List, RefreshCw } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { CredentialBanner } from '@/components/CredentialBanner'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import {
+  estimatePixivIllustRowHeight,
+  estimatePixivRankingRowHeight,
+  estimatePixivUserRowHeight,
+} from '@/lib/pixivLayout'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useIllustActions } from '@/hooks/useIllustActions'
 import { usePixivBrowseSession } from '@/hooks/usePixivBrowseSession'
 import { useProfile } from '@/hooks/useProfile'
+import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 import { api } from '@/lib/api'
 import { decideAnchorRestore, type BrowseAnchor } from '@/lib/browse/anchor'
+import { commitBrowseUrl } from '@/lib/browse/browseHistory'
 import {
   parsePixivIdentity,
+  pixivBookmarkPatch,
+  pixivFollowPatch,
   serializePixivIdentity,
   type PixivBrowseIdentity,
   type PixivBrowseItem,
@@ -32,6 +42,7 @@ import { t } from '@/lib/i18n'
 import type { PixivIllust, PixivUserPreview } from '@/lib/types'
 import { useLocale } from '@/components/LocaleProvider'
 import { toast } from 'sonner'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 const SORT_OPTIONS = [
   { value: 'date_desc', label: () => t('pixiv.sortDateDesc') },
@@ -148,14 +159,13 @@ function IllustCard({
         >
           {bookmarked ? '★' : '☆'}
         </button>
-        <button
+        <Button variant="primary" size="sm" className="text-xs"
           type="button"
           onClick={handleDownload}
           disabled={downloading}
-          className="rounded bg-vault-accent px-2 py-1 text-xs text-white disabled:opacity-50"
         >
           {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -198,14 +208,13 @@ function IllustCard({
       >
         {bookmarked ? '★' : '☆'}
       </button>
-      <button
+      <Button variant="primary" size="sm" className="absolute bottom-12 right-2 text-xs"
         type="button"
         onClick={handleDownload}
         disabled={downloading}
-        className="absolute bottom-12 right-2 rounded bg-vault-accent px-2 py-1 text-xs text-white disabled:opacity-50"
       >
         {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -242,21 +251,28 @@ function UserPreviewCard({
 }: {
   preview: PixivUserPreview
   onOpen: () => void
-  onFollow: () => void
+  onFollow: (followed: boolean) => void
 }) {
-  const [followed, setFollowed] = useState(true)
+  const followedInList = preview.user.is_followed !== false
+  const [followed, setFollowed] = useState(followedInList)
   const [toggling, setToggling] = useState(false)
+  // The list item can change after the card mounted (a patch from the
+  // artist's page, a refresh); follow it.
+  useEffect(() => {
+    setFollowed(followedInList)
+  }, [followedInList])
 
   const handleToggleFollow = async (event: React.MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
     if (toggling) return
     setToggling(true)
+    const nextFollowed = !followed
     try {
-      if (followed) await api.pixiv.unfollowUser(preview.user.id)
-      else await api.pixiv.followUser(preview.user.id)
-      setFollowed((value) => !value)
-      onFollow()
+      if (nextFollowed) await api.pixiv.followUser(preview.user.id)
+      else await api.pixiv.unfollowUser(preview.user.id)
+      setFollowed(nextFollowed)
+      onFollow(nextFollowed)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.failedToSave'))
     } finally {
@@ -276,7 +292,9 @@ function UserPreviewCard({
                 alt=""
                 className="aspect-square h-full w-full bg-vault-input object-cover"
                 onError={(event) => {
-                  event.currentTarget.style.display = 'none'
+                  // Hide, don't remove: the grid lays this card out at a fixed
+                  // height, so a failed image must keep its box.
+                  event.currentTarget.style.visibility = 'hidden'
                 }}
               />
             ))}
@@ -293,7 +311,7 @@ function UserPreviewCard({
               alt={preview.user.name}
               className="h-7 w-7 shrink-0 rounded-full bg-vault-input object-cover"
               onError={(event) => {
-                event.currentTarget.style.display = 'none'
+                event.currentTarget.style.visibility = 'hidden'
               }}
             />
           ) : (
@@ -460,6 +478,7 @@ function PixivPageInner() {
     restoreInstruction,
     acknowledgeRestore,
     updateView,
+    patchItems,
   } = session
   const visibleRangeRef = useRef({ startIndex: 0, endIndex: 0 })
   const layoutRef = useRef<BrowseLayoutSnapshot | null>(null)
@@ -530,10 +549,11 @@ function PixivPageInner() {
       const url = `/pixiv?${serializePixivIdentity(nextIdentity).toString()}`
       const changesSurface = nextIdentity.surface !== identitySurfaceRef.current
       identitySurfaceRef.current = nextIdentity.surface
-      if (changesSurface) router.push(url, { scroll: false })
-      else router.replace(url, { scroll: false })
+      // Same-page transition: the session already owns the view, so write the
+      // URL without a router round trip (see commitBrowseUrl, FE-T17).
+      commitBrowseUrl(url, changesSurface ? 'push' : 'replace')
     },
-    [captureView, checkpoint, flushPendingViewWork, router],
+    [captureView, checkpoint, flushPendingViewWork],
   )
 
   const openPixivItem = useCallback(
@@ -665,13 +685,29 @@ function PixivPageInner() {
     ],
   )
 
-  const onBookmark = useCallback(() => {
-    void refresh()
+  // A user's own change patches the item in place: this list, the other saved
+  // lists, and the snapshot even when the page unmounts first. A refresh here
+  // cost one Pixiv request per loaded page on every tap.
+  const onBookmark = useCallback(
+    (illustId: number, bookmarked: boolean) => patchItems(pixivBookmarkPatch(illustId, bookmarked)),
+    [patchItems],
+  )
+  const onFollow = useCallback(
+    (userId: number, followed: boolean) => patchItems(pixivFollowPatch(userId, followed)),
+    [patchItems],
+  )
+  // An explicit refresh starts the list over from its first page: one request,
+  // and the user asks for it at the top of the list.
+  const canRefresh = state.items.length > 0 && !state.pending
+  const isRefreshing = state.status === 'loading' && state.requestKind === 'refresh'
+  const refreshFromTop = useCallback(async () => {
+    window.scrollTo({ top: 0 })
+    await refresh({ depth: 'first' })
   }, [refresh])
-  const patchItemsFromServer = useCallback(() => {
-    void refresh()
-  }, [refresh])
-  const onFollow = useCallback(() => patchItemsFromServer(), [patchItemsFromServer])
+  const { indicator: pullIndicator } = usePullToRefresh({
+    onRefresh: refreshFromTop,
+    enabled: canRefresh,
+  })
   const loadMoreRetry = retry
 
   const [colCount, setColCount] = useState(2)
@@ -765,6 +801,19 @@ function PixivPageInner() {
   const isSessionLoading = state.status === 'loading'
   const initialLoading = isSessionLoading && state.items.length === 0
   const showCredentialGate = credentialsMissing && isPrivateSurface
+  // The card a row holds decides its height, so read the kind off the buffer
+  // rather than the identity: during a surface switch the buffer still belongs
+  // to the previous surface for a render. List rows wrap their tag chips and
+  // have no width-derived height, so they stay measured.
+  const cardKind = state.items[0]?.kind
+  const fixedRowHeight =
+    cardKind === 'user'
+      ? estimatePixivUserRowHeight
+      : cardKind === 'ranking'
+        ? estimatePixivRankingRowHeight
+        : cardKind === 'illust' && viewMode !== 'list'
+          ? estimatePixivIllustRowHeight
+          : undefined
   const gridColumns =
     identity.surface === 'following'
       ? { base: 2, sm: 3, md: 4, lg: 5 }
@@ -776,6 +825,7 @@ function PixivPageInner() {
 
   return (
     <div className="space-y-4">
+      {pullIndicator}
       {credentialsMissing && <CredentialBanner source="pixiv" />}
       <div className="flex gap-2">
         <input
@@ -789,13 +839,12 @@ function PixivPageInner() {
           placeholder={t('pixiv.searchPlaceholder')}
           className="flex-1 rounded-lg border border-vault-border bg-vault-card px-4 py-2.5 text-sm text-vault-text"
         />
-        <button
+        <Button variant="primary" size="md"
           type="button"
           onClick={handleSearchSubmit}
-          className="rounded-lg bg-vault-accent px-4 py-2.5 text-sm font-medium text-white"
         >
           {t('pixiv.search')}
-        </button>
+        </Button>
         <div className="flex overflow-hidden rounded-lg border border-vault-border">
           <button
             type="button"
@@ -816,6 +865,15 @@ function PixivPageInner() {
             <List size={18} />
           </button>
         </div>
+        <Button variant="secondary" size="icon" className="hidden sm:inline-flex"
+          type="button"
+          onClick={() => void refreshFromTop()}
+          disabled={!canRefresh || isRefreshing}
+          aria-label={t('common.refresh')}
+          title={t('common.refresh')}
+        >
+          <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
+        </Button>
       </div>
 
       {identity.surface === 'search' ? (
@@ -1016,7 +1074,8 @@ function PixivPageInner() {
           columns={gridColumns}
           getItemKey={pixivItemKey}
           gap={viewMode === 'list' ? 8 : identity.surface === 'ranking' ? 8 : 12}
-          estimateHeight={viewMode === 'list' ? 100 : identity.surface === 'following' ? 180 : 200}
+          estimateHeight={fixedRowHeight ?? 100}
+          measureRows={fixedRowHeight === undefined}
           focusedIndex={focusedIndex}
           onColCountChange={setColCount}
           onRegisterElement={handleRegisterElement}
@@ -1031,7 +1090,7 @@ function PixivPageInner() {
                 <UserPreviewCard
                   preview={preview}
                   onOpen={() => openPixivUser(preview.user.id)}
-                  onFollow={onFollow}
+                  onFollow={(followed) => onFollow(preview.user.id, followed)}
                 />
               )
             }
@@ -1096,6 +1155,7 @@ function PixivPageInner() {
 
 export default function PixivPage() {
   return (
+    <PageContainer>
     <Suspense
       fallback={
         <div className="flex min-h-[60vh] items-center justify-center">
@@ -1105,5 +1165,6 @@ export default function PixivPage() {
     >
       <PixivPageInner />
     </Suspense>
+    </PageContainer>
   )
 }

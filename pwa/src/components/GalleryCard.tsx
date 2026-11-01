@@ -10,8 +10,8 @@ import {
   Bookmark,
   BookmarkCheck,
 } from 'lucide-react'
-import type { Gallery, EhGallery } from '@/lib/types'
-import { RatingStars } from './RatingStars'
+import type { Gallery, GalleryCategoryDef } from '@/lib/types'
+import { resolveCategoryColors } from '@/lib/categoryPalette'
 import { ContextMenu } from './ContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
 import { getSourceStyle, getEventPosition } from '@/lib/galleryUtils'
@@ -21,143 +21,12 @@ import { AppImage } from './AppImage'
 
 // ── Category colours ──────────────────────────────────────────────────
 
-const CATEGORY_COLORS: Record<string, { bg: string; text: string; badge: string }> = {
-  Doujinshi: { bg: 'from-pink-950 to-pink-900', text: 'text-pink-300', badge: 'bg-pink-700' },
-  Manga: { bg: 'from-orange-950 to-orange-900', text: 'text-orange-300', badge: 'bg-orange-700' },
-  'Artist CG': {
-    bg: 'from-yellow-950 to-yellow-900',
-    text: 'text-yellow-300',
-    badge: 'bg-yellow-700',
-  },
-  'Game CG': { bg: 'from-green-950 to-green-900', text: 'text-green-300', badge: 'bg-green-700' },
-  Western: { bg: 'from-sky-950 to-sky-900', text: 'text-sky-300', badge: 'bg-sky-700' },
-  'Non-H': { bg: 'from-blue-950 to-blue-900', text: 'text-blue-300', badge: 'bg-blue-700' },
-  'Image Set': {
-    bg: 'from-purple-950 to-purple-900',
-    text: 'text-purple-300',
-    badge: 'bg-purple-700',
-  },
-  Cosplay: { bg: 'from-red-950 to-red-900', text: 'text-red-300', badge: 'bg-red-700' },
-  'Asian Porn': { bg: 'from-rose-950 to-rose-900', text: 'text-rose-300', badge: 'bg-rose-700' },
-  Misc: { bg: 'from-gray-900 to-gray-800', text: 'text-gray-300', badge: 'bg-gray-600' },
-}
-
-function getCategoryColors(category: string) {
-  return CATEGORY_COLORS[category] || CATEGORY_COLORS['Misc']
-}
-
-// ── EhGalleryCard ─────────────────────────────────────────────────────
-
-interface EhCardProps {
-  gallery: EhGallery
-  onClick?: () => void
-}
-
-export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
-  const colors = getCategoryColors(gallery.category)
-  const router = useRouter()
-
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
-
-  const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault()
-    setMenuPos(getEventPosition(e))
-    setMenuOpen(true)
-  }, [])
-
-  const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
-
-  // Detail URL: E-Hentai galleries use the gallery_id / gallery_token fields.
-  // Navigate to the detail page if the gallery object carries those fields;
-  // otherwise fall back to the source URL stored in `thumb`.
-  const handleOpenDetail = useCallback(() => {
-    const g = gallery as EhGallery & { gallery_id?: number; gallery_token?: string; url?: string }
-    if (g.gallery_id && g.gallery_token) {
-      router.push(`/eh/${g.gallery_id}/${g.gallery_token}`)
-    } else if (g.url) {
-      window.open(g.url, '_blank', 'noopener,noreferrer')
-    }
-  }, [gallery, router])
-
-  const contextItems = useMemo(
-    () =>
-      menuOpen
-        ? [
-            { label: t('contextMenu.read'), icon: BookOpen, onClick: () => onClick?.() },
-            { label: t('contextMenu.openDetail'), icon: ExternalLink, onClick: handleOpenDetail },
-          ]
-        : [],
-    [menuOpen, onClick, handleOpenDetail],
-  )
-
-  return (
-    <>
-      <article
-        onClick={onClick}
-        role={onClick ? 'button' : undefined}
-        tabIndex={onClick ? 0 : undefined}
-        onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
-        {...longPressHandlers}
-        className={`
-          relative flex flex-col select-none [-webkit-touch-callout:none]
-          bg-vault-card border border-vault-border rounded-lg overflow-hidden
-          transition-all duration-200 cursor-pointer
-          hover:scale-[1.02] hover:border-vault-accent hover:shadow-lg hover:shadow-vault-accent/20 hover:brightness-105
-          focus:outline-none focus:ring-2 focus:ring-vault-accent
-        `}
-      >
-        {/* Thumbnail */}
-        <div className="relative aspect-[3/4] bg-vault-bg overflow-hidden">
-          <AppImage
-            src={
-              gallery.thumb ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}` : ''
-            }
-            alt={gallery.title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-            fallbackClassName="w-full h-full bg-vault-input"
-          />
-          {/* Category badge */}
-          <span
-            className={`
-              absolute top-1.5 left-1.5
-              px-1.5 py-0.5 rounded text-xs font-semibold
-              ${colors.badge} text-white
-              shadow
-            `}
-          >
-            {gallery.category || t('library.categoryUncategorized')}
-          </span>
-        </div>
-
-        {/* Info */}
-        <div className="flex flex-col gap-1.5 p-2.5 flex-1">
-          <h3 className="text-vault-text text-sm font-medium line-clamp-2 leading-snug">
-            {gallery.title || gallery.title_jpn}
-          </h3>
-
-          <div className="flex items-center justify-between mt-auto pt-1">
-            <RatingStars rating={gallery.rating} readonly />
-            <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
-          </div>
-        </div>
-      </article>
-
-      <ContextMenu
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        position={menuPos}
-        items={contextItems}
-      />
-    </>
-  )
-}
 
 // ── LibraryGalleryCard ────────────────────────────────────────────────
 
 interface LibraryCardProps {
   gallery: Gallery
+  categories?: GalleryCategoryDef[]
   thumbUrl?: string
   onClick?: () => void
   selected?: boolean
@@ -170,6 +39,7 @@ interface LibraryCardProps {
 
 export function LibraryGalleryCard({
   gallery,
+  categories,
   thumbUrl,
   onClick,
   selected,
@@ -179,7 +49,7 @@ export function LibraryGalleryCard({
   onDelete,
   onDownload,
 }: LibraryCardProps) {
-  const colors = getCategoryColors(gallery.category)
+  const colors = resolveCategoryColors(gallery.category, categories)
   const router = useRouter()
 
   const [menuOpen, setMenuOpen] = useState(false)
@@ -194,6 +64,9 @@ export function LibraryGalleryCard({
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
   const sourceStyle = getSourceStyle(gallery)
+  const title = gallery.title || gallery.title_jpn
+  // Most library galleries are unrated: show a compact "★4" only when there is one.
+  const rating = Math.round(gallery.my_rating ?? gallery.rating ?? 0)
 
   const contextItems = useMemo(() => {
     if (!menuOpen) return []
@@ -326,15 +199,26 @@ export function LibraryGalleryCard({
           </div>
         </div>
 
-        {/* Info */}
-        <div className="flex flex-col gap-1.5 p-2.5 flex-1">
-          <h3 className="text-vault-text text-sm font-medium line-clamp-2 leading-snug">
-            {gallery.title || gallery.title_jpn}
+        {/* Info: one title line + one meta line, so the card height is a pure
+            function of its width (estimateLibraryGridRowHeight reserves exactly this) */}
+        <div className="flex flex-col gap-1 p-2">
+          <h3
+            className="text-vault-text text-sm font-medium truncate leading-5"
+            title={title}
+          >
+            {title}
           </h3>
 
-          <div className="flex items-center justify-between mt-auto pt-1">
-            <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
-            <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
+          <div className="flex items-center gap-1 h-4 text-xs leading-4">
+            {rating > 0 && (
+              <span
+                className="shrink-0 text-yellow-400 tabular-nums"
+                aria-label={t('common.ratingOf', { rating: String(rating) })}
+              >
+                ★{rating}
+              </span>
+            )}
+            <span className="ml-auto min-w-0 truncate text-vault-text-muted">{gallery.pages}p</span>
           </div>
         </div>
       </article>

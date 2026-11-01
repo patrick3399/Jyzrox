@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   createBrowseSnapshotStore,
   snapshotStorageKey,
@@ -266,5 +266,336 @@ describe('browse snapshot store contracts', () => {
     expect(store.restore('upload')).toEqual({ kind: 'expired', replayable: false })
     expect(store.restore('upload')).toEqual({ kind: 'expired', replayable: false })
     expect(store.load('upload')).toBeNull()
+  })
+})
+
+/**
+ * Regression: every saved list of a source shares one storage key (its
+ * partition). `write()` answered "this partition is over budget / the quota
+ * threw" by clearing the WHOLE partition, so one oversized list wiped the up to
+ * seven other lists a user could still back-navigate to ("upper page not
+ * persisted"). `restore()` also reported `missing` when only its lastAccess
+ * touch failed to persist, discarding a perfectly good snapshot.
+ */
+describe('browse snapshot store under storage pressure', () => {
+  const textBytes = (value: string) => new TextEncoder().encode(value).byteLength
+
+  /** A snapshot whose serialized size grows with `items`. */
+  function sized(id: number, items: number): BrowseSnapshot<Item, Cursor> {
+    return snapshot(id, {
+      pages: [Array.from({ length: items }, (_, index) => ({ id: id * 10_000 + index }))],
+    })
+  }
+
+  function partitionBytes(storage: Storage): number {
+    return textBytes(storage.getItem(snapshotStorageKey(scope)) ?? '')
+  }
+
+  /** Bytes of a partition holding exactly these (identity, items) entries. */
+  function bytesFor(entries: Array<[string, number]>): number {
+    const storage = new MemoryStorage()
+    let clock = 0
+    const store = createBrowseSnapshotStore<Item, Cursor>({
+      storage,
+      scope,
+      maxBytes: 10_000_000,
+      now: () => ++clock,
+    })
+    entries.forEach(([key, items], index) => store.save(key, sized(index + 1, items)))
+    return partitionBytes(storage)
+  }
+
+  it('evicts only the oldest other entry when a save pushes the partition over budget', () => {
+    const storage = new MemoryStorage()
+    let clock = 0
+    const budget =
+      bytesFor([
+        ['A', 40],
+        ['B', 40],
+        ['C', 40],
+      ]) + 20
+    const store = createBrowseSnapshotStore<Item, Cursor>({
+      storage,
+      scope,
+      maxBytes: budget,
+      now: () => ++clock,
+    })
+    expect(store.save('A', sized(1, 40))).toBe(true)
+    expect(store.save('B', sized(2, 40))).toBe(true)
+    expect(store.save('C', sized(3, 40))).toBe(true)
+
+    expect(store.save('D', sized(4, 40))).toBe(true)
+
+    expect(store.load('D')).toEqual(sized(4, 40))
+    expect(store.load('C')).toEqual(sized(3, 40))
+    expect(store.load('B')).toEqual(sized(2, 40))
+    expect(store.load('A')).toBeNull()
+    expect(partitionBytes(storage)).toBeLessThanOrEqual(budget)
+  })
+
+  it('evicts further entries in least-recently-used order until a larger save fits', () => {
+    const storage = new MemoryStorage()
+    let clock = 0
+    const store = createBrowseSnapshotStore<Item, Cursor>({
+      storage,
+      scope,
+      maxBytes:
+        bytesFor([
+          ['A', 30],
+          ['B', 30],
+          ['C', 30],
+        ]) + 20,
+      now: () => ++clock,
+    })
+    store.save('A', sized(1, 30))
+    store.save('B', sized(2, 30))
+    store.save('C', sized(3, 30))
+
+    // D is ~1.6x an entry: C + D fits, B + C + D does not, so A and B go.
+    expect(store.save('D', sized(4, 60))).toBe(true)
+
+    expect(store.load('D')).toEqual(sized(4, 60))
+    expect(store.load('A')).toBeNull()
+    expect(store.load('B')).toBeNull()
+    expect(store.load('C')).toEqual(sized(3, 30))
+  })
+
+  it('keeps other identities when the target alone exceeds the budget, and drops its stale entry', () => {
+    const storage = new MemoryStorage()
+    let clock = 0
+    const store = createBrowseSnapshotStore<Item, Cursor>({
+      storage,
+      scope,
+      maxBytes:
+        bytesFor([
+          ['A', 30],
+          ['B', 30],
+          ['C', 30],
+        ]) + 20,
+      now: () => ++clock,
+    })
+    store.save('A', sized(1, 30))
+    store.save('B', sized(2, 30))
+    store.save('C', sized(3, 30))
+
+    // B grew far past the whole budget: it can never be stored.
+    expect(store.save('B', sized(2, 400))).toBe(false)
+
+    // Its previous, now-stale snapshot must not be restored in place of it...
+    expect(store.restore('B')).toEqual({ kind: 'missing', replayable: true })
+    // ...but the other lists survive.
+    expect(store.load('A')).toEqual(sized(1, 30))
+    expect(store.load('C')).toEqual(sized(3, 30))
+  })
+
+  it('keeps other identities when the storage quota rejects the first write attempt', () => {
+    // Quota in characters, like WebKit's UTF-16 accounting: the partition does
+    // not fit while it still holds the oldest entry.
+    class LimitedStorage extends MemoryStorage {
+      limit = Number.POSITIVE_INFINITY
+      override setItem(key: string, value: string): void {
+        if (value.length > this.limit) throw new DOMException('quota', 'QuotaExceededError')
+        super.setItem(key, value)
+      }
+    }
+    const storage = new LimitedStorage()
+    let clock = 0
+    const store = createBrowseSnapshotStore<Item, Cursor>({
+      storage,
+      scope,
+      maxBytes: 10_000_000,
+      now: () => ++clock,
+    })
+    store.save('A', sized(1, 40))
+    store.save('B', sized(2, 40))
+    store.save('C', sized(3, 40))
+    storage.limit = (storage.getItem(snapshotStorageKey(scope)) ?? '').length + 20
+
+    expect(store.save('D', sized(4, 40))).toBe(true)
+
+    expect(store.load('D')).toEqual(sized(4, 40))
+    expect(store.load('C')).toEqual(sized(3, 40))
+    expect(store.load('B')).toEqual(sized(2, 40))
+    expect(store.load('A')).toBeNull()
+  })
+
+  it('keeps the other identities when the quota rejects the target even on its own', () => {
+    class LimitedStorage extends MemoryStorage {
+      limit = Number.POSITIVE_INFINITY
+      override setItem(key: string, value: string): void {
+        if (value.length > this.limit) throw new DOMException('quota', 'QuotaExceededError')
+        super.setItem(key, value)
+      }
+    }
+    const storage = new LimitedStorage()
+    let clock = 0
+    const store = createBrowseSnapshotStore<Item, Cursor>({
+      storage,
+      scope,
+      maxBytes: 10_000_000,
+      now: () => ++clock,
+    })
+    store.save('A', sized(1, 30))
+    store.save('B', sized(2, 30))
+    storage.limit = (storage.getItem(snapshotStorageKey(scope)) ?? '').length + 20
+
+    expect(store.save('C', sized(3, 400))).toBe(false)
+
+    expect(store.load('A')).toEqual(sized(1, 30))
+    expect(store.load('B')).toEqual(sized(2, 30))
+    expect(store.restore('C')).toEqual({ kind: 'missing', replayable: true })
+  })
+
+  it('returns the snapshot when only the lastAccess touch fails to persist', () => {
+    class FlakyStorage extends MemoryStorage {
+      failWrites = false
+      override setItem(key: string, value: string): void {
+        if (this.failWrites) throw new DOMException('quota', 'QuotaExceededError')
+        super.setItem(key, value)
+      }
+    }
+    const storage = new FlakyStorage()
+    const store = createBrowseSnapshotStore<Item, Cursor>({ storage, scope })
+    store.save('A', snapshot(1))
+    store.save('B', snapshot(2))
+    storage.failWrites = true
+
+    expect(store.restore('A')).toMatchObject({ kind: 'snapshot', snapshot: snapshot(1) })
+
+    // The failed touch must not have wiped the partition either.
+    storage.failWrites = false
+    expect(store.load('B')).toEqual(snapshot(2))
+    expect(store.load('A')).toEqual(snapshot(1))
+  })
+
+  it('keeps the entry being saved when its timestamp ties with a full partition', () => {
+    const store = createBrowseSnapshotStore<Item, Cursor>({
+      storage: new MemoryStorage(),
+      scope,
+      maxEntries: 2,
+      now: () => 7,
+    })
+    store.save('A', snapshot(1))
+    store.save('B', snapshot(2))
+
+    // 'C' sorts after both on the identity tie-break; it must still be stored.
+    expect(store.save('C', snapshot(3))).toBe(true)
+    expect(store.load('C')).toEqual(snapshot(3))
+  })
+
+  it('still clears a malformed partition instead of trusting any of it', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(
+      snapshotStorageKey(scope),
+      JSON.stringify({ version: 1, entries: [{ identityKey: 'A', snapshot: 'not-a-snapshot' }] }),
+    )
+    const store = createBrowseSnapshotStore<Item, Cursor>({ storage, scope })
+
+    expect(store.save('B', snapshot(2))).toBe(true)
+
+    expect(store.load('A')).toBeNull()
+    expect(store.load('B')).toEqual(snapshot(2))
+  })
+})
+
+describe('browse snapshot store patchItems', () => {
+  type Titled = { id: number; title?: string }
+
+  const retitle = (id: number, title: string) => ({
+    updateItem: (item: Titled) => (item.id === id ? { ...item, title } : item),
+  })
+
+  function titledSnapshot(pages: Titled[][], total: number | null = 10): BrowseSnapshot<Titled, Cursor> {
+    return { pages, cursor: 'cursor', hasMore: true, total, anchor: null, layout: null }
+  }
+
+  function lastAccessByKey(storage: Storage): Array<[string, number]> {
+    const partition = JSON.parse(storage.getItem(snapshotStorageKey(scope)) ?? '{"entries":[]}') as {
+      entries: Array<{ identityKey: string; lastAccess: number }>
+    }
+    return partition.entries.map((entry) => [entry.identityKey, entry.lastAccess])
+  }
+
+  it('rewrites the matching item in every saved list without changing LRU order', () => {
+    const storage = new MemoryStorage()
+    let clock = 1
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope, now: () => clock })
+    store.save('A', titledSnapshot([[{ id: 1 }, { id: 2 }]]))
+    clock = 2
+    store.save('B', titledSnapshot([[{ id: 2 }], [{ id: 3 }]]))
+    const before = lastAccessByKey(storage)
+    clock = 3
+
+    expect(store.patchItems(retitle(2, 'patched'))).toBe(true)
+
+    expect(lastAccessByKey(storage)).toEqual(before)
+    expect(store.load('A')?.pages).toEqual([[{ id: 1 }, { id: 2, title: 'patched' }]])
+    expect(store.load('B')?.pages).toEqual([[{ id: 2, title: 'patched' }], [{ id: 3 }]])
+  })
+
+  it('passes each list its own identity key and lowers the total for removed items', () => {
+    const storage = new MemoryStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('favorites', titledSnapshot([[{ id: 1 }, { id: 2 }]], 10))
+    store.save('search', titledSnapshot([[{ id: 1 }]], 10))
+
+    store.patchItems({
+      updateItem: (item, identityKey) =>
+        identityKey === 'favorites' && item.id === 1 ? null : item,
+    })
+
+    expect(store.load('favorites')).toMatchObject({ pages: [[{ id: 2 }]], total: 9 })
+    expect(store.load('search')).toMatchObject({ pages: [[{ id: 1 }]], total: 10 })
+  })
+
+  it('discards a list the patch invalidates and keeps the others', () => {
+    const storage = new MemoryStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('A', titledSnapshot([[{ id: 1 }]]))
+    store.save('B', titledSnapshot([[{ id: 2 }]]))
+
+    expect(
+      store.patchItems({
+        updateItem: (item) => item,
+        invalidates: (identityKey) => identityKey === 'A',
+      }),
+    ).toBe(true)
+
+    expect(store.restore('A')).toEqual({ kind: 'missing', replayable: true })
+    expect(store.load('B')?.pages).toEqual([[{ id: 2 }]])
+  })
+
+  it('reports no change and does not write when no item matches', () => {
+    const storage = new MemoryStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('A', titledSnapshot([[{ id: 1 }]]))
+    const setItem = vi.spyOn(storage, 'setItem')
+
+    expect(store.patchItems(retitle(99, 'absent'))).toBe(false)
+
+    expect(setItem).not.toHaveBeenCalled()
+  })
+
+  it('drops a patched list instead of leaving it stale when the rewrite cannot be stored', () => {
+    class RejectingStorage extends MemoryStorage {
+      reject = false
+      setItem(key: string, value: string) {
+        if (this.reject && value.includes('patched')) {
+          throw new DOMException('quota', 'QuotaExceededError')
+        }
+        super.setItem(key, value)
+      }
+    }
+    const storage = new RejectingStorage()
+    const store = createBrowseSnapshotStore<Titled, Cursor>({ storage, scope })
+    store.save('A', titledSnapshot([[{ id: 1 }]]))
+    store.save('B', titledSnapshot([[{ id: 2 }]]))
+    storage.reject = true
+
+    store.patchItems(retitle(1, 'patched'))
+    storage.reject = false
+
+    expect(store.restore('A')).toEqual({ kind: 'missing', replayable: true })
+    expect(store.load('B')?.pages).toEqual([[{ id: 2 }]])
   })
 })

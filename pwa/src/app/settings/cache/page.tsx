@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { SaveStatus, type SaveStatusValue } from '@/components/settings/SettingsShared'
 import {
@@ -12,6 +13,7 @@ import {
   type SWCacheConfig,
   DEFAULT_SW_CACHE_CONFIG,
 } from '@/lib/swCacheConfig'
+import { Button } from '@/components/ui/button'
 
 export default function CacheSettingsPage() {
   useLocale()
@@ -52,7 +54,7 @@ export default function CacheSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.cache')}</h1>
+      <PageHeader title={t('settingsCategory.cache')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5 pt-5">
@@ -132,12 +134,14 @@ export default function CacheSettingsPage() {
 
             {/* Clear browser cache */}
             <div className="pt-3 border-t border-vault-border/50">
-              <button
+              <Button
+                variant="ghost"
+                size="md"
+                className="border border-red-500/30 bg-red-600/20 text-red-400 hover:bg-red-600/30"
                 onClick={handleClearBrowserCache}
-                className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-400 hover:bg-red-600/30 rounded text-sm font-medium transition-colors"
               >
                 {t('settings.clearBrowserCache')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -1,14 +1,18 @@
 """Pixiv API client wrapping pixivpy3."""
 
 import asyncio
+import hashlib
 import logging
 import secrets
 import time
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 from pixivpy3 import AppPixivAPI
 
+from core.client_identity import PIXIV_APP_REFERER, pixiv_app_headers
 from core.config import settings
 from core.redis_client import get_redis
 
@@ -17,9 +21,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Module-level shared HTTP client (singleton, lazy-created)
 # ---------------------------------------------------------------------------
-# Pixiv image downloads require Referer + User-Agent headers.
-# The shared client is reused across PixivClient instances to avoid
-# creating a new connection pool per request.
+# Pixiv image downloads require Referer + User-Agent headers; they present the
+# same app identity as the API calls. The shared client is reused across
+# PixivClient instances to avoid creating a new connection pool per request.
+#
+# The Pixiv app path keeps Python's TLS: pixivpy3's cloudscraper session for
+# API and OAuth calls, and this plain httpx client for pximg. Under an iOS app
+# User-Agent that is a known mismatch, the same one gallery-dl's Pixiv app API
+# has. It stays (decided 2026-10-25) because pixivpy3's cloudscraper session
+# handles Cloudflare challenges on the OAuth endpoint, and no curl_cffi target
+# is the Pixiv app's own iOS networking stack; services.browser_http is for
+# browser requests only.
 
 _shared_img_http: httpx.AsyncClient | None = None
 
@@ -28,10 +40,7 @@ def _get_shared_img_http() -> httpx.AsyncClient:
     global _shared_img_http
     if _shared_img_http is None or _shared_img_http.is_closed:
         _shared_img_http = httpx.AsyncClient(
-            headers={
-                "Referer": "https://www.pixiv.net/",
-                "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-            },
+            headers={**pixiv_app_headers(), "Referer": PIXIV_APP_REFERER},
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             timeout=settings.pixiv_request_timeout,
             follow_redirects=True,
@@ -46,10 +55,100 @@ async def shutdown_shared_pixiv_clients() -> None:
         await _shared_img_http.aclose()
 
 
-_TOKEN_KEY = "pixiv:access_token"
-_LOCK_KEY = "pixiv:token_lock"
+class _AppPixivAPI(AppPixivAPI):
+    """AppPixivAPI that presents the Pixiv app identity from core.client_identity.
+
+    pixivpy3 writes its own, older iOS identity into each call's headers, where
+    ``additional_headers`` cannot override it. Every API, OAuth and download
+    call goes through ``requests_call``, so the identity is applied there.
+    """
+
+    def requests_call(
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, Any] | None = None,
+        params: Any = None,
+        data: Any = None,
+        stream: bool = False,
+    ) -> Any:
+        identity = pixiv_app_headers()
+        names = {name.lower() for name in identity}
+        merged = {key: value for key, value in (headers or {}).items() if key.lower() not in names}
+        merged.update(identity)
+        return super().requests_call(method, url, merged, params, data, stream)
+
+
+def new_app_api() -> AppPixivAPI:
+    """Return a pixivpy3 client that presents the Pixiv app identity."""
+    return _AppPixivAPI()
+
+
+_TOKEN_KEY_PREFIX = "pixiv:access_token"
+_LOCK_KEY_PREFIX = "pixiv:token_lock"
 _TOKEN_TTL = 3500  # seconds — Pixiv tokens last 3600s; refresh before expiry
 _LOCK_TIMEOUT = 10  # seconds
+
+
+# Pixiv throttles by account and egress IP, so one shared cooldown covers every
+# caller (downloads, subscriptions and browse pages): once a call is throttled,
+# further requests only extend the ban.
+_COOLDOWN_KEY = "pixiv:rate_limit:cooldown_until"
+_RATE_LIMIT_COOLDOWN = 180  # seconds
+
+
+class PixivRateLimitError(Exception):
+    """Pixiv throttled the app API; ``retry_after`` is the seconds left on the cooldown."""
+
+    def __init__(self, retry_after: float) -> None:
+        self.retry_after = max(retry_after, 0.0)
+        super().__init__(f"Pixiv rate limit, retry in {int(self.retry_after)}s")
+
+
+async def pixiv_cooldown_remaining() -> float:
+    """Seconds left on the shared rate-limit cooldown; 0 when clear or Redis is unreachable."""
+    try:
+        raw = await get_redis().get(_COOLDOWN_KEY)
+        if raw is None:
+            return 0.0
+        until = float(raw.decode() if isinstance(raw, bytes) else raw)
+    except Exception:
+        return 0.0
+    return max(until - time.time(), 0.0)
+
+
+async def _start_cooldown() -> float:
+    """Record a cooldown after a throttled response and return its length in seconds."""
+    until = time.time() + _RATE_LIMIT_COOLDOWN
+    try:
+        await get_redis().setex(_COOLDOWN_KEY, _RATE_LIMIT_COOLDOWN, str(until))
+    except Exception:
+        logger.warning("Could not record the Pixiv rate-limit cooldown", exc_info=True)
+    return float(_RATE_LIMIT_COOLDOWN)
+
+
+def _is_rate_limit_body(result: Any) -> bool:
+    """True for pixivpy3's parsed ``{"error": {"message": "Rate Limit"}}`` response."""
+    if not isinstance(result, Mapping):
+        return False
+    error = result.get("error")
+    if not error:
+        return False
+    if isinstance(error, Mapping):
+        text = f"{error.get('message', '')} {error.get('user_message', '')}"
+    else:
+        text = str(error)
+    return "rate limit" in text.lower()
+
+
+def _token_keys(refresh_token: str) -> tuple[str, str]:
+    """Redis keys for one refresh token: (cached access token, refresh lock).
+
+    Keyed by a digest of the refresh token because an access token belongs to
+    the account that minted it; two stored accounts must never share one.
+    """
+    digest = hashlib.sha256(refresh_token.encode()).hexdigest()[:16]
+    return f"{_TOKEN_KEY_PREFIX}:{digest}", f"{_LOCK_KEY_PREFIX}:{digest}"
 
 
 class PixivClient:
@@ -70,15 +169,22 @@ class PixivClient:
         self._img_http: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> PixivClient:
-        api = AppPixivAPI()
-        api.additional_headers["Accept-Language"] = "en"
-        self._api = api
-        await self._ensure_token()
+        self._api = new_app_api()
+        try:
+            await self._ensure_token()
+        except BaseException:
+            await self.__aexit__()
+            raise
         self._img_http = _get_shared_img_http()
         return self
 
     async def __aexit__(self, *_) -> None:
-        pass  # shared client managed externally
+        # The image httpx client is shared and managed externally, but each
+        # pixivpy session is ours: an author sync opens one client per work,
+        # and unclosed sessions leak pooled sockets until "Too many open files".
+        api, self._api = self._api, None
+        if api is not None:
+            api.requests.close()
 
     def _api_or_raise(self) -> AppPixivAPI:
         """Return the initialized pixivpy client."""
@@ -97,20 +203,21 @@ class PixivClient:
     async def _ensure_token(self) -> None:
         """Load access token from Redis cache or refresh via pixivpy3."""
         r = get_redis()
-        cached = await r.get(_TOKEN_KEY)
+        token_key, lock_key = _token_keys(self.refresh_token)
+        cached = await r.get(token_key)
         if cached:
             access_token = cached.decode() if isinstance(cached, bytes) else cached
             await asyncio.to_thread(self._api_or_raise().set_auth, access_token, self.refresh_token)
             return
 
         # Acquire a Redis lock to prevent concurrent refreshes
-        lock_acquired = await r.set(_LOCK_KEY, "1", nx=True, ex=_LOCK_TIMEOUT)
+        lock_acquired = await r.set(lock_key, "1", nx=True, ex=_LOCK_TIMEOUT)
         if not lock_acquired:
             # Another instance is refreshing — wait with jitter to avoid stampede (#202/#203)
             deadline = time.monotonic() + _LOCK_TIMEOUT
             while time.monotonic() < deadline:
                 await asyncio.sleep(0.1 + secrets.randbelow(50) / 1000)
-                cached = await r.get(_TOKEN_KEY)
+                cached = await r.get(token_key)
                 if cached:
                     access_token = cached.decode() if isinstance(cached, bytes) else cached
                     await asyncio.to_thread(self._api_or_raise().set_auth, access_token, self.refresh_token)
@@ -120,7 +227,7 @@ class PixivClient:
         try:
             await self._refresh_token()
         finally:
-            await r.delete(_LOCK_KEY)
+            await r.delete(lock_key)
 
     async def _refresh_token(self) -> None:
         """Call pixivpy3 auth and cache the resulting access token."""
@@ -134,22 +241,29 @@ class PixivClient:
             raise PermissionError("Pixiv token invalid or expired")
 
         access_token = token_response.access_token
-        await r.setex(_TOKEN_KEY, _TOKEN_TTL, access_token)
+        await r.setex(_token_keys(self.refresh_token)[0], _TOKEN_TTL, access_token)
         logger.info("Pixiv access token refreshed, cached for %ds", _TOKEN_TTL)
 
     async def _call(self, fn, *args, **kwargs):
         """
         Wrap a synchronous pixivpy3 call with to_thread().
         On 403 (token expired mid-session), flush cache and retry once.
+        Raises PixivRateLimitError while Pixiv is throttling us, without
+        sending the request when the shared cooldown is still running.
         """
+        remaining = await pixiv_cooldown_remaining()
+        if remaining > 0:
+            raise PixivRateLimitError(remaining)
         try:
             result = await asyncio.to_thread(fn, *args, **kwargs)
         except Exception as exc:
             msg = str(exc).lower()
+            if "rate limit" in msg:
+                raise PixivRateLimitError(await _start_cooldown()) from exc
             if "403" in msg or "invalid_grant" in msg or "invalid_token" in msg:
                 logger.warning("Pixiv token expired mid-session, retrying refresh")
                 r = get_redis()
-                await r.delete(_TOKEN_KEY)
+                await r.delete(_token_keys(self.refresh_token)[0])
                 try:
                     await self._refresh_token()
                     result = await asyncio.to_thread(fn, *args, **kwargs)
@@ -159,6 +273,9 @@ class PixivClient:
                     raise PermissionError(f"Pixiv request failed after token refresh: {exc2}") from exc2
             else:
                 raise
+        if _is_rate_limit_body(result):
+            logger.warning("Pixiv rate limit hit, cooling down for %ds", _RATE_LIMIT_COOLDOWN)
+            raise PixivRateLimitError(await _start_cooldown())
         return result
 
     # ── Normalisation helpers ─────────────────────────────────────────

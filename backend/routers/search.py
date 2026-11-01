@@ -17,6 +17,7 @@ from core.gallery_helpers import (
     get_rating_map,
     get_reading_list_set,
 )
+from core.utils import zh_variants
 from db.models import (
     BlockedTag,
     CollectionGallery,
@@ -30,6 +31,11 @@ from db.models import (
 )
 
 router = APIRouter(tags=["search"])
+
+
+def _text_match(columns, term: str):
+    """ILIKE-contains `term` on any column, also matching its simplified/traditional forms."""
+    return or_(*(col.ilike(f"%{v}%") for v in zh_variants(term) for col in columns))
 
 
 def _tokenize_query(q: str) -> list[str]:
@@ -59,6 +65,16 @@ def _token_value(token: str, prefix: str) -> str:
     if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
         return value[1:-1]
     return value
+
+
+def _tag_token(token: str) -> str:
+    """Drop the quotes around a tag value: cosplayer:"jun ye tako" → cosplayer:jun ye tako."""
+    if token.startswith('"'):
+        return _token_value(token, "")
+    namespace, sep, name = token.partition(":")
+    if not sep:
+        return token
+    return f"{namespace}:{_token_value(name, '')}"
 
 
 def _artist_display_name(artist_id: str | None, uploader: str | None) -> str:
@@ -91,6 +107,7 @@ def _encode_cursor(row: Gallery, sort: str) -> str:
     """
     sort_val = {
         "added_at": row.added_at.isoformat() if row.added_at else "",
+        "content_updated_at": row.content_updated_at.isoformat() if row.content_updated_at else "",
         "rating": row.rating,
         "pages": row.pages if row.pages is not None else 0,
         "posted_at": row.posted_at.isoformat() if row.posted_at else "",
@@ -161,7 +178,8 @@ async def search_galleries(
       source:ehentai                    → source filter
       rating:>=4                        → minimum rating
       favorited:true                    → favorited only
-      sort:rating                       → override sort order
+      sort:rating                       → override sort order (added_at, content_updated_at, rating,
+                                          pages, posted_at, title)
       collection:5                      → galleries in collection #5
       artist_id:pixiv123                → galleries by artist_id
       category:doujinshi                → galleries in category
@@ -213,16 +231,16 @@ async def search_galleries(
         elif t.startswith("rl:"):
             rl_filter = _token_value(t, "rl:").lower() == "true"
         elif t.startswith("-"):
-            exclude_tags.append(t[1:])
-        else:
-            include_tags.append(t)
+            if tag := _tag_token(t[1:]):
+                exclude_tags.append(tag)
+        elif tag := _tag_token(t):
+            include_tags.append(tag)
 
     # Build filters
     filters = []
 
     if text_queries:
-        tq = f"%{text_queries[0]}%"
-        filters.append((Gallery.title.ilike(tq)) | (Gallery.title_jpn.ilike(tq)))
+        filters.append(_text_match((Gallery.title, Gallery.title_jpn), text_queries[0]))
 
     if source_filter:
         filters.append(Gallery.source == source_filter)
@@ -252,6 +270,7 @@ async def search_galleries(
     # Sort — DESC for numeric/date columns, ASC for title
     sort_map = {
         "added_at": desc(Gallery.added_at),
+        "content_updated_at": desc(Gallery.content_updated_at),
         "rating": desc(Gallery.rating),
         "pages": desc(Gallery.pages),
         "posted_at": desc(Gallery.posted_at),
@@ -289,6 +308,7 @@ async def search_galleries(
             "uploader": r.uploader,
             "download_status": r.download_status,
             "added_at": r.added_at.isoformat() if r.added_at else None,
+            "content_updated_at": r.content_updated_at.isoformat() if r.content_updated_at else None,
             "posted_at": r.posted_at.isoformat() if r.posted_at else None,
             "tags": r.tags_array or [],
             "tags_array": r.tags_array or [],
@@ -338,13 +358,15 @@ async def search_galleries(
 
                 for bare_name in name_only_tags:
                     variants = name_to_variants.get(bare_name.lower())
-                    text_pattern = f"%{bare_name}%"
-                    text_filter = or_(
-                        Gallery.title.ilike(text_pattern),
-                        Gallery.title_jpn.ilike(text_pattern),
-                        Gallery.uploader.ilike(text_pattern),
-                        Gallery.artist_id.ilike(text_pattern),
-                        Gallery.source_id.ilike(text_pattern),
+                    text_filter = _text_match(
+                        (
+                            Gallery.title,
+                            Gallery.title_jpn,
+                            Gallery.uploader,
+                            Gallery.artist_id,
+                            Gallery.source_id,
+                        ),
+                        bare_name,
                     )
                     if not variants:
                         filters.append(text_filter)
@@ -483,6 +505,19 @@ async def search_galleries(
                     or_(
                         Gallery.added_at < parsed,
                         and_(Gallery.added_at == parsed, Gallery.id < cursor_id),
+                    )
+                )
+            elif effective_sort == "content_updated_at":
+                from datetime import datetime as _dt
+
+                try:
+                    parsed = _dt.fromisoformat(cursor_val)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid cursor value")
+                base_stmt = base_stmt.where(
+                    or_(
+                        Gallery.content_updated_at < parsed,
+                        and_(Gallery.content_updated_at == parsed, Gallery.id < cursor_id),
                     )
                 )
             elif effective_sort == "posted_at":

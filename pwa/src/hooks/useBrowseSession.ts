@@ -18,6 +18,8 @@ import {
   type BrowseState,
 } from '@/lib/browse/reducer'
 import { canonicalIdentityKey } from '@/lib/browse/identity'
+import { publishBrowseListPatch, subscribeBrowseListPatches } from '@/lib/browse/listPatches'
+import type { BrowseListPatch } from '@/lib/browse/patch'
 import {
   createBrowseSnapshotStore,
   type BrowseLayoutSnapshot,
@@ -78,10 +80,19 @@ export type BrowseSessionState<Item, Cursor> = BrowseState<Item, Cursor> & {
   pending: boolean
 }
 
+export type BrowseRefreshOptions = {
+  /**
+   * `'loaded'` (default) re-fetches every loaded page so a deep anchor
+   * survives. `'first'` replaces the buffer with the first page only: one
+   * request, for a refresh the user asked for at the top of the list.
+   */
+  depth?: 'loaded' | 'first'
+}
+
 export type BrowseSessionResult<Item, Cursor> = {
   state: BrowseSessionState<Item, Cursor>
   loadMore: () => Promise<void>
-  refresh: () => Promise<void>
+  refresh: (options?: BrowseRefreshOptions) => Promise<void>
   retry: () => Promise<void>
   checkpoint: (
     view: BrowseCheckpoint,
@@ -98,6 +109,12 @@ export type BrowseSessionResult<Item, Cursor> = {
     retention?: BrowseSnapshotSaveOptions,
   ) => boolean
   cancelPending: () => void
+  /**
+   * Apply a user's change to one or more items (a bookmark, a favourite) to
+   * this list, to the other saved lists of its partition and to any of them
+   * mounted elsewhere. Use it instead of `refresh` for such changes.
+   */
+  patchItems: (patch: BrowseListPatch<Item>) => void
 }
 
 export function useBrowseSession<Item, Cursor, Identity>({
@@ -128,9 +145,11 @@ export function useBrowseSession<Item, Cursor, Identity>({
   )
   const [state, dispatch] = useReducer(reducer, identityKey, createBrowseState<Item, Cursor>)
   const stateRef = useRef(state)
+  const readyRef = useRef(ready)
   useLayoutEffect(() => {
     stateRef.current = state
-  }, [state])
+    readyRef.current = ready
+  }, [ready, state])
 
   const stableScope = useMemo(
     () => ({
@@ -153,14 +172,23 @@ export function useBrowseSession<Item, Cursor, Identity>({
     [adapter.validateCursor, adapter.validateItem, adapter.validateMeta, stableScope, storage],
   )
   const storeRef = useRef(store)
+  const publishTargetRef = useRef({ storage, scope: stableScope })
   useLayoutEffect(() => {
     storeRef.current = store
-  }, [store])
+    publishTargetRef.current = { storage, scope: stableScope }
+  }, [stableScope, storage, store])
 
   const generationRef = useRef(0)
   const activeIdentityKeyRef = useRef(identityKey)
   const inflightRef = useRef<AbortController | null>(null)
   const requestInFlightRef = useRef(false)
+  // Item patches that arrived while the request of `generation` was in
+  // flight. That response may have been fetched before the change, so its
+  // commit replays them (patches are idempotent).
+  const inflightPatchesRef = useRef<{
+    generation: number
+    updates: Array<(item: Item) => Item | null>
+  }>({ generation: 0, updates: [] })
   const liveViewRef = useRef<BrowseCheckpoint | null>(null)
   const restoreEpochRef = useRef(0)
   const restoreInstructionRef = useRef<BrowseRestoreInstruction | null>(null)
@@ -245,6 +273,14 @@ export function useBrowseSession<Item, Cursor, Identity>({
       const controller = new AbortController()
       inflightRef.current = controller
       const generation = ++generationRef.current
+      inflightPatchesRef.current = { generation, updates: [] }
+      const replayPatchesFromFlight = () => {
+        const pending = inflightPatchesRef.current
+        if (pending.generation !== generation) return
+        for (const update of pending.updates) {
+          dispatch({ type: 'ITEMS_PATCHED', identityKey: requestIdentityKey, update })
+        }
+      }
       dispatch({ type: 'REQUEST_STARTED', generation, request })
       try {
         if (request.kind === 'refresh') {
@@ -318,6 +354,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
             generation,
             buffer,
           })
+          replayPatchesFromFlight()
         } else {
           const page = await adapterRef.current.fetchPage(
             requestIdentity,
@@ -338,6 +375,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
             mode: request.kind === 'append' ? 'append' : 'replace',
             page,
           })
+          replayPatchesFromFlight()
         }
       } catch (error) {
         if (controller.signal.aborted || generationRef.current !== generation) return
@@ -357,6 +395,20 @@ export function useBrowseSession<Item, Cursor, Identity>({
     },
     [],
   )
+
+  // Patches published for this partition — by this page's own cards through
+  // patchItems, or by a detail page — reach the live buffer too. Subscribed in
+  // a layout effect ahead of the restore below, so no publish can land between
+  // reading the snapshot and listening.
+  useIsomorphicLayoutEffect(() => {
+    if (!ready) return
+    return subscribeBrowseListPatches<Item>(storage, stableScope, (patch) => {
+      const liveIdentityKey = activeIdentityKeyRef.current
+      const update = (item: Item) => patch.updateItem(item, liveIdentityKey)
+      dispatch({ type: 'ITEMS_PATCHED', identityKey: liveIdentityKey, update })
+      if (requestInFlightRef.current) inflightPatchesRef.current.updates.push(update)
+    })
+  }, [ready, stableScope, storage])
 
   useIsomorphicLayoutEffect(() => {
     activeIdentityKeyRef.current = identityKey
@@ -437,7 +489,12 @@ export function useBrowseSession<Item, Cursor, Identity>({
     }
   }, [autoLoad, clearRestore, identityKey, publishRestore, ready, requestPages, saveState, store])
 
+  // While `ready` is false the scope (tab claim, user id) is a placeholder: a
+  // request would fetch against it and a fake page would commit as a real
+  // result. Callers such as a seed effect fire inside that window on every
+  // remount, so the actions are inert until the effect above can restore.
   const loadMore = useCallback(async (): Promise<void> => {
+    if (!readyRef.current) return
     const current = stateRef.current
     if (current.status === 'loading' || current.terminal) return
     if (current.status === 'error') {
@@ -454,7 +511,8 @@ export function useBrowseSession<Item, Cursor, Identity>({
     await requestPages(request, identityRef.current, current.identityKey)
   }, [requestPages])
 
-  const refresh = useCallback(async (): Promise<void> => {
+  const refresh = useCallback(async (options?: BrowseRefreshOptions): Promise<void> => {
+    if (!readyRef.current) return
     const current = stateRef.current
     if (
       current.terminal ||
@@ -466,13 +524,18 @@ export function useBrowseSession<Item, Cursor, Identity>({
     inflightRef.current = null
     requestInFlightRef.current = false
     await requestPages(
-      { kind: 'refresh', cursor: null, targetDepth: Math.max(1, current.pages.length) },
+      {
+        kind: 'refresh',
+        cursor: null,
+        targetDepth: options?.depth === 'first' ? 1 : Math.max(1, current.pages.length),
+      },
       identityRef.current,
       current.identityKey,
     )
   }, [requestPages])
 
   const retry = useCallback(async (): Promise<void> => {
+    if (!readyRef.current) return
     const current = stateRef.current
     if (
       !current.failedRequest ||
@@ -489,6 +552,21 @@ export function useBrowseSession<Item, Cursor, Identity>({
     inflightRef.current = null
     requestInFlightRef.current = false
     generationRef.current += 1
+  }, [])
+
+  const patchItems = useCallback((patch: BrowseListPatch<Item>): void => {
+    // Until `ready` the scope is a placeholder partition. After unmount the
+    // refs keep the last real scope: a card's change that settles once the
+    // user has left (opened the work mid-request) still reaches the snapshot
+    // this list restores on return.
+    if (!readyRef.current) return
+    const { storage: targetStorage, scope: targetScope } = publishTargetRef.current
+    publishBrowseListPatch({
+      storage: targetStorage,
+      scope: targetScope,
+      patch,
+      validateItem: adapterRef.current.validateItem,
+    })
   }, [])
 
   const replacePage = useCallback(
@@ -528,8 +606,14 @@ export function useBrowseSession<Item, Cursor, Identity>({
   // source metadata — belongs to the identity that produced it and must read
   // as unknown until the new one commits. Consumers guard on null; handing
   // them the previous identity's numbers makes those guards unsound.
+  //
+  // Until `ready`, nothing has been restored or requested, so the buffer is
+  // empty because it is unresolved, not because the list is: publishing 'idle'
+  // there reads as "No results" and flashes before the snapshot hydrates.
   const publishedState = useMemo<BrowseSessionState<Item, Cursor>>(() => {
-    if (state.identityKey === identityKey) return { ...state, pending: false }
+    if (state.identityKey === identityKey) {
+      return ready ? { ...state, pending: false } : { ...state, pending: false, status: 'loading' }
+    }
     return {
       ...state,
       pending: true,
@@ -543,7 +627,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
       terminal: null,
       meta: null,
     }
-  }, [identityKey, state])
+  }, [identityKey, ready, state])
 
   return {
     state: publishedState,
@@ -566,5 +650,6 @@ export function useBrowseSession<Item, Cursor, Identity>({
           : { anchor: { itemId: null, offset: 0, scrollY: 0 }, layout: null },
     replacePage,
     cancelPending,
+    patchItems,
   }
 }

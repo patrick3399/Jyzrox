@@ -156,3 +156,142 @@ async def test_paused_token_owner_still_consumes_capacity(db_session):
 
     assert claim.acquired is True
     assert (await admission.claim(waiting.id, "ehentai", max_count=1)).acquired is False
+
+
+# ── Persona-aware claim (ADR 0022) ────────────────────────────────────
+
+
+async def _persona(session, persona_id: int, name: str):
+    from db.models import EgressPersona
+
+    session.add(EgressPersona(id=persona_id, name=name))
+    await session.commit()
+
+
+def _slots(*ids: int, capacity: int = 1):
+    from services.download_admission import PersonaSlot
+
+    return [PersonaSlot(persona_id=i, name=f"p{i}", capacity=capacity) for i in ids]
+
+
+async def test_persona_claim_spreads_fifo_jobs_across_personas_up_to_each_capacity(db_session):
+    key = "gallery_dl:x.com#persona"
+    await _persona(db_session, 11, "p11")
+    await _persona(db_session, 12, "p12")
+    jobs = [await _queued_job(db_session, key=key, ticket=t) for t in (1, 2, 3)]
+    admission = _admission(db_session)
+
+    c1 = await admission.claim_with_personas(jobs[0].id, key, _slots(11, 12))
+    c2 = await admission.claim_with_personas(jobs[1].id, key, _slots(11, 12))
+    c3 = await admission.claim_with_personas(jobs[2].id, key, _slots(11, 12))
+
+    assert c1.acquired and c2.acquired
+    assert {c1.persona_id, c2.persona_id} == {11, 12}
+    assert c3.acquired is False
+    assert c3.queue_position == 1
+
+
+async def test_persona_claim_out_of_fifo_order_waits_even_when_a_persona_is_free(db_session):
+    key = "gallery_dl:x.com#persona"
+    await _persona(db_session, 11, "p11")
+    first = await _queued_job(db_session, key=key, ticket=1)
+    second = await _queued_job(db_session, key=key, ticket=2)
+
+    early = await _admission(db_session).claim_with_personas(second.id, key, _slots(11))
+
+    assert early.acquired is False
+    assert early.queue_position == 2
+    assert (await _admission(db_session).claim_with_personas(first.id, key, _slots(11))).acquired
+
+
+async def test_persona_claim_takes_preferred_persona_when_it_has_a_free_slot(db_session):
+    key = "gallery_dl:x.com#persona"
+    await _persona(db_session, 11, "p11")
+    await _persona(db_session, 12, "p12")
+    job = await _queued_job(db_session, key=key, ticket=1)
+
+    claim = await _admission(db_session).claim_with_personas(job.id, key, _slots(11, 12), preferred_persona_id=12)
+
+    assert claim.persona_id == 12
+
+
+async def test_persona_claim_skips_preferred_persona_without_free_slot(db_session):
+    key = "gallery_dl:x.com#persona"
+    await _persona(db_session, 11, "p11")
+    await _persona(db_session, 12, "p12")
+    a = await _queued_job(db_session, key=key, ticket=1)
+    b = await _queued_job(db_session, key=key, ticket=2)
+    admission = _admission(db_session)
+
+    await admission.claim_with_personas(a.id, key, _slots(11, 12), preferred_persona_id=12)
+    second = await admission.claim_with_personas(b.id, key, _slots(11, 12), preferred_persona_id=12)
+
+    assert second.acquired is True
+    assert second.persona_id == 11
+
+
+async def test_persona_claim_without_candidates_keeps_job_queued_with_position(db_session):
+    key = "gallery_dl:x.com#persona"
+    job = await _queued_job(db_session, key=key, ticket=1)
+
+    claim = await _admission(db_session).claim_with_personas(job.id, key, [])
+
+    await db_session.refresh(job)
+    assert claim.acquired is False
+    assert claim.queue_position == 1
+    assert job.status == "queued"
+    assert job.admission_token is None
+
+
+async def test_persona_claim_records_persona_and_name_snapshot_and_release_keeps_them(db_session):
+    key = "gallery_dl:x.com#persona"
+    await _persona(db_session, 11, "p11")
+    job = await _queued_job(db_session, key=key, ticket=1)
+    admission = _admission(db_session)
+
+    claim = await admission.claim_with_personas(job.id, key, _slots(11))
+    await admission.release(job.id, claim.token)
+
+    await db_session.refresh(job)
+    assert job.persona_id == 11
+    assert job.persona_name == "p11"
+    assert job.admission_token is None
+
+
+async def test_persona_queue_does_not_consume_direct_site_capacity(db_session):
+    persona_key = "gallery_dl:x.com#persona"
+    await _persona(db_session, 11, "p11")
+    persona_job = await _queued_job(db_session, key=persona_key, ticket=1)
+    direct_job = await _queued_job(db_session, key="gallery_dl:x.com", ticket=2)
+    admission = _admission(db_session)
+
+    await admission.claim_with_personas(persona_job.id, persona_key, _slots(11))
+    direct = await admission.claim(direct_job.id, "gallery_dl:x.com", max_count=1)
+
+    assert direct.acquired is True
+    assert direct.persona_id is None
+
+
+async def test_legacy_claim_after_persona_run_clears_persona_name_but_keeps_persona_id(db_session):
+    persona_key = "gallery_dl:x.com#persona"
+    await _persona(db_session, 11, "p11")
+    job = await _queued_job(db_session, key=persona_key, ticket=1)
+    admission = _admission(db_session)
+
+    first = await admission.claim_with_personas(job.id, persona_key, _slots(11))
+    await admission.release(job.id, first.token)
+
+    # Retry: the row goes back to queued (the token was already cleared by release).
+    job.status = "queued"
+    await db_session.commit()
+
+    # Personas are now off / all disabled, so the job is claimed through the direct path.
+    direct = await admission.claim(job.id, "gallery_dl:x.com", max_count=1)
+
+    await db_session.refresh(job)
+    assert direct.acquired is True
+    assert direct.persona_id is None
+    # persona_name is the display snapshot of the *current* run: a direct run has none.
+    assert job.persona_name is None
+    # persona_id stays as the sticky preference for a later persona-mode retry.
+    assert job.persona_id == 11

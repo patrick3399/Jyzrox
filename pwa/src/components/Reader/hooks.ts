@@ -152,13 +152,28 @@ const PROXY_PREFETCH_TIMEOUT_MS = 10000
  * memory incident on a long fast flip.
  */
 const PREFETCH_KEEP_AHEAD = 10
+/** Max concurrent in-flight prefetch requests in local mode */
+const LOCAL_PREFETCH_CONCURRENCY = 2
+/** Local mode prefetch window: pages ahead / behind the current page */
+const LOCAL_PREFETCH_AHEAD = 5
+const LOCAL_PREFETCH_BEHIND = 2
+/**
+ * Decoded-pixel budget for one local prefetch window. Local pages are original
+ * files, so a gallery of 5336x8000 (~40 MB) JPEGs fetched 7 at a time starved
+ * iOS Safari's network and memory until the app stopped responding even after
+ * leaving the Reader. Ordinary ~6 MP pages still get the full window; huge
+ * originals shrink it to the next page only.
+ */
+const LOCAL_PREFETCH_PIXEL_BUDGET = 48_000_000
+/** Pixel estimate for a page whose dimensions are unknown */
+const LOCAL_PREFETCH_UNKNOWN_PIXELS = 6_000_000
 
 /** Bookkeeping for one in-flight/active prefetch <img> element. */
 interface ActiveImage {
   el: HTMLImageElement
   /** Proxy-mode per-image timeout; null in local mode (no timeout there). */
   timeoutId: ReturnType<typeof setTimeout> | null
-  /** Whether this request incremented inflightCountRef (proxy mode only). */
+  /** Whether this request incremented inflightCountRef. */
   counted: boolean
 }
 
@@ -201,6 +216,9 @@ export function useSequentialPrefetch(
   // prefetchPage needs a stable reference so we use useRef to break the
   // circular dependency with the chain callback.
   const prefetchPageRef = useRef<(pageNum: number) => void>(() => undefined)
+  // Local mode tops its window up from settle callbacks, which are created
+  // inside prefetchPage — before startPrefetchWindow exists.
+  const startPrefetchWindowRef = useRef<(page: number) => void>(() => undefined)
 
   // Epoch: incremented on every currentPage change.
   // Each in-flight callback captures its epoch; if it doesn't match the
@@ -364,18 +382,23 @@ export function useSequentialPrefetch(
         }
         el.src = img.url
       } else {
-        // Local mode: fire-and-forget (concurrent, up to 3 ahead from caller)
+        // Local mode: up to LOCAL_PREFETCH_CONCURRENCY in flight; each settle
+        // tops the current window up instead of firing the whole window at once.
+        if (inflightCountRef.current >= LOCAL_PREFETCH_CONCURRENCY) return
         if (!img.url) return // skip un-downloaded images
+        inflightCountRef.current += 1
         inflightPagesRef.current.add(pageNum)
         const el = new window.Image()
-        activeImagesRef.current.set(pageNum, { el, timeoutId: null, counted: false })
+        activeImagesRef.current.set(pageNum, { el, timeoutId: null, counted: true })
         el.onload = el.onerror = () => {
           cleanupImage(pageNum)
           inflightPagesRef.current.delete(pageNum)
+          inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
           if (unmountedRef.current) return
 
           prefetchedRef.current = new Set([...prefetchedRef.current, pageNum])
           setPrefetched(new Set(prefetchedRef.current))
+          startPrefetchWindowRef.current(currentPageRef.current)
         }
         el.src = img.url
       }
@@ -397,17 +420,31 @@ export function useSequentialPrefetch(
           prefetchPage(page + 1 + slot)
         }
       } else {
-        // Local: prefetch forward 5 + backward 2 concurrently
-        for (let i = 1; i <= 5; i++) {
-          prefetchPage(page + i)
-        }
-        for (let i = 1; i <= 2; i++) {
-          prefetchPage(page - i)
+        // Local: forward pages first, then backward, until the pixel budget is
+        // spent. The next page is always kept so reading never waits on it.
+        const offsets = [
+          ...Array.from({ length: LOCAL_PREFETCH_AHEAD }, (_, i) => i + 1),
+          ...Array.from({ length: LOCAL_PREFETCH_BEHIND }, (_, i) => -(i + 1)),
+        ]
+        const byPage = new Map(imagesRef.current.map((img) => [img.pageNum, img]))
+        let pixels = 0
+        let kept = 0
+        for (const offset of offsets) {
+          const img = byPage.get(page + offset)
+          if (!img || !img.url || img.mediaType === 'video') continue
+          pixels += img.width && img.height ? img.width * img.height : LOCAL_PREFETCH_UNKNOWN_PIXELS
+          if (kept > 0 && pixels > LOCAL_PREFETCH_PIXEL_BUDGET) break
+          kept += 1
+          prefetchPage(img.pageNum)
         }
       }
     },
     [isProxyMode, prefetchPage],
   )
+
+  useEffect(() => {
+    startPrefetchWindowRef.current = startPrefetchWindow
+  }, [startPrefetchWindow])
 
   useEffect(() => {
     // Advance epoch so any stale in-flight callback from the previous page

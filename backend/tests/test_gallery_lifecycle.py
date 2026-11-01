@@ -112,3 +112,31 @@ class TestInvalidateSourcesCache:
         redis.delete = AsyncMock(side_effect=ConnectionError("Redis down"))
         with patch("services.gallery_lifecycle.get_redis", return_value=redis):
             await invalidate_sources_cache()  # Must not raise
+
+
+class TestHardDeleteWithPendingPages:
+    async def test_hard_delete_gallery_with_pending_pages_ignores_missing_blobs(self):
+        """A pending link page has blob_sha256 NULL: there is no ref_count to
+        decrement and no thumbnail to look up."""
+        from services.gallery_lifecycle import hard_delete_galleries
+
+        hashed = MagicMock(blob_sha256="a" * 64)
+        pending = MagicMock(blob_sha256=None)
+        session = _make_session()
+        images_result = MagicMock()
+        images_result.scalars.return_value.all.return_value = [hashed, pending]
+        session.execute = AsyncMock(return_value=images_result)
+        decrement = AsyncMock()
+        cleanup = AsyncMock(return_value=set())
+
+        with (
+            patch("services.gallery_lifecycle.decrement_ref_count", decrement),
+            patch("services.gallery_lifecycle.cleanup_unreferenced_thumbnails", cleanup),
+            patch("services.gallery_lifecycle.invalidate_sources_cache", new_callable=AsyncMock),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=0),
+        ):
+            result = await hard_delete_galleries(session, [_make_gallery(1)])
+
+        assert result["affected"] == 1
+        decrement.assert_awaited_once_with("a" * 64, session)
+        cleanup.assert_awaited_once_with(session, ["a" * 64])

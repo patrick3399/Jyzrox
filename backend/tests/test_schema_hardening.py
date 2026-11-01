@@ -131,3 +131,59 @@ class TestUsersRoleConstraint:
         assert set(ROLE_HIERARCHY.keys()) == db_allowed, (
             "core.auth.ROLE_HIERARCHY and the DB chk_users_role constraint must allow identical role sets"
         )
+
+
+_LINK_SYNC_MIGRATION = Path(__file__).parent.parent / "migrations" / "versions" / "0026_link_sync_fingerprints.py"
+
+
+def test_link_sync_fingerprint_columns_exist_in_model_init_sql_and_migration():
+    from db.models import Gallery, Image
+
+    assert "source_dir_mtime_ns" in Gallery.__table__.c
+    assert "source_size" in Image.__table__.c
+    assert "source_mtime_ns" in Image.__table__.c
+
+    for source in (_INIT_SQL.read_text(), _LINK_SYNC_MIGRATION.read_text()):
+        assert "ALTER TABLE images ADD COLUMN IF NOT EXISTS source_size BIGINT" in source
+        assert "ALTER TABLE images ADD COLUMN IF NOT EXISTS source_mtime_ns BIGINT" in source
+        assert "ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_dir_mtime_ns BIGINT" in source
+
+
+_PENDING_MIGRATION = Path(__file__).parent.parent / "migrations" / "versions" / "0027_images_pending_blob.py"
+
+
+def test_images_blob_sha256_is_nullable_with_blob_or_path_check():
+    from db.models import Image
+
+    assert Image.__table__.c.blob_sha256.nullable is True
+
+    init_sql = _INIT_SQL.read_text()
+    assert "blob_sha256     TEXT REFERENCES blobs(sha256)," in init_sql
+    for source in (init_sql, _PENDING_MIGRATION.read_text()):
+        assert "ck_images_blob_or_external_path" in source
+        assert "blob_sha256 IS NOT NULL OR external_path IS NOT NULL" in source
+        assert "idx_images_pending" in source
+    assert "ALTER COLUMN blob_sha256 DROP NOT NULL" in _PENDING_MIGRATION.read_text()
+
+
+_CREDENTIAL_ACCOUNTS_MIGRATION = (
+    Path(__file__).parent.parent / "migrations" / "versions" / "0030_credential_accounts.py"
+)
+
+
+class TestCredentialAccountsSchema:
+    def test_init_sql_and_migration_key_credentials_by_source_and_account(self):
+        for source in (_INIT_SQL.read_text(), _CREDENTIAL_ACCOUNTS_MIGRATION.read_text()):
+            assert "PRIMARY KEY (source, account)" in source
+            assert "uq_credentials_active_per_source" in source
+            assert "WHERE is_active" in source
+
+    def test_orm_credential_primary_key_is_source_and_account(self):
+        from db.models import Credential
+
+        assert [c.name for c in Credential.__table__.primary_key.columns] == ["source", "account"]
+
+    def test_migration_activates_the_rows_that_existed_before_it(self):
+        migration = _CREDENTIAL_ACCOUNTS_MIGRATION.read_text()
+        upgrade = migration[migration.index("def upgrade") : migration.index("def downgrade")]
+        assert "SET is_active = TRUE" in upgrade

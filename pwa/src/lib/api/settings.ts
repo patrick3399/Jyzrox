@@ -1,6 +1,12 @@
 import { apiFetch } from './client'
 
-import type { Credentials, EhAccount, RateLimitSettings, SiteRateConfig } from '../types'
+import type {
+  CredentialAccount,
+  Credentials,
+  EhAccount,
+  RateLimitSettings,
+  SiteRateConfig,
+} from '../types'
 
 // ── Settings ──────────────────────────────────────────────────────────
 
@@ -13,36 +19,39 @@ export const settings = {
       body: JSON.stringify({ username, password }),
     }),
 
-  setEhCookies: (data: {
-    ipb_member_id: string
-    ipb_pass_hash: string
-    sk?: string
-    igneous?: string
-  }) =>
+  setEhCookies: (
+    data: {
+      ipb_member_id: string
+      ipb_pass_hash: string
+      sk?: string
+      igneous?: string
+    },
+    account?: string,
+  ) =>
     apiFetch<{ status: string; account: EhAccount }>('/api/settings/credentials/ehentai', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...data, account }),
     }),
 
-  setPixivToken: (refresh_token: string) =>
+  setPixivToken: (refresh_token: string, account?: string) =>
     apiFetch<{ status: string; username: string }>('/api/settings/credentials/pixiv', {
       method: 'POST',
-      body: JSON.stringify({ refresh_token }),
+      body: JSON.stringify({ refresh_token, account }),
     }),
 
-  setPixivCookie: (phpsessid: string) =>
+  setPixivCookie: (phpsessid: string, account?: string) =>
     apiFetch<{ status: string; username: string }>('/api/settings/credentials/pixiv/cookie', {
       method: 'POST',
-      body: JSON.stringify({ phpsessid }),
+      body: JSON.stringify({ phpsessid, account }),
     }),
 
   getPixivOAuthUrl: () =>
     apiFetch<{ url: string; code_verifier: string }>('/api/settings/credentials/pixiv/oauth-url'),
 
-  pixivOAuthCallback: (code: string, code_verifier: string) =>
+  pixivOAuthCallback: (code: string, code_verifier: string, account?: string) =>
     apiFetch<{ status: string; username: string }>(
       '/api/settings/credentials/pixiv/oauth-callback',
-      { method: 'POST', body: JSON.stringify({ code, code_verifier }) },
+      { method: 'POST', body: JSON.stringify({ code, code_verifier, account }) },
     ),
 
   getEhAccount: () => apiFetch<EhAccount>('/api/settings/eh/account'),
@@ -53,14 +62,31 @@ export const settings = {
       { method: 'POST' },
     ),
 
-  setGenericCookie: (source: string, cookies: Record<string, string>) =>
+  setGenericCookie: (source: string, cookies: Record<string, string>, account?: string) =>
     apiFetch<{ status: string; source: string }>('/api/settings/credentials/generic', {
       method: 'POST',
-      body: JSON.stringify({ source, cookies }),
+      body: JSON.stringify({ source, cookies, account }),
     }),
 
   deleteCredential: (source: string) =>
     apiFetch<{ status: string }>(`/api/settings/credentials/${source}`, { method: 'DELETE' }),
+
+  listCredentialAccounts: (source: string) =>
+    apiFetch<{ source: string; accounts: CredentialAccount[] }>(
+      `/api/settings/credentials/${encodeURIComponent(source)}/accounts`,
+    ),
+
+  activateCredentialAccount: (source: string, account: string) =>
+    apiFetch<{ status: string; source: string; account: string }>(
+      `/api/settings/credentials/${encodeURIComponent(source)}/active`,
+      { method: 'POST', body: JSON.stringify({ account }) },
+    ),
+
+  deleteCredentialAccount: (source: string, account: string) =>
+    apiFetch<{ status: string }>(
+      `/api/settings/credentials/${encodeURIComponent(source)}/accounts/${encodeURIComponent(account)}`,
+      { method: 'DELETE' },
+    ),
 
   detectSite: (url: string) =>
     apiFetch<{ detected: boolean; source?: string; site_name?: string }>(
@@ -69,7 +95,7 @@ export const settings = {
 
   setSiteCredential: (
     source: string,
-    data: { cookies?: string; username?: string; password?: string },
+    data: { cookies?: string; username?: string; password?: string; account?: string },
   ) =>
     apiFetch<{ status: string; source: string }>('/api/settings/credentials/site', {
       method: 'POST',

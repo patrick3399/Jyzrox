@@ -215,3 +215,16 @@ def test_paused_state_constants_distinct():
         GDL_STATE_SLEEPING,
     }
     assert len(states) == 5
+
+
+async def test_stderr_records_throttle_signals_even_without_source_id():
+    state = _DownloadState()
+    assert state.source_id == ""
+    proc = _stderr_proc(
+        b"[twitter][warning] HttpError: '429 Too Many Requests'. Sleeping 30.0 seconds.\n",
+        b"[twitter][error] HttpError: '403 Forbidden' for 'https://x.com/i/api/graphql'\n",
+    )
+
+    await _read_stderr(proc, state)
+
+    assert state.throttle_signals == {"http_429", "http_403"}

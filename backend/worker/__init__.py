@@ -24,12 +24,19 @@ from worker.dedup_tier1 import dedup_tier1_job
 from worker.dedup_tier2 import dedup_tier2_job
 from worker.dedup_tier3 import dedup_tier3_job
 from worker.download import download_job
+from worker.download_stop import finalize_stopped_job, release_dead_collection_lock
 from worker.ehtag_sync import ehtag_sync_job
 from worker.explorer_stats import explorer_folder_stats_job
 from worker.gallery_dl_venv import ensure_venv, image_sync_loop
 from worker.gallery_dl_venv import rollback_job as gdl_rollback_job
 from worker.gallery_dl_venv import upgrade_job as gdl_upgrade_job
-from worker.helpers import _sha256, compute_job_key, enqueue_download_job, env_int
+from worker.helpers import (
+    _sha256,
+    compute_job_key,
+    enqueue_download_job,
+    enqueue_finalize_stopped_job,
+    env_int,
+)
 from worker.importer import (
     _build_gallery,
     _extract_tags,
@@ -39,12 +46,14 @@ from worker.importer import (
     local_import_job,
     upsert_metadata_gallery_tags,
 )
+from worker.link_hash import link_hash_job
 from worker.liveness import (
     clear_run_marker,
     detect_unclean_exit,
     record_memory_sample,
     start_run_marker,
 )
+from worker.log_redaction import install_log_redaction
 from worker.memory import after_process_hook
 from worker.novel_index import novel_index_job
 from worker.novel_sync import novel_sync_job
@@ -77,6 +86,7 @@ logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+install_log_redaction()
 logger = logging.getLogger("worker")
 
 
@@ -154,11 +164,15 @@ async def _ensure_archive_table_schema() -> None:
     """Ensure all gallery-dl archive tables have the gallery_id FK column.
 
     Called at worker startup. Finds tables that gallery-dl auto-created
-    without the Jyzrox extensions and ALTERs them to add gallery_id + created_at.
+    without the Jyzrox extensions and upgrades them. Downloads also do this
+    for their own category right before gallery-dl starts
+    (``GalleryDlPlugin.download``); this pass covers categories reached only
+    through another extractor.
     """
     from sqlalchemy import text
 
     from core.database import AsyncSessionLocal
+    from plugins.builtin.gallery_dl._archive import ArchiveTableConflict, ensure_archive_table
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -175,26 +189,11 @@ async def _ensure_archive_table_schema() -> None:
         )
         tables = [row[0] for row in result]
         for table in tables:
-            col_count = (
-                await session.execute(
-                    text(
-                        "SELECT COUNT(*) FROM information_schema.columns "
-                        "WHERE table_name = :t AND table_schema = 'public'"
-                    ),
-                    {"t": table},
-                )
-            ).scalar()
-            if col_count != 1:
-                continue  # not a gallery-dl archive table (has more than just 'entry')
-            await session.execute(
-                text(f'''
-                ALTER TABLE "{table}"
-                ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-                ADD COLUMN IF NOT EXISTS job_id UUID,
-                ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()
-            ''')
-            )
-            logger.info("[archive] upgraded table '%s' with gallery_id FK", table)
+            try:
+                if await ensure_archive_table(session, table) == "upgraded":
+                    logger.info("[archive] upgraded table '%s' with gallery_id FK", table)
+            except ArchiveTableConflict:
+                continue  # not a gallery-dl archive table (has more than the archive columns)
         await session.commit()
 
 
@@ -269,6 +268,116 @@ async def _report_unclean_exit(r) -> None:
     )
 
 
+async def _finish_stop_requested(r, job) -> bool:
+    """Startup recovery for a job the user already stopped; True when it was handed over.
+
+    A stop is a durable intent. Re-running such a job would download again what
+    the user chose to keep, and failing it would drop the intent, so the job goes
+    to ``finalize_stopped_job`` (BE-T19: enqueued before the caller commits). On
+    an enqueue failure the job falls through to the normal recovery policy: the
+    re-run sees the intent before it starts and takes the keep path without
+    downloading, and the auto-retry selection never picks a stop-requested row.
+    """
+    from datetime import datetime
+
+    if not isinstance(job.stop_requested_at, datetime):
+        return False
+    try:
+        await release_dead_collection_lock(r, job)
+        await enqueue_finalize_stopped_job(job.id)
+    except Exception as exc:
+        logger.error("Failed to hand stop-requested job %s to finalize: %s", job.id, exc)
+        return False
+    logger.info("Handed stop-requested job %s (%s) to finalize_stopped_job", job.id, job.status)
+    return True
+
+
+async def _sweep_orphan_repair_archives() -> int:
+    """Merge or drop the repair shadow tables of jobs that are over.
+
+    A repair run's shadow archive is merged into the real table and dropped when
+    the run is kept, aborted or cleaned up. A worker killed in between leaves the
+    table behind, and nothing else would ever read it. A job that is still
+    queued, running or paused owns its shadow. Otherwise the rows are merged when
+    the run completed and its gallery still exists (they stay unlinked; a retry
+    links them by job id) and dropped when it was discarded: a cancel rolled the
+    imports back, so archiving them would leave holes.
+    """
+    from sqlalchemy import select
+
+    from core.database import AsyncSessionLocal
+    from db.models import DownloadJob, Gallery
+    from plugins.builtin.gallery_dl._archive import (
+        drop_repair_archive,
+        list_repair_archive_tables,
+        merge_repair_archive,
+        parse_repair_archive_name,
+    )
+
+    handled = 0
+    async with AsyncSessionLocal() as session:
+        for shadow in await list_repair_archive_tables(session):
+            parsed = parse_repair_archive_name(shadow)
+            if parsed is None:
+                continue
+            real, job_uuid = parsed
+            job = (
+                await session.execute(
+                    select(DownloadJob.status, DownloadJob.gallery_id).where(DownloadJob.id == job_uuid)
+                )
+            ).one_or_none()
+            if job is not None and job.status in ("queued", "running", "paused"):
+                continue
+            try:
+                keep_rows = False
+                if job is not None and job.status in ("done", "partial", "failed") and job.gallery_id is not None:
+                    keep_rows = (
+                        await session.execute(
+                            select(Gallery.id).where(Gallery.id == job.gallery_id, Gallery.deleted_at.is_(None))
+                        )
+                    ).scalar_one_or_none() is not None
+                if keep_rows:
+                    try:
+                        async with session.begin_nested():
+                            await merge_repair_archive(session, real, shadow)
+                    except Exception as exc:  # the real table may be gone or truncated out of the name
+                        logger.warning("[archive] could not merge orphan repair table %s: %s", shadow, exc)
+                await drop_repair_archive(session, shadow)
+                await session.commit()
+                handled += 1
+            except Exception as exc:
+                await session.rollback()
+                logger.warning("[archive] could not clear orphan repair table %s: %s", shadow, exc)
+    return handled
+
+
+async def _settle_orphan_downloading_galleries() -> int:
+    """Settle every live gallery left on ``downloading`` by a job that is no longer active.
+
+    The running-job recovery only reaches galleries of jobs that are still
+    ``running``. A worker killed after a stop claimed its job ``done`` (or after
+    any other terminal write, before finalize) leaves the gallery stuck.
+    Nothing executes during startup, so every such gallery is stale.
+    """
+    from sqlalchemy import select
+
+    from core.database import AsyncSessionLocal
+    from db.models import Gallery
+    from services.gallery_lifecycle import settle_stale_downloading_galleries
+
+    async with AsyncSessionLocal() as session:
+        gallery_ids = list(
+            (
+                await session.execute(
+                    select(Gallery.id).where(Gallery.download_status == "downloading", Gallery.deleted_at.is_(None))
+                )
+            ).scalars()
+        )
+        settled = await settle_stale_downloading_galleries(session, gallery_ids)
+        await session.commit()
+    return settled
+
+
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
     # Fail fast if the DB is not migrated to this image's schema head (e.g. a
@@ -314,6 +423,11 @@ async def startup(ctx: dict) -> None:
     # If the image ships a newer gallery-dl than the venv, sync it once downloads
     # are idle (guarded like an admin upgrade; never blocks startup).
     ctx["_gdl_image_sync_task"] = asyncio.ensure_future(image_sync_loop())
+    # Log a black-holed IPv6 upstream or an inactive Happy Eyeballs patch
+    # (both slow downloads silently); background, never blocks startup.
+    from worker.egress_check import run_startup_checks
+
+    ctx["_egress_check_task"] = asyncio.ensure_future(run_startup_checks())
     # Auto-upgrade archive tables created by gallery-dl without Jyzrox columns
     try:
         await _ensure_archive_table_schema()
@@ -360,6 +474,7 @@ async def startup(ctx: dict) -> None:
         "paused_retried": 0,
         "paused_failed": 0,
         "queued_requeued": 0,
+        "stop_finalized": 0,
     }
 
     from datetime import UTC, datetime
@@ -404,6 +519,12 @@ async def startup(ctx: dict) -> None:
                 # Execution tokens are process-local fences. No owner survives
                 # a worker restart, regardless of the selected recovery policy.
                 job.admission_token = None
+                if await _finish_stop_requested(r, job):
+                    # The user already stopped it: keep what it fetched instead
+                    # of re-running or failing it. Status stays `running` until
+                    # finalize_stopped_job ends it.
+                    recovery_counts["stop_finalized"] += 1
+                    continue
                 if running_strategy == "auto_retry":
                     job.retry_count = (job.retry_count or 0) + 1
                     job_key = compute_job_key(job.id, job.retry_count)
@@ -435,6 +556,9 @@ async def startup(ctx: dict) -> None:
         if stale_queued:
             for job in stale_queued:
                 job.admission_token = None
+                if await _finish_stop_requested(r, job):
+                    recovery_counts["stop_finalized"] += 1
+                    continue
                 job_key = f"dispatch:{job.id}:{uuid.uuid4()}"
                 try:
                     await enqueue_download_job(job, job_key)
@@ -458,6 +582,10 @@ async def startup(ctx: dict) -> None:
         if paused_jobs:
             for job in paused_jobs:
                 job.admission_token = None
+                if await _finish_stop_requested(r, job):
+                    await r.delete(f"download:pause:{job.id}")
+                    recovery_counts["stop_finalized"] += 1
+                    continue
                 if paused_strategy == "keep_paused":
                     job_key = compute_job_key(job.id, job.retry_count)
                     try:
@@ -516,6 +644,22 @@ async def startup(ctx: dict) -> None:
     except Exception as exc:
         logger.error("Failed to clear stale download admission tokens: %s", exc)
 
+    # A worker killed mid-repair leaves its shadow archive table behind.
+    try:
+        swept = await _sweep_orphan_repair_archives()
+        if swept:
+            logger.info("Cleared %d orphaned repair archive table(s)", swept)
+    except Exception as exc:
+        logger.error("Failed to sweep orphaned repair archive tables: %s", exc)
+
+    # A job that ended without finalizing its gallery leaves it on `downloading`.
+    try:
+        settled = await _settle_orphan_downloading_galleries()
+        if settled:
+            logger.info("Settled %d gallery(ies) stuck on downloading", settled)
+    except Exception as exc:
+        logger.error("Failed to settle galleries stuck on downloading: %s", exc)
+
     # HR-019: a SIGKILL (container OOM) kills local_import_job before its
     # terminal-status write, leaving the gallery on `importing` with no queue
     # entry and no scan path that will ever retry it. Startup is the moment
@@ -572,7 +716,7 @@ async def startup(ctx: dict) -> None:
             kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
-        _watcher.start(paths, enqueue_sync)
+        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
         await r.set(
             "watcher:status",
             json.dumps({"running": True, "paths": paths}),
@@ -593,6 +737,13 @@ async def shutdown(ctx: dict) -> None:
         gdl_sync_task.cancel()
         try:
             await gdl_sync_task
+        except asyncio.CancelledError:
+            pass
+    egress_task = ctx.get("_egress_check_task")
+    if egress_task is not None and not egress_task.done():
+        egress_task.cancel()
+        try:
+            await egress_task
         except asyncio.CancelledError:
             pass
     # Cancel log level subscriber
@@ -646,7 +797,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
             kwargs = _watcher_job_kwargs(job_name, args)
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
-        _watcher.start(paths, enqueue_sync)
+        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
         await r.set("watcher:status", json.dumps({"running": True, "paths": paths}))
         logger.info("[toggle_watcher] Started, watching %d path(s)", len(paths))
         return {"status": "started", "paths": paths}
@@ -825,6 +976,61 @@ async def _check_oom_kills(ctx: dict) -> int | None:
     return oom_kills
 
 
+_REDIS_ALERT_MESSAGES = {
+    "high": "Redis memory is still high after trimming the image cache",
+    "unbounded": "Redis has no maxmemory limit",
+    "unsafe_policy": "Redis eviction policy is not noeviction",
+}
+
+
+async def _trim_image_cache_if_needed(redis, sample):
+    """Trim the oldest image-cache keys once Redis crosses the high watermark.
+
+    Returns the sample the alert should be judged on: a fresh one after a trim,
+    otherwise the one passed in. Never raises; a monitor must not fail its cron.
+    """
+    from core.config import settings
+
+    if sample is None:
+        return sample
+    limit_bytes = int(sample["limit_bytes"])
+    used_bytes = int(sample["used_bytes"])
+    if limit_bytes <= 0 or float(sample["pct"]) < settings.redis_image_cache_trim_high_pct:
+        return sample
+
+    from services.cache import IMAGE_CACHE_TTLS
+    from worker.redis_memory import sample_redis_memory, trim_image_cache
+
+    target_bytes = int(limit_bytes * settings.redis_image_cache_trim_target_pct / 100)
+    try:
+        trimmed = await trim_image_cache(redis, IMAGE_CACHE_TTLS, bytes_to_free=used_bytes - target_bytes)
+    except Exception as exc:
+        logger.warning("[memory_monitor] REDIS image cache trim failed: %s", exc)
+        return sample
+
+    logger.info(
+        "[memory_monitor] REDIS image cache trimmed at %.1f%%: deleted %d keys, freed %.1f MB%s",
+        float(sample["pct"]),
+        int(trimmed["deleted_keys"]),
+        int(trimmed["freed_bytes"]) / (1024 * 1024),
+        " (scan truncated, continuing next run)" if trimmed["truncated"] else "",
+    )
+    return await sample_redis_memory(redis) or sample
+
+
+async def _push_redis_memory_alert(status: str) -> None:
+    """Surface a Redis memory alert in the UI. Never raises."""
+    message = _REDIS_ALERT_MESSAGES.get(status)
+    if message is None:
+        return
+    try:
+        from services.cache import push_system_alert
+
+        await push_system_alert(message)
+    except Exception as exc:
+        logger.warning("[memory_monitor] could not publish Redis alert: %s", exc)
+
+
 async def memory_monitor_job(ctx: dict) -> dict:
     """Cron: warn when worker or Redis memory crosses its alert threshold.
 
@@ -833,13 +1039,15 @@ async def memory_monitor_job(ctx: dict) -> dict:
     crosses ``settings.memory_alert_pct``. Redis is sampled independently because
     it holds non-evictable control-plane state and must alert before maxmemory
     causes writes to fail. Replaces the external memory_monitor.sh + CSV with an
-    in-app, log-visible alert.
+    in-app, log-visible alert. Before alerting on Redis it trims the oldest
+    image-cache keys (ADR 0018), so the alert means trimming did not help.
     """
     from core.config import settings
     from worker import memory as _mem
     from worker.redis_memory import sample_redis_memory
 
-    redis_sample = await sample_redis_memory(ctx.get("redis"))
+    redis = ctx.get("redis")
+    redis_sample = await _trim_image_cache_if_needed(redis, await sample_redis_memory(redis))
     redis_status = "unknown"
     if redis_sample is not None:
         redis_pct = float(redis_sample["pct"])
@@ -873,6 +1081,7 @@ async def memory_monitor_job(ctx: dict) -> dict:
                 redis_policy,
                 int(redis_sample["evicted_keys"]),
             )
+            await _push_redis_memory_alert(redis_status)
     redis_is_alert = redis_status in {"high", "unbounded", "unsafe_policy"}
 
     mem = _mem.read_container_memory_detail()
@@ -983,6 +1192,7 @@ def _make_startup_log(label: str):
 
 
 _ingest_startup = _make_startup_log("ingest")
+_cover_startup = _make_startup_log("cover")
 
 
 async def _render_startup(ctx: dict) -> None:
@@ -1027,7 +1237,7 @@ def _build_cron_jobs() -> list[CronJob]:
 
 
 def build_workers() -> tuple:
-    """Build and return all three SAQ Worker instances.
+    """Build and return every SAQ Worker instance, one per queue.
 
     Queue objects are pre-registered in core.queue._queues so that enqueue()
     works immediately from startup() onwards without a separate init call.
@@ -1038,6 +1248,7 @@ def build_workers() -> tuple:
     from core.queue_config import (
         ALL_QUEUES,
         DEFAULT_CONCURRENCY,
+        QUEUE_COVER,
         QUEUE_INGEST,
         QUEUE_INTERACTIVE,
         QUEUE_RENDER,
@@ -1050,12 +1261,14 @@ def build_workers() -> tuple:
     concurrency = {
         QUEUE_INTERACTIVE: env_int("WORKER_CONCURRENCY_INTERACTIVE", DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE]),
         QUEUE_INGEST: env_int("WORKER_CONCURRENCY_INGEST", DEFAULT_CONCURRENCY[QUEUE_INGEST]),
+        QUEUE_COVER: env_int("WORKER_CONCURRENCY_COVER", DEFAULT_CONCURRENCY[QUEUE_COVER]),
         QUEUE_RENDER: env_int("WORKER_CONCURRENCY_RENDER", DEFAULT_CONCURRENCY[QUEUE_RENDER]),
     }
     logger.info(
-        "Worker concurrency — interactive: %d, ingest: %d, render: %d",
+        "Worker concurrency — interactive: %d, ingest: %d, cover: %d, render: %d",
         concurrency[QUEUE_INTERACTIVE],
         concurrency[QUEUE_INGEST],
+        concurrency[QUEUE_COVER],
         concurrency[QUEUE_RENDER],
     )
 
@@ -1063,6 +1276,7 @@ def build_workers() -> tuple:
         queues[QUEUE_INTERACTIVE],
         functions=[
             download_job,
+            finalize_stopped_job,
             pixiv_collection_job,
             import_job,
             batch_import_job,
@@ -1107,12 +1321,24 @@ def build_workers() -> tuple:
         queues[QUEUE_INGEST],
         functions=[
             local_import_job,
+            link_hash_job,
+            # Routed to the cover queue now. Still registered here so cover
+            # jobs already queued on ingest (or enqueued by an api container
+            # that predates the cover queue) drain instead of failing.
             cover_thumbnail_job,
             auto_discover_job,
             explorer_folder_stats_job,
         ],
         concurrency=concurrency[QUEUE_INGEST],
         startup=_ingest_startup,
+        after_process=after_process_hook,
+    )
+
+    worker_cover = Worker(
+        queues[QUEUE_COVER],
+        functions=[cover_thumbnail_job],
+        concurrency=concurrency[QUEUE_COVER],
+        startup=_cover_startup,
         after_process=after_process_hook,
     )
 
@@ -1127,7 +1353,7 @@ def build_workers() -> tuple:
         after_process=after_process_hook,
     )
 
-    return worker_interactive, worker_ingest, worker_render
+    return worker_interactive, worker_ingest, worker_cover, worker_render
 
 
 # Keep old name as alias for any external scripts that import it
@@ -1136,12 +1362,14 @@ build_worker = build_workers
 
 __all__ = [
     "download_job",
+    "finalize_stopped_job",
     "pixiv_collection_job",
     "import_job",
     "local_import_job",
     "batch_import_job",
     "rescan_library_job",
     "rescan_gallery_job",
+    "link_hash_job",
     "rescan_by_path_job",
     "move_library_path_job",
     "reconcile_library_path_job",

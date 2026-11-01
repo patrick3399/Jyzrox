@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
 import { useState, useEffect } from 'react'
 import { use } from 'react'
 import Link from 'next/link'
@@ -13,9 +14,20 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { ExternalLink, ArrowLeft, BookOpen } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
+import { useBrowseListPatcher } from '@/hooks/useBrowseListPatcher'
+import {
+  isPixivBrowseItem,
+  PIXIV_BROWSE_SCHEMA_VERSION,
+  PIXIV_BROWSE_SOURCE_ID,
+  pixivBookmarkPatch,
+  type PixivBrowseItem,
+} from '@/lib/browse/pixiv'
+import { detailHotkey } from '@/lib/detailHotkeys'
+import { smartBack } from '@/lib/navBack'
 import DOMPurify from 'dompurify'
+import { PageContainer } from '@/components/layout/PageContainer'
 
-export default function IllustDetailPage({ params }: { params: Promise<{ id: string }> }) {
+function IllustDetailPageInner({ params }: { params: Promise<{ id: string }> }) {
   useLocale()
   const { id } = use(params)
   const illustId = parseInt(id, 10)
@@ -35,6 +47,13 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     () => api.pixiv.getBookmarkStatus(illustId),
   )
   const isBookmarked = bookmarkData?.is_bookmarked ?? illust?.is_bookmarked ?? false
+  // Bookmark changes reach the saved Pixiv lists of this tab, so the list the
+  // user goes back to shows the new star without refetching.
+  const patchPixivLists = useBrowseListPatcher<PixivBrowseItem>({
+    sourceId: PIXIV_BROWSE_SOURCE_ID,
+    schemaVersion: PIXIV_BROWSE_SCHEMA_VERSION,
+    validateItem: isPixivBrowseItem,
+  })
 
   const [downloading, setDownloading] = useState(false)
   const [bookmarking, setBookmarking] = useState(false)
@@ -43,38 +62,45 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     tag: string
   } | null>(null)
 
+  const tagPopoverOpen = pixivTagPopover !== null
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (e.key === 'Enter' || e.key === ' ') {
+      // The tag popover owns Escape/ArrowUp while it is open.
+      const action = detailHotkey(e)
+      if (!action || tagPopoverOpen) return
+      if (action === 'open') {
+        if (isNaN(illustId)) return
         e.preventDefault()
-        if (!isNaN(illustId)) router.push(`/reader/pixiv/${illustId}`)
+        router.push(`/reader/pixiv/${illustId}`)
+        return
       }
-      if (e.key === 'ArrowUp' || e.key === 'Escape') {
-        e.preventDefault()
-        if (history.length > 1) {
-          router.back()
-        } else {
-          router.push('/pixiv')
-        }
-      }
+      e.preventDefault()
+      smartBack(router, '/pixiv')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [illustId, router])
+  }, [illustId, router, tagPopoverOpen])
 
   if (isNaN(illustId))
-    return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
+    return (
+      <div className="p-8 text-center text-vault-text-secondary">
+        <BackButton fallback="/pixiv" />
+        {t('common.invalidId')}
+      </div>
+    )
 
   const handleBookmark = async () => {
     if (bookmarking) return
     setBookmarking(true)
+    const nextBookmarked = !isBookmarked
     try {
-      if (isBookmarked) {
-        await api.pixiv.deleteBookmark(illustId)
-      } else {
+      if (nextBookmarked) {
         await api.pixiv.addBookmark(illustId)
+      } else {
+        await api.pixiv.deleteBookmark(illustId)
       }
+      patchPixivLists(pixivBookmarkPatch(illustId, nextBookmarked))
       mutateBookmark()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
@@ -99,6 +125,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
+        <BackButton fallback="/pixiv" />
         <LoadingSpinner size="lg" />
       </div>
     )
@@ -109,7 +136,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
       <div className="p-6 text-center text-vault-text-secondary">
         <p>{t('common.failedToLoad')}</p>
         <button
-          onClick={() => router.back()}
+          onClick={() => smartBack(router, '/pixiv')}
           className="text-vault-accent underline mt-2 inline-block"
         >
           <ArrowLeft size={14} className="inline mr-1" />
@@ -119,6 +146,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     )
   }
 
+  const bookmarkLabel = isBookmarked ? t('pixiv.removeBookmark') : t('pixiv.addBookmark')
   const mainImageUrl = api.pixiv.imageProxyUrl(illust.image_urls.large)
   const squareUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
 
@@ -181,25 +209,20 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
 
           {/* Actions */}
           <div className="flex gap-2">
-            <button
+            <Button variant="primary" size="md" className="flex-1"
               onClick={handleDownload}
               disabled={downloading}
-              className="flex-1 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:bg-vault-accent/80 transition-colors disabled:opacity-50"
             >
               {downloading ? t('pixiv.downloading') : t('pixiv.download')}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary" size="icon" className={isBookmarked ? 'border-yellow-500/50 bg-yellow-500/20 text-yellow-400 hover:bg-red-500/10 hover:text-red-400' : ''}
               onClick={handleBookmark}
               disabled={bookmarking}
-              title={isBookmarked ? t('pixiv.unfollow') : t('pixiv.bookmarks')}
-              className={`w-10 h-10 flex items-center justify-center rounded-lg border text-base transition-colors disabled:opacity-50 ${
-                isBookmarked
-                  ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400 hover:bg-red-500/10 hover:text-red-400'
-                  : 'bg-vault-card border-vault-border text-vault-text hover:bg-vault-card-hover'
-              }`}
+              title={bookmarkLabel}
+              aria-label={bookmarkLabel}
             >
               {bookmarking ? '·' : isBookmarked ? '★' : '☆'}
-            </button>
+            </Button>
             <Link
               href={`/reader/pixiv/${illustId}`}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors"
@@ -294,5 +317,13 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
     </div>
+  )
+}
+
+export default function IllustDetailPage(props: Parameters<typeof IllustDetailPageInner>[0]) {
+  return (
+    <PageContainer>
+      <IllustDetailPageInner {...props} />
+    </PageContainer>
   )
 }

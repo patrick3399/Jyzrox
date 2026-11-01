@@ -44,4 +44,12 @@ describe('reader download refresh', () => {
       }),
     ).toBe(false)
   })
+
+  it('treats a page that just received its blob as changed even when the path is unchanged', () => {
+    const pending = { ...image, file_hash: null, thumb_path: null } as GalleryImage
+    const hashed = { ...pending, file_hash: 'ab'.repeat(32) } as GalleryImage
+
+    expect(readerImagesEqual([pending], [{ ...pending }])).toBe(true)
+    expect(readerImagesEqual([pending], [hashed])).toBe(false)
+  })
 })

@@ -32,11 +32,6 @@ export const galleryManagement = {
       method: 'POST',
       body: JSON.stringify({ gallery_id: linkedGalleryId }),
     }),
-  merge: (targetGalleryId: number, sourceGalleryId: number) =>
-    apiFetch<{ status: string; pages: number }>(`/api/gallery-management/galleries/${targetGalleryId}/merge`, {
-      method: 'POST',
-      body: JSON.stringify({ source_gallery_id: sourceGalleryId }),
-    }),
   publicShare: (token: string) =>
     apiFetch<{
       gallery: { id: number; title: string | null; source: string; source_id: string; pages: number; tags: string[] }

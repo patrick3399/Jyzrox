@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -17,6 +18,7 @@ _admin = require_role("admin")
 
 class UpgradeRequest(BaseModel):
     version: str | None = None
+    source: Literal["pypi", "master"] = "pypi"
 
 
 @router.get("/version")
@@ -52,6 +54,9 @@ async def upgrade_gallery_dl(
     _: dict = Depends(_admin),
 ):
     """Enqueue gallery-dl upgrade job."""
+    if body and body.source == "master":
+        job = await core.queue.enqueue("gdl_upgrade_job", source="master")
+        return {"job_id": job.key if job else "unknown"}
     version = body.version if body else None
     job = await core.queue.enqueue("gdl_upgrade_job", version=version)
     return {"job_id": job.key if job else "unknown"}

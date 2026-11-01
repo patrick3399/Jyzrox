@@ -16,7 +16,7 @@ from core.auth import require_role
 from core.database import async_session
 from core.keys import cursor_hmac_key
 from db.models import Blob, BlobRelationship, Gallery, Image
-from services.cas import adjust_ref_count, cas_url, thumb_srcset, thumb_url
+from services.cas import adjust_ref_count, image_file_url, thumb_srcset, thumb_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["dedup"])
@@ -53,7 +53,8 @@ def _decode_cursor(cursor: str) -> int | None:
 # ── Blob detail helper ────────────────────────────────────────────────
 
 
-def _blob_detail(blob: Blob, occurrences: list[dict]) -> dict:
+def _blob_detail(blob: Blob, occurrences: list[dict], external_path: str | None = None) -> dict:
+    """Describe one side of a pair; ``external_path`` is an Image-bound location of its bytes."""
     return {
         "sha256": blob.sha256,
         "width": blob.width,
@@ -63,7 +64,9 @@ def _blob_detail(blob: Blob, occurrences: list[dict]) -> dict:
         "media_type": blob.media_type,
         "thumb_url": thumb_url(blob.sha256),
         "thumb_srcset": thumb_srcset(blob.sha256),
-        "image_url": cas_url(blob.sha256, blob.extension),
+        # A link-mode blob has no CAS file: its bytes stay in the user's folder.
+        # A CAS-stored blob keeps its CAS URL even if a link page shares its bytes.
+        "image_url": image_file_url(blob, external_path if blob.storage == "external" else None),
         "occurrences": occurrences,
     }
 
@@ -150,7 +153,10 @@ async def get_dedup_review(
         ).all()
 
     occurrences: dict[str, list[dict]] = {sha: [] for sha in shas}
+    external_paths: dict[str, str] = {}
     for image, gallery in occurrence_rows:
+        if image.external_path:
+            external_paths.setdefault(image.blob_sha256, image.external_path)
         occurrences.setdefault(image.blob_sha256, []).append(
             {
                 "image_id": image.id,
@@ -176,8 +182,8 @@ async def get_dedup_review(
                 "reason": pair.reason,
                 "diff_score": pair.diff_score,
                 "diff_type": pair.diff_type,
-                "blob_a": _blob_detail(pair.blob_a, occurrences.get(pair.sha_a, [])),
-                "blob_b": _blob_detail(pair.blob_b, occurrences.get(pair.sha_b, [])),
+                "blob_a": _blob_detail(pair.blob_a, occurrences.get(pair.sha_a, []), external_paths.get(pair.sha_a)),
+                "blob_b": _blob_detail(pair.blob_b, occurrences.get(pair.sha_b, []), external_paths.get(pair.sha_b)),
             }
         )
 

@@ -34,9 +34,10 @@ def _fail_key(sub_id: int) -> str:
 async def record_check_result(sub_id: int, status: str) -> int:
     """Update the consecutive-failure counter from a terminal check status.
 
-    done/partial reset the counter; failed increments it (emitting
-    SUBSCRIPTION_FAILING exactly when the threshold is crossed); anything else
-    (cancelled) is a user action, not a source failure, and leaves it alone.
+    done/partial/stopped reset the counter (a user stop is a successful run that
+    the user ended early); failed increments it (emitting SUBSCRIPTION_FAILING
+    exactly when the threshold is crossed); anything else (cancelled) is a user
+    action, not a source failure, and leaves it alone.
     Fails open: a Redis error is logged and reported as 0 failures — health
     tracking must never break the download/check flow it observes.
     Returns the current consecutive-failure count.
@@ -49,7 +50,7 @@ async def record_check_result(sub_id: int, status: str) -> int:
         r = get_redis()
         key = _fail_key(sub_id)
 
-        if status in ("done", "partial"):
+        if status in ("done", "partial", "stopped"):
             await r.delete(key)
             return 0
 

@@ -265,7 +265,9 @@ class _LibraryHandler(FileSystemEventHandler):
             new_parent = str(Path(new_path).parent)
             if old_ext in _SUPPORTED_EXTS:
                 self._schedule(f"rescan:{old_parent}", "rescan_by_path_job", old_parent)
-            if new_parent != old_parent and new_ext in _SUPPORTED_EXTS:
+            # The key dedupes a same-directory rename. Testing new_ext alone also
+            # catches a temp file renamed into place (x.part -> x.jpg).
+            if new_ext in _SUPPORTED_EXTS:
                 self._schedule(f"rescan:{new_parent}", "rescan_by_path_job", new_parent)
 
     def on_modified(self, event):

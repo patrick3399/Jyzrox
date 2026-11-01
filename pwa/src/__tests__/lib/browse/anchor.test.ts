@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decideAnchorRestore } from '@/lib/browse/anchor'
+import { decideAnchorRestore, restoreAnchorOffset } from '@/lib/browse/anchor'
 
 type Item = { id: string }
 const items: Item[] = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
@@ -34,5 +34,24 @@ describe('browse anchor restoration decisions', () => {
     expect(
       decideAnchorRestore({ itemId: null, offset: 0, scrollY: 120 }, items, (i) => i.id),
     ).toEqual({ kind: 'pixel', scrollY: 120 })
+  })
+})
+
+describe('restoreAnchorOffset', () => {
+  it('test_offset_deeper_than_the_current_card_height_aligns_the_card_top_instead_of_hiding_it', () => {
+    // Captured 290px into a 300px card; after the card shrank to 270px the same
+    // offset would leave the anchor card fully above the viewport.
+    expect(restoreAnchorOffset(-290, 270)).toBe(0)
+    expect(restoreAnchorOffset(-270, 270)).toBe(0)
+  })
+
+  it('test_offset_within_the_current_card_height_is_kept', () => {
+    expect(restoreAnchorOffset(-200, 270)).toBe(-200)
+    expect(restoreAnchorOffset(120, 270)).toBe(120)
+  })
+
+  it('test_unmeasured_card_keeps_the_stored_offset', () => {
+    // A zero height means no layout yet; do not guess.
+    expect(restoreAnchorOffset(-290, 0)).toBe(-290)
   })
 })

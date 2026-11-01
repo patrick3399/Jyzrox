@@ -5,6 +5,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { StatusBadge } from './StatusBadge'
 import { timeAgo } from '@/lib/timeUtils'
 import type { ScheduledTask } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 interface TaskCardProps {
   task: ScheduledTask
@@ -178,14 +179,16 @@ export function TaskCard({
           </button>
 
           {/* Run Now button */}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => onRunNow(task.id)}
             disabled={isRunning}
-            className="px-2 py-1 rounded text-[10px] font-medium bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 transition-colors disabled:opacity-50 flex items-center gap-1"
+            className="text-[10px] bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 hover:text-vault-accent"
           >
             {isRunning && <LoadingSpinner size="sm" />}
             {t('settings.tasks.runNow')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

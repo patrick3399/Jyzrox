@@ -4,7 +4,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -29,6 +29,7 @@ from routers import (
     explorer,
     export,
     external,
+    gallery_categories,
     gallery_dl_admin,
     gallery_management,
     history,
@@ -47,7 +48,13 @@ from routers import (
     ws,
 )
 from routers import (
+    credential_accounts as credential_accounts_router,
+)
+from routers import (
     dedup as dedup_router,
+)
+from routers import (
+    egress_personas as egress_personas_router,
 )
 from routers import (
     logs as logs_router,
@@ -63,6 +70,7 @@ from routers import site_config as site_config_router
 from routers import (
     users as users_router,
 )
+from services.pixiv_client import PixivRateLimitError
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -147,6 +155,18 @@ app = FastAPI(
     openapi_url=None,  # served manually with auth below
 )
 
+
+@app.exception_handler(PixivRateLimitError)
+async def pixiv_rate_limit_handler(_: Request, exc: PixivRateLimitError) -> JSONResponse:
+    """Pixiv is throttling us: tell the client to wait instead of reporting a broken upstream."""
+    retry_after = max(int(exc.retry_after) + 1, 1)
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": f"Pixiv is rate limiting requests, retry in {retry_after}s"},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 # Mount swagger-ui static assets
 app.mount("/api/docs/static", StaticFiles(directory="/app/static/swagger-ui"), name="swagger-static")
 
@@ -187,6 +207,7 @@ app.include_router(library.router, prefix="/api/library")
 app.include_router(explorer.router, prefix="/api/explorer")
 app.include_router(download.router, prefix="/api/download")
 app.include_router(settings_router.router, prefix="/api/settings")
+app.include_router(credential_accounts_router.router, prefix="/api/settings/credentials")
 app.include_router(ws.router, prefix="/api")
 
 # rev 2.0 new routers
@@ -200,8 +221,10 @@ app.include_router(plugins_router.router, prefix="/api/plugins")
 app.include_router(artists.router, prefix="/api/artists")
 app.include_router(collections.router, prefix="/api/collections")
 app.include_router(datasets.router, prefix="/api/datasets")
+app.include_router(gallery_categories.router, prefix="/api/gallery-categories")
 app.include_router(gallery_management.router, prefix="/api/gallery-management")
 app.include_router(novels.router, prefix="/api/novels")
+app.include_router(novels.remote_router, prefix="/api/novels/remote")
 app.include_router(opds.router, prefix="/opds")
 app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")
 app.include_router(subscriptions.router, prefix="/api/subscriptions")
@@ -213,6 +236,7 @@ app.include_router(logs_router.router, prefix="/api/logs")
 app.include_router(backups.router, prefix="/api/admin/backups")
 app.include_router(gallery_dl_admin.router, prefix="/api/admin/gallery-dl")
 app.include_router(site_config_router.router, prefix="/api/admin/sites")
+app.include_router(egress_personas_router.router, prefix="/api/admin/personas")
 app.include_router(queue_admin.router, prefix="/api/admin/queue")
 app.include_router(saucenao_router.router, prefix="/api/saucenao")
 

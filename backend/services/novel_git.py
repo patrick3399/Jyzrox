@@ -11,7 +11,10 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
+
+from services import novel_remote
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +40,25 @@ class NovelLocked(Exception):
     pass
 
 
-async def _git(repo: str | Path, *args: str, env_extra: dict | None = None) -> tuple[int, str, str]:
+_REMOTE_PROTOCOLS = "ssh"  # URLs we hand to git come from the admin UI: ssh only
+
+
+def _build_env(env_extra: dict | None) -> dict:
     env = os.environ.copy()
+    env["GIT_SSH_COMMAND"] = novel_remote.ssh_command()  # managed identity is the only identity
     if env_extra:
         env.update(env_extra)
+    return env
+
+
+def _remote_env() -> dict:
+    return {"GIT_ALLOW_PROTOCOL": _REMOTE_PROTOCOLS, "GIT_TERMINAL_PROMPT": "0"}
+
+
+async def _git(
+    repo: str | Path, *args: str, env_extra: dict | None = None, timeout: float | None = None
+) -> tuple[int, str, str]:
+    env = _build_env(env_extra)
     proc = await asyncio.create_subprocess_exec(
         "git",
         "-C",
@@ -51,7 +69,7 @@ async def _git(repo: str | Path, *args: str, env_extra: dict | None = None) -> t
         env=env,
     )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT if timeout is None else timeout)
     except TimeoutError:
         proc.kill()
         await proc.wait()  # reap the killed process (avoid a zombie / ResourceWarning)
@@ -75,12 +93,16 @@ async def head_sha(repo: str | Path) -> str:
 
 
 async def _current_branch(repo: str | Path) -> str:
-    _, out, _ = await _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    code, out, _ = await _git(repo, "symbolic-ref", "--short", "HEAD")
+    if code == 0 and out.strip():
+        return out.strip()
+    _, out, _ = await _git(repo, "rev-parse", "--abbrev-ref", "HEAD")  # detached HEAD
     return out.strip() or "main"
 
 
 async def status(repo: str | Path) -> dict:
-    head = await head_sha(repo)
+    code, out, _ = await _git(repo, "rev-parse", "HEAD")
+    head = out.strip() if code == 0 else ""  # unborn HEAD (empty remote)
     _, porcelain, _ = await _git(repo, "status", "--porcelain")
     clean = porcelain.strip() == ""
     branch = await _current_branch(repo)
@@ -228,3 +250,77 @@ async def reset_to_origin(repo: str | Path, branch: str | None = None) -> None:
     if code != 0:
         raise NovelGitError(err)
     _lock_path(repo).unlink(missing_ok=True)
+
+
+async def get_remote_url(repo: str | Path) -> str | None:
+    code, out, _ = await _git(repo, "remote", "get-url", "origin")
+    return out.strip() if code == 0 and out.strip() else None
+
+
+async def ls_remote(url: str) -> dict:
+    """Probe a remote without touching any repo. `url` MUST be pre-validated by
+    novel_remote.parse_remote_url (never starts with '-', ssh forms only)."""
+    code, out, err = await _git(".", "ls-remote", "--symref", "--", url, "HEAD", env_extra=_remote_env())
+    if code != 0:
+        return {"ok": False, "empty": False, "default_branch": None, "error": err.strip()[:300]}
+    branch = None
+    for line in out.splitlines():
+        if line.startswith("ref: "):
+            branch = line.split()[1].removeprefix("refs/heads/")
+    return {"ok": True, "empty": not out.strip(), "default_branch": branch, "error": ""}
+
+
+async def history_relation(repo: str | Path, url: str) -> str:
+    probe = await ls_remote(url)
+    if not probe["ok"]:
+        raise NovelGitError(probe["error"] or "remote unreachable")
+    if probe["empty"]:
+        return "remote_empty"
+    if probe["default_branch"] != await _current_branch(repo):
+        return "branch_mismatch"
+    code, _, err = await _git(repo, "fetch", "--no-tags", "--", url, "HEAD", env_extra=_remote_env())
+    if code != 0:
+        raise NovelGitError(err.strip()[:300])
+    code, _, _ = await _git(repo, "merge-base", "HEAD", "FETCH_HEAD")
+    return "related" if code == 0 else "unrelated"
+
+
+async def set_remote_url(repo: str | Path, url: str) -> None:
+    verb = "set-url" if await get_remote_url(repo) else "add"
+    args = ("remote", verb, "origin", url)
+    code, _, err = await _git(repo, *args, env_extra=_remote_env())
+    if code != 0:
+        raise NovelGitError(err.strip()[:300])
+
+
+def _swap_in(root: Path, tmp: Path) -> None:
+    for child in list(root.iterdir()):
+        if child == tmp:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    for child in list(tmp.iterdir()):
+        child.rename(root / child.name)
+    tmp.rmdir()
+
+
+async def clone_replace(repo: str | Path, url: str) -> None:
+    """Replace the working clone with a fresh clone of `url`.
+
+    The repo directory is usually a bind-mount root, so it cannot be renamed
+    aside: clone into a scratch dir inside it, and only after the clone
+    succeeded wipe the old contents and move the new ones up. A failed clone
+    therefore never touches the existing tree. Local state is disposable by
+    design (the hub is the source of truth). Caller MUST hold the git lock.
+    """
+    root = Path(repo)
+    root.mkdir(parents=True, exist_ok=True)
+    tmp = root / ".jyzrox-clone-tmp"
+    await asyncio.to_thread(shutil.rmtree, tmp, True)
+    code, _, err = await _git(root, "clone", "--", url, str(tmp), env_extra=_remote_env(), timeout=120)
+    if code != 0:
+        await asyncio.to_thread(shutil.rmtree, tmp, True)
+        raise NovelGitError(err.strip()[:300])
+    await asyncio.to_thread(_swap_in, root, tmp)

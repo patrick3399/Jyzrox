@@ -10,6 +10,7 @@ export const import_ = {
         abs_path: string
         artist: string | null
         category: string | null
+        category_resolved: string | null
         title: string
         file_count: number
       }>

@@ -30,4 +30,28 @@ export default [
       'react-hooks/preserve-manual-memoization': 'off',
     },
   },
+  {
+    // A bare router.back() is a no-op on a one-entry history (share link, new
+    // tab, PWA relaunch) and skips the nav-tab restore climb; on chrome-less
+    // routes like the Reader that traps the user (FE-T3, FE-T18).
+    // lib/navBack.ts is the one place that decides when history back is safe.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/lib/navBack.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.property.name='back']:matches([callee.object.name=/[rR]outer$/], [callee.object.property.name=/[rR]outer$/], [callee.object.callee.name='useRouter'])",
+          message:
+            "Bare router.back() does nothing on a one-entry history (share link, new tab, PWA relaunch). Use smartBack(router, fallback) from '@/lib/navBack'.",
+        },
+        {
+          selector: "VariableDeclarator[init.callee.name='useRouter'] > ObjectPattern > Property[key.name='back']",
+          message:
+            "Don't pull back() out of useRouter(): a bare back does nothing on a one-entry history. Use smartBack(router, fallback) from '@/lib/navBack'.",
+        },
+      ],
+    },
+  },
 ]

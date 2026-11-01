@@ -9,12 +9,20 @@ import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { Pagination } from '@/components/Pagination'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateArtistGalleryRowHeight } from '@/lib/gridRowHeight'
 import { AppImage } from '@/components/AppImage'
 import { t } from '@/lib/i18n'
 import { galleryHref } from '@/lib/galleryRoutes'
 import { useLocale } from '@/components/LocaleProvider'
-import { useFollowedArtists, useFollowArtist, useUnfollowArtist, usePatchFollow } from '@/hooks/useFollowedArtists'
+import {
+  useFollowedArtists,
+  useFollowArtist,
+  useUnfollowArtist,
+  usePatchFollow,
+} from '@/hooks/useFollowedArtists'
 import { toast } from 'sonner'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { Button } from '@/components/ui/button'
 
 function getGalleryColCount() {
   if (typeof window === 'undefined') return 4
@@ -38,7 +46,7 @@ const SOURCE_COLORS: Record<string, string> = {
 const GALLERY_PAGE_SIZE = 48
 const IMAGE_PAGE_SIZE = 40
 
-export default function ArtistDetailPage() {
+function ArtistDetailPageInner() {
   useLocale()
   const router = useRouter()
   const params = useParams()
@@ -136,16 +144,15 @@ export default function ArtistDetailPage() {
           )}
         </div>
 
-        <button
-          onClick={handleReadAll}
-          className="flex items-center gap-2 px-4 py-2 bg-vault-accent hover:bg-vault-accent/80 text-white rounded-lg text-sm font-medium transition-colors shrink-0"
-        >
+        <Button variant="primary" size="md" onClick={handleReadAll} className="shrink-0">
           <BookOpen size={16} />
           {t('artists.readAll')}
-        </button>
+        </Button>
 
         {/* Follow/Unfollow button */}
-        <button
+        <Button
+          variant={isFollowed ? 'ghost' : 'primary'}
+          size="md"
           onClick={async () => {
             try {
               if (isFollowed) {
@@ -164,15 +171,15 @@ export default function ArtistDetailPage() {
             }
           }}
           disabled={isFollowing || isUnfollowing}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors shrink-0 ${
+          className={`shrink-0 ${
             isFollowed
               ? 'bg-vault-accent/20 text-vault-accent hover:bg-red-500/20 hover:text-red-400'
-              : 'bg-vault-accent text-vault-accent-fg hover:bg-vault-accent-hover'
+              : ''
           }`}
         >
           <Heart size={14} className={isFollowed ? 'fill-current' : ''} />
           {isFollowed ? t('artists.following') : t('artists.follow')}
-        </button>
+        </Button>
 
         {/* Auto-download toggle when followed */}
         {isFollowed && (
@@ -246,7 +253,8 @@ export default function ArtistDetailPage() {
               items={galleries}
               columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
               gap={6}
-              estimateHeight={180}
+              estimateHeight={estimateArtistGalleryRowHeight}
+              measureRows={false}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onLoadMore={loadMoreGalleries}
@@ -275,7 +283,9 @@ export default function ArtistDetailPage() {
                     <p className="font-medium text-[11px] sm:text-xs text-vault-text line-clamp-2 leading-snug">
                       {gallery.title || gallery.title_jpn}
                     </p>
-                    <p className="text-[10px] sm:text-xs text-vault-text-secondary">{gallery.pages}p</p>
+                    <p className="text-[10px] sm:text-xs text-vault-text-secondary">
+                      {gallery.pages}p
+                    </p>
                   </div>
                 </button>
               )}
@@ -362,5 +372,13 @@ export default function ArtistDetailPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function ArtistDetailPage() {
+  return (
+    <PageContainer>
+      <ArtistDetailPageInner />
+    </PageContainer>
   )
 }

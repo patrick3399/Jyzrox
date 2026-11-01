@@ -35,7 +35,7 @@ class TestBatchScan:
             ("/mnt/test_lib/root/gallery2", [], ["a.webp"]),
         ]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -86,7 +86,7 @@ class TestBatchScan:
             return path
 
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -129,7 +129,7 @@ class TestBatchScan:
             return path
 
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -162,14 +162,14 @@ class TestBatchScan:
     async def test_scan_rejects_internal_path(self, client):
         """root_dir inside data_gallery_path should return 400."""
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.sep", "/"),
         ):
             resp = await client.post(
                 "/api/import/batch/scan",
-                json={"root_dir": "/data/gallery/subdir", "pattern": "{title}"},
+                json={"root_dir": "/data/download_temp/subdir", "pattern": "{title}"},
             )
 
         assert resp.status_code == 400
@@ -193,7 +193,7 @@ class TestBatchStart:
             {"path": "/mnt/test_lib/root/gallery2", "artist": None, "title": "Gallery Two"},
         ]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -236,7 +236,7 @@ class TestBatchStart:
             {"path": "/mnt/test_lib/root/art1", "artist": "Artist", "title": "Work One"},
         ]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -260,7 +260,7 @@ class TestBatchStart:
     async def test_start_invalid_mode_returns_400(self, client, mock_redis):
         """Mode other than copy or link should return 400."""
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -850,8 +850,8 @@ def _to_thread_stub(fixed_hash: str):
     (sha256, identity) so the digest and the bytes it describes stay pinned
     together; import_job still uses the plain _sha256. One stub serves both.
     """
+    from services.source_identity import SourceFileIdentity
     from worker import importer as _importer
-    from worker.source_identity import SourceFileIdentity
 
     async def _fake(fn, *args, **kwargs):
         if fn is _importer.hash_file_with_identity:
@@ -980,69 +980,6 @@ class TestLocalImportJob:
         call_kwargs = mock_store.call_args[1] if mock_store.call_args[1] else {}
         assert call_kwargs.get("storage") != "external"
 
-    async def test_link_mode_calls_store_blob_with_external_storage(self, tmp_path):
-        """Link mode should call store_blob with storage='external'."""
-        from worker.importer import local_import_job
-
-        src = tmp_path / "link_src"
-        src.mkdir()
-        img = src / "page1.jpg"
-        img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
-
-        mock_gallery = MagicMock()
-        mock_gallery.source = "local"
-        mock_gallery.source_id = "link_src"
-        mock_gallery.deleted_at = None
-
-        fixed_hash = "11223344" * 8
-        mock_blob = MagicMock()
-        mock_blob.sha256 = fixed_hash
-
-        mock_sess1 = _make_mock_session()
-        mock_sess1.get = AsyncMock(return_value=mock_gallery)
-
-        mock_sess2 = _make_mock_session()
-        excl_result = MagicMock()
-        excl_result.scalars.return_value.all.return_value = []
-        mock_sess2.execute = AsyncMock(return_value=excl_result)
-
-        mock_sess3 = _make_mock_session()
-        img_result = MagicMock()
-        img_result.scalar_one.return_value = None
-        mock_sess3.execute = AsyncMock(return_value=img_result)
-        mock_sess3.get = AsyncMock(return_value=mock_gallery)
-
-        sessions = iter([mock_sess1, mock_sess2, mock_sess3])
-
-        def _factory():
-            return next(sessions)
-
-        mock_store = AsyncMock(return_value=mock_blob)
-        mock_symlink = AsyncMock()
-        ctx = _make_ctx()
-
-        with (
-            patch("worker.importer.AsyncSessionLocal", side_effect=_factory),
-            patch("worker.importer.store_blob", mock_store),
-            patch("worker.importer.create_library_symlink", mock_symlink),
-            patch("worker.importer._validate_image_magic", return_value=True),
-            patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
-        ):
-            result = await local_import_job(ctx, str(src), "link", gallery_id=1)
-
-        assert result["status"] == "done"
-        mock_store.assert_called_once()
-        call_kwargs = mock_store.call_args[1] if mock_store.call_args[1] else {}
-        assert call_kwargs.get("storage") == "external"
-        assert call_kwargs.get("external_path") == str(img)
-        image_insert = next(
-            call.args[0]
-            for call in mock_sess3.execute.await_args_list
-            if getattr(getattr(call.args[0], "table", None), "name", None) == "images"
-        )
-        assert image_insert.compile().params["external_path"] == str(img)
-        assert mock_symlink.await_args.kwargs["external_path"] == str(img)
-
     async def test_excluded_blob_skipped_in_local_import(self, tmp_path):
         """Files matching excluded_blobs sha256 should be skipped during local import."""
         from worker.importer import local_import_job
@@ -1146,7 +1083,7 @@ class TestLocalImportJob:
             patch("asyncio.to_thread", new=_to_thread_stub(fixed_hash)),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
-            result = await local_import_job(ctx, str(src), "link", gallery_id=1)
+            result = await local_import_job(ctx, str(src), "copy", gallery_id=1)
 
         assert result["status"] == "done"
         assert result["processed"] == 0
@@ -1880,6 +1817,57 @@ async def test_web_clip_imports_browser_authenticated_image(client, db_session, 
     assert tuple(gallery) == ("webclip", "https://example.test/post/1", "private")
 
 
+async def test_web_clip_upload_filename_with_path_is_reduced_to_its_basename(client, db_session, tmp_path):
+    """The multipart filename is client-controlled and Starlette passes it through
+    verbatim. Only its last component may name the image and its library link, so
+    the DB row and the link agree and the link stays inside the gallery's dir."""
+    from db.models import Blob
+
+    await db_session.execute(
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'owner', 'x', 'admin')")
+    )
+    await db_session.commit()
+    image = io.BytesIO()
+    PILImage.new("RGB", (8, 8), "red").save(image, format="PNG")
+
+    async def fake_store(path, sha256, session):
+        blob = Blob(
+            sha256=sha256,
+            file_size=path.stat().st_size,
+            extension=".png",
+            media_type="image",
+            storage="external",
+            external_path=str(path),
+            ref_count=0,
+        )
+        session.add(blob)
+        await session.flush()
+        return blob
+
+    symlink = AsyncMock()
+    with (
+        patch("routers.import_router.settings.data_training_path", str(tmp_path)),
+        patch("routers.import_router.store_blob", side_effect=fake_store),
+        patch("routers.import_router.create_library_symlink", symlink),
+        patch("routers.import_router.emit_safe", new_callable=AsyncMock),
+    ):
+        response = await client.post(
+            "/api/import/web-clip",
+            data={"source_url": "https://example.test/post/2"},
+            files={"file": ("../../../escape.png", image.getvalue(), "image/png")},
+        )
+
+    assert response.status_code == 201, response.text
+    stored = (
+        await db_session.execute(
+            text("SELECT filename FROM images WHERE gallery_id=:id"),
+            {"id": response.json()["gallery_id"]},
+        )
+    ).scalar_one()
+    assert stored == "escape.png"
+    assert symlink.await_args.args[2] == "escape.png"
+
+
 class TestImportConflictOptions:
     """Overwrite cannot be honored (it only appends), so the option is removed."""
 
@@ -1994,7 +1982,7 @@ class TestBatchStartCategoryTypeChecking:
 
         galleries = [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1", "category": "x" * 5000}]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -2013,12 +2001,18 @@ class TestBatchStartCategoryTypeChecking:
         entry = enqueue_call.kwargs["galleries"][0]
         assert self._entry_category(entry) is None
 
-    async def test_category_with_surrounding_whitespace_is_trimmed_before_enqueue(self, client, mock_redis):
+    async def test_category_with_surrounding_whitespace_is_trimmed_before_enqueue(self, client, db_session, mock_redis):
+        from sqlalchemy import text
+
         from main import app
 
+        await db_session.execute(
+            text("INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES ('Cosplay', 'red', 1, 1)")
+        )
+        await db_session.commit()
         galleries = [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1", "category": "  Cosplay  "}]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
@@ -2043,7 +2037,7 @@ class TestBatchStartCategoryTypeChecking:
         to `list[BatchGalleryItem]` must not break this existing caller."""
         galleries = [{"path": "/mnt/test_lib/root/g1", "artist": "abfluss", "category": "Cosplay", "title": "G1"}]
         with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),

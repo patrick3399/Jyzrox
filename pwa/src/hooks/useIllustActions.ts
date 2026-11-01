@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
@@ -10,6 +10,11 @@ export function useIllustActions(
 ) {
   const [downloading, setDownloading] = useState(false)
   const [bookmarked, setBookmarked] = useState(illust.is_bookmarked)
+  // The list item can change after the card mounted (a patch from the work's
+  // own page, a refresh); follow it.
+  useEffect(() => {
+    setBookmarked(illust.is_bookmarked)
+  }, [illust.is_bookmarked])
   const [bookmarking, setBookmarking] = useState(false)
 
   const handleDownload = useCallback(

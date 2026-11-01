@@ -45,7 +45,10 @@ export function getEhAutocompleteFragment(value: string): EhAutocompleteFragment
   }
 
   const raw = value.slice(start).trimStart()
-  if (!raw || raw.endsWith('$') || raw.endsWith('$"')) return null
+  // A picked suggestion is written back as `tag$ ` — the separator space must
+  // not make the already-exact tag look unfinished again.
+  const settled = raw.trimEnd()
+  if (!settled || settled.endsWith('$') || settled.endsWith('$"')) return null
   const excluded = raw.startsWith('-')
   const token = excluded ? raw.slice(1) : raw
   if (!token) return null

@@ -96,3 +96,26 @@ export function consumeTabRestore(currentUrl: string): boolean {
     return false
   }
 }
+
+/** True when `url` is the armed tab-restore destination. Does not consume it. */
+export function isTabRestoreTarget(url: string): boolean {
+  try {
+    return sessionStorage.getItem(RESTORE_FLAG_KEY) === url
+  } catch {
+    return false
+  }
+}
+
+/** Disarm the flag if it is still armed for `url` — the page the user has just
+ *  left. Only smartBack consumed the flag, so leaving the restored page any
+ *  other way (a link, browser back, another tab) would otherwise leave it armed
+ *  for the next ordinary arrival at that URL. A flag armed for a different URL
+ *  (a newer tab restore) is left alone. */
+export function releaseTabRestore(url: string): void {
+  try {
+    if (sessionStorage.getItem(RESTORE_FLAG_KEY) === url)
+      sessionStorage.removeItem(RESTORE_FLAG_KEY)
+  } catch {
+    /* best effort */
+  }
+}

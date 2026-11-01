@@ -211,6 +211,7 @@ async def _run_gallery_dl_probe(url: str) -> list[dict]:
     Returns empty list on any error.
     """
     from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
+    from plugins.builtin.gallery_dl._subprocess_env import gdl_subprocess_env
     from worker.gallery_dl_venv import get_gdl_bin
 
     gdl_bin = get_gdl_bin()
@@ -233,6 +234,7 @@ async def _run_gallery_dl_probe(url: str) -> list[dict]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=gdl_subprocess_env(),
         )
 
         chunks: list[bytes] = []
@@ -457,7 +459,7 @@ def _score_mappings(fields: list[ProbeField], _items: list[dict]) -> list[FieldM
 
 
 def _detect_source(raw: list[dict]) -> str | None:
-    """Detect the gallery-dl source_id by matching 'category' in GDL_SITES."""
+    """Detect the gallery-dl source_id by matching 'category' in the site registry."""
     if not raw:
         return None
 
@@ -465,10 +467,10 @@ def _detect_source(raw: list[dict]) -> str | None:
     if not gdl_category:
         return None
 
-    from plugins.builtin.gallery_dl._sites import GDL_SITES
+    from plugins.builtin.gallery_dl._sites import all_sites
 
     gdl_category_lower = str(gdl_category).lower()
-    for site in GDL_SITES:
+    for site in all_sites():
         # gallery-dl 'category' field typically matches the extractor name.
         extractor_name = site.extractor or site.source_id
         if extractor_name.lower() == gdl_category_lower or site.source_id.lower() == gdl_category_lower:

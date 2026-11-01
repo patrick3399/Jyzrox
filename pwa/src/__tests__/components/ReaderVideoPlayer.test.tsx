@@ -9,9 +9,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, act } from '@testing-library/react'
+import { render, act, fireEvent } from '@testing-library/react'
 import VideoPlayer from '../../components/Reader/VideoPlayer'
 import type { ReaderImage } from '../../components/Reader/types'
+import { THUMB_STRIP_HEIGHT } from '../../components/Reader/layout'
 
 // ── IntersectionObserver stub ─────────────────────────────────────────
 
@@ -40,13 +41,28 @@ class FakeIntersectionObserver {
   }
 }
 
-/** Drive the most recently created observer. */
-function setVisible(isIntersecting: boolean) {
-  const live = observers.filter((o) => !o.disconnected)
+function liveObservers(near: boolean) {
+  return observers.filter((o) => !o.disconnected && (o.options?.rootMargin != null) === near)
+}
+
+function trigger(near: boolean, isIntersecting: boolean) {
+  const live = liveObservers(near)
   const target = live[live.length - 1]
+  if (!target) return
   act(() => {
     target.callback([{ isIntersecting }])
   })
+}
+
+/** Move the player on or off the screen; on screen is also near it. */
+function setVisible(isIntersecting: boolean) {
+  trigger(true, isIntersecting)
+  trigger(false, isIntersecting)
+}
+
+/** Move the player into or out of the zone around the screen only. */
+function setNear(isIntersecting: boolean) {
+  trigger(true, isIntersecting)
 }
 
 const video: ReaderImage = {
@@ -60,12 +76,14 @@ const video: ReaderImage = {
 describe('VideoPlayer', () => {
   let play: ReturnType<typeof vi.spyOn>
   let pause: ReturnType<typeof vi.spyOn>
+  let load: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     observers.length = 0
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
     play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
   })
 
   afterEach(() => {
@@ -101,7 +119,7 @@ describe('VideoPlayer', () => {
     // screen, and would then never start.
     render(<VideoPlayer image={video} />)
 
-    expect(observers[observers.length - 1].options?.threshold ?? 0).toBe(0)
+    expect(liveObservers(false)[0].options?.threshold ?? 0).toBe(0)
   })
 
   it('should pause playback when the player scrolls out of view', () => {
@@ -123,5 +141,129 @@ describe('VideoPlayer', () => {
     })
 
     expect(play).toHaveBeenCalled()
+  })
+
+  // Regression: the controls were anchored 80px up, but the thumbnail strip is
+  // taller than that, so the strip covered the bottom of the play/mute buttons.
+  // Lifting them further instead left a band of bare video between the two
+  // dark surfaces, so they sit exactly on the strip's top edge.
+  it('should rest the controls flush on the thumbnail strip while the overlay is visible', () => {
+    const { getByLabelText } = render(<VideoPlayer image={video} overlayVisible />)
+
+    const controls = getByLabelText('Seek').parentElement as HTMLElement
+    const lift = parseFloat(/(\d+(?:\.\d+)?)px/.exec(controls.style.bottom)?.[1] ?? '0')
+
+    expect(lift).toBe(THUMB_STRIP_HEIGHT)
+    expect(controls.style.bottom).toContain('env(safe-area-inset-bottom)')
+  })
+
+  it('should keep play, time, the seek bar and mute on a single row', () => {
+    const { getByLabelText, getByText } = render(<VideoPlayer image={video} overlayVisible />)
+
+    const row = getByLabelText('Seek').parentElement as HTMLElement
+    expect(getByLabelText('Play').parentElement).toBe(row)
+    expect(getByText('0:00 / 0:12').parentElement).toBe(row)
+    expect(getByLabelText('Unmute').parentElement).toBe(row)
+    expect(row.style.flexDirection).not.toBe('column')
+    expect(Array.from(row.children).map((child) => child.tagName)).toEqual([
+      'BUTTON',
+      'SPAN',
+      'INPUT',
+      'BUTTON',
+    ])
+  })
+
+  it('should start muted and unmute when the mute button is tapped', () => {
+    const { getByLabelText, container } = render(<VideoPlayer image={video} overlayVisible />)
+    const element = container.querySelector('video') as HTMLVideoElement
+    expect(element.muted).toBe(true)
+
+    fireEvent.click(getByLabelText('Unmute'))
+
+    expect(element.muted).toBe(false)
+    expect(getByLabelText('Mute')).toBeTruthy()
+  })
+
+  // Regression: webtoon mounts every page, and iOS Safari answers
+  // preload="metadata" with a run of Range requests per video. One switch to
+  // webtoon on a gallery with 103 videos fetched all of them (1,661 requests,
+  // 4.5 GB in two minutes) and froze the tab.
+  it('should not give an off-screen player a source so webtoon does not fetch every video', () => {
+    const { container } = render(<VideoPlayer image={video} />)
+
+    expect(container.querySelector('video')?.hasAttribute('src')).toBe(false)
+
+    setVisible(true)
+
+    expect(container.querySelector('video')?.getAttribute('src')).toBe(video.url)
+  })
+
+  it('should show the thumbnail as poster while an off-screen player has no source', () => {
+    const { container } = render(
+      <VideoPlayer image={{ ...video, thumbUrl: '/media/thumbs/2b/ff/2bff/thumb_360.webp' }} />,
+    )
+
+    expect(container.querySelector('video')?.getAttribute('poster')).toBe(
+      '/media/thumbs/2b/ff/2bff/thumb_360.webp',
+    )
+  })
+
+  it('should drop the source and abort its download when the player scrolls out of view', () => {
+    const { container } = render(<VideoPlayer image={video} />)
+    setVisible(true)
+    load.mockClear()
+
+    setVisible(false)
+
+    expect(container.querySelector('video')?.hasAttribute('src')).toBe(false)
+    expect(load).toHaveBeenCalled()
+  })
+
+  it('should abort the download when a player with a source unmounts', () => {
+    const { container, unmount } = render(<VideoPlayer image={video} />)
+    setVisible(true)
+    const element = container.querySelector('video') as HTMLVideoElement
+    load.mockClear()
+
+    unmount()
+
+    expect(element.hasAttribute('src')).toBe(false)
+    expect(load).toHaveBeenCalled()
+  })
+
+  // Regression: a player only got its source on entering the screen, so during
+  // a fast webtoon scroll each video flashed its 160px poster, then a blank
+  // frame, then the video.
+  it('should give a player near the screen its source before it scrolls into view', () => {
+    const { container } = render(<VideoPlayer image={video} />)
+
+    setNear(true)
+
+    expect(container.querySelector('video')?.getAttribute('src')).toBe(video.url)
+    expect(play).not.toHaveBeenCalled()
+  })
+
+  it('should measure the zone around the screen against the webtoon scroller', () => {
+    const { getByTestId } = render(
+      <div data-reader-scroll data-testid="scroller">
+        <VideoPlayer image={video} />
+      </div>,
+    )
+
+    const options = liveObservers(true)[0]?.options
+    expect(options?.root).toBe(getByTestId('scroller'))
+    expect(options?.rootMargin).toBe('100% 0px')
+  })
+
+  it('should keep the source of a player that leaves the screen but stays near it', () => {
+    const { container } = render(<VideoPlayer image={video} />)
+    setVisible(true)
+    load.mockClear()
+
+    trigger(false, false)
+
+    expect(pause).toHaveBeenCalled()
+    expect(container.querySelector('video')?.getAttribute('src')).toBe(video.url)
+    expect(load).not.toHaveBeenCalled()
   })
 })

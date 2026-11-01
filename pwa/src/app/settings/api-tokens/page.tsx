@@ -4,12 +4,14 @@ import { useState, useCallback, useEffect } from 'react'
 import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { inputClass, btnPrimary } from '@/components/settings/SettingsShared'
+import { inputClass } from '@/components/settings/SettingsShared'
 import { formatDate, t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Copy } from 'lucide-react'
 import type { ApiTokenInfo } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 
 export default function ApiTokensSettingsPage() {
   useLocale()
@@ -76,7 +78,7 @@ export default function ApiTokensSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.apiTokens')}</h1>
+      <PageHeader title={t('settingsCategory.apiTokens')} />
 
       <div className="space-y-6">
         {/* Create new token */}
@@ -114,13 +116,14 @@ export default function ApiTokensSettingsPage() {
                 <option value="365">{t('settings.year1')}</option>
               </select>
             </div>
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleCreateToken}
               disabled={tokenCreating || !newTokenName.trim()}
-              className={btnPrimary}
             >
               {tokenCreating ? t('settings.creating') : t('settings.createToken')}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -130,13 +133,14 @@ export default function ApiTokensSettingsPage() {
             <p className="text-xs text-vault-text-muted uppercase tracking-wide">
               {t('settings.activeTokens')}
             </p>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleLoadApiTokens}
               disabled={apiTokensLoading}
-              className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
             >
               {apiTokensLoading ? t('settings.loading') : t('settings.refresh')}
-            </button>
+            </Button>
           </div>
 
           {apiTokensLoading && apiTokens.length === 0 ? (
@@ -175,16 +179,19 @@ export default function ApiTokensSettingsPage() {
                               {tk.token ?? `${tk.token_prefix}...`}
                             </code>
                             {tk.token && (
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="shrink-0"
                                 onClick={() => {
                                   navigator.clipboard.writeText(tk.token!)
                                   toast.success(t('settings.copied'))
                                 }}
-                                className="px-1.5 py-1 text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
+
                                 title={t('common.copy')}
                               >
                                 <Copy size={12} />
-                              </button>
+                              </Button>
                             )}
                           </div>
                         )}
@@ -218,13 +225,15 @@ export default function ApiTokensSettingsPage() {
                           {!tk.expires_at && <span>{t('settings.tokenNoExpiration')}</span>}
                         </div>
                       </div>
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400/70 hover:text-red-400 shrink-0"
                         onClick={() => handleDeleteToken(tk.id)}
                         disabled={deletingTokenId === tk.id}
-                        className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
                       >
                         {deletingTokenId === tk.id ? '...' : t('settings.revoke')}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )
@@ -243,18 +252,21 @@ export default function ApiTokensSettingsPage() {
               {typeof window !== 'undefined' ? window.location.origin : ''}
               /api/rss/recent?token=YOUR_TOKEN
             </code>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 hover:text-vault-accent"
               onClick={() => {
                 navigator.clipboard.writeText(
                   `${window.location.origin}/api/rss/recent?token=YOUR_TOKEN`,
                 )
                 toast.success(t('rss.copied'))
               }}
-              className="p-1 rounded text-vault-text-muted hover:text-vault-accent transition-colors shrink-0"
+
               title={t('rss.copyUrl')}
             >
               <Copy size={14} />
-            </button>
+            </Button>
           </div>
         </div>
 

@@ -3,7 +3,7 @@
 import { useReducer, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 
-export type SortValue = 'added_at' | 'rating' | 'pages'
+export type SortValue = 'added_at' | 'content_updated_at' | 'rating' | 'pages'
 
 export interface FilterState {
   searchQuery: string

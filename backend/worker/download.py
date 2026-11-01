@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from datetime import UTC, datetime
@@ -12,8 +13,21 @@ from core.config import settings
 from core.events import EventType, emit_safe
 from services.credential import get_credential
 from services.download_admission import DownloadAdmission, admission_key_for
-from worker.constants import _IMAGE_EXTS, DISK_LOW_KEY, logger
-from worker.helpers import _set_job_progress, _set_job_status, _validate_image_magic, check_disk_space
+from services.download_mode import REPAIR, effective_mode
+from services.download_stop import claim_stop_finish, read_stop_intent, run_started_at
+from worker.constants import _IMAGE_EXTS, _MEDIA_EXTS, DISK_LOW_KEY, logger
+from worker.helpers import (
+    _set_job_progress,
+    _set_job_status,
+    _validate_image_magic,
+    check_disk_space,
+    enqueue_finalize_stopped_job,
+)
+
+# Names gallery-dl and its post-processors leave while a file is still being written.
+_STAGING_TEMP_SUFFIXES = (".part", ".ytdl", ".tmp")
+# yt-dlp intermediates: `name.temp.mp4` and per-format fragments `name.f137.mp4`.
+_STAGING_YTDLP_FRAGMENT_RE = re.compile(r"\.f\d+\.")
 
 
 def _postprocess_failure_status(downloaded: int) -> str:
@@ -48,6 +62,50 @@ def _import_outcome(importer) -> tuple[tuple[dict[str, str], ...], int]:
     return failures, success_count
 
 
+async def _link_already_saved_gallery(db_job_id: str | None, url: str, source_id: str) -> dict | None:
+    """Find the live gallery a fully archive-skipped run belongs to.
+
+    A run that downloads nothing never reaches the importer, so the job would
+    carry no gallery link. Resolve the URL identity read-only and attach the
+    existing gallery to the job so the queue can point at it. Trashed
+    galleries are not linked (BE-T17). Returns ``{"gallery_id", "title",
+    "pages"}`` or ``None``; never raises.
+    """
+    if source_id != "gallery_dl":
+        return None
+    try:
+        from sqlalchemy import select as sa_select
+
+        from core.database import AsyncSessionLocal
+        from db.models import DownloadJob, Gallery
+        from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+        identity = resolve_url_identity(url)
+        if identity is None or identity.is_account:
+            return None
+        async with AsyncSessionLocal() as session:
+            gallery = (
+                await session.execute(
+                    sa_select(Gallery.id, Gallery.title, Gallery.pages).where(
+                        Gallery.source == identity.source,
+                        Gallery.source_id == identity.source_id,
+                        Gallery.deleted_at.is_(None),
+                    )
+                )
+            ).one_or_none()
+            if gallery is None:
+                return None
+            if db_job_id:
+                job = await session.get(DownloadJob, uuid.UUID(db_job_id))
+                if job is not None and job.gallery_id is None:
+                    job.gallery_id = gallery.id
+                    await session.commit()
+            return {"gallery_id": gallery.id, "title": gallery.title, "pages": gallery.pages}
+    except Exception as exc:
+        logger.warning("[download] could not link already-saved gallery for %s: %s", url, exc)
+        return None
+
+
 async def _is_job_cancelled_in_db(db_job_id: str | None) -> bool:
     """Read the authoritative DB status for a DownloadJob.
 
@@ -71,15 +129,22 @@ async def _is_job_cancelled_in_db(db_job_id: str | None) -> bool:
         return False
 
 
-async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> None:
-    """Read cookie update files written by gallery-dl's cookies-update PP and save to DB."""
+async def _writeback_cookies(
+    credentials: dict | str | None, job_id: str, accounts: dict[str, str] | None = None
+) -> None:
+    """Read cookie update files written by gallery-dl's cookies-update PP and save to DB.
+
+    ``accounts`` maps each source to the account its cookies were loaded from
+    when the job started. The refreshed cookies go back to that account, not to
+    whichever one is active by the time the job ends.
+    """
     import http.cookiejar
 
     if not isinstance(credentials, dict):
         return
 
     from plugins.builtin.gallery_dl._sites import cookie_writeback_path, get_site_config
-    from services.credential import set_credential
+    from services.credential import DEFAULT_ACCOUNT, set_credential_for_account
 
     for src in credentials:
         cfg = get_site_config(src)
@@ -99,12 +164,38 @@ async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> Non
                 except json.JSONDecodeError, TypeError:
                     original = {}
                 if updated != original:
-                    await set_credential(src, json.dumps(updated), "cookies")
-                    logger.info("[download] cookies updated for %s (%d cookies)", src, len(updated))
+                    account = (accounts or {}).get(src, DEFAULT_ACCOUNT)
+                    if await set_credential_for_account(src, account, json.dumps(updated), "cookies"):
+                        logger.info("[download] cookies updated for %s/%s (%d cookies)", src, account, len(updated))
+                    else:
+                        logger.info(
+                            "[download] %s/%s was removed during the job; refreshed cookies dropped", src, account
+                        )
         except Exception as exc:
             logger.warning("[download] failed to update cookies for %s: %s", src, exc)
         finally:
             cookie_path.unlink(missing_ok=True)
+
+
+async def _load_credentials(plugin) -> tuple[dict | str | None, dict[str, str]]:
+    """Return the plugin's credentials and, per source, the account each value came from.
+
+    Value and account come from one read, so a switch of the active account
+    between two lookups cannot pair one account's cookies with another's name.
+    """
+    if not plugin.meta.needs_all_credentials:
+        return await get_credential(plugin.meta.source_id), {}
+
+    from services.credential import get_active_credential, list_credentials
+
+    values: dict[str, str] = {}
+    accounts: dict[str, str] = {}
+    for entry in await list_credentials():
+        active = await get_active_credential(entry["source"])
+        if active:
+            values[entry["source"]] = active.value
+            accounts[entry["source"]] = active.account
+    return values, accounts
 
 
 async def _set_subscription_result(
@@ -113,6 +204,7 @@ async def _set_subscription_result(
     error: str | None = None,
     *,
     advance_success: bool = True,
+    boundary: datetime | None = None,
 ) -> None:
     """Update subscription status after the associated download reaches a terminal state.
 
@@ -120,11 +212,20 @@ async def _set_subscription_result(
     Use this when gallery-dl returned 0 downloaded + 0 skipped: the run produced no
     evidence the source was actually checked (date-after may have filtered everything),
     so advancing the cutoff would self-poison the next incremental check.
+
+    status="stopped" is a user ending the run early and keeping what it fetched.
+    ``boundary`` (the run's start) becomes the new ``last_success_at`` unless the
+    subscription already has a later one, so the next check fetches only what is
+    newer and the history the user gave up is not pulled back. Without a boundary
+    a stop leaves ``last_success_at`` alone.
+
+    A repair job never moves ``last_success_at`` whatever its status: it re-fetches
+    what a subscription already covers and owns no boundary.
     """
     if not db_job_id:
         return
     try:
-        from sqlalchemy import update
+        from sqlalchemy import func, update
 
         from core.database import AsyncSessionLocal
         from db.models import DownloadJob, Subscription
@@ -134,11 +235,22 @@ async def _set_subscription_result(
             if not job or not job.subscription_id:
                 return
             subscription_id = job.subscription_id
+            job_mode = effective_mode(
+                job.mode if isinstance(job.mode, str) else None,
+                job.options if isinstance(job.options, dict) else None,
+            )
             values = {
                 "last_status": status,
                 "last_error": error[:500] if error else None,
             }
-            if status == "done" and advance_success:
+            if job_mode == REPAIR:
+                pass
+            elif status == "stopped":
+                if boundary is not None:
+                    values["last_success_at"] = func.greatest(
+                        func.coalesce(Subscription.last_success_at, boundary), boundary
+                    )
+            elif status == "done" and advance_success:
                 values["last_success_at"] = datetime.now(UTC)
             await session.execute(update(Subscription).where(Subscription.id == subscription_id).values(**values))
             await session.commit()
@@ -219,6 +331,250 @@ async def _admission_token_valid(job_id: str, token: uuid.UUID) -> bool:
         return await DownloadAdmission(session).token_is_valid(job_id, token)
 
 
+async def _stop_intent(db_job_id: str | None) -> str | None:
+    """Durable intent of the job (``"cancel"``, ``"stop"`` or ``None``); never raises."""
+    if not db_job_id:
+        return None
+    return await read_stop_intent(db_job_id)
+
+
+def _list_staged_media(target_dir: Path) -> list[Path]:
+    """Finished media files in a staging dir, skipping what is still being written."""
+    if not target_dir.exists():
+        return []
+    found: list[Path] = []
+    for path in sorted(target_dir.rglob("*")):
+        name = path.name
+        if name.startswith(".") or name.endswith(_STAGING_TEMP_SUFFIXES):
+            continue
+        if ".temp." in name or _STAGING_YTDLP_FRAGMENT_RE.search(name):
+            continue
+        if path.suffix.lower() not in _MEDIA_EXTS:
+            continue
+        if path.is_file():
+            found.append(path)
+    return found
+
+
+async def _import_staged_leftovers(importer, target_dir: Path, on_file) -> int:
+    """Import the finished files in staging that never reached the importer.
+
+    gallery-dl records a file in the archive before its ``after`` hook prints
+    ``JYZROX_FILE``, so a run ended between the two leaves a file that is archived,
+    on disk and unknown to the importer. Importing it here keeps the archive and
+    the gallery in agreement. ``on_file`` creates the gallery when none exists
+    yet. Returns how many files were handed over.
+    """
+    handed = 0
+    for path in await asyncio.to_thread(_list_staged_media, target_dir):
+        # Both checks are cheap and skip a file before it is hashed. A known name
+        # means the gallery already holds it (`is True`: loose test doubles).
+        if importer.has_processed(path) or importer.is_known_filename(path) is True:
+            continue
+        try:
+            await on_file(path)
+            handed += 1
+        except Exception as exc:
+            logger.warning("[download] could not import staged leftover %s: %s", path.name, exc)
+    if handed:
+        logger.info("[download] imported %d staged leftover file(s) from %s", handed, target_dir)
+    return handed
+
+
+def _count(value) -> int:
+    """An int counter, or 0 for anything else (loose test doubles)."""
+    return value if type(value) is int else 0
+
+
+async def _finish_stopped(
+    *,
+    importer,
+    target_dir: Path,
+    url: str,
+    plugin,
+    on_file,
+    db_job_id: str | None,
+    mode: str,
+    started_at: datetime,
+    boundary: datetime | None,
+    credentials,
+    credential_accounts: dict[str, str] | None,
+    result,
+) -> dict:
+    """Keep what a user-stopped run fetched and end the job ``done``.
+
+    A failure before the claim must not leave the job running with nobody to
+    finish it, so it hands the job to ``finalize_stopped_job``: once this
+    execution releases its admission token that task redoes the keep path from
+    the database state. After the claim the job is ``done`` and that task would
+    ignore it, so a failure there settles the gallery here instead.
+    """
+    state = {"claimed": False}
+    try:
+        return await _finish_stopped_inner(
+            state=state,
+            importer=importer,
+            target_dir=target_dir,
+            url=url,
+            plugin=plugin,
+            on_file=on_file,
+            db_job_id=db_job_id,
+            mode=mode,
+            started_at=started_at,
+            boundary=boundary,
+            credentials=credentials,
+            credential_accounts=credential_accounts,
+            result=result,
+        )
+    except Exception as exc:
+        logger.error("[download] keep path failed for stopped job %s: %s", db_job_id, exc, exc_info=True)
+        if state["claimed"]:
+            await _settle_claimed_gallery(importer, db_job_id)
+            return {"status": "done", "outcome": "stopped", "error": str(exc)}
+        if db_job_id:
+            try:
+                await enqueue_finalize_stopped_job(db_job_id)
+            except Exception as enqueue_exc:
+                logger.error("[download] could not hand stopped job %s to finalize: %s", db_job_id, enqueue_exc)
+        return {"status": "stopping", "error": str(exc)}
+
+
+async def _settle_claimed_gallery(importer, db_job_id: str | None) -> None:
+    """Take a claimed stop's gallery off ``downloading`` when its keep path broke.
+
+    Best effort; what it cannot settle, worker startup does.
+    """
+    gallery_id = getattr(importer, "gallery_id", None)
+    if not gallery_id or getattr(importer, "skipped_trashed", False) is True:
+        return
+    try:
+        from core.database import AsyncSessionLocal
+        from services.gallery_lifecycle import settle_stale_downloading_galleries
+
+        async with AsyncSessionLocal() as session:
+            await settle_stale_downloading_galleries(session, [gallery_id])
+            await session.commit()
+    except Exception as exc:
+        logger.error("[download] could not settle gallery %s of stopped job %s: %s", gallery_id, db_job_id, exc)
+
+
+async def _finish_stopped_inner(
+    *,
+    state: dict,
+    importer,
+    target_dir: Path,
+    url: str,
+    plugin,
+    on_file,
+    db_job_id: str | None,
+    mode: str,
+    started_at: datetime,
+    boundary: datetime | None,
+    credentials,
+    credential_accounts: dict[str, str] | None,
+    result,
+) -> dict:
+    # 1. Files gallery-dl archived and left in staging without printing them (B1).
+    await _import_staged_leftovers(importer, target_dir, on_file)
+
+    # 2. Claim: end the job `done` before the gallery is touched. A cancel that
+    # committed first wins (HR-005, A2) and discards the run; once claimed, a
+    # cancel is refused, so the job can never end `cancelled` with a kept gallery
+    # or `done` with a discarded one.
+    claim = await claim_stop_finish(db_job_id) if db_job_id else "claimed"
+    if claim == "cancelled":
+        await importer.cleanup()
+        await _set_subscription_result(db_job_id, "cancelled")
+        logger.info("[download] cancelled after stop (keep-path claim): %s", url)
+        return {"status": "cancelled"}
+    if claim != "claimed":
+        logger.warning("[download] stop keep path of %s found the job %s; leaving it", db_job_id, claim)
+        return {"status": claim}
+    state["claimed"] = True
+
+    # 3. The subscription boundary moves to the run start, never backwards. Before
+    # the gallery work: the job is already `done`, so nothing would redo it.
+    await _set_subscription_result(db_job_id, "stopped", boundary=boundary)
+
+    # 4. Keep. No gallery (stopped before anything imported) or a trashed one
+    # (BE-T17) leaves nothing to keep, and the archive rows this run wrote would
+    # make the next run skip files that were never imported (E5).
+    gallery_id = None
+    if importer.gallery_id and getattr(importer, "skipped_trashed", False) is not True:
+        try:
+            gallery_id = await importer.finalize_kept(target_dir, mode=mode)
+        except Exception as exc:
+            # The job is claimed, so no hand-off would redo this: abort settles the gallery
+            # (and if abort fails too, _finish_stopped does).
+            logger.error("[download] keep path failed for stopped job %s: %s", db_job_id, exc, exc_info=True)
+            await importer.abort()
+    else:
+        from worker.progressive import _rmtree_staging_dir
+
+        if getattr(plugin.meta, "source_id", None) == "gallery_dl" and not importer.source:
+            # The archive table is named after the source; a run that never created
+            # a gallery has none yet, so without it the discard would find no table.
+            try:
+                from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+                identity = resolve_url_identity(url)
+                if identity is not None:
+                    importer.source = identity.source
+            except Exception as exc:
+                logger.warning("[download] could not resolve archive source for %s: %s", url, exc)
+        await importer.discard_unlinked_archive_entries()
+        _rmtree_staging_dir(target_dir)
+
+    # 5. Cookie writeback, as for a finished run.
+    if db_job_id:
+        try:
+            await _writeback_cookies(credentials, db_job_id, credential_accounts)
+        except Exception as exc:
+            logger.warning("[download] cookie writeback failed: %s", exc)
+
+    # 6. A stop always ends `done` (never failed/partial, which auto-retry would
+    # resume — A10); progress.outcome tells the UI what happened.
+    import_failures, kept = _import_outcome(importer)
+    fetched = _count(getattr(result, "downloaded", None)) or kept
+    skipped = max(_count(getattr(result, "total", None)) - _count(getattr(result, "downloaded", None)), 0)
+    progress: dict = {
+        "total": fetched,
+        "downloaded": fetched,
+        "skipped": skipped,
+        "started_at": started_at.isoformat(),
+        "last_update_at": datetime.now(UTC).isoformat(),
+        "status_text": f"Stopped — kept {kept}",
+        "gdl_state": "done",
+        "outcome": "stopped",
+    }
+    importer_skip = {
+        "duplicate": _count(importer.skipped_duplicate_count),
+        "excluded": _count(importer.skipped_excluded_count),
+        "invalid": _count(importer.skipped_invalid_count),
+    }
+    if any(importer_skip.values()):
+        progress["import_skipped"] = importer_skip
+    if isinstance(importer.title, str) and importer.title:
+        progress["title"] = importer.title
+    if gallery_id:
+        progress["gallery_id"] = gallery_id
+    if import_failures:
+        progress["import_failures"] = {
+            "count": len(import_failures),
+            "success": kept,
+            "details": list(import_failures[:10]),
+        }
+    # The claim already set `done`; this write publishes the final progress with it.
+    await _set_job_progress(db_job_id, progress)
+
+    # 7. Library refresh.
+    if gallery_id:
+        await emit_safe(EventType.GALLERY_UPDATED, resource_type="gallery", resource_id=gallery_id)
+
+    logger.info("[download] stopped: %s (kept=%d, gallery_id=%s)", url, kept, gallery_id)
+    return {"status": "done", "outcome": "stopped", "downloaded": fetched}
+
+
 async def download_job(
     ctx: dict,
     url: str,
@@ -246,12 +602,13 @@ async def download_job(
 
     source_id = plugin.meta.source_id
     admission_key = plugin.meta.semaphore_key or source_id
+    site_source_id = source_id
     if source_id == "gallery_dl":
         from plugins.builtin.gallery_dl._sites import get_site_by_domain
 
         domain = (urlparse(url).hostname or "unknown").removeprefix("www.")
-        effective_source_id = get_site_by_domain(domain).source_id
-        dl_params = await site_config_service.get_effective_download_params(effective_source_id)
+        site_source_id = get_site_by_domain(domain).source_id
+        dl_params = await site_config_service.get_effective_download_params(site_source_id)
         if admission_key == "gallery_dl":
             admission_key = admission_key_for("gallery_dl", url)
     else:
@@ -263,9 +620,19 @@ async def download_job(
         )
 
     from core.database import AsyncSessionLocal
+    from services.egress_persona import claim_download_slot
 
     async with AsyncSessionLocal() as session:
-        claim = await DownloadAdmission(session).claim(db_job_id, admission_key, dl_params.concurrency)
+        decision = await claim_download_slot(
+            session,
+            job_id=db_job_id,
+            base_key=admission_key,
+            site_source_id=site_source_id,
+            capacity=dl_params.concurrency,
+            admission=DownloadAdmission(session),
+        )
+    claim = decision.claim
+    admission_key = decision.key
     if not claim.acquired:
         # A token-less result with no queue position means the durable row is
         # no longer queued (cancelled, paused, terminal, or a duplicate active
@@ -278,7 +645,7 @@ async def download_job(
             {
                 **base_progress,
                 "status_text": "Waiting for download slot...",
-                "wait_reason": "source_slot",
+                "wait_reason": "persona_cooldown" if decision.personas_cooling else "source_slot",
                 "semaphore_key": admission_key,
                 "queue_position": claim.queue_position,
             },
@@ -289,7 +656,7 @@ async def download_job(
             source=source,
             options=options,
             total=total,
-            delay_seconds=5,
+            delay_seconds=60 if decision.personas_cooling else 5,
         )
         return {"status": "queued", "queue_position": claim.queue_position}
 
@@ -310,6 +677,8 @@ async def download_job(
             plugin=plugin,
             dl_params=dl_params,
             admission_token=claim.token,
+            persona_id=claim.persona_id if decision.persona_mode else None,
+            site_source_id=site_source_id,
         )
     finally:
         released = False
@@ -333,6 +702,8 @@ async def _run_download_job(
     plugin,
     dl_params,
     admission_token: uuid.UUID | None,
+    persona_id: int | None = None,
+    site_source_id: str | None = None,
 ) -> dict:
     """Download a gallery via the plugin registry — unified progressive import."""
     logger.info("[download] url=%s", url)
@@ -340,20 +711,27 @@ async def _run_download_job(
     started_at = datetime.now(UTC)
 
     from plugins.registry import plugin_registry
-    from services.credential import list_credentials as _list_creds
 
     source_id = plugin.meta.source_id
 
     # ── 2. Load credentials (unified) ───────────────────────────────
-    if plugin.meta.needs_all_credentials:
-        all_creds = await _list_creds()
-        credentials: dict | str | None = {}
-        for c in all_creds:
-            val = await get_credential(c["source"])
-            if val:
-                credentials[c["source"]] = val  # type: ignore[index]
-    else:
-        credentials = await get_credential(source_id)
+    credentials, credential_accounts = await _load_credentials(plugin)
+
+    # ADR 0022: a persona job swaps the site's active account for its bound one
+    # (or none); credential_accounts then feeds the cookie writeback below.
+    persona_identity = None
+    if persona_id is not None and site_source_id:
+        from services.egress_persona import PersonaUnavailable, prepare_persona_run
+
+        try:
+            persona_identity, credentials, credential_accounts = await prepare_persona_run(
+                persona_id, site_source_id, credentials, credential_accounts
+            )
+        except PersonaUnavailable as exc:
+            err = str(exc)
+            logger.error("[download] %s", err)
+            await _set_job_status(db_job_id, "failed", err)
+            return {"status": "failed", "error": err}
 
     # ── 3. Output directory ─────────────────────────────────────────
     downloader = plugin_registry.get_downloader(source_id)
@@ -392,6 +770,12 @@ async def _run_download_job(
     # ── 6. Progressive Importer (ALL sources) ───────────────────────
     import_user_id = None
     existing_gallery_id = None
+    row_mode = None
+    row_options = None
+    stop_already_requested = False
+    # Start of an earlier execution of this job (None if it never ran): the
+    # boundary of a stop that lands before this execution starts.
+    previous_run_start = None
     if db_job_id:
         from sqlalchemy.sql import select as sa_select
 
@@ -401,23 +785,52 @@ async def _run_download_job(
         try:
             async with asyncio.timeout(2):
                 async with AsyncSessionLocal() as _sess:
-                    _result = await _sess.execute(sa_select(_DJ.user_id, _DJ.gallery_id).where(_DJ.id == db_job_id))
+                    _result = await _sess.execute(
+                        sa_select(
+                            _DJ.user_id, _DJ.gallery_id, _DJ.mode, _DJ.options, _DJ.stop_requested_at, _DJ.progress
+                        ).where(_DJ.id == db_job_id)
+                    )
                     _row = _result.one_or_none()
                     if _row:
                         import_user_id = _row.user_id
                         existing_gallery_id = _row.gallery_id
+                        row_mode = _row.mode
+                        row_options = _row.options
+                        # A stop requested while the job waited for its slot: it never starts.
+                        stop_already_requested = isinstance(_row.stop_requested_at, datetime)
+                        previous_run_start = run_started_at(_row.progress if isinstance(_row.progress, dict) else None)
         except Exception as exc:
             # Admission already verified the durable row. Keep this lookup
             # defensive for isolated unit execution and transient read errors.
+            # (A stop missed here is still caught by the Redis flag the plugin polls.)
             logger.warning("[download] could not load persisted gallery attachment: %s", exc)
 
-    from worker.constants import _MEDIA_EXTS
+    # The mode was decided when the job was enqueued; rows from before the column
+    # existed are mapped from their options (services/download_mode.py).
+    mode_options = row_options if isinstance(row_options, dict) else options
+    mode = effective_mode(row_mode if isinstance(row_mode, str) else None, mode_options)
+
     from worker.progressive import ProgressiveImporter
 
     # Use filename-based page numbering for plugins with parallel downloads
     page_from_filename = plugin.meta.concurrency > 1
-    importer = ProgressiveImporter(db_job_id, import_user_id, page_num_from_filename=page_from_filename)
+    importer = ProgressiveImporter(
+        db_job_id,
+        import_user_id,
+        page_num_from_filename=page_from_filename,
+        # Only a repair may bring purged images back.
+        include_excluded=bool((mode_options or {}).get("include_excluded")) and mode == REPAIR,
+    )
     importer.source_url = url
+    if mode == REPAIR and source_id == "gallery_dl" and db_job_id:
+        # The repair reads and writes a per-job shadow of the real archive table;
+        # the importer merges it back when the run is kept (source.py creates it).
+        try:
+            from plugins.builtin.gallery_dl._archive import repair_archive_tables
+
+            importer.repair_archive = repair_archive_tables(url, db_job_id)
+        except Exception as exc:
+            logger.warning("[download] could not resolve repair archive tables for %s: %s", url, exc)
     if isinstance(existing_gallery_id, int):
         attached = await importer.attach_existing_gallery(existing_gallery_id)
         if not attached:
@@ -427,7 +840,7 @@ async def _run_download_job(
             )
 
     # ── 7. Pre-download metadata (native plugins) ──────────────────
-    if hasattr(plugin, "resolve_metadata"):
+    if hasattr(plugin, "resolve_metadata") and not stop_already_requested:
         try:
             import_data = await plugin.resolve_metadata(url, credentials)
             if import_data:
@@ -580,12 +993,24 @@ async def _run_download_job(
             async with _gallery_create_lock:
                 if not importer.gallery_id:  # double-check after acquiring lock
                     meta_path = Path(str(file_path) + ".json")
+                    raw: dict | None = None
                     if meta_path.exists():
                         try:
                             raw = json.loads(meta_path.read_text(encoding="utf-8"))
-                            await importer.ensure_gallery(raw, target_dir)
                         except Exception as exc:
                             logger.warning("[download] failed to parse metadata: %s", exc)
+                    identity = None
+                    if plugin.meta.source_id == "gallery_dl":
+                        from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+                        identity = resolve_url_identity(url)
+                    try:
+                        if identity is not None:
+                            await importer.ensure_gallery_from_identity(identity, raw, target_dir)
+                        elif raw is not None:
+                            await importer.ensure_gallery(raw, target_dir)
+                    except Exception as exc:
+                        logger.warning("[download] failed to create gallery from metadata: %s", exc)
                     if not importer.gallery_id:
                         try:
                             await importer.ensure_gallery_from_url(url, target_dir)
@@ -604,7 +1029,32 @@ async def _run_download_job(
                         )
         await importer.import_file(file_path, sha256=sha256)
 
+    async def _stop_and_keep(run_result, *, before_start: bool = False) -> dict:
+        return await _finish_stopped(
+            importer=importer,
+            target_dir=target_dir,
+            url=url,
+            plugin=plugin,
+            on_file=on_file,
+            db_job_id=db_job_id,
+            mode=mode,
+            started_at=started_at,
+            # A stop before this execution started keeps an earlier run's start,
+            # or none at all for a job that never ran (the boundary stays put).
+            boundary=previous_run_start if before_start else started_at,
+            credentials=credentials,
+            credential_accounts=credential_accounts,
+            result=run_result,
+        )
+
     # ── 11. Execute download ────────────────────────────────────────
+    # A stop that arrived before the job started: nothing to download, only the
+    # keep path (leftover staging from an earlier attempt, archive rows, boundary).
+    # Ahead of the pause gate, or a paused job would sit there with its stop unserved.
+    if stop_already_requested:
+        logger.info("[download] stop requested before start: %s", db_job_id)
+        return await _stop_and_keep(None, before_start=True)
+
     # ── Pre-download pause gate (for keep_paused recovery) ─────────
     if db_job_id:
         pause_val = await redis.get(f"download:pause:{db_job_id}")
@@ -631,7 +1081,10 @@ async def _run_download_job(
         opts["inactivity_timeout"] = dl_params.inactivity_timeout
         opts["timing_ctx"] = timing_ctx
         opts["diagnostic_ctx"] = diagnostic_ctx
+        if persona_identity is not None:
+            opts["persona"] = persona_identity.network_options()
         opts["job_context"] = (options or {}).get("job_context", "manual")
+        opts["mode"] = mode
         # last_completed_at travels through SAQ as ISO string (JSON-safe);
         # source.py expects a datetime, so reify here.
         _lca_raw = (options or {}).get("last_completed_at")
@@ -663,12 +1116,16 @@ async def _run_download_job(
         # N8: cookie writeback (updated cookies → encrypted DB)
         if db_job_id and result.status in ("done", "partial"):
             try:
-                await _writeback_cookies(credentials, db_job_id)
+                await _writeback_cookies(credentials, db_job_id, credential_accounts)
             except Exception as exc:
                 logger.warning("[download] cookie writeback failed: %s", exc)
     except Exception as exc:
         err = f"Download failed: {exc}"
         logger.error("[download] %s", err, exc_info=True)
+        # The user stopped the job and the plugin then failed (or was torn down):
+        # the stop still wins, and what was fetched is kept.
+        if await _stop_intent(db_job_id) == "stop":
+            return await _stop_and_keep(None)
         await importer.abort()
         await _set_job_status(db_job_id, "failed", err)
         await _set_subscription_result(db_job_id, "failed", err)
@@ -684,8 +1141,26 @@ async def _run_download_job(
         if config_path:
             config_path.unlink(missing_ok=True)
 
-    # ── 12. Post-download: cancel guard ─────────────────────────────
+    # Outside the try above: a cooldown failure must not turn a partial result into failed.
+    if persona_identity is not None and result.status in ("failed", "partial"):
+        from services.egress_persona import mark_persona_cooldown, throttle_signal
+
+        signal = throttle_signal(diagnostic_ctx)
+        if signal:
+            await mark_persona_cooldown(persona_identity.persona_id, site_source_id, signal)
+
+    # ── 12. Post-download: stop / cancel guards ─────────────────────
+    # A stop keeps the run whatever the plugin reported: the process was killed
+    # (cancelled), or died/timed out at the same moment (failed/partial, A9). A
+    # run that finished (`done`) before the stop landed is simply finished (A1).
+    if result.status != "done" and await _stop_intent(db_job_id) == "stop":
+        return await _stop_and_keep(result)
+
     if result.status == "cancelled":
+        # The Redis flag that ended the process is only a signal: re-read the
+        # durable intent before throwing the run away.
+        if await _stop_intent(db_job_id) == "stop":
+            return await _stop_and_keep(result)
         await importer.cleanup()
         await _set_job_status(db_job_id, "cancelled")
         await _set_subscription_result(db_job_id, "cancelled")
@@ -711,11 +1186,17 @@ async def _run_download_job(
             return {"status": "failed", "error": err}
 
     if await cancel_check():
-        await importer.cleanup()
-        await _set_job_status(db_job_id, "cancelled")
-        await _set_subscription_result(db_job_id, "cancelled")
-        logger.info("[download] cancelled (post-download guard): %s", url)
-        return {"status": "cancelled"}
+        # The stop flag shares the key with cancel. A stop landing after the plugin
+        # finished changes nothing (A1); otherwise it keeps the run.
+        intent = await _stop_intent(db_job_id)
+        if intent == "stop" and result.status != "done":
+            return await _stop_and_keep(result)
+        if intent != "stop":
+            await importer.cleanup()
+            await _set_job_status(db_job_id, "cancelled")
+            await _set_subscription_result(db_job_id, "cancelled")
+            logger.info("[download] cancelled (post-download guard): %s", url)
+            return {"status": "cancelled"}
 
     try:
         # ── 13. Image validation ────────────────────────────────────────
@@ -748,6 +1229,10 @@ async def _run_download_job(
             final_status_text = f"Complete — {result.downloaded} new, {skipped_total} already saved"
         else:
             final_status_text = "Complete"
+        already_saved = result.downloaded == 0 and skipped_total > 0 and not all_failed
+        saved_gallery = None
+        if already_saved and not importer.gallery_id:
+            saved_gallery = await _link_already_saved_gallery(db_job_id, url, plugin.meta.source_id)
         final_progress = {
             **_base_progress,
             "total": result.total or result.downloaded,
@@ -772,6 +1257,14 @@ async def _run_download_job(
             final_progress["title"] = importer.title
         if importer.gallery_id:
             final_progress["gallery_id"] = importer.gallery_id
+        if already_saved:
+            # Nothing new was fetched: tell the UI this run only confirmed what
+            # is already stored, instead of leaving it to guess from counters.
+            final_progress["outcome"] = "already_saved"
+            if saved_gallery:
+                final_progress["gallery_id"] = saved_gallery["gallery_id"]
+                final_progress["title"] = saved_gallery["title"]
+                final_progress["existing_pages"] = saved_gallery["pages"]
         if all_failed:
             final_progress["failed_pages"] = all_failed
         await _set_job_progress(db_job_id, final_progress)
@@ -782,6 +1275,8 @@ async def _run_download_job(
         # where the Redis cancel flag was evicted (allkeys-lru) or set
         # after the earlier post-download guards already passed (HR-005).
         if await _is_job_cancelled_in_db(db_job_id):
+            if await _stop_intent(db_job_id) == "stop":
+                return await _stop_and_keep(result)
             await importer.cleanup()
             await _set_job_status(db_job_id, "cancelled")
             await _set_subscription_result(db_job_id, "cancelled")

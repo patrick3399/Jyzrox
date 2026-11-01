@@ -140,6 +140,23 @@ class TestListSubscriptions:
         assert resp.status_code == 200
         assert len(resp.json()["subscriptions"]) <= 2
 
+    async def test_list_subscriptions_offset_pages_with_equal_created_at_neither_repeat_nor_skip(
+        self, client, db_session
+    ):
+        """Bulk-imported subs share created_at; id must break the tie so pages are stable."""
+        await _ensure_user(db_session)
+        ids = [await _insert_subscription(db_session, name=f"Tied Sub {i}") for i in range(6)]
+        await db_session.execute(text("UPDATE subscriptions SET created_at = '2026-01-01 00:00:00'"))
+        await db_session.commit()
+
+        seen: list[int] = []
+        for offset in (0, 2, 4):
+            resp = await client.get("/api/subscriptions/", params={"limit": 2, "offset": offset})
+            assert resp.status_code == 200
+            seen += [s["id"] for s in resp.json()["subscriptions"]]
+
+        assert seen == sorted(ids, reverse=True)
+
     async def test_list_subscriptions_returns_current_gallery_title_without_job(self, client, db_session):
         """Old subscriptions use the current Gallery title even after linked jobs are gone."""
         await _ensure_user(db_session)
@@ -245,6 +262,63 @@ def _conflict_set_sql(stmt) -> str:
     compiled = str(stmt.compile(dialect=postgresql.dialect())).upper()
     assert "ON CONFLICT" in compiled
     return compiled.split("ON CONFLICT", 1)[1]
+
+
+class TestCreateSubscriptionDefaults:
+    """Adding a subscription must not opt into auto-download unless asked."""
+
+    def test_create_request_defaults_auto_download_to_false(self):
+        from routers.subscriptions import CreateSubscriptionRequest
+
+        req = CreateSubscriptionRequest(url="https://example.com/artist/1")
+        assert req.auto_download is False
+
+    def test_create_request_explicit_auto_download_true_is_kept(self):
+        from routers.subscriptions import CreateSubscriptionRequest
+
+        req = CreateSubscriptionRequest(url="https://example.com/artist/1", auto_download=True)
+        assert req.auto_download is True
+
+
+class TestCreateSubscriptionDefaultCron:
+    """A subscription created without cron_expr is scheduled weekly, not every 2h."""
+
+    async def test_create_without_cron_uses_weekly_default(self, client, db_session):
+        from routers import subscriptions as router_mod
+
+        await _ensure_user(db_session)
+        captured: dict = {}
+        real = router_mod._build_subscription_upsert
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return real(**kwargs)
+
+        with patch.object(router_mod, "_build_subscription_upsert", side_effect=_capture):
+            # The pg upsert itself may 500 on SQLite; only the built args matter.
+            await client.post("/api/subscriptions/", json={"url": "https://example.com/artist/weekly"})
+
+        assert captured["cron_expr"] == "0 0 * * 1"
+        assert captured["auto_download"] is False
+
+    async def test_create_with_explicit_cron_keeps_it(self, client, db_session):
+        from routers import subscriptions as router_mod
+
+        await _ensure_user(db_session)
+        captured: dict = {}
+        real = router_mod._build_subscription_upsert
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return real(**kwargs)
+
+        with patch.object(router_mod, "_build_subscription_upsert", side_effect=_capture):
+            await client.post(
+                "/api/subscriptions/",
+                json={"url": "https://example.com/artist/hourly", "cron_expr": "0 * * * *"},
+            )
+
+        assert captured["cron_expr"] == "0 * * * *"
 
 
 class TestSubscriptionUpsertRefreshesSchedule:
@@ -401,6 +475,49 @@ class TestGetSubscriptionJobs:
         assert job_id in job_ids
 
 
+class TestLatestJobs:
+    """GET /api/subscriptions/latest-jobs — one request instead of N per-sub calls."""
+
+    async def _insert_job(self, db_session, sub_id: int, created_at: str, user_id: int = 1) -> str:
+        job_id = str(uuid.uuid4())
+        await db_session.execute(
+            text(
+                "INSERT INTO download_jobs (id, url, status, progress, subscription_id, user_id, created_at) "
+                "VALUES (:jid, 'https://example.com/dl', 'done', '{}', :sid, :uid, :ts)"
+            ),
+            {"jid": job_id, "sid": sub_id, "uid": user_id, "ts": created_at},
+        )
+        await db_session.commit()
+        return job_id
+
+    async def test_latest_jobs_returns_newest_job_per_subscription_in_one_call(self, client, db_session):
+        """Two subs with several jobs each → one response holds only each sub's newest job."""
+        await _ensure_user(db_session)
+        sub_a = await _insert_subscription(db_session, name="A")
+        sub_b = await _insert_subscription(db_session, name="B")
+        await self._insert_job(db_session, sub_a, "2026-01-01 00:00:00")
+        newest_a = await self._insert_job(db_session, sub_a, "2026-01-03 00:00:00")
+        newest_b = await self._insert_job(db_session, sub_b, "2026-01-02 00:00:00")
+
+        resp = await client.get("/api/subscriptions/latest-jobs")
+        assert resp.status_code == 200
+        jobs = resp.json()["jobs"]
+        assert jobs[str(sub_a)]["id"] == newest_a
+        assert jobs[str(sub_b)]["id"] == newest_b
+        assert len(jobs) == 2
+
+    async def test_latest_jobs_excludes_other_users_subscriptions(self, client, db_session):
+        """A subscription owned by another user must not leak its job."""
+        await _ensure_user(db_session)
+        await _ensure_user(db_session, user_id=2)
+        other_sub = await _insert_subscription(db_session, user_id=2, name="Other")
+        await self._insert_job(db_session, other_sub, "2026-01-01 00:00:00", user_id=2)
+
+        resp = await client.get("/api/subscriptions/latest-jobs")
+        assert resp.status_code == 200
+        assert resp.json()["jobs"] == {}
+
+
 # ---------------------------------------------------------------------------
 # PATCH /api/subscriptions/{sub_id}
 # ---------------------------------------------------------------------------
@@ -453,6 +570,63 @@ class TestUpdateSubscription:
         resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"cron_expr": "0 6 * * 1"})
         assert resp.status_code == 200
 
+    async def test_update_subscription_cron_change_recomputes_next_check_at(self, client, db_session):
+        """Changing cron_expr via PATCH must move next_check_at onto the new schedule.
+
+        Regression: PATCH only wrote cron_expr, so an ungrouped subscription kept
+        its old next_check_at and the new interval did not apply until after the
+        next check. next_check_at must come from the new cron, relative to now.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy import select
+
+        from db.models import Subscription
+
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, name="Cron Reschedule", cron_expr="0 */2 * * *")
+        await db_session.execute(
+            text("UPDATE subscriptions SET next_check_at = :ts WHERE id = :id"),
+            {"ts": "2000-01-01 00:00:00", "id": sub_id},
+        )
+        await db_session.commit()
+
+        before = datetime.now(UTC)
+        resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"cron_expr": "0 6 * * 1"})
+        assert resp.status_code == 200
+
+        next_check = (
+            await db_session.execute(select(Subscription.next_check_at).where(Subscription.id == sub_id))
+        ).scalar_one()
+        if next_check.tzinfo is None:  # SQLite returns naive datetimes
+            next_check = next_check.replace(tzinfo=UTC)
+        assert next_check > before, "next_check_at still on the old schedule after cron_expr PATCH"
+        # Mondays 06:00 are at most 7 days away.
+        assert next_check <= before + timedelta(days=7, minutes=1)
+        assert next_check.weekday() == 0 and next_check.hour == 6 and next_check.minute == 0
+
+    async def test_update_subscription_without_cron_keeps_next_check_at(self, client, db_session):
+        """PATCHing unrelated fields must not reschedule the subscription."""
+        from sqlalchemy import select
+
+        from db.models import Subscription
+
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, name="No Reschedule")
+        await db_session.execute(
+            text("UPDATE subscriptions SET next_check_at = :ts WHERE id = :id"),
+            {"ts": "2031-05-05 05:05:05", "id": sub_id},
+        )
+        await db_session.commit()
+
+        resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"name": "Renamed"})
+        assert resp.status_code == 200
+
+        next_check = (
+            await db_session.execute(select(Subscription.next_check_at).where(Subscription.id == sub_id))
+        ).scalar_one()
+        assert (next_check.year, next_check.month, next_check.day) == (2031, 5, 5)
+
     async def test_update_subscription_no_fields_returns_400(self, client, db_session):
         """Sending an empty patch body → 400 (no fields to update)."""
         await _ensure_user(db_session)
@@ -467,6 +641,75 @@ class TestUpdateSubscription:
 
         resp = await client.patch("/api/subscriptions/99999", json={"name": "Ghost"})
         assert resp.status_code == 404
+
+
+class TestSubscriptionMediaPolicy:
+    """PATCH/POST download_options.media validation."""
+
+    async def test_patch_subscription_media_options_rejected_for_pixiv_subscription(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(
+            db_session, url="https://www.pixiv.net/users/12345", source="pixiv", name="Pixiv Sub"
+        )
+
+        resp = await client.patch(
+            f"/api/subscriptions/{sub_id}",
+            json={"download_options": {"media": {"max_files": 10}}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
+
+    async def test_patch_subscription_unknown_id_returns_404_before_validation(self, client, db_session):
+        await _ensure_user(db_session)
+
+        # max_files=0 is invalid; a 404 (not 422) proves ownership is checked first.
+        resp = await client.patch(
+            "/api/subscriptions/99999",
+            json={"download_options": {"media": {"max_files": 0}}},
+        )
+
+        assert resp.status_code == 404
+
+    async def test_patch_subscription_zero_max_files_returns_422_for_gallery_dl_subscription(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, url="https://x.com/someuser", source="twitter")
+
+        resp = await client.patch(
+            f"/api/subscriptions/{sub_id}",
+            json={"download_options": {"media": {"max_files": 0}}},
+        )
+
+        assert resp.status_code == 422
+
+    async def test_patch_subscription_media_options_saved_for_twitter_subscription(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, url="https://x.com/someuser", source="twitter")
+
+        resp = await client.patch(
+            f"/api/subscriptions/{sub_id}",
+            json={"download_options": {"media": {"max_files": 20, "include_videos": False}}},
+        )
+
+        assert resp.status_code == 200
+        raw = (
+            await db_session.execute(text("SELECT download_options FROM subscriptions WHERE id = :i"), {"i": sub_id})
+        ).scalar_one()
+        import json as _json
+
+        stored = _json.loads(raw) if isinstance(raw, str) else raw
+        assert stored["media"] == {"max_files": 20, "include_videos": False}
+
+    async def test_create_subscription_media_options_rejected_for_pixiv_url(self, client, db_session):
+        await _ensure_user(db_session)
+
+        resp = await client.post(
+            "/api/subscriptions/",
+            json={"url": "https://www.pixiv.net/users/12345", "download_options": {"media": {"max_files": 10}}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
 
 
 # ---------------------------------------------------------------------------

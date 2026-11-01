@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -222,7 +222,17 @@ class TestBuildGallery:
         iso = "2024-01-15T12:00:00"
         meta = {"date": iso}
         result = self._call(meta=meta)
-        assert result["posted_at"] == datetime.fromisoformat(iso)
+        assert result["posted_at"] == datetime.fromisoformat(iso).replace(tzinfo=UTC)
+
+    def test_posted_at_without_offset_is_utc_not_container_local_time(self):
+        """gallery-dl writes naive UTC; asyncpg reads a naive value as local time (TZ=Asia/Taipei)."""
+        result = self._call(meta={"date": "2026-03-19 02:39:43"})
+        assert result["posted_at"].utcoffset() == timedelta(0)
+        assert result["posted_at"] == datetime(2026, 3, 19, 2, 39, 43, tzinfo=UTC)
+
+    def test_posted_at_with_explicit_offset_keeps_its_instant(self):
+        result = self._call(meta={"date": "2026-03-19T11:39:43+09:00"})
+        assert result["posted_at"] == datetime(2026, 3, 19, 2, 39, 43, tzinfo=UTC)
 
     def test_posted_at_invalid_value_returns_none_without_crash(self):
         """An unparseable 'date' value must result in None — not a crash."""
@@ -236,6 +246,7 @@ class TestBuildGallery:
             "title": "Full Gallery",
             "title_jpn": "フルギャラリー",
             "category": "ehentai",
+            "gallery_category": "Doujinshi",
             "lang": "japanese",
             "uploader": "uploader_name",
             "date": 1_700_000_000,
@@ -246,7 +257,7 @@ class TestBuildGallery:
         assert result["source"] == "ehentai"
         assert result["title"] == "Full Gallery"
         assert result["title_jpn"] == "フルギャラリー"
-        assert result["category"] == "ehentai"
+        assert result["category"] == "Doujinshi"
         assert result["language"] == "japanese"
         assert result["uploader"] == "uploader_name"
         assert result["pages"] == 42
@@ -624,7 +635,7 @@ def _hash_stub(test_sha: str):
     Returning the real stat keeps the commit-boundary re-check satisfied while
     the digest itself stays fixed for the assertions.
     """
-    from worker.source_identity import SourceFileIdentity
+    from services.source_identity import SourceFileIdentity
 
     def _hash(path):
         return test_sha, SourceFileIdentity._from_stat(path, path.stat())

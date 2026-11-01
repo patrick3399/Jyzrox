@@ -71,6 +71,33 @@ async def check_rate_limit(
         )
 
 
+async def failed_attempts_lockout(key: str) -> int:
+    """Seconds left on ``key``'s lockout, or 0 while it still has failed attempts to spend.
+
+    Unlike check_rate_limit(), only failures count (see record_failed_attempt), for
+    credentials a client resends on every request. Budget: the login limits.
+    """
+    if not settings.rate_limit_enabled:
+        return 0
+    redis = get_redis()
+    redis_key = f"ratelimit:{key}"
+    count = await redis.get(redis_key)
+    if count is None or int(count) < settings.rate_limit_login:
+        return 0
+    return max(await redis.ttl(redis_key), 1)
+
+
+async def record_failed_attempt(key: str) -> None:
+    """Spend one of ``key``'s failed attempts; the window starts at the first failure."""
+    if not settings.rate_limit_enabled:
+        return
+    redis = get_redis()
+    redis_key = f"ratelimit:{key}"
+    count = await redis.incr(redis_key)
+    if count == 1:
+        await redis.expire(redis_key, settings.rate_limit_window + 1)
+
+
 def get_client_ip(request: Request) -> str:
     """Extract client IP, respecting X-Forwarded-For only from trusted proxies."""
     peer_ip = request.client.host if request.client else "unknown"

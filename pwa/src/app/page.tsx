@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { ArrowRight, BookMarked, X, LayoutList, LayoutGrid } from 'lucide-react'
 import { api } from '@/lib/api'
 import { galleryHref } from '@/lib/galleryRoutes'
+import { dashboardQueueHref } from '@/lib/downloadJobFilters'
 import { t } from '@/lib/i18n'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
@@ -15,6 +16,9 @@ import { loadDashboardConfig, DASHBOARD_LINKS_CONFIG_KEY } from '@/components/Da
 import { passesFeatureFlag } from '@/lib/pageRegistry'
 import { useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 const DISMISSED_KEY = 'dashboard:dismissed_alerts'
 const COMPACT_LINKS_KEY = 'dashboard_compact_links'
@@ -97,13 +101,15 @@ function SystemAlerts({
             className={`flex items-center justify-between gap-3 border rounded-lg px-4 py-3 text-sm ${styles.wrap}`}
           >
             <span className="leading-snug">{msg}</span>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={() => dismiss(msg)}
-              className={`shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
+              className={`shrink-0 ${styles.btn}`}
               aria-label={t('common.dismissAlert')}
             >
               <X size={14} />
-            </button>
+            </Button>
           </div>
         )
       })}
@@ -136,19 +142,23 @@ function GalleryThumb({ gallery }: { gallery: Gallery }) {
   )
 }
 
-export default function Dashboard() {
+function DashboardInner() {
   const { connected } = useWsConnection()
 
   const { data: libraryData, isLoading: libraryLoading } = useSWR('dashboard/recent', () =>
     api.library.getGalleries({ limit: 12, sort: 'added_at' }),
   )
 
-  const { data: jobsData } = useSWR('dashboard/jobs', () => api.download.getJobs({ limit: 5 }), {
-    // Event-driven while connected (see wsInvalidation.tsx); poll as a fallback when WS is down.
-    refreshInterval: pollingRefreshInterval(connected, 5000),
-    dedupingInterval: 3000,
-    focusThrottleInterval: 10000,
-  })
+  const { data: jobsData } = useSWR(
+    'dashboard/jobs',
+    () => api.download.getJobs({ active_only: true, limit: 5 }),
+    {
+      // Event-driven while connected (see wsInvalidation.tsx); poll as a fallback when WS is down.
+      refreshInterval: pollingRefreshInterval(connected, 5000),
+      dedupingInterval: 3000,
+      focusThrottleInterval: 10000,
+    },
+  )
 
   const { data: alertsData, mutate: mutateAlerts } = useSWR(
     'dashboard/alerts',
@@ -174,9 +184,9 @@ export default function Dashboard() {
     [mutateAlerts],
   )
 
-  const activeJobs = (jobsData?.jobs ?? []).filter(
-    (j: DownloadJob) => j.status === 'queued' || j.status === 'running',
-  )
+  // The server already filters to queued/running/paused jobs.
+  const activeJobs = jobsData?.jobs ?? []
+  const activeJobsTotal = jobsData?.total ?? activeJobs.length
 
   // Quick links config — user-customisable via Settings > Dashboard Quick Links
   // loadDashboardConfig() is SSR-safe (returns ALL_DASHBOARD_LINKS when window is undefined)
@@ -225,11 +235,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
-        </div>
-      </div>
+      <PageHeader title={t('dashboard.title')} spacing="none" />
 
       {/* System Alerts */}
       {alerts.length > 0 && <SystemAlerts alerts={alerts} onDismiss={dismissAlert} />}
@@ -241,9 +247,10 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
             {t('dashboard.quickLinks.title')}
           </h2>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={toggleCompactLinks}
-            className="p-1.5 rounded-md text-vault-text-muted hover:text-vault-text hover:bg-vault-card-hover transition-colors"
             aria-label={
               compactLinks
                 ? t('dashboard.quickLinks.expandedView')
@@ -256,7 +263,7 @@ export default function Dashboard() {
             }
           >
             {compactLinks ? <LayoutList size={15} /> : <LayoutGrid size={15} />}
-          </button>
+          </Button>
         </div>
 
         {/* Grid — animates between compact and expanded */}
@@ -321,10 +328,10 @@ export default function Dashboard() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-              {t('dashboard.activeDownloads')} ({activeJobs.length})
+              {t('dashboard.activeDownloads')} ({activeJobsTotal})
             </h2>
             <Link
-              href="/queue"
+              href={dashboardQueueHref(activeJobs)}
               className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
             >
               {t('dashboard.viewAll')} <ArrowRight size={12} />
@@ -390,5 +397,13 @@ export default function Dashboard() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function Dashboard() {
+  return (
+    <PageContainer>
+      <DashboardInner />
+    </PageContainer>
   )
 }

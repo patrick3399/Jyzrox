@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { setFeatureAndSyncCache } from '@/lib/featureSettings'
 import { t } from '@/lib/i18n'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function FeaturesSettingsPage() {
   useLocale()
@@ -72,7 +73,7 @@ export default function FeaturesSettingsPage() {
   return (
     <div className="max-w-2xl">
       <BackButton fallback="/settings" />
-      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settingsCategory.features')}</h1>
+      <PageHeader title={t('settingsCategory.features')} />
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5">
@@ -90,13 +91,6 @@ export default function FeaturesSettingsPage() {
               description={t('settings.externalApiDesc')}
               checked={features.external_api_enabled ?? true}
               onChange={(v) => handleToggle('external_api_enabled', v)}
-              disabled={featuresLoading}
-            />
-            <ToggleRow
-              label={t('settings.novelModule')}
-              description={t('settings.novelModuleDesc')}
-              checked={features.novel_enabled ?? false}
-              onChange={(v) => handleToggle('novel_enabled', v)}
               disabled={featuresLoading}
             />
             <ToggleRow

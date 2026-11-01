@@ -135,6 +135,13 @@ describe('useCollections', () => {
     expect(lastSwrCall().key).toBe('collections')
   })
 
+  it('test_useCollections_withGalleryId_keyStartsWithCollectionsAndFetcherSendsGalleryId', () => {
+    useCollections(true, 42)
+    expect(lastSwrCall().key).toEqual(['collections', 'gallery', 42])
+    lastSwrCall().fetcher?.()
+    expect(mockList).toHaveBeenCalledWith({ gallery_id: 42 })
+  })
+
   it('test_useCollections_disabled_passesNullKeyToSwr', () => {
     useCollections(false)
     expect(lastSwrCall().key).toBeNull()

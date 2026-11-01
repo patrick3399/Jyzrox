@@ -5,3 +5,6 @@ export const CRON_PRESETS = [
   { label: '3d', value: '0 0 */3 * *' },
   { label: '1w', value: '0 0 * * 1' },
 ] as const
+
+/** Default check interval for a new subscription: weekly (the "1w" preset). */
+export const DEFAULT_SUBSCRIPTION_CRON = '0 0 * * 1'

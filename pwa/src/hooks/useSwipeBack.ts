@@ -3,16 +3,25 @@
 import { useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { smartBack } from '@/lib/navBack'
+import { resolveTabRoot } from '@/lib/navMemory'
+import { PAGE_REGISTRY } from '@/lib/pageRegistry'
 
 const EDGE_THRESHOLD = 24
 const MIN_SWIPE = 60
 const DIR_RATIO = 1.5
 
+// The same roots NavMemoryTracker records, so every deep page that a nav tab can
+// restore also knows which section list it climbs back to.
+const SECTION_ROOTS = PAGE_REGISTRY.filter((page) => page.nav && page.href !== '/').map(
+  (page) => page.href,
+)
+
 function getFallback(pathname: string): string {
-  if (pathname.startsWith('/e-hentai/')) return '/e-hentai'
-  if (pathname.startsWith('/library/')) return '/library'
   if (pathname.startsWith('/artists/')) return '/artists'
-  if (pathname.startsWith('/pixiv/illust/')) return '/pixiv'
+  // A deep page falls back to its section list. The root itself is not "deep":
+  // from there back leads out of the section, to the Dashboard.
+  const root = resolveTabRoot(SECTION_ROOTS, pathname)
+  if (root && pathname !== root) return root
   return '/'
 }
 

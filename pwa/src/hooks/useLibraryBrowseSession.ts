@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { api, type SearchGalleryItem } from '@/lib/api'
 import {
   canonicalLibraryBrowseIdentity,
@@ -10,16 +10,25 @@ import {
   LIBRARY_BROWSE_SCHEMA_VERSION,
   LIBRARY_BROWSE_SOURCE_ID,
   libraryBrowseIdentityKey,
+  libraryFirstPageChanged,
   libraryBrowseSearchQuery,
   type LibraryBrowseIdentity,
 } from '@/lib/browse/library'
 import type { BrowseSnapshotScope } from '@/lib/browse/snapshotStore'
 import { useBrowseSession } from '@/hooks/useBrowseSession'
 import { useBrowseTabScope } from '@/hooks/useBrowseTabScope'
-import { useWsJobs } from '@/lib/ws'
+import { useWsConnection, useWsJobs } from '@/lib/ws'
 
 const PAGE_SIZE = 24
 const LIBRARY_REFRESH_THROTTLE_MS = 2_000
+// A cancelled or failed run rolls back the gallery it created, so those end
+// states stale the list just like a finished run does.
+const GALLERY_CHANGING_JOB_STATUSES: ReadonlySet<string> = new Set([
+  'done',
+  'partial',
+  'cancelled',
+  'failed',
+])
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>()
@@ -131,12 +140,17 @@ export function useLibraryBrowseSession({
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const refresh = session.refresh
 
+  const seenJobUpdateRef = useRef({ update: lastJobUpdate, ready: false })
+
   useEffect(() => {
-    if (
-      !scopeReady ||
-      !lastJobUpdate ||
-      (lastJobUpdate.status !== 'done' && lastJobUpdate.status !== 'partial')
-    ) {
+    const seen = seenJobUpdateRef.current
+    seenJobUpdateRef.current = { update: lastJobUpdate, ready: scopeReady }
+    // A job event is news only to a session that was already live when it
+    // arrived. One that predates the initial load or snapshot restore is
+    // covered by that load and by the revalidation probe; replaying it in the
+    // restore commit refreshes at a depth of one and truncates the snapshot.
+    if (!seen.ready || seen.update === lastJobUpdate) return
+    if (!scopeReady || !lastJobUpdate || !GALLERY_CHANGING_JOB_STATUSES.has(lastJobUpdate.status)) {
       return
     }
     const elapsed = Date.now() - lastRefreshAtRef.current
@@ -153,9 +167,89 @@ export function useLibraryBrowseSession({
     refreshTimerRef.current = setTimeout(runRefresh, LIBRARY_REFRESH_THROTTLE_MS - elapsed)
   }, [lastJobUpdate, refresh, scopeReady])
 
+  // A job event only reaches a mounted page with a live socket. A snapshot
+  // restored after a reload, a dropped socket, or a backgrounded PWA would
+  // otherwise stay stale, so those moments probe the first page and refresh
+  // the loaded depth only when it actually changed.
+  const sessionStateRef = useRef(session.state)
+  useLayoutEffect(() => {
+    sessionStateRef.current = session.state
+  }, [session.state])
+  const probeControllerRef = useRef<AbortController | null>(null)
+  const lastProbeRef = useRef<{ identityKey: string; at: number } | null>(null)
+
+  const revalidate = useCallback(async (): Promise<void> => {
+    const before = sessionStateRef.current
+    if (
+      !scopeReady ||
+      before.identityKey !== identityKey ||
+      before.status !== 'idle' ||
+      before.terminal ||
+      before.pages.length === 0
+    ) {
+      return
+    }
+    const now = Date.now()
+    const lastProbe = lastProbeRef.current
+    if (
+      lastProbe?.identityKey === identityKey &&
+      now - lastProbe.at < LIBRARY_REFRESH_THROTTLE_MS
+    ) {
+      return
+    }
+    lastProbeRef.current = { identityKey, at: now }
+    probeControllerRef.current?.abort()
+    const controller = new AbortController()
+    probeControllerRef.current = controller
+    let probe: Awaited<ReturnType<typeof fetchPage>>
+    try {
+      probe = await fetchPage(identity, null, controller.signal)
+    } catch {
+      // Best effort: the restored buffer stays as it is.
+      return
+    }
+    if (controller.signal.aborted) return
+    const current = sessionStateRef.current
+    if (current.identityKey !== identityKey || current.status !== 'idle') return
+    if (!libraryFirstPageChanged(current, probe)) return
+    lastRefreshAtRef.current = Date.now()
+    await refresh()
+  }, [fetchPage, identity, identityKey, refresh, scopeReady])
+  const revalidateRef = useRef(revalidate)
+  useLayoutEffect(() => {
+    revalidateRef.current = revalidate
+  }, [revalidate])
+
+  const restoreInstruction = session.restoreInstruction
+  const restoredSnapshotKey =
+    restoreInstruction?.target.kind === 'view' ? restoreInstruction.key : null
+  const probedRestoreKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!restoredSnapshotKey || probedRestoreKeyRef.current === restoredSnapshotKey) return
+    probedRestoreKeyRef.current = restoredSnapshotKey
+    void revalidateRef.current()
+  }, [restoredSnapshotKey])
+
+  const { connected } = useWsConnection()
+  const hasConnectedRef = useRef(false)
+  useEffect(() => {
+    if (!connected) return
+    if (hasConnectedRef.current) void revalidateRef.current()
+    hasConnectedRef.current = true
+  }, [connected])
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void revalidateRef.current()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [])
+
   useEffect(
     () => () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      probeControllerRef.current?.abort()
     },
     [],
   )

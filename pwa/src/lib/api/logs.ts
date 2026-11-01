@@ -51,6 +51,11 @@ export const galleryDl = {
       method: 'POST',
       body: JSON.stringify(version ? { version } : {}),
     }),
+  upgradeToMaster: () =>
+    apiFetch<{ job_id: string }>('/api/admin/gallery-dl/upgrade', {
+      method: 'POST',
+      body: JSON.stringify({ source: 'master' }),
+    }),
   rollback: () =>
     apiFetch<{ job_id: string }>('/api/admin/gallery-dl/rollback', { method: 'POST' }),
 }

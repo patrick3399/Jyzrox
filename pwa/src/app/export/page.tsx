@@ -7,6 +7,9 @@ import { Download, FolderCog } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 export default function ExportPage() {
   const { data, isLoading } = useSWR('export-datasets', () => api.datasets.list())
@@ -43,11 +46,8 @@ export default function ExportPage() {
   }
 
   return (
-    <div className="max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-vault-text">{t('export.title')}</h1>
-        <p className="mt-2 text-vault-text-secondary">{t('export.datasetSubtitle')}</p>
-      </div>
+    <PageContainer variant="secondary" className="space-y-6">
+      <PageHeader spacing="none" title={t('export.title')} subtitle={t('export.datasetSubtitle')} />
 
       {isLoading ? (
         <LoadingSpinner />
@@ -55,7 +55,10 @@ export default function ExportPage() {
         <div className="rounded-xl border border-vault-border bg-vault-card p-8 text-center">
           <FolderCog className="mx-auto mb-3 text-vault-text-muted" />
           <p className="text-vault-text">{t('export.noDatasets')}</p>
-          <Link href="/datasets" className="mt-3 inline-block text-sm text-vault-accent hover:underline">
+          <Link
+            href="/datasets"
+            className="mt-3 inline-block text-sm text-vault-accent hover:underline"
+          >
             {t('export.createDataset')}
           </Link>
         </div>
@@ -118,18 +121,20 @@ export default function ExportPage() {
               />
               {t('export.includeMetadata')}
             </label>
-            <button
+            <Button
+              variant="primary"
+              size="md"
+              className="w-full"
               type="button"
               onClick={handleExport}
               disabled={!datasetId || exporting}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-vault-accent px-4 py-2.5 font-medium text-white disabled:opacity-50"
             >
               <Download size={17} />
               {exporting ? t('export.downloading') : t('export.downloadDataset')}
-            </button>
+            </Button>
           </section>
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

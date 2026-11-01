@@ -1,17 +1,21 @@
 import type { ColumnConfig } from '@/components/VirtualGrid'
 import type { GridDensityPreference } from '@/lib/uiPreferences'
+import { rootFontSize } from '@/lib/gridRowHeight'
 
-// Height reserved below the cover for a LibraryGalleryCard's info block:
-// p-2.5 (20) + 2-line line-clamp title text-sm/leading-snug (~39) + gap-1.5 (6)
-// + rating/pages row pt-1 + text-base (~20) + card border (2) ≈ 87px.
+// Height reserved below the cover for a LibraryGalleryCard's info block. The
+// padding and text are rem-based and grow with the root font size: p-2 (16px)
+// + 1-line truncated title leading-5 (20) + gap-1 (4) + rating/pages row h-4
+// (16) = 3.5rem (56px at a 16px root). Only the card border is fixed px (2px,
+// added on top).
 // This MUST NOT underestimate the real info height: `measureRows={false}` places
 // the next row at `rowHeight + gap`, so a too-small reserve makes the next row
 // overlap and cover the previous card's bottom edge — including its focus ring.
-const LIBRARY_CARD_INFO_HEIGHT = 88
+const LIBRARY_CARD_INFO_REM = 3.5
+const LIBRARY_CARD_BORDER_PX = 2
 
 const AUTO_COLUMNS: Record<GridDensityPreference, ColumnConfig> = {
   spacious: { base: 2, sm: 3, md: 4, lg: 5, xl: 6, xxl: 7 },
-  comfortable: { base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 },
+  comfortable: { base: 3, sm: 5, md: 6, lg: 8, xl: 10, xxl: 10 },
   compact: { base: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 12 },
 }
 
@@ -28,6 +32,21 @@ export function getLibraryGridColumns(
     lg: Math.min(Math.max(5, Math.ceil(max * 0.67)), max),
     xl: Math.min(Math.max(6, Math.ceil(max * 0.84)), max),
     xxl: max,
+  }
+}
+
+/** A density override wins over the Settings density and ignores fixed columns. */
+export function resolveLibraryGrid(
+  preferences: { gallery_grid_density: GridDensityPreference; gallery_grid_columns: number },
+  override: GridDensityPreference | null,
+): { density: GridDensityPreference; columns: ColumnConfig } {
+  if (override) return { density: override, columns: getLibraryGridColumns(override) }
+  return {
+    density: preferences.gallery_grid_density,
+    columns: getLibraryGridColumns(
+      preferences.gallery_grid_density,
+      preferences.gallery_grid_columns,
+    ),
   }
 }
 
@@ -53,5 +72,5 @@ export function estimateLibraryGridRowHeight({
 
   // No upper clamp: truncating tall (wide-card) rows would underestimate the
   // real card height and reintroduce the next-row overlap described above.
-  return Math.ceil(Math.max(188, coverHeight + LIBRARY_CARD_INFO_HEIGHT))
+  return Math.ceil(Math.max(188, coverHeight + LIBRARY_CARD_INFO_REM * rootFontSize() + LIBRARY_CARD_BORDER_PX))
 }

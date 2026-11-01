@@ -65,6 +65,12 @@ function readStoredTabId(storage: Storage): string | null {
   }
 }
 
+/** The browse-tab ID this tab's lists are saved under, without claiming or
+ *  creating one. Null when this tab never committed one. */
+export function peekBrowseTabId(storage: Storage): string | null {
+  return readStoredTabId(storage)
+}
+
 function persistTabId(storage: Storage, tabId: string): void {
   try {
     storage.setItem(TAB_ID_KEY, tabId)

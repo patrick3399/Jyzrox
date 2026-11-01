@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { X as XIcon } from 'lucide-react'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 
 export function CredentialBanner({ source }: { source: string }) {
   const [dismissed, setDismissed] = useState(() => {
@@ -22,7 +23,9 @@ export function CredentialBanner({ source }: { source: string }) {
           {t('credential.banner.configure')}
         </Link>
       </div>
-      <button
+      <Button
+        variant="ghost"
+        size="icon-sm"
         onClick={() => {
           setDismissed(true)
           localStorage.setItem(`credential_banner_dismissed_${source}`, 'true')
@@ -31,7 +34,7 @@ export function CredentialBanner({ source }: { source: string }) {
         aria-label={t('credential.banner.dismiss')}
       >
         <XIcon className="w-4 h-4" />
-      </button>
+      </Button>
     </div>
   )
 }

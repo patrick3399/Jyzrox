@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     tags_array      TEXT[] DEFAULT '{}',
     source_url      TEXT,
     metadata_updated_at TIMESTAMPTZ,
+    content_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (source, source_id)
 );
 
@@ -91,7 +92,7 @@ CREATE TABLE IF NOT EXISTS images (
     gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     page_num        INT NOT NULL,
     filename        TEXT,
-    blob_sha256     TEXT NOT NULL REFERENCES blobs(sha256),
+    blob_sha256     TEXT REFERENCES blobs(sha256),
     external_path   TEXT,
     caption         TEXT,
     visibility      TEXT NOT NULL DEFAULT 'active',
@@ -100,14 +101,26 @@ CREATE TABLE IF NOT EXISTS images (
     source_position INT,
     source_seen_at  TIMESTAMPTZ,
     hidden_at       TIMESTAMPTZ,
-    replaced_by_image_id BIGINT REFERENCES images(id) ON DELETE SET NULL,
+    replaced_by_image_id BIGINT,
+    CONSTRAINT fk_images_replaced_by_image_id
+        FOREIGN KEY (replaced_by_image_id) REFERENCES images(id) ON DELETE SET NULL,
     CONSTRAINT fk_images_blob_location
         FOREIGN KEY (blob_sha256, external_path)
         REFERENCES blob_locations(blob_sha256, external_path),
+    CONSTRAINT ck_images_blob_or_external_path
+        CHECK (blob_sha256 IS NOT NULL OR external_path IS NOT NULL),
     UNIQUE (gallery_id, page_num)
 );
 CREATE INDEX IF NOT EXISTS idx_images_external_path
     ON images(external_path) WHERE external_path IS NOT NULL;
+
+-- Link-sync fingerprints (mirrors migration 0026).
+ALTER TABLE images ADD COLUMN IF NOT EXISTS source_size BIGINT;
+ALTER TABLE images ADD COLUMN IF NOT EXISTS source_mtime_ns BIGINT;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_dir_mtime_ns BIGINT;
+
+-- Pending link pages (mirrors migration 0027).
+CREATE INDEX IF NOT EXISTS idx_images_pending ON images (gallery_id) WHERE blob_sha256 IS NULL;
 
 CREATE TABLE IF NOT EXISTS tags (
     id              BIGSERIAL PRIMARY KEY,
@@ -147,7 +160,7 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     source          TEXT,
     status          TEXT DEFAULT 'queued',
     progress        JSONB DEFAULT '{}',
-    options         JSONB DEFAULT '{}',
+    options         JSONB NOT NULL DEFAULT '{}',
     error           TEXT,
     created_at      TIMESTAMPTZ DEFAULT now(),
     finished_at     TIMESTAMPTZ,
@@ -165,31 +178,59 @@ CREATE TABLE IF NOT EXISTS read_progress (
     PRIMARY KEY (user_id, gallery_id)
 );
 
+-- ── Source works and stable read anchors ─────────────────────────────
+-- Mirrors migration 0008. Kept after galleries, images and read_progress so
+-- every foreign-key target already exists.
+CREATE TABLE IF NOT EXISTS gallery_source_items (
+    id              BIGSERIAL PRIMARY KEY,
+    gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    source_item_id  TEXT NOT NULL,
+    source_item_url TEXT,
+    title           TEXT,
+    published_at    TIMESTAMPTZ,
+    page_count      INTEGER NOT NULL DEFAULT 0,
+    source_position INTEGER,
+    source_seen_at  TIMESTAMPTZ,
+    status          TEXT NOT NULL DEFAULT 'active',
+    metadata_json   JSONB NOT NULL DEFAULT '{}',
+    CONSTRAINT uq_gallery_source_item UNIQUE (gallery_id, source_item_id),
+    CONSTRAINT ck_gallery_source_item_status CHECK (status IN ('active', 'source_missing'))
+);
+CREATE INDEX IF NOT EXISTS ix_gallery_source_items_gallery_order
+    ON gallery_source_items (gallery_id, source_position);
+ALTER TABLE images ADD COLUMN IF NOT EXISTS source_item_row_id BIGINT
+    REFERENCES gallery_source_items(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ix_images_source_item_row_id ON images (source_item_row_id);
+ALTER TABLE read_progress ADD COLUMN IF NOT EXISTS last_image_id BIGINT
+    REFERENCES images(id) ON DELETE SET NULL;
+
 CREATE TABLE IF NOT EXISTS workbench_operations (
     id              UUID PRIMARY KEY DEFAULT uuidv7(),
     user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL,
     kind            TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'queued'
-                    CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+    status          TEXT NOT NULL DEFAULT 'queued',
     selection_count INT NOT NULL DEFAULT 0,
     progress        JSONB NOT NULL DEFAULT '{}',
     params          JSONB NOT NULL DEFAULT '{}',
     error           TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at      TIMESTAMPTZ,
-    finished_at     TIMESTAMPTZ
+    finished_at     TIMESTAMPTZ,
+    CONSTRAINT ck_workbench_operation_status
+        CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled'))
 );
 
 CREATE TABLE IF NOT EXISTS gallery_metadata_field_states (
     gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     field_name      TEXT NOT NULL,
-    origin          TEXT NOT NULL DEFAULT 'source'
-                    CHECK (origin IN ('source', 'import', 'manual', 'merge')),
+    origin          TEXT NOT NULL DEFAULT 'source',
     locked          BOOLEAN NOT NULL DEFAULT false,
     source_value    JSONB,
     updated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (gallery_id, field_name)
+    PRIMARY KEY (gallery_id, field_name),
+    CONSTRAINT ck_gallery_metadata_field_origin
+        CHECK (origin IN ('source', 'import', 'manual', 'merge'))
 );
 
 CREATE TABLE IF NOT EXISTS gallery_metadata_changes (
@@ -198,10 +239,12 @@ CREATE TABLE IF NOT EXISTS gallery_metadata_changes (
     field_name      TEXT NOT NULL,
     old_value       JSONB,
     new_value       JSONB,
-    origin          TEXT NOT NULL CHECK (origin IN ('source', 'import', 'manual', 'merge')),
+    origin          TEXT NOT NULL,
     actor_user_id   BIGINT REFERENCES users(id) ON DELETE SET NULL,
     operation_id    UUID REFERENCES workbench_operations(id) ON DELETE SET NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_gallery_metadata_change_origin
+        CHECK (origin IN ('source', 'import', 'manual', 'merge'))
 );
 
 CREATE INDEX IF NOT EXISTS ix_workbench_operations_user_id
@@ -211,13 +254,21 @@ CREATE INDEX IF NOT EXISTS ix_gallery_metadata_changes_gallery_created
 CREATE INDEX IF NOT EXISTS ix_gallery_metadata_changes_operation_id
   ON gallery_metadata_changes (operation_id);
 
+-- One row per (source, account). At most one account per source is active
+-- (enforced below); readers that ask for "the credential of a source" get it.
 CREATE TABLE IF NOT EXISTS credentials (
-    source          TEXT PRIMARY KEY,
+    source          TEXT NOT NULL,
+    account         TEXT NOT NULL DEFAULT 'default',
+    is_active       BOOLEAN NOT NULL DEFAULT FALSE,
     credential_type TEXT NOT NULL,
     value_encrypted BYTEA,
     expires_at      TIMESTAMPTZ,
-    last_verified   TIMESTAMPTZ
+    last_verified   TIMESTAMPTZ,
+    CONSTRAINT credentials_pkey PRIMARY KEY (source, account)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_credentials_active_per_source
+  ON credentials (source) WHERE is_active;
 
 CREATE TABLE IF NOT EXISTS api_tokens (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -385,6 +436,30 @@ ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_path TEXT;
 ALTER TABLE library_paths ADD COLUMN IF NOT EXISTS pattern TEXT NOT NULL DEFAULT '{title}';
 ALTER TABLE library_paths ADD COLUMN IF NOT EXISTS import_mode TEXT NOT NULL DEFAULT 'link';
 
+-- ── Gallery category registry ──────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS gallery_categories (
+    id          SERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    color       TEXT NOT NULL DEFAULT 'gray',
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    is_builtin  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gallery_categories_name_lower ON gallery_categories (lower(name));
+INSERT INTO gallery_categories (name, color, sort_order, is_builtin) VALUES
+    ('Doujinshi', 'pink', 1, TRUE),
+    ('Manga', 'orange', 2, TRUE),
+    ('Artist CG', 'yellow', 3, TRUE),
+    ('Game CG', 'green', 4, TRUE),
+    ('Western', 'sky', 5, TRUE),
+    ('Non-H', 'blue', 6, TRUE),
+    ('Image Set', 'purple', 7, TRUE),
+    ('Cosplay', 'red', 8, TRUE),
+    ('Asian Porn', 'rose', 9, TRUE),
+    ('Misc', 'gray', 10, TRUE)
+ON CONFLICT DO NOTHING;
+
 -- Image browser columns
 ALTER TABLE images ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ;
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS thumbhash TEXT;
@@ -425,11 +500,6 @@ CREATE TABLE IF NOT EXISTS subscription_groups (
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- Seed Default group
-INSERT INTO subscription_groups (name, schedule, concurrency, priority, is_system)
-SELECT 'Default', '0 */2 * * *', 2, 3, true
-WHERE NOT EXISTS (SELECT 1 FROM subscription_groups WHERE is_system = true AND name = 'Default');
-
 -- ── Subscriptions (replaces followed_artists) ──────────────────────
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -442,7 +512,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     avatar_url      TEXT,
     enabled         BOOLEAN DEFAULT TRUE,
     auto_download   BOOLEAN DEFAULT TRUE,
-    download_options JSONB DEFAULT '{}',
+    download_options JSONB NOT NULL DEFAULT '{}',
     cron_expr       TEXT DEFAULT '0 */2 * * *',
     last_checked_at TIMESTAMPTZ,
     last_success_at TIMESTAMPTZ,
@@ -457,8 +527,8 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_next_check ON subscriptions(next_ch
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source, source_id);
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS group_id INT REFERENCES subscription_groups(id) ON DELETE SET NULL;
-ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS download_options JSONB DEFAULT '{}';
-ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS options JSONB DEFAULT '{}';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS download_options JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_subscriptions_group ON subscriptions(group_id);
 
 -- Artist grouping
@@ -605,11 +675,13 @@ CREATE TABLE IF NOT EXISTS blob_relationships (
     context_revision_b BIGINT,
     decision        TEXT,
     decision_keep_sha TEXT,
-    decision_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    decision_by_user_id BIGINT,
     decided_at      TIMESTAMPTZ,
     tier            SMALLINT NOT NULL DEFAULT 1,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT fk_blob_relationship_decision_user
+        FOREIGN KEY (decision_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT uq_blob_pair UNIQUE (sha_a, sha_b),
     CONSTRAINT chk_canonical_order CHECK (sha_a < sha_b)
 );
@@ -679,6 +751,10 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_enqueued INT DEFAULT 0;
 -- ── Progressive Import: link download_jobs to gallery ────────────
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE SET NULL;
 
+-- ── Download modes + stop-and-keep ───────────────────────────────
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'download';
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS stop_requested_at TIMESTAMPTZ;
+
 -- ── Source URL ──────────────────────────────────────────────────────
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_url TEXT;
 
@@ -722,11 +798,13 @@ CREATE TABLE IF NOT EXISTS site_configs (
 -- gallery-dl only reads/writes the 'entry' column.
 -- Jyzrox adds gallery_id FK for CASCADE lifecycle management.
 -- Tables are named by gallery-dl category (archive-table: "{category}").
+-- job_id is filled by its default: each download connects with its job id as
+-- the session setting jyzrox.archive_job_id, so a row records which job wrote it.
 
 CREATE TABLE IF NOT EXISTS exhentai (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_exhentai_unlinked ON exhentai (job_id) WHERE gallery_id IS NULL;
@@ -734,7 +812,7 @@ CREATE INDEX IF NOT EXISTS idx_exhentai_unlinked ON exhentai (job_id) WHERE gall
 CREATE TABLE IF NOT EXISTS pixiv (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_pixiv_unlinked ON pixiv (job_id) WHERE gallery_id IS NULL;
@@ -742,7 +820,7 @@ CREATE INDEX IF NOT EXISTS idx_pixiv_unlinked ON pixiv (job_id) WHERE gallery_id
 CREATE TABLE IF NOT EXISTS twitter (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_twitter_unlinked ON twitter (job_id) WHERE gallery_id IS NULL;
@@ -750,64 +828,82 @@ CREATE INDEX IF NOT EXISTS idx_twitter_unlinked ON twitter (job_id) WHERE galler
 CREATE TABLE IF NOT EXISTS instagram (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS danbooru (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS gelbooru (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS newgrounds (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS nijie (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS kemono (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS nhentai (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS hitomi (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS rule34 (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS weibo (
     entry       TEXT PRIMARY KEY,
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
-    job_id      UUID,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_weibo_unlinked ON weibo (job_id) WHERE gallery_id IS NULL;
+
+-- Bundled custom extractor (backend/plugins/builtin/gallery_dl/extractors/xiuren7_gallery.py)
+CREATE TABLE IF NOT EXISTS xiuren7 (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID DEFAULT NULLIF(current_setting('jyzrox.archive_job_id', true), '')::uuid,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_xiuren7_unlinked ON xiuren7 (job_id) WHERE gallery_id IS NULL;
 
 -- ── Performance indexes (benchmark-driven) ─────────────────────────────
 
@@ -826,6 +922,37 @@ CREATE INDEX IF NOT EXISTS idx_galleries_public_added_at_id
 
 CREATE INDEX IF NOT EXISTS idx_galleries_owner_added_at_id
   ON galleries (created_by_user_id, added_at DESC, id DESC)
+  WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL;
+
+-- ── Gallery content_updated_at: last time active pages grew ─────────
+-- Bumped by trigger so every code path that raises galleries.pages is covered.
+-- Decreases and unchanged values never move it (cancel restores it explicitly).
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS content_updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+CREATE OR REPLACE FUNCTION bump_gallery_content_updated_at()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.pages IS NOT NULL AND NEW.pages > COALESCE(OLD.pages, 0) THEN
+        NEW.content_updated_at := now();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_galleries_content_updated_at ON galleries;
+CREATE TRIGGER trg_galleries_content_updated_at
+BEFORE UPDATE OF pages ON galleries
+FOR EACH ROW EXECUTE FUNCTION bump_gallery_content_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_galleries_live_content_updated_at_id
+  ON galleries (content_updated_at DESC, id DESC)
+  WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_galleries_public_content_updated_at_id
+  ON galleries (content_updated_at DESC, id DESC)
+  WHERE deleted_at IS NULL AND visibility = 'public';
+
+CREATE INDEX IF NOT EXISTS idx_galleries_owner_content_updated_at_id
+  ON galleries (created_by_user_id, content_updated_at DESC, id DESC)
   WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL;
 
 -- ── read_progress indexes (#144) ─────────────────────────────────────
@@ -888,6 +1015,38 @@ CREATE TABLE IF NOT EXISTS novel_mentions (
 );
 CREATE INDEX IF NOT EXISTS idx_novel_notes_type ON novel_notes (note_type);
 CREATE INDEX IF NOT EXISTS idx_novel_mentions_note ON novel_mentions (note_path);
+
+-- ── Egress personas (ADR 0022) ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS egress_personas (
+    id              BIGSERIAL PRIMARY KEY,
+    name            TEXT NOT NULL UNIQUE,
+    proxy_url       TEXT,
+    user_agent      TEXT,
+    browser_profile TEXT CHECK (browser_profile IN ('chrome', 'firefox')),
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    last_exit_ip    TEXT,
+    last_tested_at  TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_egress_personas_one_identity CHECK (browser_profile IS NULL OR user_agent IS NULL)
+);
+CREATE TABLE IF NOT EXISTS persona_accounts (
+    persona_id BIGINT NOT NULL REFERENCES egress_personas(id) ON DELETE CASCADE,
+    source     TEXT NOT NULL,
+    account    TEXT NOT NULL,
+    PRIMARY KEY (persona_id, source),
+    CONSTRAINT uq_persona_accounts_account UNIQUE (source, account),
+    CONSTRAINT fk_persona_accounts_credential FOREIGN KEY (source, account)
+        REFERENCES credentials(source, account) ON DELETE CASCADE
+);
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS persona_id BIGINT;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS persona_name TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_download_jobs_persona') THEN
+        ALTER TABLE download_jobs ADD CONSTRAINT fk_download_jobs_persona
+            FOREIGN KEY (persona_id) REFERENCES egress_personas(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- ── PostgreSQL 18 features ─────────────────────────────────────────────
 

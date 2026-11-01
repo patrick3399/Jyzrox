@@ -5,7 +5,7 @@ import random
 from datetime import UTC, datetime
 
 from croniter import croniter as _croniter_cls
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 
 import core.queue
 from core.database import AsyncSessionLocal
@@ -35,6 +35,15 @@ def _cron_is_due(schedule: str, last_run: datetime | None) -> bool:
     it = _croniter_cls(schedule, base)
     next_run = it.get_next(datetime)
     return datetime.now(UTC) >= next_run
+
+
+def _released_status():
+    """Status a finished or failed run leaves behind: idle, unless paused meanwhile.
+
+    POST /pause can land while a run is in flight; a plain status="idle" here
+    would silently undo it and the group would fire on its next due time.
+    """
+    return case((SubscriptionGroup.status == "paused", "paused"), else_="idle")
 
 
 async def subscription_scheduler(ctx: dict) -> dict:
@@ -101,7 +110,7 @@ async def subscription_scheduler(ctx: dict) -> dict:
                 logger.error("[scheduler] Failed to enqueue group %d: %s", group.id, exc)
                 # Reset status on failure
                 await session.execute(
-                    update(SubscriptionGroup).where(SubscriptionGroup.id == group.id).values(status="idle")
+                    update(SubscriptionGroup).where(SubscriptionGroup.id == group.id).values(status=_released_status())
                 )
                 await session.commit()
 
@@ -155,7 +164,7 @@ async def check_subscription_group(ctx: dict, group_id: int, start_jitter: bool 
             await session.execute(
                 update(SubscriptionGroup)
                 .where(SubscriptionGroup.id == group_id)
-                .values(status="idle", last_completed_at=datetime.now(UTC))
+                .values(status=_released_status(), last_completed_at=datetime.now(UTC))
             )
             await session.commit()
         return {"status": "ok", "checked": 0, "enqueued": 0}
@@ -216,7 +225,7 @@ async def check_subscription_group(ctx: dict, group_id: int, start_jitter: bool 
         # On unexpected error, ensure group is reset to idle
         async with AsyncSessionLocal() as session:
             await session.execute(
-                update(SubscriptionGroup).where(SubscriptionGroup.id == group_id).values(status="idle")
+                update(SubscriptionGroup).where(SubscriptionGroup.id == group_id).values(status=_released_status())
             )
             await session.commit()
         raise
@@ -226,7 +235,7 @@ async def check_subscription_group(ctx: dict, group_id: int, start_jitter: bool 
         await session.execute(
             update(SubscriptionGroup)
             .where(SubscriptionGroup.id == group_id)
-            .values(status="idle", last_completed_at=datetime.now(UTC))
+            .values(status=_released_status(), last_completed_at=datetime.now(UTC))
         )
         await session.commit()
 

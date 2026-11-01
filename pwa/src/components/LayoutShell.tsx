@@ -13,12 +13,10 @@ import { WsProvider } from '@/lib/ws'
 import { WsInvalidationBridge } from '@/lib/wsInvalidation'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { isReaderPath } from '@/lib/readerRoutes'
+import { isAuthPath, isPublicPath } from '@/lib/publicPaths'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { useLocale } from '@/components/LocaleProvider'
 import { UiPreferencesSync } from '@/components/UiPreferencesSync'
-
-const AUTH_PATHS = ['/login', '/setup']
-const PUBLIC_PATH_PREFIXES = ['/share/']
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   // Subscribe at the shell boundary so legacy direct t() call sites refresh.
@@ -26,8 +24,8 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   // loading, so dictionaryVersion must also invalidate the shell.
   const { locale, dictionaryVersion } = useLocale()
   const pathname = usePathname()
-  const isAuth = AUTH_PATHS.includes(pathname)
-  const isPublic = PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  const isAuth = isAuthPath(pathname)
+  const isPublic = isPublicPath(pathname)
   const isReader = isReaderPath(pathname)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const handleDrawerClose = useCallback(() => setDrawerOpen(false), [])

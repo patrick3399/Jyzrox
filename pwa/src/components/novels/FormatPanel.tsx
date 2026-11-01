@@ -7,6 +7,7 @@ import { CheckCircle2, Wand2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { Button } from '@/components/ui/button'
 
 /** Wording for a rule id, falling back to the id itself for a rule the UI does
  * not know yet (a new backend rule must never render as a blank line). */
@@ -54,15 +55,16 @@ export function FormatPanel({ path, canEdit = false }: { path: string; canEdit?:
           {t('novels.formatIssueCount', { count: issues.length })}
         </p>
         {canEdit && issues.length > 0 && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0 text-xs"
             disabled={fixing}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text disabled:opacity-50"
             onClick={handleFix}
           >
             <Wand2 className="size-3" />
             {t('novels.formatFix')}
-          </button>
+          </Button>
         )}
       </div>
 

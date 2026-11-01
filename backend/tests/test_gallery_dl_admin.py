@@ -183,3 +183,33 @@ async def test_get_gallery_dl_version_no_drift_when_venv_ahead_or_equal(client):
         ):
             data = (await client.get("/api/admin/gallery-dl/version")).json()
         assert data["image_newer"] is False
+
+
+async def test_upgrade_gallery_dl_master_source_enqueues_master_without_version(client):
+    """source=master must enqueue the dev-build job and drop any version pin."""
+    mock_job = MagicMock()
+    mock_job.key = "job-master-001"
+    mock_enqueue = AsyncMock(return_value=mock_job)
+
+    with patch("core.queue.enqueue", mock_enqueue):
+        resp = await client.post(
+            "/api/admin/gallery-dl/upgrade",
+            json={"source": "master", "version": "1.2.3"},
+        )
+
+    assert resp.status_code == 200
+    mock_enqueue.assert_called_once_with("gdl_upgrade_job", source="master")
+
+
+async def test_upgrade_gallery_dl_rejects_arbitrary_source(client):
+    """A source outside the pypi/master allowlist must be rejected, not enqueued."""
+    mock_enqueue = AsyncMock()
+
+    with patch("core.queue.enqueue", mock_enqueue):
+        resp = await client.post(
+            "/api/admin/gallery-dl/upgrade",
+            json={"source": "git+https://evil.example/x.git"},
+        )
+
+    assert resp.status_code == 422
+    mock_enqueue.assert_not_called()

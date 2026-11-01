@@ -139,10 +139,15 @@ async def enqueue_download_job(job, job_key: str) -> None:
     )
     if options.get("pixiv_collection") is True:
         from plugins.builtin.pixiv.source import PixivSourcePlugin
+        from services.download_mode import REPAIR, effective_mode
 
         match = PixivSourcePlugin.user_match(job.url)
         if not match or job.user_id is None:
             raise ValueError(f"Invalid persisted Pixiv collection job: {job.id}")
+        job_mode = getattr(job, "mode", None)
+        # A repair must traverse the whole catalogue: an incremental run stops at
+        # the subscription's last item and would repair nothing.
+        repair = effective_mode(job_mode if isinstance(job_mode, str) else None, options) == REPAIR
         await core.queue.enqueue(
             "pixiv_collection_job",
             _job_id=job_key,
@@ -151,7 +156,7 @@ async def enqueue_download_job(job, job_key: str) -> None:
             user_id=int(match.group(1)),
             owner_user_id=job.user_id,
             db_job_id=str(job.id),
-            full_reconcile=bool(options.get("full_reconcile")),
+            full_reconcile=bool(options.get("full_reconcile")) or repair,
             subscription_id=job.subscription_id,
         )
         return
@@ -168,6 +173,27 @@ async def enqueue_download_job(job, job_key: str) -> None:
         options=options,
         db_job_id=str(job.id),
         total=job.progress.get("total") if job.progress else None,
+    )
+
+
+async def enqueue_finalize_stopped_job(job_id, *, delay_s: int = 5) -> None:
+    """Hand a stop-requested job that has no live execution to ``finalize_stopped_job``.
+
+    Used by startup recovery, the stale reaper and the keep path's own fallback.
+    Each delivery gets a unique key, so a repeated hand-off is never dropped as a
+    duplicate; the task itself ignores a job that is gone, terminal, still
+    owned, or without a stop intent. The short delay lets the caller commit the
+    state the task reads (BE-T19: enqueue before commit).
+    """
+    import core.queue
+    from core.config import settings
+
+    await core.queue.enqueue(
+        "finalize_stopped_job",
+        _job_id=f"stop:{job_id}:{uuid.uuid4()}",
+        _timeout=settings.download_job_timeout,
+        _scheduled=int(time.time()) + delay_s,
+        db_job_id=str(job_id),
     )
 
 

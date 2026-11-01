@@ -19,8 +19,16 @@ from pathlib import Path
 from core.config import settings
 from core.version import __version__
 from plugins.base import SourcePlugin
+from plugins.builtin.gallery_dl._archive import (
+    ArchiveTableConflict,
+    archive_dsn_for_job,
+    ensure_archive_table,
+    ensure_repair_archive_table,
+    repair_archive_tables,
+)
 from plugins.builtin.gallery_dl._extractors import extractor_source_dirs
 from plugins.builtin.gallery_dl._metadata import _resolve_source_id
+from plugins.builtin.gallery_dl._subprocess_env import gdl_subprocess_env
 from plugins.models import (
     CredentialFlow,
     CredentialStatus,
@@ -30,6 +38,9 @@ from plugins.models import (
     PluginMeta,
     SiteInfo,
 )
+from services.download_mode import REPAIR, SUBSCRIPTION_INCREMENTAL, effective_mode
+from services.download_policy import MediaPolicy, media_policy_from_options
+from services.media_formats import VIDEO_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +50,7 @@ _PRINT_PREPARE_PREFIX = "JYZROX_PREPARE\t"
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
 _PROGRESS_PULSE_S = 5.0
+_READER_DRAIN_TIMEOUT_S = 10
 _MAX_STDERR_LINES = 10000
 _RECENT_LOG_SIZE = 5
 _SLEEP_VISIBLE_THRESHOLD = 2.0
@@ -80,12 +92,23 @@ _METADATA_INCLUDE = (
     "num",
     "rating",
     "language",
+    "author",
+    "username",
+    "user_id",
+    "content",
 )
+
+
+def _metadata_include() -> list[str]:
+    """_METADATA_INCLUDE plus the fields drop-in extractors declared (JYZROX_SITE)."""
+    from plugins.builtin.gallery_dl._sites import extra_metadata_fields
+
+    return list(dict.fromkeys([*_METADATA_INCLUDE, *extra_metadata_fields()]))
 
 
 def _build_supported_sites() -> list[SiteInfo]:
     """Generate SiteInfo list from unified site registry."""
-    from plugins.builtin.gallery_dl._sites import GDL_SITES
+    from plugins.builtin.gallery_dl._sites import all_sites
 
     return [
         SiteInfo(
@@ -95,16 +118,73 @@ def _build_supported_sites() -> list[SiteInfo]:
             category=s.category,
             has_tags=s.has_tags,
         )
-        for s in GDL_SITES
+        for s in all_sites()
     ]
 
 
 def _source_to_extractor(source: str) -> str:
     """Map our source name to gallery-dl extractor name."""
-    from plugins.builtin.gallery_dl._sites import get_site_config
+    from plugins.builtin.gallery_dl._sites import gdl_extractor_name
 
-    cfg = get_site_config(source)
-    return cfg.extractor or cfg.source_id
+    return gdl_extractor_name(source)
+
+
+async def _ensure_job_archive_table(url: str) -> str | None:
+    """Create or upgrade the archive table this download writes to.
+
+    gallery-dl would otherwise create a bare ``(entry)`` table for a category
+    db/init.sql does not list, and its rows would stay unlinked until the next
+    worker start upgraded the table. Returns an error when the category names a
+    table that is not an archive; any other failure only logs, leaving the
+    download as it was before this step existed.
+    """
+    from plugins.builtin.gallery_dl._identity import resolve_url_identity
+
+    identity = resolve_url_identity(url)
+    if identity is None:
+        return None
+    try:
+        from core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            action = await ensure_archive_table(session, identity.category)
+            await session.commit()
+    except ArchiveTableConflict as exc:
+        return str(exc)
+    except Exception as exc:
+        logger.warning("[gallery_dl] could not prepare archive table for %r: %s", identity.category, exc)
+        return None
+    if action != "ok":
+        logger.info("[gallery_dl] archive table for %r %s", identity.category, action)
+    return None
+
+
+async def _prepare_repair_archive(url: str, job_id: str | None) -> str | None:
+    """Create the per-job shadow archive a repair run reads and writes; returns its name.
+
+    A repair fetches files the real archive already lists, so gallery-dl is
+    pointed at an empty copy of that table instead. Its rows are merged into
+    the real table when the run is kept (``ProgressiveImporter``).
+
+    ``None`` means no shadow: the URL names no category, the job id is not a
+    UUID, or the database refused. The run then has no archive at all, which is
+    what a forced re-scan did before shadows existed; the importer's merge and
+    drop find nothing to act on.
+    """
+    pair = repair_archive_tables(url, job_id)
+    if pair is None:
+        return None
+    real, shadow = pair
+    try:
+        from core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            await ensure_repair_archive_table(session, real, shadow)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("[gallery_dl] could not prepare repair archive %r for %s: %s", shadow, url, exc)
+        return None
+    return shadow
 
 
 FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
@@ -136,34 +216,50 @@ async def _build_gallery_dl_config(
     last_completed_at: datetime | None = None,
     force_full_scan: bool = False,
     target_source_id: str | None = None,
+    media: MediaPolicy | None = None,
+    persona: dict | None = None,
+    mode: str | None = None,
+    archive_table: str | None = None,
 ) -> Path:
     """Write gallery-dl config with v3.0 features: PG archive, native rate-limiting, postprocessors.
 
     Args:
         credentials: Dict mapping source name -> credential value string.
         config_id: Per-job config isolation key.
-        job_context: "manual" or "subscription" — controls archive-mode and skip behavior.
-        last_completed_at: For subscription context, enables date-after optimization.
-        force_full_scan: Subscription force re-scan mode. Disables both
-            date-after and gallery-dl's archive so remote items are fetched
-            again and the importer can repair missing DB/library rows.
-            Mutually exclusive with ``last_completed_at`` — caller
-            (worker.subscription) drops last_completed_at when this is True.
+        job_context: Legacy: with ``last_completed_at`` and ``force_full_scan`` it
+            only decides the mode when ``mode`` is not given.
+        last_completed_at: Boundary of a ``subscription_incremental`` run; sets
+            ``date-after`` and ``skip: abort:10``.
+        force_full_scan: Legacy alias for ``mode="repair"``.
         target_source_id: The site this job actually downloads from. Global
             downloader options (rate) are only applied from this site's
             params — other sites' settings must not leak into the job.
+        mode: The job's download mode (``services/download_mode.py``). Decides the
+            scan range and the archive: ``subscription_incremental`` stops at the
+            boundary, ``repair`` reads and writes ``archive_table`` (a per-job
+            shadow) with no boundary, everything else uses the real archive
+            with no boundary.
+        archive_table: The shadow archive table of a repair run. A repair without
+            one runs with no archive at all (the pre-shadow forced re-scan).
+        media: Per-job media policy (newest-N files, videos on/off); ``None``
+            leaves the config exactly as it was before the option existed.
+        persona: ADR 0022 network identity of a persona job — proxy and browser/UA
+            for the whole job, overriding every per-site value; ``None`` leaves
+            the config unchanged.
 
     Returns:
         Path to the config file written.
     """
-    from plugins.builtin.gallery_dl._sites import GDL_SITES, cookie_writeback_path, get_site_config
+    from plugins.builtin.gallery_dl._sites import all_sites, cookie_writeback_path, gdl_extractor_name, get_site_config
 
     config: dict = {
         "extractor": {
             "base-directory": settings.data_gallery_path,
             "directory": [],
-            # N1: PostgreSQL archive — tables pre-created in init.sql
-            "archive": settings.gdl_archive_dsn,
+            # N1: PostgreSQL archive — the table is prepared per job by
+            # _ensure_job_archive_table() (init.sql lists the built-in ones). The job id
+            # rides on the connection so each row is stamped with its writer.
+            "archive": archive_dsn_for_job(settings.gdl_archive_dsn, config_id),
             "archive-table": "{category}",
             # N3: native rate limiting (offloaded from adaptive engine).
             # exp:BASE:START:MAX=VALUE -> sleep(n) = min(START + VALUE*BASE^(n-1), MAX)
@@ -175,19 +271,22 @@ async def _build_gallery_dl_config(
             "filesize-min": "1k",
             # N10b: file-unique prevents duplicate URLs within a single run
             "file-unique": True,
+            # Must live under "extractor": the --Print flags we pass make
+            # gallery-dl replace the root-level "postprocessors" list wholesale,
+            # so root-level entries never ran (no sha256, no mtime, no JSON).
+            "postprocessors": [
+                # N5: hash PP — sha256 streamed via --Print ("hashes" is the option HashPP reads)
+                {"name": "hash", "hashes": "sha256"},
+                # N5: mtime PP — preserves original upload timestamp
+                {"name": "mtime"},
+                # N10d: metadata PP with include filter (replaces --write-metadata --write-tags)
+                {"name": "metadata", "mode": "json", "include": _metadata_include()},
+            ],
         },
         "downloader": {
             # N4: adjust-extensions ensures correct file extensions
             "adjust-extensions": True,
         },
-        "postprocessors": [
-            # N5: hash PP — sha256 streamed via --Print
-            {"name": "hash", "algorithm": "sha256"},
-            # N5: mtime PP — preserves original upload timestamp
-            {"name": "mtime"},
-            # N10d: metadata PP with include filter (replaces --write-metadata --write-tags)
-            {"name": "metadata", "mode": "json", "include": list(_METADATA_INCLUDE)},
-        ],
     }
 
     # Custom extractors bundled under plugins/builtin/gallery_dl/extractors.
@@ -210,36 +309,59 @@ async def _build_gallery_dl_config(
             "sleep-retries": "exp:2:0:300=10",
         }
 
-    # N2: subscription optimization
-    if job_context == "subscription":
-        if force_full_scan:
-            # Force re-scan is a repair path for archive/import mismatches:
-            # gallery-dl must fetch every currently visible remote item even if
-            # it was already archived. The ProgressiveImporter keeps existing
-            # local images and reorders the combined set, so remote-deleted
-            # local-only images remain in the gallery sequence.
+    # The mode decides the scan range and which archive table gallery-dl reads.
+    # No archive-mode "memory": it only flushes on an error-free exit, so a
+    # single failed file or a killed process dropped every entry of the run.
+    mode = effective_mode(
+        mode,
+        {"job_context": job_context, "last_completed_at": last_completed_at, "force_full_scan": force_full_scan},
+    )
+    if mode == REPAIR:
+        # A repair must fetch every currently visible remote item even if it is
+        # already archived, so that the importer can restore missing DB/library
+        # rows. It reads an empty per-job shadow table, which still records what
+        # it fetches and is merged into the real archive when the run is kept.
+        # The ProgressiveImporter keeps existing local images and reorders the
+        # combined set, so remote-deleted local-only images remain in the gallery.
+        if archive_table:
+            config["extractor"]["archive-table"] = archive_table
+        else:
             config["extractor"].pop("archive", None)
             config["extractor"].pop("archive-table", None)
-        else:
-            # N10a: archive-mode memory for batch writes (subscription)
-            config["extractor"]["archive-mode"] = "memory"
+    elif mode == SUBSCRIPTION_INCREMENTAL and last_completed_at:
+        # Incremental mode: a full download was confirmed before.
+        # abort:10 is safe here — 10 consecutive archive hits means we've caught up.
+        # An initial run (no boundary) must not abort early: it has to fetch everything.
+        config["extractor"]["skip"] = "abort:10"
+        from datetime import timedelta
 
-        if not force_full_scan and last_completed_at:
-            # Incremental mode: a full download was confirmed before.
-            # abort:10 is safe here — 10 consecutive archive hits means we've caught up.
-            # For initial downloads (no last_completed_at), abort:10 would prematurely stop
-            # before all images are fetched, so we skip it.
-            config["extractor"]["skip"] = "abort:10"
-            from datetime import timedelta
+        cutoff = last_completed_at - timedelta(days=1)
+        config["extractor"]["date-after"] = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+        # date-after raises StopExtraction at the first post older than the
+        # cutoff. Instagram lists pinned posts (usually old) ahead of the feed,
+        # so with them included the run stops before reaching anything new.
+        # The initial full run already fetched them.
+        config["extractor"].setdefault("instagram", {})["pinned"] = False
 
-            cutoff = last_completed_at - timedelta(days=1)
-            config["extractor"]["date-after"] = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+    # Per-job media policy (options.media). The config file is per job, so
+    # root-level extractor keys cannot leak into other jobs.
+    if media is not None:
+        if media.max_files is not None:
+            # Counts files that pass the filter, archived ones included, and
+            # stops paginating once the range is exhausted.
+            config["extractor"]["file-range"] = f"1-{media.max_files}"
+        if not media.include_videos:
+            # 'videos' is read by twitter/instagram/facebook and skips video
+            # posts before any request; the extension filter covers the rest.
+            config["extractor"]["videos"] = False
+            exts = ", ".join(repr(e.lstrip(".")) for e in sorted(VIDEO_EXTENSIONS))
+            config["extractor"]["file-filter"] = f"extension not in ({exts})"
 
     # Inject per-site sleep-request via SiteConfigService
     from core.site_config import site_config_service
 
     all_params = await site_config_service.get_all_download_params()
-    for site_cfg in GDL_SITES:
+    for site_cfg in all_sites():
         params = all_params.get(site_cfg.source_id)
         if not params:
             continue
@@ -249,6 +371,12 @@ async def _build_gallery_dl_config(
         if params.sleep_request is not None:
             entry["sleep-request"] = (
                 list(params.sleep_request) if isinstance(params.sleep_request, tuple) else params.sleep_request
+            )
+
+        # sleep-request only paces API/page requests; file downloads obey "sleep".
+        if params.sleep_download is not None:
+            entry["sleep"] = (
+                list(params.sleep_download) if isinstance(params.sleep_download, tuple) else params.sleep_download
             )
 
         # N7: per-site browser profile for anti-bot defense
@@ -269,7 +397,7 @@ async def _build_gallery_dl_config(
         if not cred_val:
             continue
         cfg = get_site_config(src)
-        ext = cfg.extractor or cfg.source_id
+        ext = gdl_extractor_name(src)
 
         cookies_applied = False
         fragment = _try_parse_fragment(cred_val)
@@ -302,9 +430,27 @@ async def _build_gallery_dl_config(
             for name in (ext, *cfg.extra_extractors):
                 config["extractor"].setdefault(name, {})["cookies-update"] = cookie_export
 
+    # ADR 0022: a persona job is one identity end to end. Child extractors and
+    # file downloads must not fall back to the host's own route or a per-site
+    # proxy/browser, so the persona is set at the root and per-site values go.
+    # After the credentials loop: credential fragments are merged with
+    # .update(fragment) and may carry their own proxy/user-agent.
+    if persona is not None:
+        for entry in config["extractor"].values():
+            if isinstance(entry, dict):
+                for key in ("proxy", "browser", "user-agent"):
+                    entry.pop(key, None)
+        if persona.get("proxy_url"):
+            config["extractor"]["proxy"] = persona["proxy_url"]
+            config["downloader"]["proxy"] = persona["proxy_url"]
+        if persona.get("browser_profile"):
+            config["extractor"]["browser"] = persona["browser_profile"]
+        elif persona.get("user_agent"):
+            config["extractor"]["user-agent"] = persona["user_agent"]
+
     # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
     if "pixiv" in credentials and credentials["pixiv"]:
-        config["postprocessors"].append(
+        config["extractor"]["postprocessors"].append(
             {
                 "name": "ugoira",
                 "ffmpeg-output": True,
@@ -332,6 +478,9 @@ class _DownloadState:
     last_activity: float = 0.0
     total_paused: float = 0.0
     cancelled: bool = False
+    # True while the pause watcher holds the process in SIGSTOP; a stopped
+    # process is silent by design, so the inactivity watchdog must not count it.
+    paused: bool = False
     last_progress_update: float = 0.0
     stderr_lines: list[str] = field(default_factory=list)
     html_response_count: int = 0
@@ -345,6 +494,8 @@ class _DownloadState:
     gdl_state_seconds: float | None = None
     gdl_state_started_at: float = 0.0
     recent_log: list[str] = field(default_factory=list)
+    # HTTP 403/429 seen on stderr; read by the persona cooldown (ADR 0022).
+    throttle_signals: set[str] = field(default_factory=set)
 
     def push_log(self, line: str) -> None:
         self.recent_log.append(line)
@@ -371,6 +522,7 @@ def _sync_diagnostic(state: _DownloadState, diagnostic_ctx: dict | None) -> None
         diagnostic_ctx["gdl_state_seconds"] = state.gdl_state_seconds
     else:
         diagnostic_ctx.pop("gdl_state_seconds", None)
+    diagnostic_ctx["throttle_signals"] = sorted(state.throttle_signals)
     diagnostic_ctx["recent_log"] = list(state.recent_log)
 
 
@@ -485,7 +637,10 @@ async def _read_stderr(
                 state.stderr_lines.append(line)
             state.push_log(line)
 
-            if state.source_id and _RE_403.search(line):
+            is_403 = _RE_403.search(line) is not None
+            if is_403:
+                state.throttle_signals.add("http_403")
+            if state.source_id and is_403:
                 try:
                     await adaptive_engine.record_signal(state.source_id, AdaptiveSignal.HTTP_403)
                 except Exception:
@@ -501,6 +656,7 @@ async def _read_stderr(
                 except ValueError, IndexError:
                     code = 0
                 if code == 429:
+                    state.throttle_signals.add("http_429")
                     state.gdl_state = GDL_STATE_RATE_LIMITED
                     if m_sleep:
                         state.gdl_state_seconds = float(m_sleep.group(1))
@@ -605,16 +761,50 @@ async def _heartbeat_loop(
             logger.warning("[gallery_dl] heartbeat callback error: %s", exc)
 
 
+def _partial_bytes(watch_dir: Path) -> int:
+    """Total size of the files gallery-dl is still writing (``*.part``)."""
+    total = 0
+    try:
+        with os.scandir(watch_dir) as entries:
+            for entry in entries:
+                if entry.name.endswith(".part"):
+                    try:
+                        total += entry.stat().st_size
+                    except OSError:
+                        continue
+    except OSError:
+        return 0
+    return total
+
+
 async def _inactivity_watchdog(
     state: _DownloadState,
-    timeout: int,
+    timeout: float,
     proc: asyncio.subprocess.Process,
+    watch_dir: Path | None = None,
+    poll_s: float = 10,
 ) -> str:
-    """Kill the process if no stdout/stderr activity for `timeout` seconds."""
+    """Kill the process after `timeout` seconds without output or download progress.
+
+    gallery-dl prints nothing while one file is in flight, so a large file on a
+    slow CDN looked idle and was killed mid-download. A growing ``*.part`` file
+    in `watch_dir` counts as activity.
+    """
+    last_partial = 0
     while True:
-        await asyncio.sleep(10)
+        await asyncio.sleep(poll_s)
         if state.cancelled:
             return "cancelled"
+        if state.paused:
+            # Restart the idle window so it is measured from resume, not pause start.
+            state.last_activity = asyncio.get_running_loop().time()
+            continue
+        if watch_dir is not None:
+            partial = await asyncio.to_thread(_partial_bytes, watch_dir)
+            if partial != last_partial:
+                last_partial = partial
+                if partial:
+                    state.last_activity = asyncio.get_running_loop().time()
         elapsed = asyncio.get_running_loop().time() - state.last_activity
         if elapsed >= timeout:
             logger.error("[gallery_dl] inactivity timeout (%ds) — killing process", timeout)
@@ -649,6 +839,7 @@ async def _pause_cancel_watcher(
             state.gdl_state = GDL_STATE_PAUSED
             _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] pausing process")
+            state.paused = True
             try:
                 proc.send_signal(signal.SIGSTOP)
             except ProcessLookupError, OSError:
@@ -659,6 +850,7 @@ async def _pause_cancel_watcher(
                     state.cancelled = True
                     state.gdl_state = GDL_STATE_CANCELLED
                     _sync_diagnostic(state, diagnostic_ctx)
+                    state.paused = False
                     try:
                         proc.send_signal(signal.SIGCONT)
                     except ProcessLookupError, OSError:
@@ -674,6 +866,7 @@ async def _pause_cancel_watcher(
             state.gdl_state = prev_state if prev_state != GDL_STATE_PAUSED else GDL_STATE_DOWNLOADING
             _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] resumed after %.1fs", paused_duration)
+            state.paused = False
             try:
                 proc.send_signal(signal.SIGCONT)
             except ProcessLookupError, OSError:
@@ -762,6 +955,8 @@ def _read_url_file(path: Path) -> list[str]:
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""
 
+    supports_media_policy = True
+
     meta = PluginMeta(
         name="gallery-dl (Fallback)",
         source_id="gallery_dl",
@@ -774,6 +969,11 @@ class GalleryDlPlugin(SourcePlugin):
         semaphore_key="gallery_dl",
         needs_all_credentials=True,
     )
+
+    def __init__(self) -> None:
+        # The class attribute was built when this module was imported, which is
+        # before init_plugins() registers the sites drop-in extractors declare.
+        self.meta = self.meta.model_copy(update={"supported_sites": _build_supported_sites()})
 
     async def can_handle(self, url: str) -> bool:
         """Always returns True — gallery-dl is the universal fallback."""
@@ -812,13 +1012,31 @@ class GalleryDlPlugin(SourcePlugin):
         _domain = _urlparse(url).netloc.removeprefix("www.")
         _site_cfg = get_site_by_domain(_domain)
 
+        # Fail a malformed stored policy loudly instead of silently downloading everything.
+        try:
+            media = media_policy_from_options(options)
+        except ValueError as exc:
+            return DownloadResult(status="failed", downloaded=0, total=0, error=f"Invalid media options: {exc}")
+
+        # The worker stamps the job's mode into options; a caller that does not
+        # falls back to the legacy flags (force_full_scan -> repair).
+        mode = effective_mode((options or {}).get("mode"), options)
+
+        if archive_error := await _ensure_job_archive_table(url):
+            logger.error("[gallery_dl] refusing download of %s: %s", url, archive_error)
+            return DownloadResult(status="failed", downloaded=0, total=0, error=archive_error)
+        archive_table = await _prepare_repair_archive(url, (options or {}).get("config_id")) if mode == REPAIR else None
+
         config_path = await _build_gallery_dl_config(
             credentials,
             config_id=options.get("config_id") if options else None,
             job_context=options.get("job_context", "manual") if options else "manual",
             last_completed_at=options.get("last_completed_at") if options else None,
-            force_full_scan=bool(options.get("force_full_scan", False)) if options else False,
             target_source_id=_site_cfg.source_id,
+            media=media,
+            persona=(options or {}).get("persona"),
+            mode=mode,
+            archive_table=archive_table,
         )
 
         from worker.gallery_dl_venv import get_gdl_exec_cmd
@@ -834,8 +1052,10 @@ class GalleryDlPlugin(SourcePlugin):
             str(dest_dir),
             "--Print",
             "after:JYZROX_FILE\t{_path}\t{sha256}",
+            # The format needs a field: gallery-dl reads one with no "{" and no
+            # space as a field *name* and prints that field's value instead.
             "--Print",
-            "skip:JYZROX_SKIP",
+            f"skip:{_PRINT_SKIP_PREFIX}\t{{filename}}",
             # prepare event fires before each download — gives UI the file
             # name and page number while bytes are streaming in.
             "--Print",
@@ -876,7 +1096,8 @@ class GalleryDlPlugin(SourcePlugin):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                # PYTHONPATH carries the Happy Eyeballs sitecustomize (_subprocess_env).
+                env=gdl_subprocess_env(PYTHONUNBUFFERED="1"),
                 # HR-011: start a new session so proc.pid == its process
                 # group id. This lets every kill path below terminate the
                 # whole descendant tree (ffmpeg, etc.) via os.killpg instead
@@ -928,7 +1149,7 @@ class GalleryDlPlugin(SourcePlugin):
 
         # Sentinel tasks — any of these finishing first triggers cleanup
         proc_wait_task = asyncio.create_task(proc.wait())
-        inactivity_task = asyncio.create_task(_inactivity_watchdog(state, inactivity_timeout, proc))
+        inactivity_task = asyncio.create_task(_inactivity_watchdog(state, inactivity_timeout, proc, watch_dir=dest_dir))
         sentinel_tasks: list[asyncio.Task] = [proc_wait_task, inactivity_task]
 
         sem_heartbeat = (options or {}).get("sem_heartbeat")
@@ -978,18 +1199,37 @@ class GalleryDlPlugin(SourcePlugin):
                     except Exception:
                         pass
 
-        # Cancel all remaining tasks (sentinels + background)
-        remaining = pending | {t for t in bg_tasks if not t.done()}
-        for t in remaining:
+        # Cancel the sentinels and the pulse task. The stdout/stderr readers are
+        # NOT cancelled yet: gallery-dl records a file in the archive before its
+        # `after` hook prints JYZROX_FILE, so a line still buffered in the pipe
+        # when the process exits names a file that is archived and must reach
+        # on_file, or the archive keeps a row for a file that was never imported.
+        stoppable = pending | ({pulse_task} if not pulse_task.done() else set())
+        for t in stoppable:
             t.cancel()
-        if remaining:
-            await asyncio.wait(remaining, timeout=5)
+        if stoppable:
+            await asyncio.wait(stoppable, timeout=5)
 
         # Wait for process to actually finish
         try:
             await asyncio.wait_for(proc.wait(), timeout=10)
         except TimeoutError:
             await _terminate_process_tree(proc)
+
+        # The process is gone, so its pipes reach EOF and the readers finish
+        # their buffered lines. The timeout only guards a descendant that
+        # inherited the pipe and outlived gallery-dl.
+        readers = {t for t in (stdout_task, stderr_task) if not t.done()}
+        if readers:
+            await asyncio.wait(readers, timeout=_READER_DRAIN_TIMEOUT_S)
+            stuck = {t for t in readers if not t.done()}
+            for t in stuck:
+                t.cancel()
+            if stuck:
+                logger.warning(
+                    "[gallery_dl] output readers still open %ds after exit; cancelled", _READER_DRAIN_TIMEOUT_S
+                )
+                await asyncio.wait(stuck, timeout=5)
 
         # Capture unsupported + error URLs
         unsupported_urls: list[str] = []

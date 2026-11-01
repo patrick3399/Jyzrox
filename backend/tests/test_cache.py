@@ -26,6 +26,9 @@ def _make_redis(**overrides) -> AsyncMock:
     r.ltrim = AsyncMock(return_value=True)
     r.lrange = AsyncMock(return_value=[])
     r.lrem = AsyncMock(return_value=1)
+    r.info = AsyncMock(
+        return_value={"used_memory": 0, "maxmemory": 0, "maxmemory_policy": "noeviction", "evicted_keys": 0}
+    )
     for attr, value in overrides.items():
         setattr(r, attr, value)
     return r
@@ -151,6 +154,121 @@ async def test_get_bytes_key_missing_returns_none():
         result = await get_bytes("thumb:proxied:missing")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Cache writes are best-effort (incident 2026-10-10: Redis at maxmemory)
+# ---------------------------------------------------------------------------
+
+_OOM_MESSAGE = "command not allowed when used memory > 'maxmemory'."
+
+
+def _memory_info(used: int, maxmemory: int) -> AsyncMock:
+    return AsyncMock(
+        return_value={
+            "used_memory": used,
+            "maxmemory": maxmemory,
+            "maxmemory_policy": "noeviction",
+            "evicted_keys": 0,
+        }
+    )
+
+
+async def test_set_bytes_when_redis_rejects_the_write_at_maxmemory_does_not_raise():
+    """A full Redis must cost the cache entry, not the request that fetched the image."""
+    from redis.exceptions import OutOfMemoryError
+
+    redis = _make_redis(setex=AsyncMock(side_effect=OutOfMemoryError(_OOM_MESSAGE)))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import set_bytes
+
+        await set_bytes("thumb:proxied:1:0", b"image", ttl=86400)
+
+    redis.setex.assert_awaited_once()
+
+
+async def test_set_json_when_redis_rejects_the_write_at_maxmemory_does_not_raise():
+    from redis.exceptions import OutOfMemoryError
+
+    redis = _make_redis(setex=AsyncMock(side_effect=OutOfMemoryError(_OOM_MESSAGE)))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import set_json
+
+        await set_json("eh:gallery:1", {"title": "x"}, ttl=300)
+
+    redis.setex.assert_awaited_once()
+
+
+async def test_push_system_alert_when_redis_rejects_the_write_at_maxmemory_does_not_raise():
+    """Alerts are raised from error paths; failing to store one must not mask the error."""
+    from redis.exceptions import OutOfMemoryError
+
+    redis = _make_redis(lpush=AsyncMock(side_effect=OutOfMemoryError(_OOM_MESSAGE)))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import push_system_alert
+
+        await push_system_alert("E-Hentai cookie invalid or expired")
+
+    redis.lpush.assert_awaited_once()
+
+
+async def test_set_bytes_at_the_admission_watermark_skips_the_write():
+    """Image bytes stop being admitted at 90% so the control plane keeps its room."""
+    redis = _make_redis(info=_memory_info(used=90, maxmemory=100))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import set_bytes
+
+        await set_bytes("thumb:proxied:1:0", b"image", ttl=86400)
+
+    redis.setex.assert_not_awaited()
+
+
+async def test_set_bytes_below_the_admission_watermark_writes():
+    redis = _make_redis(info=_memory_info(used=89, maxmemory=100))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import set_bytes
+
+        await set_bytes("thumb:proxied:1:0", b"image", ttl=86400)
+
+    redis.setex.assert_awaited_once_with("thumb:proxied:1:0", 86400, b"image")
+
+
+async def test_set_json_at_the_admission_watermark_still_writes():
+    """Only image bytes are gated: JSON caches are kilobytes and hold pTokens worth keeping."""
+    redis = _make_redis(info=_memory_info(used=95, maxmemory=100))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import set_json
+
+        await set_json("eh:imagelist:1", {"1": "tok"}, ttl=604800)
+
+    redis.setex.assert_awaited_once()
+
+
+async def test_cdn_thumb_roundtrip_uses_the_thumb_cdn_prefix_and_24h_ttl():
+    redis = _make_redis(get=AsyncMock(return_value=b"thumb"))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import get_cdn_thumb, set_cdn_thumb
+
+        await set_cdn_thumb("abc123", b"thumb")
+        result = await get_cdn_thumb("abc123")
+
+    redis.setex.assert_awaited_once_with("thumb:cdn:abc123", 86400, b"thumb")
+    redis.get.assert_awaited_once_with("thumb:cdn:abc123")
+    assert result == b"thumb"
+
+
+def test_image_cache_prefix_registry_covers_every_set_bytes_caller():
+    """The trim only knows the prefixes listed here; a new image cache must be added."""
+    from services.cache import IMAGE_CACHE_TTLS
+
+    assert IMAGE_CACHE_TTLS == {"thumb:proxied:": 86400, "thumb:cdn:": 86400, "pixiv:img:": 86400}
 
 
 # ---------------------------------------------------------------------------

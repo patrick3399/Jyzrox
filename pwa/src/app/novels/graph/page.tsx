@@ -8,6 +8,8 @@ import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { KnowledgeGraph } from '@/components/novels/KnowledgeGraph'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export default function NovelGraphPage() {
   useLocale()
@@ -15,11 +17,8 @@ export default function NovelGraphPage() {
   const empty = !data || data.nodes.length === 0
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-6">
-      <h1 className="mb-4 flex items-center gap-2 text-2xl font-semibold text-vault-text">
-        <Share2 className="size-6" />
-        {t('novels.graph')}
-      </h1>
+    <PageContainer variant="secondary">
+      <PageHeader title={t('novels.graph')} icon={<Share2 className="size-6" />} />
 
       {isLoading ? (
         <LoadingSpinner />
@@ -30,6 +29,6 @@ export default function NovelGraphPage() {
           <KnowledgeGraph data={data} />
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

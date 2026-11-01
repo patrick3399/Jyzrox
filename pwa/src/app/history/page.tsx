@@ -7,10 +7,14 @@ import { galleryHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { estimateHistoryRowHeight } from '@/lib/gridRowHeight'
 import { AppImage } from '@/components/AppImage'
 import { toast } from 'sonner'
 import { X, Trash2, Clock } from 'lucide-react'
 import type { BrowseHistoryItem } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 const PAGE_SIZE = 24
 
@@ -76,9 +80,11 @@ function HistoryCard({
           <p className="text-xs text-vault-text line-clamp-2 leading-snug font-medium">
             {item.title}
           </p>
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[10px] text-vault-text-muted">{sourceLabel(item.source)}</span>
-            <span className="text-[10px] text-vault-text-muted">
+          <div className="flex items-center justify-between gap-1 mt-1.5">
+            <span className="min-w-0 truncate text-[10px] text-vault-text-muted">
+              {sourceLabel(item.source)}
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-[10px] text-vault-text-muted">
               {formatRelativeTime(item.viewed_at)}
             </span>
           </div>
@@ -102,7 +108,7 @@ function HistoryCard({
   )
 }
 
-export default function HistoryPage() {
+function HistoryPageInner() {
   const router = useRouter()
   const [items, setItems] = useState<BrowseHistoryItem[]>([])
   const [total, setTotal] = useState(0)
@@ -175,23 +181,24 @@ export default function HistoryPage() {
   return (
     <>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-bold text-vault-text">{t('history.title')}</h1>
-          <p className="text-sm text-vault-text-muted mt-0.5">{t('history.subtitle')}</p>
-        </div>
-        {items.length > 0 && (
-          <button
-            onClick={handleClearAll}
-            disabled={clearing}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-700/50
-                         bg-red-900/20 text-red-400 hover:bg-red-900/40 transition-colors text-sm"
-          >
-            <Trash2 size={14} />
-            {clearing ? '...' : t('history.clearAll')}
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title={t('history.title')}
+        subtitle={t('history.subtitle')}
+        actions={
+          items.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClearAll}
+              disabled={clearing}
+              className="border border-red-700/50 bg-red-900/20 text-red-400 hover:bg-red-900/40 hover:text-red-400"
+            >
+              <Trash2 size={14} />
+              {clearing ? '...' : t('history.clearAll')}
+            </Button>
+          )
+        }
+      />
 
       {/* Count */}
       {!loading && total > 0 && (
@@ -216,7 +223,8 @@ export default function HistoryPage() {
           items={items}
           columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 12, xxl: 15 }}
           gap={12}
-          estimateHeight={250}
+          estimateHeight={estimateHistoryRowHeight}
+          measureRows={false}
           renderItem={(item) => (
             <HistoryCard
               key={item.id}
@@ -231,5 +239,13 @@ export default function HistoryPage() {
         />
       )}
     </>
+  )
+}
+
+export default function HistoryPage() {
+  return (
+    <PageContainer>
+      <HistoryPageInner />
+    </PageContainer>
   )
 }

@@ -24,6 +24,7 @@ export interface Gallery {
   missing_pages?: number | null
   posted_at: string | null
   added_at: string
+  content_updated_at?: string | null
   rating: number // 0–5 (legacy global, kept for backward compat)
   favorited: boolean // legacy, always false now
   is_favorited: boolean // per-user favorite status
@@ -32,7 +33,8 @@ export interface Gallery {
   uploader: string
   artist_id: string | null
   artist_name?: string | null
-  download_status: 'proxy_only' | 'partial' | 'complete' | 'downloading'
+  download_status:
+    'proxy_only' | 'partial' | 'complete' | 'downloading' | 'importing' | 'failed' | 'missing'
   import_mode: string | null
   tags_array: string[]
   cover_thumb?: string | null
@@ -41,6 +43,25 @@ export interface Gallery {
   source_path?: string | null
   deleted_at?: string | null
   metadata_updated_at?: string | null
+}
+
+export interface GallerySyncResult {
+  status:
+    | 'synced'
+    | 'unchanged'
+    | 'busy'
+    | 'not_link'
+    | 'not_found'
+    | 'skipped_trashed'
+    | 'root_unavailable'
+    | 'source_missing'
+  changed: boolean
+  added: number
+  removed: number
+  renamed: number
+  replaced: number
+  pending: number
+  pages: number | null
 }
 
 export interface GalleryImage {
@@ -58,6 +79,8 @@ export interface GalleryImage {
   media_type: 'image' | 'video' | 'gif'
   duration: number | null
   thumbhash?: string | null
+  /** Link page registered but not hashed yet: original file readable, no thumbnail. */
+  pending?: boolean
   visibility?: 'active' | 'user_hidden' | 'source_missing' | 'replaced'
   source_item_id?: string | null
   source_item_url?: string | null
@@ -210,11 +233,25 @@ export interface EhImageMap {
 
 // ── Download ──────────────────────────────────────────────────────────
 
+/**
+ * What a job is for, decided when it is enqueued. Only the subscription modes and
+ * `repair` change what the user can do with a job (a repair is never discarded).
+ */
+export type DownloadJobMode =
+  | 'download'
+  | 'subscription_initial'
+  | 'subscription_incremental'
+  | 'repair'
+
 export interface DownloadJob {
   id: string
   url: string
   source: string
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused' | 'partial'
+  /** Absent on an API that predates download modes; treat as `download`. */
+  mode?: DownloadJobMode
+  /** Set once the user asked to stop and keep; the job still runs until the worker finishes it. */
+  stop_requested_at?: string | null
   gallery_id?: number | null
   gallery_source?: string
   gallery_source_id?: string
@@ -225,11 +262,13 @@ export interface DownloadJob {
     downloaded?: number
     total?: number
     skipped?: number
+    outcome?: 'already_saved' | 'stopped'
+    existing_pages?: number | null
     status_text?: string
     speed?: number
     started_at?: string
     last_update_at?: string
-    wait_reason?: 'source_slot'
+    wait_reason?: 'source_slot' | 'persona_cooldown'
     wait_started_at?: string
     semaphore_key?: string
     queue_position?: number
@@ -259,6 +298,8 @@ export interface DownloadJob {
   retry_count: number
   max_retries: number
   next_retry_at: string | null
+  /** Egress persona the job runs under (ADR 0022); null/absent when not in persona mode. */
+  persona?: string | null
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────
@@ -316,9 +357,40 @@ export interface TagHealthReport {
 
 export interface CredentialStatus {
   configured: boolean
+  /** Name of the active account. */
+  account?: string
+  /** How many accounts are stored for this source. */
+  accounts?: number
+}
+
+export interface CredentialAccount {
+  account: string
+  credential_type: string
+  is_active: boolean
 }
 
 export type Credentials = Record<string, CredentialStatus>
+
+// ── Egress Personas (Admin, ADR 0022) ─────────────────────────────────
+
+export interface EgressPersona {
+  id: number
+  name: string
+  proxy_url: string | null
+  user_agent: string | null
+  browser_profile: 'chrome' | 'firefox' | null
+  enabled: boolean
+  last_exit_ip: string | null
+  last_tested_at: string | null
+  accounts: { source: string; account: string }[]
+}
+
+export interface PersonaTestResult {
+  ip: string | null
+  colo: string | null
+  same_ip: string[]
+  same_subnet: string[]
+}
 
 export interface EhAccount {
   valid: boolean
@@ -527,6 +599,8 @@ export interface Collection {
   cover_gallery_id: number | null
   gallery_count: number
   cover_thumb: string | null
+  /** Present only when the list was requested with `gallery_id`. */
+  contains_gallery?: boolean
   created_at: string | null
   updated_at: string | null
 }
@@ -671,7 +745,6 @@ export interface PluginInfo {
   enabled: boolean
 }
 
-
 // ── Pixiv Types ──────────────────────────────────────────────────────
 
 export interface PixivImageUrls {
@@ -751,6 +824,7 @@ export interface PixivUserPreview {
     name: string
     account: string
     profile_image: string
+    is_followed?: boolean
   }
   illusts: PixivIllust[]
 }
@@ -816,6 +890,12 @@ export interface SubscriptionGroup {
 }
 
 // ── Subscriptions ───────────────────────────────────────────────────
+
+/** Per-job media selection carried in `options.media` / `download_options.media`. */
+export interface MediaPolicy {
+  max_files: number | null
+  include_videos: boolean
+}
 
 export interface Subscription {
   id: number
@@ -991,7 +1071,7 @@ export interface GallerySearchParams {
   page?: number
   cursor?: string
   limit?: number
-  sort?: 'added_at' | 'rating' | 'pages'
+  sort?: 'added_at' | 'content_updated_at' | 'rating' | 'pages'
   collection?: number
   category?: string
 }
@@ -1016,6 +1096,8 @@ export interface JobListParams {
   page?: number
   limit?: number
   exclude_subscription?: boolean
+  subscription_only?: boolean
+  active_only?: boolean
 }
 
 // ── Download Preview ──────────────────────────────────────────────────
@@ -1034,17 +1116,41 @@ export interface DownloadPreview {
 
 // ── Site Config (Admin) ──────────────────────────────────────────────
 
+/** Pacing value in seconds: fixed, a [min, max] range, or null (nothing set). */
+export type SiteSleepValue = number | [number, number] | null
+
+export interface SiteDownloadParams {
+  retries: number
+  http_timeout: number
+  /** Pause between gallery-dl API / page requests. */
+  sleep_request: SiteSleepValue
+  /** Pause between individual file downloads (gallery-dl `extractor.<cat>.sleep`). */
+  sleep_download: SiteSleepValue
+  concurrency: number
+  inactivity_timeout: number
+  /** ADR 0022: spread manual downloads across egress personas (concurrency becomes per-persona). */
+  spread_personas: boolean
+}
+
+export type SiteDownloadKey = keyof SiteDownloadParams
+
 export interface SiteConfigItem {
   source_id: string
   name: string
   domain: string
   category: string
-  download: {
-    retries: number
-    http_timeout: number
-    sleep_request: number | [number, number] | null
-    concurrency: number
-    inactivity_timeout: number
+  /** Effective values. */
+  download: SiteDownloadParams
+  /** Jyzrox-layer defaults (same keys as `download`). */
+  defaults: SiteDownloadParams
+  /** Keys present in the stored override. */
+  overridden: SiteDownloadKey[]
+  /** Keys auto-tuned by the adaptive layer (and not overridden). */
+  adaptive: SiteDownloadKey[]
+  /** gallery-dl built-in pacing, applies when the effective sleep value is null. */
+  extractor_defaults: {
+    sleep_request: SiteSleepValue
+    sleep_download: SiteSleepValue
   }
   field_mapping?: Record<string, string | null>
   auto_probe?: ProbeResult | null
@@ -1147,4 +1253,25 @@ export interface QueueOverview {
   active: number
   scheduled: number
   workers: SaqWorker[]
+}
+
+export interface GalleryCategoryDef {
+  id: number
+  name: string
+  color: string
+  sort_order: number
+  is_builtin: boolean
+  gallery_count: number
+}
+
+export interface GalleryCategoriesResponse {
+  categories: GalleryCategoryDef[]
+  palette: string[]
+  uncategorized_count: number
+}
+
+export interface CategoryBackfillResult {
+  dry_run: boolean
+  matched: number
+  applied: number
 }

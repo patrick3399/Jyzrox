@@ -1,8 +1,9 @@
 """Subscription management endpoints."""
 
 import logging
-from datetime import UTC
+from datetime import UTC, datetime
 
+from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import delete, select, update
@@ -13,8 +14,9 @@ import core.queue
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
-from db.models import DownloadJob, Gallery, Subscription
-from services.download_policy import normalize_source_options
+from db.models import DEFAULT_SUBSCRIPTION_CRON, DownloadJob, Gallery, Subscription
+from services.download_policy import normalize_download_options
+from services.download_stop import StopNotAllowed, request_stop
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
@@ -78,7 +80,9 @@ class CreateSubscriptionRequest(BaseModel):
     url: str
     name: str | None = None
     cron_expr: str | None = None
-    auto_download: bool = True
+    # Opt-in: a new subscription only tracks new works until the user turns
+    # auto-download on (per card, or via the create form).
+    auto_download: bool = False
     group_id: int | None = None
     download_options: dict | None = None
 
@@ -145,7 +149,8 @@ async def list_subscriptions(
             query = query.where(Subscription.enabled == enabled)
         if group_id is not None:
             query = query.where(Subscription.group_id == group_id)
-        query = query.order_by(Subscription.created_at.desc()).offset(offset).limit(limit)
+        # id breaks created_at ties so offset paging neither repeats nor skips rows.
+        query = query.order_by(Subscription.created_at.desc(), Subscription.id.desc()).offset(offset).limit(limit)
 
         result = await session.execute(query)
         subs = result.scalars().all()
@@ -207,6 +212,50 @@ async def list_subscriptions(
     }
 
 
+@router.get("/latest-jobs")
+async def get_latest_jobs(auth: dict = Depends(require_auth)):
+    """Latest download job of every subscription the user owns, keyed by subscription id.
+
+    One request replaces a per-subscription ``/{sub_id}/jobs?limit=1`` fan-out,
+    which exhausted nginx's per-IP ``api_zone`` burst on the subscriptions page.
+    """
+    from services.download_presenter import serialize_download_job
+
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        ranked = (
+            select(
+                DownloadJob.id.label("id"),
+                sa_func.row_number()
+                .over(
+                    partition_by=DownloadJob.subscription_id,
+                    order_by=(DownloadJob.created_at.desc(), DownloadJob.id.desc()),
+                )
+                .label("rn"),
+            )
+            .join(Subscription, Subscription.id == DownloadJob.subscription_id)
+            .where(Subscription.user_id == user_id)
+            .subquery()
+        )
+        jobs = (
+            (
+                await session.execute(
+                    select(DownloadJob).join(ranked, ranked.c.id == DownloadJob.id).where(ranked.c.rn == 1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        gallery_ids = [j.gallery_id for j in jobs if j.gallery_id]
+        gallery_map = {}
+        if gallery_ids:
+            gs = (await session.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
+            gallery_map = {g.id: g for g in gs}
+
+    return {"jobs": {str(j.subscription_id): serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs}}
+
+
 @router.post("/")
 async def create_subscription(
     req: CreateSubscriptionRequest,
@@ -222,16 +271,12 @@ async def create_subscription(
     if req.cron_expr:
         validate_cron(req.cron_expr)
 
-    cron_expr = req.cron_expr or "0 */2 * * *"
+    cron_expr = req.cron_expr or DEFAULT_SUBSCRIPTION_CRON
     download_options = req.download_options or {}
     try:
-        download_options = normalize_source_options(source, download_options)
+        download_options = await normalize_download_options(normalized_url, source, download_options)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
-    from datetime import datetime
-
-    from croniter import croniter
-
+        raise HTTPException(status_code=422, detail=f"Invalid download options: {exc}") from exc
     next_check = croniter(cron_expr, datetime.now(UTC)).get_next(datetime)
 
     async with async_session() as session:
@@ -371,21 +416,32 @@ async def update_subscription(
     if req.cron_expr is not None:
         validate_cron(req.cron_expr)
         updates["cron_expr"] = req.cron_expr
+        # Reschedule from the new cron right away. Leaving next_check_at on the
+        # old schedule would keep the previous interval active until the next
+        # check completed. Grouped subs ignore it, but it is what takes effect
+        # once such a sub is moved back out of its group.
+        updates["next_check_at"] = croniter(req.cron_expr, datetime.now(UTC)).get_next(datetime)
     if req.group_id is not None:
         updates["group_id"] = req.group_id
     if req.download_options is not None:
-        # Policy validation needs the source from the owned subscription rather
-        # than trusting a caller-supplied source identifier.
+        # Policy validation needs the source and URL from the owned subscription
+        # rather than trusting caller-supplied identifiers.
         async with async_session() as session:
-            source = (
+            owned = (
                 await session.execute(
-                    select(Subscription.source).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+                    select(Subscription.source, Subscription.url).where(
+                        Subscription.id == sub_id, Subscription.user_id == user_id
+                    )
                 )
-            ).scalar_one_or_none()
+            ).first()
+        if owned is None:
+            raise HTTPException(status_code=404, detail="Subscription not found")
         try:
-            updates["download_options"] = normalize_source_options(source or "", req.download_options)
+            updates["download_options"] = await normalize_download_options(
+                owned.url, owned.source, req.download_options
+            )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+            raise HTTPException(status_code=422, detail=f"Invalid download options: {exc}") from exc
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -506,6 +562,68 @@ async def check_subscription(
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {"status": "queued", "subscription_id": sub_id}
+
+
+@router.post("/{sub_id}/stop")
+async def stop_subscription(
+    sub_id: int,
+    request: Request,
+    auth: dict = Depends(_member),
+):
+    """Stop every active job of a subscription and keep what they fetched.
+
+    Unlike delete (which cancels and discards), a stop finishes each job through
+    the worker's keep path and moves the subscription boundary, so later checks
+    only fetch newer posts. Jobs that already finished are skipped.
+    """
+    user_id = auth["user_id"]
+    stopped = 0
+    failed = 0
+    async with async_session() as session:
+        sub = (
+            await session.execute(
+                select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+            )
+        ).scalar_one_or_none()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Only the ids are listed up front. request_stop decides per job from
+        # the database, so a job that finished (or started) since this listing
+        # is handled correctly, and a failure that rolls the session back
+        # cannot leave later iterations holding expired instances.
+        job_ids = (
+            (
+                await session.execute(
+                    select(DownloadJob.id)
+                    .where(
+                        DownloadJob.subscription_id == sub_id,
+                        DownloadJob.status.in_(["queued", "running", "paused"]),
+                    )
+                    .order_by(DownloadJob.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for job_id in job_ids:
+            job = await session.get(DownloadJob, job_id)
+            if job is None:
+                continue
+            try:
+                await request_stop(session, job)
+            except StopNotAllowed:
+                continue  # finished since the listing
+            except Exception as exc:
+                # One failed enqueue must not leave the remaining jobs running.
+                logger.error("[subscription] stop failed for job %s of sub %d: %s", job_id, sub_id, exc)
+                failed += 1
+                continue
+            stopped += 1
+
+    if failed and not stopped:
+        raise HTTPException(status_code=503, detail="Failed to stop subscription jobs")
+    return {"status": "ok", "stopped": stopped}
 
 
 @router.post("/{sub_id}/backfill")

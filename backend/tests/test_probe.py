@@ -859,6 +859,27 @@ class TestRunGalleryDlProbe:
         )
         assert cmd[cmd.index("--config") + 1] == "/dev/null"
 
+    async def test_run_gallery_dl_probe_subprocess_env_loads_happy_eyeballs(self):
+        """The admin probe resolves sites through the same Happy Eyeballs patch as downloads."""
+        import os
+
+        from core.probe import _run_gallery_dl_probe
+        from plugins.builtin.gallery_dl._subprocess_env import SITE_DIR
+
+        mock_proc = AsyncMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.stdout.read = AsyncMock(return_value=b"")
+        mock_proc.wait = AsyncMock()
+
+        with (
+            patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc) as create_proc,
+        ):
+            await _run_gallery_dl_probe("https://example.com/gallery/1")
+
+        env = create_proc.call_args.kwargs["env"]
+        assert env["PYTHONPATH"].split(os.pathsep)[0] == str(SITE_DIR)
+
     async def test_run_gallery_dl_probe_returns_parsed_dicts_from_json_lines(self):
         """Valid JSON-lines output → list of dicts."""
         from core.probe import _run_gallery_dl_probe

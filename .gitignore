@@ -36,6 +36,7 @@ backups/
 backend/.python-version
 .playwright-mcp/
 docker-compose.override.yml
+/egress/
 
 # IDE & local dev tools
 .vscode/

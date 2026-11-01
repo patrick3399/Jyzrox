@@ -1,9 +1,19 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, FolderOpen, Pause, Play, Settings2, Trash2 } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  Globe,
+  Pause,
+  Play,
+  Settings2,
+  Trash2,
+} from 'lucide-react'
 import { SubscriptionCard, timeAgo } from './SubscriptionCard'
 import { t } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
 import type { DownloadJob, Subscription, SubscriptionGroup } from '@/lib/types'
 
 function groupStatusBadge(status: string) {
@@ -45,10 +55,14 @@ export function GroupCard({
   onAutoDownloadToggle,
   onMoveToGroup,
   onRenameSub,
+  onCronChangeSub,
+  onDownloadOptionsChangeSub,
   checkingId,
   defaultExpanded,
+  title,
+  showSubGroup = false,
 }: {
-  group: SubscriptionGroup | null // null = ungrouped section
+  group: SubscriptionGroup | null // null = ungrouped section, or a site section when title is set
   subs: Subscription[]
   jobsData: Record<number, DownloadJob>
   groups: SubscriptionGroup[]
@@ -63,8 +77,14 @@ export function GroupCard({
   onAutoDownloadToggle: (sub: Subscription) => void
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
   onRenameSub: (sub: Subscription, name: string) => void
+  onCronChangeSub?: (sub: Subscription, cron: string) => void
+  onDownloadOptionsChangeSub?: (sub: Subscription, options: Record<string, unknown>) => void
   checkingId: number | null
   defaultExpanded: boolean
+  /** Heading of a site section (group must be null). */
+  title?: string
+  /** Show each subscription's schedule group on its card. */
+  showSubGroup?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
 
@@ -80,17 +100,24 @@ export function GroupCard({
         <span className="text-vault-text-muted shrink-0">
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </span>
-        <FolderOpen
-          size={16}
-          className={isUngrouped ? 'text-vault-text-muted' : 'text-vault-accent'}
-        />
+        {title !== undefined ? (
+          <Globe size={16} className="text-vault-accent" />
+        ) : (
+          <FolderOpen
+            size={16}
+            className={isUngrouped ? 'text-vault-text-muted' : 'text-vault-accent'}
+          />
+        )}
         <span className="flex-1 font-medium text-sm text-vault-text truncate">
-          {isUngrouped ? t('subscriptions.ungrouped') : group.name}
+          {isUngrouped ? (title ?? t('subscriptions.ungrouped')) : group.name}
         </span>
 
         {/* Group meta */}
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] text-vault-text-muted hidden sm:block">
+          <span
+            data-testid="group-sub-count"
+            className="text-[10px] text-vault-text-muted whitespace-nowrap"
+          >
             {t('subscriptions.groupSubCount', { count: String(subs.length) })}
           </span>
 
@@ -114,16 +141,20 @@ export function GroupCard({
         {/* Group actions — stop propagation so clicking them doesn't toggle accordion */}
         {!isUngrouped && (
           <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={() => onRun(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-emerald-400 transition-colors"
+              className="hover:text-emerald-400"
               title={t('subscriptions.groupRunNow')}
             >
               <Play size={13} />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={() => onPauseResume(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-yellow-400 transition-colors"
+              className="hover:text-yellow-400"
               title={
                 group.status === 'paused'
                   ? t('subscriptions.groupResume')
@@ -131,22 +162,26 @@ export function GroupCard({
               }
             >
               <Pause size={13} />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={() => onEdit(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
+              className="hover:text-vault-accent"
               title={t('subscriptions.groupEdit')}
             >
               <Settings2 size={13} />
-            </button>
+            </Button>
             {!group.is_system && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => onDelete(group)}
-                className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors"
+                className="hover:text-red-400"
                 title={t('subscriptions.groupDelete')}
               >
                 <Trash2 size={13} />
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -186,7 +221,10 @@ export function GroupCard({
                 onAutoDownloadToggle={onAutoDownloadToggle}
                 onMoveToGroup={onMoveToGroup}
                 onRename={onRenameSub}
+                onCronChange={onCronChangeSub}
+                onDownloadOptionsChange={onDownloadOptionsChangeSub}
                 checkingId={checkingId}
+                showGroup={showSubGroup}
               />
             ))
           )}

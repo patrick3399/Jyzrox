@@ -21,6 +21,7 @@ import { import_ } from './import'
 import { history, savedSearches } from './history'
 import { plugins } from './plugins'
 import { galleryManagement } from './galleryManagement'
+import { galleryCategories } from './galleryCategories'
 import { pixiv } from './pixiv'
 import { artists } from './artists'
 import { collections } from './collections'
@@ -30,7 +31,7 @@ import { subscriptions, subscriptionGroups } from './subscriptions'
 import { dedup } from './dedup'
 import { users } from './users'
 import { logs, galleryDl } from './logs'
-import { adminSites, adminQueue } from './admin'
+import { adminSites, adminQueue, adminPersonas } from './admin'
 import { search } from './search'
 import { saucenao } from './saucenao'
 import { novels } from './novels'
@@ -51,6 +52,7 @@ export const api = {
   savedSearches,
   plugins,
   galleryManagement,
+  galleryCategories,
   pixiv,
   artists,
   collections,
@@ -63,6 +65,7 @@ export const api = {
   users,
   logs,
   adminSites,
+  adminPersonas,
   galleryDl,
   adminQueue,
   search,

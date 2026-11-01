@@ -12,6 +12,7 @@ import {
   Pause,
   X,
   Play,
+  Square,
   ChevronDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -22,6 +23,9 @@ import { useProfile } from '@/hooks/useProfile'
 import { useDashboard } from '@/hooks/useDashboard'
 import { api } from '@/lib/api'
 import type { DashboardSiteStats, DashboardTiming, DownloadJob } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -227,16 +231,24 @@ function JobTimingChips({
   )
 }
 
+const MODE_LABEL_KEY: Partial<Record<NonNullable<DownloadJob['mode']>, string>> = {
+  subscription_initial: 'queue.modeInitial',
+  subscription_incremental: 'queue.modeIncremental',
+  repair: 'queue.modeRepair',
+}
+
 function ActiveJobCard({
   job,
   onPause,
   onResume,
-  onCancel,
+  onStop,
+  onDiscard,
 }: {
   job: DownloadJob
   onPause: (id: string) => void
   onResume: (id: string) => void
-  onCancel: (id: string) => void
+  onStop: (job: DownloadJob) => void
+  onDiscard: (job: DownloadJob) => void
 }) {
   const timing = job.progress?.timing as Partial<DashboardTiming> | undefined
 
@@ -253,6 +265,11 @@ function ActiveJobCard({
   const speed = job.progress?.speed ?? 0
   const title = job.progress?.title ?? job.url
   const isPaused = job.status === 'paused'
+  // The job stays active until the worker has kept what it fetched.
+  const isStopping = !!job.stop_requested_at
+  // A repair's files are wanted, so it has no discard (the server treats cancel as stop).
+  const canDiscard = job.mode !== 'repair'
+  const modeLabelKey = job.mode ? MODE_LABEL_KEY[job.mode] : undefined
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl p-4">
@@ -260,6 +277,16 @@ function ActiveJobCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-vault-text truncate">{title}</span>
+            {modeLabelKey && (
+              <span className="text-[11px] font-medium text-vault-text-secondary border border-vault-border px-1.5 py-0.5 rounded">
+                {t(modeLabelKey)}
+              </span>
+            )}
+            {isStopping && (
+              <span className="text-[11px] font-medium text-vault-accent bg-vault-accent/10 px-1.5 py-0.5 rounded">
+                {t('queue.stopping')}
+              </span>
+            )}
             {isStalling && (
               <span className="flex items-center gap-1 text-[11px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded-full">
                 <AlertTriangle size={10} />
@@ -271,29 +298,52 @@ function ActiveJobCard({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {isPaused ? (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onResume(job.id)}
-              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-green-400 hover:bg-green-500/10 transition-colors"
+              disabled={isStopping}
+              className="hover:text-green-400 hover:bg-green-500/10"
               title={t('downloadDashboard.resume')}
             >
               <Play size={14} />
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onPause(job.id)}
-              className="p-1.5 rounded-lg text-vault-text-secondary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
+              disabled={isStopping}
+              className="hover:text-yellow-400 hover:bg-yellow-500/10"
               title={t('downloadDashboard.pause')}
             >
               <Pause size={14} />
-            </button>
+            </Button>
           )}
-          <button
-            onClick={() => onCancel(job.id)}
-            className="p-1.5 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            title={t('downloadDashboard.cancel')}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onStop(job)}
+            disabled={isStopping}
+            className="text-vault-accent hover:text-vault-accent hover:bg-vault-accent/10"
+            title={isStopping ? t('queue.stopping') : t('queue.stop')}
+            aria-label={isStopping ? t('queue.stopping') : t('queue.stop')}
           >
-            <X size={14} />
-          </button>
+            <Square size={14} />
+          </Button>
+          {canDiscard && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onDiscard(job)}
+              disabled={isStopping}
+              className="hover:text-red-400 hover:bg-red-500/10"
+              title={t('queue.discard')}
+              aria-label={t('queue.discard')}
+            >
+              <X size={14} />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -511,8 +561,14 @@ export default function DownloadDashboardPage() {
     if (!data) return
     setToggling(true)
     try {
-      await api.settings.setRateLimitOverride(!data.global.boost_mode)
-      await mutate()
+      const next = !data.global.boost_mode
+      await api.settings.setRateLimitOverride(next)
+      // Write the new state locally first: with the WebSocket connected the
+      // dashboard has no polling, so a plain refetch could show the old state.
+      await mutate(
+        (prev) => (prev ? { ...prev, global: { ...prev.global, boost_mode: next } } : prev),
+        { revalidate: true },
+      )
     } catch {
       toast.error(t('common.errorOccurred'))
     } finally {
@@ -520,36 +576,66 @@ export default function DownloadDashboardPage() {
     }
   }
 
-  const handleJobAction = async (id: string, action: 'pause' | 'resume' | 'cancel') => {
+  const handleJobAction = async (id: string, action: 'pause' | 'resume' | 'stop' | 'cancel') => {
     try {
       if (action === 'pause') await api.download.pauseJob(id)
       else if (action === 'resume') await api.download.resumeJob(id)
+      else if (action === 'stop') await api.download.stopJob(id)
       else await api.download.cancelJob(id)
       await mutate()
     } catch {
-      toast.error(t(action === 'cancel' ? 'queue.cancelError' : 'queue.pauseError'))
+      toast.error(
+        t(
+          action === 'cancel'
+            ? 'queue.cancelError'
+            : action === 'stop'
+              ? 'queue.stopError'
+              : 'queue.pauseError',
+        ),
+      )
     }
+  }
+
+  const handleStop = (job: DownloadJob) => {
+    // Stopping a subscription run gives up the posts it has not reached yet, for good.
+    const givesUpHistory =
+      job.mode === 'subscription_initial' ||
+      job.mode === 'subscription_incremental' ||
+      (!job.mode && !!job.subscription_id)
+    if (givesUpHistory && !confirm(t('queue.stopConfirm'))) return
+    void handleJobAction(job.id, 'stop')
+  }
+
+  const handleDiscard = (job: DownloadJob) => {
+    if (!confirm(t('queue.discardConfirm'))) return
+    void handleJobAction(job.id, 'cancel')
   }
 
   if (isLoading || profileLoading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <Loader2 className="animate-spin text-vault-text-muted" size={24} />
-      </div>
+      <PageContainer variant="secondary">
+        <div className="flex items-center justify-center h-48">
+          <Loader2 className="animate-spin text-vault-text-muted" size={24} />
+        </div>
+      </PageContainer>
     )
   }
 
   if (!data) {
-    return <div className="p-6 text-vault-text-muted text-sm">{t('common.failedToLoad')}</div>
+    return (
+      <PageContainer variant="secondary">
+        <div className="text-vault-text-muted text-sm">{t('common.failedToLoad')}</div>
+      </PageContainer>
+    )
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Activity size={22} className="text-vault-accent shrink-0" />
-        <h1 className="text-xl font-semibold text-vault-text">{t('downloadDashboard.title')}</h1>
-      </div>
+    <PageContainer variant="secondary" className="space-y-6">
+      <PageHeader
+        spacing="none"
+        title={t('downloadDashboard.title')}
+        icon={<Activity size={22} className="text-vault-accent shrink-0" />}
+      />
 
       {/* Global status bar */}
       <GlobalBar
@@ -587,7 +673,8 @@ export default function DownloadDashboardPage() {
                 job={job}
                 onPause={(id) => handleJobAction(id, 'pause')}
                 onResume={(id) => handleJobAction(id, 'resume')}
-                onCancel={(id) => handleJobAction(id, 'cancel')}
+                onStop={handleStop}
+                onDiscard={handleDiscard}
               />
             ))}
           </div>
@@ -614,6 +701,6 @@ export default function DownloadDashboardPage() {
 
       {/* Recent events */}
       <RecentEvents />
-    </div>
+    </PageContainer>
   )
 }

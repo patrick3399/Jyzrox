@@ -4,17 +4,30 @@ from core.queue_config import (
     ALL_QUEUES,
     DEFAULT_CONCURRENCY,
     JOB_QUEUE_ROUTING,
+    QUEUE_COVER,
     QUEUE_INGEST,
     QUEUE_INTERACTIVE,
     QUEUE_RENDER,
 )
 
 
-def test_all_queues_contains_three_entries():
-    assert len(ALL_QUEUES) == 3
+def test_all_queues_contains_four_entries():
+    assert len(ALL_QUEUES) == 4
     assert QUEUE_INTERACTIVE in ALL_QUEUES
     assert QUEUE_INGEST in ALL_QUEUES
+    assert QUEUE_COVER in ALL_QUEUES
     assert QUEUE_RENDER in ALL_QUEUES
+
+
+def test_cover_thumbnail_job_does_not_share_a_queue_with_import_or_hash_jobs():
+    """A SAQ Redis queue is FIFO. While the cover job shared `ingest`, a bulk
+    library import put every later cover behind the import and hash jobs of
+    all the other galleries (2026-10-09: median 157 s, up to 402 s queued)."""
+    cover_queue = JOB_QUEUE_ROUTING["cover_thumbnail_job"]
+
+    assert cover_queue == QUEUE_COVER
+    sharing = [job for job, queue in JOB_QUEUE_ROUTING.items() if queue == cover_queue]
+    assert sharing == ["cover_thumbnail_job"]
 
 
 def test_render_jobs_route_to_render_queue():
@@ -24,7 +37,7 @@ def test_render_jobs_route_to_render_queue():
 
 def test_ingest_jobs_route_to_ingest_queue():
     assert JOB_QUEUE_ROUTING["local_import_job"] == QUEUE_INGEST
-    assert JOB_QUEUE_ROUTING["cover_thumbnail_job"] == QUEUE_INGEST
+    assert JOB_QUEUE_ROUTING["link_hash_job"] == QUEUE_INGEST
     assert JOB_QUEUE_ROUTING["auto_discover_job"] == QUEUE_INGEST
 
 

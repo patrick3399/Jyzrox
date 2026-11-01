@@ -28,6 +28,7 @@ async def _insert_job(
     retry_count: int = 0,
     max_retries: int = 3,
     next_retry_at: str | None = None,
+    subscription_id: int | None = None,
 ):
     """Insert a download job directly via raw SQL (SQLite-compatible)."""
     from core.utils import normalize_download_url
@@ -35,8 +36,8 @@ async def _insert_job(
     job_id = str(uuid.uuid4())
     await db_session.execute(
         text(
-            "INSERT INTO download_jobs (id, url, canonical_url, source, status, progress, user_id, gallery_id, retry_count, max_retries, next_retry_at) "
-            "VALUES (:id, :url, :canonical_url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at)"
+            "INSERT INTO download_jobs (id, url, canonical_url, source, status, progress, user_id, gallery_id, retry_count, max_retries, next_retry_at, subscription_id) "
+            "VALUES (:id, :url, :canonical_url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at, :subscription_id)"
         ),
         {
             "id": job_id,
@@ -50,10 +51,21 @@ async def _insert_job(
             "retry_count": retry_count,
             "max_retries": max_retries,
             "next_retry_at": next_retry_at,
+            "subscription_id": subscription_id,
         },
     )
     await db_session.commit()
     return job_id
+
+
+async def _insert_subscription(db_session, *, user_id: int = 1, url: str = "https://example.com/artist") -> int:
+    """Insert a subscription row and return its id."""
+    await db_session.execute(
+        text("INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"),
+        {"uid": user_id, "url": url},
+    )
+    await db_session.commit()
+    return (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
 
 
 async def _insert_gallery(db_session, *, source_id: str = "12345", download_status: str = "downloading"):
@@ -336,6 +348,52 @@ class TestEnqueueDownload:
             assert "job_id" in data
             assert "status" in data
             assert "source" in data
+
+    async def test_enqueue_stamps_persona_key_when_site_spreads_personas(self, client, db_session):
+        """Regression: the row is persisted with the persona-mode key at write time.
+
+        A base-key stamp left the row invisible to the persona FIFO until its first
+        claim attempt, so a newer job could claim ahead of it.
+        """
+        from sqlalchemy import select
+
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        with (
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+        ):
+            resp = await client.post("/api/download/", json={"url": "https://x.com/someone/media"})
+
+        assert resp.status_code == 200
+        job_id = uuid.UUID(resp.json()["job_id"])
+        job = (await db_session.execute(select(DownloadJob).where(DownloadJob.id == job_id))).scalar_one()
+        assert job.admission_key == "gallery_dl:x.com#persona"
+
+    async def test_enqueue_stamps_base_key_when_site_does_not_spread_personas(self, client, db_session):
+        """With the site switch off the row keeps the plain per-host key."""
+        from sqlalchemy import select
+
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        with (
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=False)),
+            ),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+        ):
+            resp = await client.post("/api/download/", json={"url": "https://x.com/someone/media"})
+
+        assert resp.status_code == 200
+        job_id = uuid.UUID(resp.json()["job_id"])
+        job = (await db_session.execute(select(DownloadJob).where(DownloadJob.id == job_id))).scalar_one()
+        assert job.admission_key == "gallery_dl:x.com"
 
 
 # ---------------------------------------------------------------------------
@@ -915,6 +973,133 @@ class TestListJobsExcludeSubscription:
 
 
 # ---------------------------------------------------------------------------
+# Jobs listing — subscription_only / active_only filters
+# ---------------------------------------------------------------------------
+
+
+class TestListJobsSubscriptionActiveFilters:
+    """GET /api/download/jobs?subscription_only=&active_only="""
+
+    async def test_list_jobs_subscription_only_excludes_manual_jobs(self, client, db_session):
+        """subscription_only=true returns only jobs with a subscription_id, never manual ones."""
+        sub_id = await _insert_subscription(db_session, user_id=1)
+        manual_id = await _insert_job(db_session, status="running", user_id=1, url="https://e-hentai.org/g/801/aa/")
+        sub_job_id = await _insert_job(
+            db_session, status="running", user_id=1, url="https://e-hentai.org/g/802/bb/", subscription_id=sub_id
+        )
+        sub_done_id = await _insert_job(
+            db_session, status="done", user_id=1, url="https://e-hentai.org/g/803/cc/", subscription_id=sub_id
+        )
+
+        resp = await client.get("/api/download/jobs", params={"subscription_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        returned = {j["id"] for j in data["jobs"]}
+        assert returned == {sub_job_id, sub_done_id}
+        assert manual_id not in returned
+        assert data["total"] == 2
+
+    async def test_list_jobs_active_only_excludes_finished_jobs(self, client, db_session):
+        """active_only=true keeps queued/running/paused and drops done/failed/partial/cancelled."""
+        active_ids = {
+            await _insert_job(db_session, status="queued", user_id=1, url="https://e-hentai.org/g/811/aa/"),
+            await _insert_job(db_session, status="running", user_id=1, url="https://e-hentai.org/g/812/bb/"),
+            await _insert_job(db_session, status="paused", user_id=1, url="https://e-hentai.org/g/813/cc/"),
+        }
+        finished_ids = {
+            await _insert_job(db_session, status="done", user_id=1, url="https://e-hentai.org/g/814/dd/"),
+            await _insert_job(db_session, status="failed", user_id=1, url="https://e-hentai.org/g/815/ee/"),
+            await _insert_job(db_session, status="partial", user_id=1, url="https://e-hentai.org/g/816/ff/"),
+            await _insert_job(db_session, status="cancelled", user_id=1, url="https://e-hentai.org/g/817/gg/"),
+        }
+
+        resp = await client.get("/api/download/jobs", params={"active_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        returned = {j["id"] for j in data["jobs"]}
+        assert returned == active_ids
+        assert returned.isdisjoint(finished_ids)
+        assert {j["status"] for j in data["jobs"]} == {"queued", "running", "paused"}
+        assert data["total"] == 3
+
+    async def test_list_jobs_subscription_only_and_active_only_total_counts_filtered(self, client, db_session):
+        """total reflects the filtered row count, not the number of all rows in the table."""
+        sub_id = await _insert_subscription(db_session, user_id=1)
+        wanted = {
+            await _insert_job(
+                db_session, status="running", user_id=1, url="https://e-hentai.org/g/821/aa/", subscription_id=sub_id
+            ),
+            await _insert_job(
+                db_session, status="paused", user_id=1, url="https://e-hentai.org/g/822/bb/", subscription_id=sub_id
+            ),
+        }
+        # Rows that must not be counted
+        await _insert_job(
+            db_session, status="done", user_id=1, url="https://e-hentai.org/g/823/cc/", subscription_id=sub_id
+        )
+        await _insert_job(
+            db_session, status="failed", user_id=1, url="https://e-hentai.org/g/824/dd/", subscription_id=sub_id
+        )
+        await _insert_job(db_session, status="running", user_id=1, url="https://e-hentai.org/g/825/ee/")
+        await _insert_job(db_session, status="queued", user_id=1, url="https://e-hentai.org/g/826/ff/")
+
+        resp = await client.get("/api/download/jobs", params={"subscription_only": "true", "active_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert {j["id"] for j in data["jobs"]} == wanted
+
+        # Pagination must not change total: limit=1 returns one job but total stays 2
+        resp = await client.get(
+            "/api/download/jobs", params={"subscription_only": "true", "active_only": "true", "limit": 1}
+        )
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["jobs"]) == 1
+        assert data["jobs"][0]["id"] in wanted
+
+    async def test_list_jobs_subscription_only_with_exclude_subscription_returns_422(self, client, db_session):
+        """The two subscription filters are contradictory and must be rejected."""
+        sub_id = await _insert_subscription(db_session, user_id=1)
+        await _insert_job(
+            db_session, status="running", user_id=1, url="https://e-hentai.org/g/831/aa/", subscription_id=sub_id
+        )
+
+        resp = await client.get(
+            "/api/download/jobs", params={"subscription_only": "true", "exclude_subscription": "true"}
+        )
+
+        assert resp.status_code == 422
+        assert "mutually exclusive" in resp.json()["detail"]
+
+    async def test_list_jobs_subscription_only_non_admin_sees_only_own_jobs(self, make_client, db_session):
+        """A member never sees another user's subscription jobs, even with subscription_only."""
+        own_sub = await _insert_subscription(db_session, user_id=2, url="https://example.com/own")
+        other_sub = await _insert_subscription(db_session, user_id=1, url="https://example.com/other")
+        own_job = await _insert_job(
+            db_session, status="running", user_id=2, url="https://e-hentai.org/g/841/aa/", subscription_id=own_sub
+        )
+        other_job = await _insert_job(
+            db_session, status="running", user_id=1, url="https://e-hentai.org/g/842/bb/", subscription_id=other_sub
+        )
+        own_manual = await _insert_job(db_session, status="running", user_id=2, url="https://e-hentai.org/g/843/cc/")
+
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get("/api/download/jobs", params={"subscription_only": "true", "active_only": "true"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        returned = {j["id"] for j in data["jobs"]}
+        assert returned == {own_job}
+        assert other_job not in returned
+        assert own_manual not in returned
+        assert data["total"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Stats — exclude_subscription filter
 # ---------------------------------------------------------------------------
 
@@ -1095,6 +1280,48 @@ class TestEnqueueFailurePaths:
                 )
         assert exc_info.value.status_code == 503
         assert "enqueue" in exc_info.value.detail.lower()
+
+    async def test_enqueue_pixiv_user_url_dispatches_collection_job_not_download_job(self, db_session, mock_redis):
+        """A Pixiv users/ URL (e.g. the detail-page repair button re-enqueuing an
+        author collection's source_url) must sync the ``user:{id}`` collection.
+        Running it as a plain download_job imported a second gallery keyed by
+        the output folder name, ``user_{id}``."""
+        from routers.download import _enqueue
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await _enqueue("https://www.pixiv.net/users/2587756", db_session, user_id=7)
+
+        mock_enqueue.assert_awaited_once()
+        args, kwargs = mock_enqueue.call_args
+        assert args[0] == "pixiv_collection_job"
+        assert kwargs["user_id"] == 2587756
+        assert kwargs["owner_user_id"] == 7
+        assert kwargs["db_job_id"] == result["job_id"]
+
+        from db.models import DownloadJob
+
+        job = await db_session.get(DownloadJob, uuid.UUID(result["job_id"]))
+        # Persisted so retry/recovery (enqueue_download_job) keeps routing to the collection job.
+        assert job.options.get("pixiv_collection") is True
+
+    async def test_enqueue_pixiv_artwork_url_still_dispatches_download_job(self, db_session, mock_redis):
+        from routers.download import _enqueue
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            await _enqueue("https://www.pixiv.net/artworks/151313568", db_session, user_id=7)
+
+        assert mock_enqueue.call_args.args[0] == "download_job"
+        assert not (mock_enqueue.call_args.kwargs.get("options") or {}).get("pixiv_collection")
 
     async def test_enqueue_duplicate_url_same_user_returns_existing_job(self, db_session, mock_redis):
         """When same URL + user has a queued job, _enqueue returns existing job without inserting."""
@@ -1839,3 +2066,258 @@ class TestPreviewViaRegistry:
         import routers.download as rd
 
         assert not hasattr(rd, "_EH_URL_RE") and not hasattr(rd, "_PIXIV_URL_RE")
+
+
+# ---------------------------------------------------------------------------
+# options.media — download media policy
+# ---------------------------------------------------------------------------
+
+# The EH gallery token must be 10 hex chars, or the native plugin does not claim
+# the URL and gallery-dl (which supports the policy) would handle it instead.
+_EH_GALLERY_MEDIA_URL = "https://e-hentai.org/g/123456/abcdef1234/"
+
+
+class TestEnqueueMediaPolicy:
+    """POST /api/download/ — options.media validation and persistence."""
+
+    @staticmethod
+    def _patches():
+        return (
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+        )
+
+    async def test_enqueue_rejects_media_options_for_eh_gallery_url(self, client):
+        p1, p2 = self._patches()
+        with p1, p2, patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock:
+            resp = await client.post(
+                "/api/download/",
+                json={"url": _EH_GALLERY_MEDIA_URL, "options": {"media": {"max_files": 10}}},
+            )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
+        enqueue_mock.assert_not_awaited()
+
+    async def test_enqueue_rejects_zero_max_files_for_twitter_url(self, client):
+        p1, p2 = self._patches()
+        with p1, p2, patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock:
+            resp = await client.post(
+                "/api/download/",
+                json={"url": "https://x.com/someuser", "options": {"media": {"max_files": 0}}},
+            )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"].startswith("Invalid download options:")
+        enqueue_mock.assert_not_awaited()
+
+    @pytest.mark.parametrize("url", ["https://x.com/someuser", "https://twitter.com/someuser/media"])
+    async def test_enqueue_persists_normalized_media_options_for_twitter_url(self, db_session, mock_redis, url):
+        from routers.download import _enqueue
+
+        added: list = []
+        real_add = db_session.add
+
+        def _spy_add(obj):
+            added.append(obj)
+            return real_add(obj)
+
+        p1, p2 = self._patches()
+        with (
+            p1,
+            p2,
+            patch.object(db_session, "add", side_effect=_spy_add),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock,
+        ):
+            result = await _enqueue(
+                url,
+                db_session,
+                options={"media": {"max_files": 200, "include_videos": False}},
+                user_id=1,
+            )
+
+        assert result["status"] == "queued"
+        expected = {"max_files": 200, "include_videos": False}
+        assert len(added) == 1
+        assert added[0].options["media"] == expected
+        # The SAQ payload carries the same normalized options the worker will read.
+        assert enqueue_mock.await_args.kwargs["options"]["media"] == expected
+
+    async def test_enqueue_drops_default_media_options(self, db_session, mock_redis):
+        from routers.download import _enqueue
+
+        added: list = []
+        real_add = db_session.add
+
+        def _spy_add(obj):
+            added.append(obj)
+            return real_add(obj)
+
+        p1, p2 = self._patches()
+        with (
+            p1,
+            p2,
+            patch.object(db_session, "add", side_effect=_spy_add),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock,
+        ):
+            result = await _enqueue(
+                "https://x.com/someuser",
+                db_session,
+                options={"media": {"max_files": None, "include_videos": True}},
+                user_id=1,
+            )
+
+        assert result["status"] == "queued"
+        assert len(added) == 1
+        assert "media" not in added[0].options
+        assert "media" not in enqueue_mock.await_args.kwargs["options"]
+
+    async def test_enqueue_media_options_http_roundtrip_for_twitter_url(self, client):
+        """Through the real route: accepted (not 422) and no validation error leaks."""
+        p1, p2 = self._patches()
+        with p1, p2, patch("core.queue.enqueue", new_callable=AsyncMock):
+            resp = await client.post(
+                "/api/download/",
+                json={"url": "https://x.com/someuser", "options": {"media": {"max_files": 20}}},
+            )
+
+        # SQLite may fail the ORM insert (500); the policy itself must not be refused.
+        assert resp.status_code in (200, 500)
+
+
+class TestCheckUrlMediaPolicy:
+    """GET /api/download/check-url — supports_media_policy capability flag."""
+
+    async def test_check_url_reports_media_policy_support(self, client):
+        twitter = await client.get("/api/download/check-url", params={"url": "https://x.com/someuser"})
+        eh_gallery = await client.get("/api/download/check-url", params={"url": _EH_GALLERY_MEDIA_URL})
+
+        assert twitter.status_code == 200
+        assert twitter.json()["supports_media_policy"] is True
+        assert eh_gallery.status_code == 200
+        assert eh_gallery.json()["supports_media_policy"] is False
+
+    async def test_check_url_pixiv_reports_no_media_policy_support(self, client):
+        resp = await client.get("/api/download/check-url", params={"url": "https://www.pixiv.net/artworks/99999"})
+
+        assert resp.status_code == 200
+        assert resp.json()["supports_media_policy"] is False
+
+    async def test_check_url_not_a_url_reports_no_media_policy_support(self, client):
+        resp = await client.get("/api/download/check-url", params={"url": "not-a-url"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["supported"] is False
+        assert body["supports_media_policy"] is False
+
+
+# ---------------------------------------------------------------------------
+# Admission key re-stamp on retry / resume (ADR 0022 persona FIFO)
+# ---------------------------------------------------------------------------
+
+
+class TestRequeueRestampsAdmissionKey:
+    """Retry and resume re-stamp the queue key before the row is delivered again."""
+
+    async def _manual_job(self, db_session, *, admission_key: str, status: str = "failed", admission_ticket=None):
+        from db.models import DownloadJob
+
+        job = DownloadJob(
+            id=uuid.uuid4(),
+            url="https://x.com/someone/media",
+            canonical_url="https://x.com/someone/media",
+            source="twitter",
+            status=status,
+            progress={},
+            user_id=1,
+            retry_count=0,
+            max_retries=3,
+            admission_key=admission_key,
+            admission_ticket=admission_ticket,
+        )
+        db_session.add(job)
+        await db_session.commit()
+        return job.id
+
+    async def test_retry_restamps_manual_job_with_persona_key_when_site_spreads_personas(
+        self, member_client, db_session, mock_redis
+    ):
+        """Regression: a retry written under the base key was invisible to the persona FIFO."""
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        mock_redis.get = AsyncMock(return_value=None)
+        job_id = await self._manual_job(db_session, admission_key="gallery_dl:x.com")
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
+
+        assert resp.status_code == 200
+        db_session.expire_all()
+        job = await db_session.get(DownloadJob, job_id)
+        assert job.status == "queued"
+        assert job.admission_key == "gallery_dl:x.com#persona"
+
+    async def test_retry_keeps_subscription_job_on_base_key_even_when_site_spreads_personas(
+        self, member_client, db_session, mock_redis
+    ):
+        """Subscription runs never use persona mode, so their retry stays on the direct queue."""
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        mock_redis.get = AsyncMock(return_value=None)
+        job_id = await self._manual_job(db_session, admission_key="gallery_dl:x.com")
+        job = await db_session.get(DownloadJob, job_id)
+        job.subscription_id = 7
+        await db_session.commit()
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
+
+        assert resp.status_code == 200
+        db_session.expire_all()
+        job = await db_session.get(DownloadJob, job_id)
+        assert job.admission_key == "gallery_dl:x.com"
+
+    async def test_resume_restamps_paused_manual_job_with_persona_key_when_site_spreads_personas(
+        self, member_client, db_session, mock_redis
+    ):
+        """Regression: a token-less paused job re-queued by resume joins the persona FIFO."""
+        from core.site_config import DownloadParams
+        from db.models import DownloadJob
+
+        job_id = await self._manual_job(
+            db_session, admission_key="gallery_dl:x.com", status="paused", admission_ticket=5
+        )
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download.enqueue_download_job", new_callable=AsyncMock),
+            patch(
+                "core.site_config.site_config_service.get_effective_download_params",
+                AsyncMock(return_value=DownloadParams(spread_personas=True)),
+            ),
+        ):
+            resp = await member_client.patch(f"/api/download/jobs/{job_id}", json={"action": "resume"})
+
+        assert resp.status_code == 200
+        assert resp.json()["restarted"] is True
+        db_session.expire_all()
+        job = await db_session.get(DownloadJob, job_id)
+        assert job.status == "queued"
+        assert job.admission_key == "gallery_dl:x.com#persona"

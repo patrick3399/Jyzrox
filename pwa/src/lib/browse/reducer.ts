@@ -1,4 +1,5 @@
 import { canonicalIdentityKey } from './identity'
+import { patchPages } from './patch'
 
 export type BrowsePageResult<Item, Cursor> = {
   items: Item[]
@@ -51,6 +52,11 @@ export type BrowseAction<Item, Cursor> =
       identityKey: string
       generation: number
       buffer: BrowseHydration<Item, Cursor>
+    }
+  | {
+      type: 'ITEMS_PATCHED'
+      identityKey: string
+      update: (item: Item) => Item | null
     }
   | {
       type: 'PAGE_FAILED'
@@ -192,6 +198,20 @@ export function createBrowseReducer<Item, Cursor>(getItemId: (item: Item) => str
           failedRequest: null,
           terminal: null,
           meta: action.buffer.meta ?? state.meta,
+        }
+      }
+      case 'ITEMS_PATCHED': {
+        // An in-place edit, not a request outcome: the generation is left
+        // alone so a request already in flight still commits (the coordinator
+        // replays the patch onto its result).
+        if (action.identityKey !== state.identityKey) return state
+        const patched = patchPages(state.pages, action.update)
+        if (!patched) return state
+        return {
+          ...state,
+          pages: patched.pages,
+          items: unique(patched.pages.flat()),
+          total: state.total === null ? null : Math.max(0, state.total - patched.removed),
         }
       }
       case 'PAGE_FAILED':

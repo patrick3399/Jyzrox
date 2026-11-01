@@ -1,15 +1,15 @@
-import { apiFetch, encodeOpaquePathId, galleryApiPath, qs } from './client'
+import { apiFetch, galleryApiPath, qs } from './client'
 
 import type {
   Gallery,
   GalleryImage,
   GalleryListResponse,
+  GallerySyncResult,
   GallerySearchParams,
   ReadProgress,
   ArtistSummary,
   ArtistDetail,
   ArtistImageItem,
-  LibraryFile,
 } from '../types'
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -29,6 +29,12 @@ export const library = {
 
   getGallery: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<Gallery>(galleryApiPath(source, sourceId), init),
+
+  syncGallery: (source: string, sourceId: string, init?: RequestInit) =>
+    apiFetch<GallerySyncResult>(galleryApiPath(source, sourceId, '/sync'), {
+      ...init,
+      method: 'POST',
+    }),
 
   getImages: (
     source: string,
@@ -88,7 +94,7 @@ export const library = {
     },
     init?: RequestInit,
   ) =>
-    apiFetch<{ status: string; affected: number; deleted_dirs?: number }>(
+    apiFetch<{ status: string; affected: number; deleted_dirs?: number; denied?: number[] }>(
       '/api/library/galleries/batch',
       {
         method: 'POST',
@@ -167,17 +173,6 @@ export const library = {
       `/api/library/artists/${encodeURIComponent(artistId)}/images${qs(params as Record<string, unknown>)}`,
       init,
     ),
-
-  listGalleryFiles: (source: string, sourceId: string, init?: RequestInit) =>
-    apiFetch<{
-      gallery_id: number
-      source: string
-      source_id: string
-      title: string
-      category: string | null
-      files: LibraryFile[]
-      total_files: number
-    }>(`/api/library/files/${encodeURIComponent(source)}/${encodeOpaquePathId(sourceId)}`, init),
 
   deleteImage: (source: string, sourceId: string, pageNum: number, init?: RequestInit) =>
     apiFetch<{ status: string; remaining_pages: number }>(

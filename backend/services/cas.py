@@ -3,6 +3,8 @@
 import asyncio
 import os
 import shutil
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
 
@@ -17,6 +19,12 @@ from services.media_formats import media_type_for_extension
 THUMBNAIL_SIZES = (160, 360, 720)
 THUMBNAIL_VERSION = 2
 THUMBNAIL_VERSION_FILENAME = ".thumbnail-version"
+
+# Thumbnail stats on the NFS data root are latency-bound (~0.5 ms each when
+# cold), so a bounded pool overlaps them: 3000 cold checks took 1.46 s one by
+# one and 0.18 s across 16 threads.
+_THUMB_CHECK_WORKERS = 16
+_thumb_check_pool = ThreadPoolExecutor(max_workers=_THUMB_CHECK_WORKERS, thread_name_prefix="thumb-check")
 
 
 def cas_path(sha256: str, ext: str) -> Path:
@@ -46,6 +54,24 @@ def library_url(external_path: str) -> str:
     the filesystem lookup, so the round-trip is preserved.
     """
     return quote(external_path.replace("/mnt/", "/media/libraries/", 1), safe="/")
+
+
+def image_file_url(blob: Blob | None, external_path: str | None = None) -> str | None:
+    """Return the nginx-served URL for one image's original file.
+
+    Link-mode pages keep their bytes in the user's folder and have no CAS file,
+    so an Image-bound ``external_path`` is honoured before the blob check. That
+    also covers a pending link page, which has no blob yet.
+    """
+    if external_path:
+        return library_url(external_path)
+    if blob is None:
+        return None
+    if blob.storage == "external" and blob.external_path:
+        # Compatibility for callers/tests without an Image binding. Migrated
+        # production Image rows carry their own external_path.
+        return library_url(blob.external_path)
+    return cas_url(blob.sha256, blob.extension)
 
 
 def safe_source_id(source_id: str) -> str:
@@ -102,10 +128,12 @@ def ensure_library_dir(source: str, source_id: str) -> Path:
     return d
 
 
-def resolve_blob_path(blob: Blob, external_path: str | None = None) -> Path:
+def resolve_blob_path(blob: Blob | None, external_path: str | None = None) -> Path:
     """Return the filesystem path for a blob or a specific image binding."""
     if external_path:
         return Path(external_path)
+    if blob is None:
+        raise ValueError("a pending page has no blob; pass its external_path")
     if blob.storage == "external" and blob.external_path:
         # Compatibility fallback for callers that do not represent one Image.
         # New image-bound reads pass ``external_path`` explicitly.
@@ -190,6 +218,24 @@ def thumb_url(sha256: str, size: int = 160) -> str:
     if size not in THUMBNAIL_SIZES:
         raise ValueError(f"Unsupported thumbnail size: {size}")
     return f"/media/thumbs/{sha256[:2]}/{sha256[2:4]}/{sha256}/thumb_{size}.webp"
+
+
+def _has_base_thumb(sha256: str) -> bool:
+    return (thumb_dir(sha256) / "thumb_160.webp").exists()
+
+
+async def existing_base_thumbs(sha256s: Iterable[str | None]) -> set[str]:
+    """Return the blobs among ``sha256s`` whose 160px thumbnail exists.
+
+    Each distinct blob is checked once, off the event loop: a Reader request
+    lists every page of a gallery, and stat-ing them inline blocked the whole
+    API worker for seconds on large galleries.
+    """
+    unique = list(dict.fromkeys(sha for sha in sha256s if sha))
+    if not unique:
+        return set()
+    present = await asyncio.to_thread(lambda: list(_thumb_check_pool.map(_has_base_thumb, unique)))
+    return {sha for sha, ok in zip(unique, present, strict=True) if ok}
 
 
 def thumb_variants(sha256: str) -> dict[str, str]:
@@ -301,11 +347,15 @@ async def create_library_symlink(
     source: str,
     source_id: str,
     filename: str,
-    blob: Blob,
+    blob: Blob | None,
     *,
     external_path: str | None = None,
 ) -> None:
     """Create a symlink in /data/library/{source}/{safe_source_id}/ pointing to the blob's actual file."""
+    # One path component only: the existing file at the link's path is unlinked
+    # below, so a '../' name would delete and replace a file outside the dir.
+    if not filename or filename in (".", "..") or Path(filename).name != filename:
+        raise ValueError(f"library link name must be a single path component: {filename!r}")
     try:
         link_dir = ensure_library_dir(source, source_id)
     except LibraryDirCollisionError as exc:
@@ -329,7 +379,7 @@ async def create_library_symlink(
     # browsed from the host (file browser / Samba). External blobs live outside
     # the data volume and rely on an identical bind-mount path, so they keep an
     # absolute target.
-    if external_path or (blob.storage == "external" and blob.external_path):
+    if external_path or (blob is not None and blob.storage == "external" and blob.external_path):
         link.symlink_to(target)
     else:
         link.symlink_to(os.path.relpath(target, link_dir))

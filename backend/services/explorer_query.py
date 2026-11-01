@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import asc, desc, exists, or_, select
+from sqlalchemy import asc, desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import gallery_access_filter
 from db.models import (
+    Blob,
     BlobRelationship,
     CollectionGallery,
     Gallery,
@@ -18,6 +19,8 @@ from db.models import (
     UserReadingList,
 )
 
+UNCATEGORIZED = "__uncategorized__"
+
 
 @dataclass(slots=True)
 class ExplorerQuerySpec:
@@ -26,6 +29,8 @@ class ExplorerQuerySpec:
     query: str = ""
     sort: str = "added_at"
     direction: str = "desc"
+    # None = no filter, "__uncategorized__" = NULL or "", otherwise exact match.
+    category: str | None = None
 
 
 def _tokens(query: str) -> list[str]:
@@ -76,6 +81,7 @@ async def normalize_explorer_query(
         query=saved.query or spec.query,
         sort=str(params.get("sort") or spec.sort),
         direction=str(params.get("direction") or spec.direction),
+        category=spec.category,
     )
 
 
@@ -98,17 +104,27 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
         )
     elif spec.node_kind == "artist" and spec.node_id:
         filters.append(Gallery.artist_id == spec.node_id)
+    elif spec.node_kind == "category" and spec.node_id:
+        filters.append(
+            or_(Gallery.category.is_(None), Gallery.category == "")
+            if spec.node_id == "__uncategorized__"
+            else Gallery.category == spec.node_id
+        )
     elif spec.node_kind == "smart" and spec.node_id:
         if spec.node_id == "missing_metadata":
             filters.append(or_(Gallery.title.is_(None), Gallery.pages.is_(None)))
         elif spec.node_id == "empty_galleries":
             filters.append(~exists(select(Image.id).where(Image.gallery_id == Gallery.id)))
+        elif spec.node_id == "hidden_images":
+            filters.append(
+                exists(select(Image.id).where(Image.gallery_id == Gallery.id, Image.visibility == "user_hidden"))
+            )
         elif spec.node_id == "duplicates":
             related_hashes = select(BlobRelationship.sha_a).union(select(BlobRelationship.sha_b))
             filters.append(Gallery.id.in_(select(Image.gallery_id).where(Image.blob_sha256.in_(related_hashes))))
         else:
             raise HTTPException(status_code=400, detail="Unknown smart view")
-    elif spec.node_kind not in {"all", "trash", "source", "collection", "artist"}:
+    elif spec.node_kind not in {"all", "trash", "source", "collection", "artist", "category"}:
         raise HTTPException(status_code=400, detail="Unknown Explorer node")
 
     for token in _tokens(spec.query):
@@ -167,13 +183,33 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
                 )
             )
 
+    if spec.category is not None:
+        filters.append(
+            or_(Gallery.category.is_(None), Gallery.category == "")
+            if spec.category == UNCATEGORIZED
+            else Gallery.category == spec.category
+        )
+
     sort_columns = {
         "added_at": Gallery.added_at,
+        "content_updated_at": Gallery.content_updated_at,
         "posted_at": Gallery.posted_at,
         "title": Gallery.title,
         "rating": Gallery.rating,
         "pages": Gallery.pages,
     }
+    if spec.sort == "size":
+        # Total bytes of the gallery's active images (logical, duplicates within
+        # the gallery counted per page), computed per row so the order matches
+        # the ``logical_bytes`` the list shows for active pages.
+        sort_columns["size"] = (
+            select(func.coalesce(func.sum(Blob.file_size), 0))
+            .select_from(Image)
+            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .where(Image.gallery_id == Gallery.id, Image.visibility == "active")
+            .correlate(Gallery)
+            .scalar_subquery()
+        )
     sort_column = sort_columns.get(spec.sort, Gallery.added_at)
     order = asc(sort_column) if spec.direction == "asc" else desc(sort_column)
     return select(Gallery).where(*filters).order_by(order, desc(Gallery.id))

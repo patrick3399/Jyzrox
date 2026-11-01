@@ -1,4 +1,5 @@
 import { canonicalIdentityKey } from './identity'
+import type { BrowseListPatch } from './patch'
 
 export const PIXIV_BROWSE_SOURCE_ID = 'pixiv'
 export const PIXIV_BROWSE_SCHEMA_VERSION = 1
@@ -185,5 +186,67 @@ export function clearPixivLegacyBrowseState(storage: Storage): void {
     } catch {
       // Legacy cleanup is best effort; continue invalidating the remaining keys.
     }
+  }
+}
+
+type PixivIllustRecord = Extract<PixivBrowseItem, { kind: 'illust' }>['illust']
+
+/**
+ * A bookmark the signed-in user added or removed, for the saved and mounted
+ * Pixiv lists. The work keeps its place with the star (and count) updated:
+ * removing an un-bookmarked work from a Bookmarks list would shift the grid
+ * under the pointer, and its card offers the undo. A new bookmark cannot be
+ * placed in a saved public Bookmarks list that lacks it (bookmarks are added
+ * as public), so that list is discarded and loads fresh on its next visit.
+ */
+export function pixivBookmarkPatch(
+  illustId: number,
+  bookmarked: boolean,
+): BrowseListPatch<PixivBrowseItem> {
+  const publicBookmarksKey = pixivIdentityKey({ surface: 'bookmarks', restrict: 'public' })
+  return {
+    updateItem: (item) => {
+      if (item.kind !== 'illust' || item.illust.id !== illustId) return item
+      const current = item.illust.is_bookmarked
+      if (current === bookmarked) return item
+      const illust: PixivIllustRecord = { ...item.illust, is_bookmarked: bookmarked }
+      // The count includes the user's own bookmark only when the flag was known.
+      if (typeof current === 'boolean' && typeof item.illust.total_bookmarks === 'number') {
+        illust.total_bookmarks = Math.max(0, item.illust.total_bookmarks + (bookmarked ? 1 : -1))
+      }
+      return { kind: 'illust', illust }
+    },
+    invalidates: (identityKey, items) =>
+      bookmarked &&
+      identityKey === publicBookmarksKey &&
+      !items.some((item) => item.kind === 'illust' && item.illust.id === illustId),
+  }
+}
+
+/**
+ * A follow the signed-in user added or removed, for the saved and mounted
+ * Pixiv lists. A Following list keeps an unfollowed artist with the button
+ * reset (the undo), like an un-bookmarked work; a saved Following list that
+ * lacks a newly followed artist is discarded.
+ */
+export function pixivFollowPatch(
+  userId: number,
+  followed: boolean,
+): BrowseListPatch<PixivBrowseItem> {
+  const followingKey = pixivIdentityKey({ surface: 'following', restrict: 'public' })
+  return {
+    updateItem: (item) => {
+      if (item.kind !== 'user' || item.preview.user.id !== userId) return item
+      // A Following list item without the flag is a followed artist.
+      if ((item.preview.user.is_followed !== false) === followed) return item
+      return {
+        kind: 'user',
+        preview: { ...item.preview, user: { ...item.preview.user, is_followed: followed } },
+      }
+    },
+    invalidates: (identityKey, items) =>
+      followed &&
+      identityKey === followingKey &&
+      !items.some((item) => item.kind === 'user' && item.preview.user.id === userId),
   }
 }

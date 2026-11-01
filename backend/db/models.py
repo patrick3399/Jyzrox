@@ -118,8 +118,16 @@ class Gallery(Base):
     )
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # mtime of source_path at the last clean link sync; NULL forces a full diff.
+    source_dir_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metadata_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Maintained by a PG trigger that sets it to now() whenever ``pages`` increases.
+    # No server_onupdate: expiring it on every UPDATE makes serializers lazy-load
+    # it after commit, which raises in async sessions.
+    content_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     images: Mapped[list[Image]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
     gallery_tags: Mapped[list[GalleryTag]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
@@ -252,8 +260,12 @@ class Image(Base):
     gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
     page_num: Mapped[int] = mapped_column(Integer, nullable=False)
     filename: Mapped[str | None] = mapped_column(Text)
-    blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
+    # NULL while a link page is pending: registered from the folder, not hashed yet (ADR 0015).
+    blob_sha256: Mapped[str | None] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=True)
     external_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # stat fingerprint of external_path when blob_sha256 was computed (link mode).
+    source_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     visibility: Mapped[str] = mapped_column(Text, default="active", server_default="active", nullable=False)
@@ -270,7 +282,7 @@ class Image(Base):
     )
 
     gallery: Mapped[Gallery] = relationship(back_populates="images")
-    blob: Mapped[Blob] = relationship()
+    blob: Mapped[Blob | None] = relationship()
 
 
 class Tag(Base):
@@ -348,6 +360,20 @@ class DownloadJob(Base):
     subscription_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True
     )
+    # ADR 0022: persona_id is the persona the job last claimed with. It is kept
+    # as the sticky preference for retries, even across a later direct claim.
+    # persona_name is the snapshot for the current run's display and is cleared
+    # by a direct claim.
+    persona_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("egress_personas.id", ondelete="SET NULL"), nullable=True
+    )
+    persona_name: Mapped[str | None] = mapped_column(Text)
+    # How this job fetches (services/download_mode.py). Decided at enqueue and
+    # never at run time, so retries and recovery replay the same mode.
+    mode: Mapped[str] = mapped_column(Text, nullable=False, default="download", server_default=text("'download'"))
+    # Durable "stop and keep" intent. The status stays active until the worker
+    # (or finalize_stopped_job) finishes the keep path.
+    stop_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ReadProgress(Base):
@@ -402,12 +428,61 @@ class GallerySourceItem(Base):
 
 class Credential(Base):
     __tablename__ = "credentials"
+    __table_args__ = (
+        # At most one active account per source; see ADR 0019.
+        Index(
+            "uq_credentials_active_per_source",
+            "source",
+            unique=True,
+            postgresql_where=text("is_active"),
+            sqlite_where=text("is_active"),
+        ),
+    )
 
     source: Mapped[str] = mapped_column(Text, primary_key=True)
+    account: Mapped[str] = mapped_column(Text, primary_key=True, server_default=text("'default'"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     credential_type: Mapped[str] = mapped_column(Text, nullable=False)
     value_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_verified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EgressPersona(Base):
+    """A fixed download identity: egress proxy + browser identity (ADR 0022)."""
+
+    __tablename__ = "egress_personas"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    proxy_url: Mapped[str | None] = mapped_column(Text)  # None = direct (host default route)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    browser_profile: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    last_exit_ip: Mapped[str | None] = mapped_column(Text)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersonaAccount(Base):
+    """Binds one credential account of a site to exactly one persona."""
+
+    __tablename__ = "persona_accounts"
+    __table_args__ = (
+        UniqueConstraint("source", "account", name="uq_persona_accounts_account"),
+        ForeignKeyConstraint(
+            ["source", "account"],
+            ["credentials.source", "credentials.account"],
+            ondelete="CASCADE",
+            name="fk_persona_accounts_credential",
+        ),
+    )
+
+    persona_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("egress_personas.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    account: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class ApiToken(Base):
@@ -481,6 +556,20 @@ class LibraryPath(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class GalleryCategory(Base):
+    """Closed set of category names that local import and manual edits may assign."""
+
+    __tablename__ = "gallery_categories"
+    __table_args__ = (Index("uq_gallery_categories_name_lower", text("lower(name)"), unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    color: Mapped[str] = mapped_column(Text, nullable=False, default="gray", server_default="gray")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class PluginConfig(Base):
     __tablename__ = "plugin_config"
 
@@ -507,6 +596,11 @@ class SubscriptionGroup(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+# Weekly (Mondays 00:00). Applied by the application when a subscription is
+# created without an explicit cron_expr; the DB column DEFAULT is unused.
+DEFAULT_SUBSCRIPTION_CRON = "0 0 * * 1"
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
@@ -522,7 +616,7 @@ class Subscription(Base):
     # Source-specific download policy. Credentials remain global; this controls
     # what this subscription chooses to fetch with those credentials.
     download_options: Mapped[dict] = mapped_column(JSONB, default=dict)
-    cron_expr: Mapped[str | None] = mapped_column(Text, default="0 */2 * * *")
+    cron_expr: Mapped[str | None] = mapped_column(Text, default=DEFAULT_SUBSCRIPTION_CRON)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_item_id: Mapped[str | None] = mapped_column(Text)

@@ -420,6 +420,7 @@ _SQLITE_SCHEMA = [
         download_status TEXT DEFAULT 'proxy_only',
         import_mode TEXT,
         source_path TEXT,
+        source_dir_mtime_ns INTEGER,
         tags_array TEXT DEFAULT '[]',
         last_scanned_at TIMESTAMP,
         library_path TEXT,
@@ -428,8 +429,18 @@ _SQLITE_SCHEMA = [
         created_by_user_id INTEGER REFERENCES users(id),
         source_url TEXT,
         deleted_at TIMESTAMP,
-        metadata_updated_at TIMESTAMP
+        metadata_updated_at TIMESTAMP,
+        content_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+    """,
+    # SQLite equivalent of PG trg_galleries_content_updated_at. CURRENT_TIMESTAMP
+    # is 'YYYY-MM-DD HH:MM:SS', same shape the ORM writes (space separator), so it
+    # orders correctly against ORM-written datetimes.
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_galleries_content_updated_at
+    AFTER UPDATE OF pages ON galleries
+    WHEN NEW.pages IS NOT NULL AND NEW.pages > COALESCE(OLD.pages, 0)
+    BEGIN UPDATE galleries SET content_updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; END
     """,
     """
     CREATE TABLE IF NOT EXISTS blobs (
@@ -489,6 +500,8 @@ _SQLITE_SCHEMA = [
         filename TEXT,
         blob_sha256 TEXT REFERENCES blobs(sha256),
         external_path TEXT,
+        source_size INTEGER,
+        source_mtime_ns INTEGER,
         caption TEXT,
         added_at TIMESTAMP,
         visibility TEXT DEFAULT 'active',
@@ -523,7 +536,11 @@ _SQLITE_SCHEMA = [
         admission_token TEXT,
         admission_ticket INTEGER,
         gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
-        subscription_id INTEGER
+        subscription_id INTEGER,
+        persona_id INTEGER REFERENCES egress_personas(id) ON DELETE SET NULL,
+        persona_name TEXT,
+        mode TEXT NOT NULL DEFAULT 'download',
+        stop_requested_at TIMESTAMP
     )
     """,
     """
@@ -622,12 +639,42 @@ _SQLITE_SCHEMA = [
     """,
     """
     CREATE TABLE IF NOT EXISTS credentials (
-        source TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        account TEXT NOT NULL DEFAULT 'default',
+        is_active BOOLEAN NOT NULL DEFAULT 0,
         credential_type TEXT NOT NULL,
         value_encrypted BLOB,
         expires_at TIMESTAMP,
-        last_verified TIMESTAMP
+        last_verified TIMESTAMP,
+        PRIMARY KEY (source, account)
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS egress_personas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        proxy_url TEXT,
+        user_agent TEXT,
+        browser_profile TEXT,
+        enabled BOOLEAN NOT NULL DEFAULT 1,
+        last_exit_ip TEXT,
+        last_tested_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS persona_accounts (
+        persona_id INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        account TEXT NOT NULL,
+        PRIMARY KEY (persona_id, source),
+        UNIQUE (source, account),
+        FOREIGN KEY (source, account) REFERENCES credentials(source, account) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_credentials_active_per_source
+        ON credentials (source) WHERE is_active
     """,
     """
     CREATE TABLE IF NOT EXISTS api_tokens (
@@ -685,6 +732,17 @@ _SQLITE_SCHEMA = [
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT 'gray',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_builtin BOOLEAN NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_gallery_categories_name_lower ON gallery_categories (lower(name))",
     """
     CREATE TABLE IF NOT EXISTS plugin_config (
         source_id TEXT PRIMARY KEY,
@@ -985,6 +1043,9 @@ def mock_redis():
     redis.lrem = AsyncMock(return_value=1)
     redis.ltrim = AsyncMock(return_value=True)
     redis.scan = AsyncMock(return_value=(0, []))
+    redis.info = AsyncMock(
+        return_value={"used_memory": 0, "maxmemory": 0, "maxmemory_policy": "noeviction", "evicted_keys": 0}
+    )
     return redis
 
 
@@ -1017,6 +1078,7 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("core.queue.enqueue", _mock_enqueue),
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1079,10 +1141,12 @@ async def unauthed_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
+        patch("core.auth.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
     ):
@@ -1122,6 +1186,7 @@ async def opds_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1159,6 +1224,7 @@ async def unauthed_opds_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1198,6 +1264,7 @@ async def ext_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1253,6 +1320,7 @@ def make_client(db_session, db_session_factory, mock_redis):
             patch("core.queue.enqueue", _mock_enqueue),
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.rate_limit.get_redis", return_value=mock_redis),
+            patch("services.cache.get_redis", return_value=mock_redis),
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
             patch("routers.auth.get_redis", return_value=mock_redis),
             patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1317,6 +1385,7 @@ async def hist_client(db_session, db_session_factory, mock_redis):
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("services.cache.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
@@ -1333,3 +1402,16 @@ async def hist_client(db_session, db_session_factory, mock_redis):
             yield ac
 
     _app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_redis_admission_memo():
+    """The image-cache admission decision is memoized per process for 10s."""
+    try:
+        from services.redis_memory import reset_admission_memo
+    except ImportError:  # module not created yet (plan Task 1, before implementation)
+        yield
+        return
+    reset_admission_memo()
+    yield
+    reset_admission_memo()

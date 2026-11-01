@@ -1,9 +1,11 @@
 'use client'
 
-import { useRef, useEffect, useState, useMemo, type ReactNode } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo, type ReactNode } from 'react'
 import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual'
 import justifiedLayout from 'justified-layout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 export interface JustifiedGridProps<T> {
   items: T[]
@@ -120,6 +122,20 @@ export function JustifiedGrid<T>({
 
   const virtualizer = scrollElement != null ? elementVirtualizer : windowVirtualizer
 
+  // Row heights are computed by justified-layout, not measured, so the
+  // virtualizer only ever sees them through `estimateSize`. It memoizes row
+  // offsets on count/scrollMargin and its measured-size cache, not on
+  // `estimateSize`: a container width change that keeps the row count would
+  // resize every row while leaving it at its old offset. Re-measuring when the
+  // layout changes drops that cache; the layout effect lands the corrected
+  // offsets before paint. Only the active virtualizer is re-measured.
+  const appliedRowsRef = useRef(rows)
+  useIsomorphicLayoutEffect(() => {
+    if (appliedRowsRef.current === rows) return
+    appliedRowsRef.current = rows
+    virtualizer.measure()
+  }, [rows, virtualizer])
+
   const virtualItems = virtualizer.getVirtualItems()
 
   // Load more trigger
@@ -161,7 +177,6 @@ export function JustifiedGrid<T>({
             <div
               key={virtualRow.key}
               data-index={virtualRow.index}
-              ref={virtualizer.measureElement}
               style={{
                 position: 'absolute',
                 top: 0,

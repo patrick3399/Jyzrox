@@ -2,6 +2,8 @@
 
 Jyzrox can read local galleries through host bind mounts. **The default Compose stack currently does not mount `/mnt` or any NAS path**, so SMB/NAS storage is not enabled out of the box. If needed, mount the share on the **host machine** and explicitly expose it to the required containers through `docker-compose.override.yml`.
 
+> **UID in the examples:** containers run as `PUID:PGID` from `.env` (image default `1042:1042`). The examples below use `1042`; if you set a different `PUID`/`PGID` (for example `3000:3000` to match your host user), substitute that value in every `uid=`/`gid=`/`anonuid=`/`anongid=` option and ownership check.
+
 ## Overview
 
 ```
@@ -130,7 +132,7 @@ Replace `192.168.1.100` with your NAS IP and `media` with the actual share name.
 | `x-systemd.mount-timeout=30` | Mount attempt times out after 30 seconds instead of hanging indefinitely |
 | `nofail` | Mount failure does not block boot; system starts normally |
 | `credentials=...` | Reads credentials from a file with 600 permissions |
-| `uid=1042,gid=1042` | Matches the container's `appuser`, ensuring correct file permissions |
+| `uid=1042,gid=1042` | Matches the container's `appuser` (`PUID`/`PGID`, default `1042`), ensuring correct file permissions |
 | `ro` | Read-only mount; Jyzrox only reads library files, no writes needed |
 | `cache=strict,actimeo=60` | Aggressive metadata caching, reduces frequent queries to the NAS |
 | `vers=3.1.1` | Uses SMB 3.1.1 (best security and performance); fall back to `3.0` or `2.1` if unsupported |
@@ -143,7 +145,7 @@ sudo mount /mnt/nas-share
 ls -la /mnt/nas-share
 ```
 
-Verify that you can see files on the NAS and that the owner shows `1042:1042` (or the corresponding username).
+Verify that you can see files on the NAS and that the owner shows your `PUID:PGID` (`1042:1042` by default).
 
 If mounting fails, check detailed errors:
 
@@ -260,7 +262,7 @@ sudo mount /mnt/nas-share
 ls -la /mnt/nas-share
 ```
 
-Verify the file owner shows `1042:1042` (determined by the NAS-side `all_squash,anonuid=1042` setting).
+Verify the file owner shows your `PUID:PGID` (`1042:1042` by default; determined by the NAS-side `all_squash,anonuid=` setting).
 
 ### Step 6: Integrate with Jyzrox
 
@@ -281,7 +283,7 @@ Control Panel → File Services → NFS → Enable NFS service
 **Shared folder permissions (SMB):**
 Control Panel → Shared Folder → Edit → Local Users → Set read permission for your account
 
-**UID 1042 mapping (NFS):**
+**PUID mapping (NFS, default 1042):**
 NFS UID squash settings are under "Shared Folder → NFS Permissions" — set `anonuid=1042,anongid=1042`.
 
 ### QNAP QTS
@@ -300,7 +302,29 @@ NFS is a native feature on TrueNAS — prefer it over SMB.
 
 Storage → Shares → Unix Shares (NFS) → Add:
 - Path: Select the dataset to share
-- Advanced Options → `mapall User` / `mapall Group`: Enter the user corresponding to UID 1042 (or create a user with uid=1042)
+- Advanced Options → `mapall User` / `mapall Group`: Enter the user corresponding to your `PUID` (default 1042; create one with that uid if needed)
+
+---
+
+## Keeping `JYZROX_DATA_ROOT` on NFS
+
+`JYZROX_DATA_ROOT` can itself live on a read-write NFS export (`/data`, `novel`, `venv`). Keep these in mind:
+
+- **Postgres and Redis stay on local disk.** Override their volume `device` in `docker-compose.override.yml`:
+
+  ```yaml
+  volumes:
+    postgres_data:
+      driver_opts:
+        device: /opt/jyzrox/postgres
+    redis_data:
+      driver_opts:
+        device: /opt/jyzrox/redis
+  ```
+
+  A named volume keeps the `driver_opts` it was created with. After changing `device`, stop the stack and `docker volume rm` the volume so Compose recreates it.
+- **root_squash blocks root in the container.** The entrypoint's `chown` of `/data` directories runs as root and fails silently. Files on the export must already be owned by `PUID:PGID`; after changing `PUID`, re-own them as that user on the host or on the NAS.
+- **`docker compose exec` defaults to root**, which gets `Permission denied` on the 700 data directories. Use `docker compose exec --user appuser <service> ...`.
 
 ---
 
@@ -374,7 +398,7 @@ After remounting, verify:
 
 ```bash
 ls -ln /mnt/nas-share | head -5
-# Should show 1042 1042
+# Should show your PUID PGID (1042 1042 by default)
 ```
 
 ### CIFS version negotiation failure

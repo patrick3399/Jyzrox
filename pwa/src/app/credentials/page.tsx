@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ChevronUp,
@@ -18,16 +18,19 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
+import { CredentialAccounts, sanitizeAccountName } from '@/components/CredentialAccounts'
 import type { Credentials, EhAccount, PluginInfo, CredentialFlow, FieldDef } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
+
+// Sources that have their own credential section; the generic site list must not repeat them.
+const NON_GENERIC_SOURCES = new Set(['ehentai', 'pixiv', 'saucenao'])
 
 // ── Shared style constants ─────────────────────────────────────────────────
 
 const inputClass =
   'w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm'
-const btnPrimary =
-  'px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors'
-const btnSecondary =
-  'px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors'
 
 // ── StatusBadge ────────────────────────────────────────────────────────────
 
@@ -89,10 +92,10 @@ function EhExtras({
 
       {/* Refresh account button */}
       <div className="mb-3">
-        <button onClick={onRefresh} disabled={ehAccountLoading} className={btnSecondary}>
+        <Button variant="secondary" size="md" onClick={onRefresh} disabled={ehAccountLoading}>
           <RefreshCw size={14} className="inline mr-1.5" />
           {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
-        </button>
+        </Button>
       </div>
 
       {/* Account info */}
@@ -132,7 +135,13 @@ function EhExtras({
 
 // ── EhFieldsFlow ──────────────────────────────────────────────────────────
 
-function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
+function EhFieldsFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (account: EhAccount) => void
+  saveAs?: string
+}) {
   const [memberId, setMemberId] = useState('')
   const [passHash, setPassHash] = useState('')
   const [sk, setSk] = useState('')
@@ -148,7 +157,7 @@ function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
         { ipb_member_id: memberId.trim(), ipb_pass_hash: passHash.trim() }
       if (sk.trim()) data.sk = sk.trim()
       if (igneous.trim()) data.igneous = igneous.trim()
-      const result = await api.settings.setEhCookies(data)
+      const result = await api.settings.setEhCookies(data, saveAs)
       toast.success(t('settings.ehCookiesSaved'))
       onSaved(result.account)
     } catch (err) {
@@ -214,20 +223,27 @@ function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
           className={inputClass}
         />
       </div>
-      <button
+      <Button
+        variant="primary"
+        size="md"
         onClick={handleSave}
         disabled={saving || !memberId.trim() || !passHash.trim()}
-        className={btnPrimary}
       >
         {saving ? t('settings.saving') : t('settings.saveCookies')}
-      </button>
+      </Button>
     </div>
   )
 }
 
 // ── PixivOAuthFlow ────────────────────────────────────────────────────────
 
-function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
+function PixivOAuthFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (username: string) => void
+  saveAs?: string
+}) {
   const [_oauthUrl, setOauthUrl] = useState('')
   const [codeVerifier, setCodeVerifier] = useState('')
   const [callbackUrl, setCallbackUrl] = useState('')
@@ -248,7 +264,7 @@ function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
     if (!callbackUrl.trim() || !codeVerifier) return
     setSaving(true)
     try {
-      const res = await api.settings.pixivOAuthCallback(callbackUrl.trim(), codeVerifier)
+      const res = await api.settings.pixivOAuthCallback(callbackUrl.trim(), codeVerifier, saveAs)
       toast.success(`${t('settings.pixivSaved')}: ${res.username}`)
       onSaved(res.username)
       setCallbackUrl('')
@@ -274,13 +290,10 @@ function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
         </p>
         <p className="text-yellow-400/70">{t('settings.pixivOauthHint2')}</p>
       </div>
-      <button
-        onClick={handleGetUrl}
-        className={`${btnSecondary} w-full flex items-center justify-center gap-2`}
-      >
+      <Button variant="secondary" size="md" className="w-full gap-2" onClick={handleGetUrl}>
         <ExternalLink size={14} />
         {t('credentials.oauthGetUrl')}
-      </button>
+      </Button>
       {codeVerifier && (
         <div>
           <p className="text-xs text-vault-text-muted mb-1">{t('settings.pixivOauthStep4')}</p>
@@ -291,13 +304,15 @@ function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
             placeholder={t('credentials.oauthPasteCallback')}
             className={inputClass}
           />
-          <button
+          <Button
+            variant="primary"
+            size="md"
+            className="mt-3"
             onClick={handleExchange}
             disabled={saving || !callbackUrl.trim()}
-            className={`${btnPrimary} mt-3`}
           >
             {saving ? t('settings.saving') : t('credentials.oauthExchange')}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -306,7 +321,13 @@ function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
 
 // ── PixivTokenFlow ────────────────────────────────────────────────────────
 
-function PixivTokenFlow({ onSaved }: { onSaved: (username: string) => void }) {
+function PixivTokenFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (username: string) => void
+  saveAs?: string
+}) {
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -314,7 +335,7 @@ function PixivTokenFlow({ onSaved }: { onSaved: (username: string) => void }) {
     if (!token.trim()) return
     setSaving(true)
     try {
-      const result = await api.settings.setPixivToken(token.trim())
+      const result = await api.settings.setPixivToken(token.trim(), saveAs)
       toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
       onSaved(result.username)
     } catch (err) {
@@ -339,16 +360,22 @@ function PixivTokenFlow({ onSaved }: { onSaved: (username: string) => void }) {
         />
         <p className="text-xs text-vault-text-muted mt-1">{t('settings.pixivHint')}</p>
       </div>
-      <button onClick={handleSave} disabled={saving || !token.trim()} className={btnPrimary}>
+      <Button variant="primary" size="md" onClick={handleSave} disabled={saving || !token.trim()}>
         {saving ? t('settings.saving') : t('settings.saveToken')}
-      </button>
+      </Button>
     </div>
   )
 }
 
 // ── PixivCookieFlow ───────────────────────────────────────────────────────
 
-function PixivCookieFlow({ onSaved }: { onSaved: (username: string) => void }) {
+function PixivCookieFlow({
+  onSaved,
+  saveAs,
+}: {
+  onSaved: (username: string) => void
+  saveAs?: string
+}) {
   const [cookie, setCookie] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -356,7 +383,7 @@ function PixivCookieFlow({ onSaved }: { onSaved: (username: string) => void }) {
     if (!cookie.trim()) return
     setSaving(true)
     try {
-      const result = await api.settings.setPixivCookie(cookie.trim())
+      const result = await api.settings.setPixivCookie(cookie.trim(), saveAs)
       toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
       onSaved(result.username)
       setCookie('')
@@ -394,9 +421,9 @@ function PixivCookieFlow({ onSaved }: { onSaved: (username: string) => void }) {
           className={inputClass}
         />
       </div>
-      <button onClick={handleSave} disabled={saving || !cookie.trim()} className={btnPrimary}>
+      <Button variant="primary" size="md" onClick={handleSave} disabled={saving || !cookie.trim()}>
         {saving ? t('settings.saving') : t('credentials.oauthExchange')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -455,10 +482,12 @@ function GenericFieldsFlow({
   plugin,
   flow,
   onSaved,
+  saveAs,
 }: {
   plugin: PluginInfo
   flow: CredentialFlow
   onSaved: () => void
+  saveAs?: string
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -477,7 +506,7 @@ function GenericFieldsFlow({
     if (!canSave) return
     setSaving(true)
     try {
-      await api.settings.setGenericCookie(plugin.source_id, filled)
+      await api.settings.setGenericCookie(plugin.source_id, filled, saveAs)
       toast.success(t('credentials.savedSite', { source: plugin.name }))
       setValues({})
       onSaved()
@@ -498,9 +527,9 @@ function GenericFieldsFlow({
           onChange={(v) => setValues((prev) => ({ ...prev, [field.name]: v }))}
         />
       ))}
-      <button onClick={handleSave} disabled={saving || !canSave} className={btnPrimary}>
+      <Button variant="primary" size="md" onClick={handleSave} disabled={saving || !canSave}>
         {saving ? t('credentials.saving') : t('credentials.save')}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -521,12 +550,16 @@ function PluginCredentialSection({
   onToggle,
   configured,
   onDeleted,
+  accountCount,
+  accountsRefreshKey,
 }: {
   plugin: PluginInfo
   isOpen: boolean
   onToggle: () => void
   configured: boolean
   onDeleted: () => void
+  accountCount: number
+  accountsRefreshKey: number
 }) {
   const flows = plugin.credential_flows ?? []
   const [activeFlow, setActiveFlow] = useState(0)
@@ -536,6 +569,15 @@ function PluginCredentialSection({
   const [useEx, setUseEx] = useState(false)
   const [useExLoading, setUseExLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [newAccount, setNewAccount] = useState('')
+  // The input is only rendered once a credential exists; never apply a name the
+  // user cannot see.
+  const saveAs = configured ? newAccount || undefined : undefined
+
+  const afterSave = useCallback(() => {
+    setNewAccount('')
+    onDeleted()
+  }, [onDeleted])
 
   const isEh = plugin.source_id === 'ehentai'
   const isPixiv = plugin.source_id === 'pixiv'
@@ -595,27 +637,33 @@ function PluginCredentialSection({
   if (currentFlow && isEh && currentFlow.flow_type === 'fields') {
     specialFlow = (
       <EhFieldsFlow
+        saveAs={saveAs}
         onSaved={(account) => {
-          setEhAccount(account)
-          onDeleted() // re-check configured status via parent refresh
+          // A named account is not made active by the backend, so the
+          // "current account" panel must keep showing the active one.
+          if (!saveAs) setEhAccount(account)
+          afterSave() // re-check configured status via parent refresh
         }}
       />
     )
   } else if (currentFlow && isPixiv) {
     const onPixivSaved = (username: string) => {
-      setPixivUsername(username)
-      onDeleted()
+      if (!saveAs) setPixivUsername(username)
+      afterSave()
     }
-    if (currentFlow.flow_type === 'oauth') specialFlow = <PixivOAuthFlow onSaved={onPixivSaved} />
+    if (currentFlow.flow_type === 'oauth')
+      specialFlow = <PixivOAuthFlow saveAs={saveAs} onSaved={onPixivSaved} />
     else if (currentFlow.flow_type === 'fields')
-      specialFlow = <PixivTokenFlow onSaved={onPixivSaved} />
+      specialFlow = <PixivTokenFlow saveAs={saveAs} onSaved={onPixivSaved} />
     else if (currentFlow.flow_type === 'login')
-      specialFlow = <PixivCookieFlow onSaved={onPixivSaved} />
+      specialFlow = <PixivCookieFlow saveAs={saveAs} onSaved={onPixivSaved} />
   }
 
   // A non-fields flow with no bespoke component has no UI to offer.
   if (!specialFlow && currentFlow && currentFlow.fields.length === 0) {
-    specialFlow = <p className="text-xs text-vault-text-muted">{t('credentials.flowUnavailable')}</p>
+    specialFlow = (
+      <p className="text-xs text-vault-text-muted">{t('credentials.flowUnavailable')}</p>
+    )
   }
 
   return (
@@ -653,6 +701,16 @@ function PluginCredentialSection({
             />
           )}
 
+          {configured && (
+            <CredentialAccounts
+              source={plugin.source_id}
+              refreshKey={accountsRefreshKey}
+              onChanged={onDeleted}
+              newAccount={newAccount}
+              onNewAccountChange={setNewAccount}
+            />
+          )}
+
           {/* Flow tabs (only if multiple flows) */}
           {flows.length > 1 && (
             <div className="flex mt-4 bg-vault-input border border-vault-border rounded overflow-hidden">
@@ -673,7 +731,12 @@ function PluginCredentialSection({
           {currentFlow && (
             <div className="mt-4">
               {specialFlow ?? (
-                <GenericFieldsFlow plugin={plugin} flow={currentFlow} onSaved={onDeleted} />
+                <GenericFieldsFlow
+                  plugin={plugin}
+                  flow={currentFlow}
+                  onSaved={afterSave}
+                  saveAs={saveAs}
+                />
               )}
             </div>
           )}
@@ -687,11 +750,13 @@ function PluginCredentialSection({
           )}
 
           {/* Delete button */}
-          {configured && (
-            <button
+          {configured && accountCount <= 1 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-4 border border-red-500/30 bg-red-600/20 text-red-400 hover:bg-red-600/30"
               onClick={handleDelete}
               disabled={deleting}
-              className="mt-4 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 flex items-center gap-1.5"
             >
               <Trash2 size={13} />
               {deleting
@@ -701,7 +766,7 @@ function PluginCredentialSection({
                   : isPixiv
                     ? t('settings.clearToken')
                     : t('credentials.clearCredential')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -715,10 +780,14 @@ function SiteCredentialSection({
   credentials,
   credLoading,
   onCredentialsChange,
+  onRefresh,
+  accountsRefreshKey,
 }: {
   credentials: Credentials | null
   credLoading: boolean
   onCredentialsChange: (next: Credentials) => void
+  onRefresh: () => void
+  accountsRefreshKey: number
 }) {
   const [isOpen, setIsOpen] = useState(false)
 
@@ -735,12 +804,28 @@ function SiteCredentialSection({
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [clearingSource, setClearingSource] = useState<string | null>(null)
+  const [accountName, setAccountName] = useState('')
+  const accountInputRef = useRef<HTMLInputElement>(null)
+  const [expandedSource, setExpandedSource] = useState<string | null>(null)
 
   const genericSites = credentials
     ? Object.entries(credentials).filter(
-        ([source]) => source !== 'ehentai' && source !== 'pixiv' && credentials[source].configured,
+        ([source]) => !NON_GENERIC_SOURCES.has(source) && credentials[source].configured,
       )
     : []
+
+  // "Add account" on a site's panel: aim the form below at that site, so the
+  // user does not have to retype which site the new account belongs to.
+  const handleAddAccountTo = (source: string) => {
+    setSourceName(source)
+    setUrlInput('')
+    setDetectedName(null)
+    accountInputRef.current?.focus()
+    accountInputRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  }
+
+  const targetSource = sourceName.trim().toLowerCase()
+  const existingTarget = credentials?.[targetSource]?.configured ? credentials[targetSource] : null
 
   const handleDetect = async () => {
     if (!urlInput.trim()) return
@@ -770,17 +855,20 @@ function SiteCredentialSection({
     setSaving(true)
     try {
       if (activeTab === 'cookies') {
-        await api.settings.setSiteCredential(source, { cookies: cookiesText.trim() })
+        await api.settings.setSiteCredential(source, {
+          cookies: cookiesText.trim(),
+          account: accountName || undefined,
+        })
       } else {
         await api.settings.setSiteCredential(source, {
           username: username.trim(),
           password: password.trim() || undefined,
+          account: accountName || undefined,
         })
       }
       toast.success(t('credentials.savedSite', { source }))
-      if (credentials) {
-        onCredentialsChange({ ...credentials, [source]: { configured: true } })
-      }
+      onRefresh()
+      setAccountName('')
       // Reset form
       setSourceName('')
       setCookiesText('')
@@ -806,6 +894,7 @@ function SiteCredentialSection({
         delete next[source]
         onCredentialsChange(next)
       }
+      onRefresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('credentials.clearFailed'))
     } finally {
@@ -852,25 +941,73 @@ function SiteCredentialSection({
                 {t('credentials.configuredSites')}
               </p>
               <div className="space-y-1.5">
-                {genericSites.map(([source]) => (
-                  <div
-                    key={source}
-                    className="flex items-center justify-between bg-vault-input border border-vault-border rounded-lg px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                      <span className="text-sm text-vault-text font-medium">{source}</span>
-                    </div>
-                    <button
-                      onClick={() => handleClear(source)}
-                      disabled={clearingSource === source}
-                      className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
-                      aria-label={t('credentials.clearConfirm', { source })}
+                {genericSites.map(([source, status]) => {
+                  const expanded = expandedSource === source
+                  const count = status.accounts ?? 1
+                  return (
+                    // One card per site: the account panel opens inside it, so
+                    // it is never a free-floating block under the list.
+                    <div
+                      key={source}
+                      data-site={source}
+                      className={`rounded-lg border overflow-hidden transition-colors ${expanded ? 'border-vault-accent/60' : 'border-vault-border'}`}
                     >
-                      {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex items-center justify-between bg-vault-input px-3 py-2">
+                        <button
+                          onClick={() => setExpandedSource(expanded ? null : source)}
+                          aria-label={t('credentials.showAccounts', { source })}
+                          aria-expanded={expanded}
+                          className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                        >
+                          {expanded ? (
+                            <ChevronUp size={14} className="text-vault-text-muted shrink-0" />
+                          ) : (
+                            <ChevronDown size={14} className="text-vault-text-muted shrink-0" />
+                          )}
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                          <span className="text-sm text-vault-text font-medium truncate">
+                            {source}
+                          </span>
+                          {status.account && (
+                            <span className="text-xs text-vault-text-muted truncate">
+                              {status.account}
+                            </span>
+                          )}
+                          {count > 1 && (
+                            <span className="text-xs text-vault-text-muted bg-vault-card border border-vault-border rounded px-1.5 py-0.5 shrink-0">
+                              {t('credentials.accountCount', { count: String(count) })}
+                            </span>
+                          )}
+                        </button>
+                        {count <= 1 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-400/70 hover:text-red-400"
+                            onClick={() => handleClear(source)}
+                            disabled={clearingSource === source}
+
+                            aria-label={t('credentials.clearConfirm', { source })}
+                          >
+                            {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
+                          </Button>
+                        )}
+                      </div>
+                      {expanded && (
+                        <div className="border-t border-vault-border px-3 py-3">
+                          <CredentialAccounts
+                            source={source}
+                            refreshKey={accountsRefreshKey}
+                            onChanged={onRefresh}
+                            title={t('credentials.accountsOf', { source })}
+                            onAddAccount={() => handleAddAccountTo(source)}
+                            addAccountLabel={t('credentials.addAccountTo', { source })}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -901,13 +1038,14 @@ function SiteCredentialSection({
                     placeholder={t('credentials.urlPlaceholder')}
                     className={`${inputClass} flex-1`}
                   />
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="md"
                     onClick={handleDetect}
                     disabled={detecting || !urlInput.trim()}
-                    className={btnSecondary}
                   >
                     {detecting ? t('credentials.detecting') : <Search size={16} />}
-                  </button>
+                  </Button>
                 </div>
                 {detectedName && (
                   <p className="text-xs text-green-400 mt-1">
@@ -930,6 +1068,37 @@ function SiteCredentialSection({
                 />
                 <p className="text-xs text-vault-text-muted mt-1">
                   {t('credentials.orTypeManually')}
+                </p>
+                {existingTarget && (
+                  <p className="text-xs text-vault-accent mt-1">
+                    {t('credentials.existingSiteHint', {
+                      source: targetSource,
+                      account: existingTarget.account ?? '',
+                    })}
+                  </p>
+                )}
+              </div>
+
+              {/* Account name (optional) */}
+              <div>
+                <label
+                  htmlFor="site-credential-account"
+                  className="block text-xs text-vault-text-muted mb-1"
+                >
+                  {t('credentials.newAccountName')}
+                </label>
+                <input
+                  id="site-credential-account"
+                  ref={accountInputRef}
+                  type="text"
+                  value={accountName}
+                  onChange={(e) => setAccountName(sanitizeAccountName(e.target.value))}
+                  placeholder={t('credentials.newAccountPlaceholder')}
+                  autoComplete="off"
+                  className={inputClass}
+                />
+                <p className="text-xs text-vault-text-muted mt-1">
+                  {t('credentials.newAccountHint')}
                 </p>
               </div>
 
@@ -992,9 +1161,14 @@ function SiteCredentialSection({
                 </div>
               )}
 
-              <button onClick={handleSave} disabled={saving || !canSave} className={btnPrimary}>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={handleSave}
+                disabled={saving || !canSave}
+              >
                 {saving ? t('credentials.saving') : t('credentials.save')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1070,13 +1244,21 @@ function SauceNaoSection({
               />
               <p className="text-xs text-vault-text-muted mt-1">{t('saucenao.apiKeyHint')}</p>
             </div>
-            <button onClick={handleSave} disabled={saving || !apiKey.trim()} className={btnPrimary}>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={handleSave}
+              disabled={saving || !apiKey.trim()}
+            >
               {saving ? t('credentials.saving') : t('saucenao.saveApiKey')}
-            </button>
+            </Button>
           </div>
 
           {configured && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-4 border border-red-500/30 bg-red-600/20 text-red-400 hover:bg-red-600/30"
               onClick={async () => {
                 try {
                   await api.settings.deleteCredential('saucenao')
@@ -1086,11 +1268,10 @@ function SauceNaoSection({
                   toast.error(t('credentials.clearFailed'))
                 }
               }}
-              className="mt-4 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors flex items-center gap-1.5"
             >
               <Trash2 size={13} />
               {t('saucenao.clearApiKey')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -1117,6 +1298,8 @@ export default function CredentialsPage() {
   const [pluginsLoading, setPluginsLoading] = useState(true)
   const [credentials, setCredentials] = useState<Credentials | null>(null)
   const [credLoading, setCredLoading] = useState(true)
+  // Shared by every account list so a source shown in two sections stays in sync.
+  const [accountsRefresh, setAccountsRefresh] = useState(0)
 
   // Track which plugin section is expanded (by source_id)
   const [openSection, setOpenSection] = useState<string | null>('ehentai')
@@ -1143,6 +1326,7 @@ export default function CredentialsPage() {
 
   // Refresh credentials after a save/delete action
   const refreshCredentials = useCallback(() => {
+    setAccountsRefresh((n) => n + 1)
     api.settings
       .getCredentials()
       .then(setCredentials)
@@ -1155,9 +1339,11 @@ export default function CredentialsPage() {
 
   if (profileLoading || !profile || !isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
-      </div>
+      <PageContainer variant="secondary">
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
+        </div>
+      </PageContainer>
     )
   }
 
@@ -1165,11 +1351,11 @@ export default function CredentialsPage() {
   const pluginSections = plugins.filter((p) => p.source_id !== 'gallery_dl')
 
   return (
-    <div className="max-w-2xl">
-      <div className="flex items-center gap-3 mb-6">
-        <Key size={22} className="text-vault-accent" />
-        <h1 className="text-2xl font-bold text-vault-text">{t('credentials.title')}</h1>
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('credentials.title')}
+        icon={<Key size={22} className="text-vault-accent" />}
+      />
 
       {pluginsLoading ? (
         <div className="text-sm text-vault-text-muted">{t('common.loading')}</div>
@@ -1184,6 +1370,8 @@ export default function CredentialsPage() {
               onToggle={() => toggleSection(plugin.source_id)}
               configured={credentials?.[plugin.source_id]?.configured ?? false}
               onDeleted={refreshCredentials}
+              accountCount={credentials?.[plugin.source_id]?.accounts ?? 1}
+              accountsRefreshKey={accountsRefresh}
             />
           ))}
 
@@ -1200,9 +1388,11 @@ export default function CredentialsPage() {
             credentials={credentials}
             credLoading={credLoading}
             onCredentialsChange={setCredentials}
+            onRefresh={refreshCredentials}
+            accountsRefreshKey={accountsRefresh}
           />
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

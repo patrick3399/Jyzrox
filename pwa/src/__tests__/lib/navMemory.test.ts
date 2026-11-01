@@ -7,6 +7,8 @@ import {
   clearTabMemory,
   markTabRestore,
   consumeTabRestore,
+  isTabRestoreTarget,
+  releaseTabRestore,
 } from '@/lib/navMemory'
 
 const ROOTS = ['/e-hentai', '/pixiv', '/library', '/queue']
@@ -97,5 +99,41 @@ describe('markTabRestore / consumeTabRestore', () => {
 
   it('returns false when nothing was marked', () => {
     expect(consumeTabRestore('/e-hentai/123/abc?fav=1')).toBe(false)
+  })
+})
+
+// Regression: only smartBack consumed the flag. Leaving the restored page by a
+// link, the browser back button or any other route left it armed, so a later
+// ordinary arrival at the same URL made back climb to the list (replace)
+// instead of walking history.
+describe('isTabRestoreTarget / releaseTabRestore', () => {
+  beforeEach(() => sessionStorage.clear())
+
+  it('isTabRestoreTarget reports the armed URL without consuming it', () => {
+    markTabRestore('/e-hentai/123/abc?fav=1')
+    expect(isTabRestoreTarget('/e-hentai/123/abc?fav=1')).toBe(true)
+    expect(isTabRestoreTarget('/e-hentai/123/abc?fav=1')).toBe(true)
+    expect(isTabRestoreTarget('/e-hentai/999/zzz')).toBe(false)
+  })
+
+  it('releases a flag armed for the URL that was left, so a later arrival does not climb', () => {
+    markTabRestore('/e-hentai/123/abc?fav=1')
+
+    releaseTabRestore('/e-hentai/123/abc?fav=1')
+
+    expect(consumeTabRestore('/e-hentai/123/abc?fav=1')).toBe(false)
+  })
+
+  it('keeps a flag armed for a different URL than the one that was left', () => {
+    markTabRestore('/pixiv/user/9')
+
+    releaseTabRestore('/e-hentai/123/abc?fav=1')
+
+    expect(consumeTabRestore('/pixiv/user/9')).toBe(true)
+  })
+
+  it('does not throw when nothing is armed', () => {
+    expect(() => releaseTabRestore('/e-hentai/123/abc')).not.toThrow()
+    expect(isTabRestoreTarget('/e-hentai/123/abc')).toBe(false)
   })
 })

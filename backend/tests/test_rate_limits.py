@@ -435,7 +435,19 @@ class TestSetRateLimitOverride:
         assert resp.status_code == 200
         data = resp.json()
         assert data["override_active"] is False
-        mock_redis.delete.assert_awaited_once_with("rate_limit:override:unlocked")
+        mock_redis.delete.assert_any_await("rate_limit:override:unlocked")
+
+    @pytest.mark.parametrize("unlocked", [True, False])
+    async def test_set_override_invalidates_dashboard_snapshot(self, client, mock_redis, unlocked):
+        """The dashboard reads a 3s cached snapshot; without dropping it the toggle shows the old boost state."""
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock(return_value=1)
+
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.post("/api/settings/rate-limits/override", json={"unlocked": unlocked})
+
+        assert resp.status_code == 200
+        mock_redis.delete.assert_any_await("dashboard:snapshot")
 
     async def test_set_override_requires_admin_unauthenticated_returns_401(self, unauthed_client):
         """Unauthenticated request should return 401."""

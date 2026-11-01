@@ -393,3 +393,16 @@ describe('useIllustActions — handleBookmark() guard', () => {
     expect(result.current.bookmarking).toBe(false)
   })
 })
+
+describe('useIllustActions — illust prop changes', () => {
+  it('test_useIllustActions_bookmarked_followsIllustPropChange_afterMount', () => {
+    const { result, rerender } = renderHook(({ illust }) => useIllustActions(illust), {
+      initialProps: { illust: makeIllust({ is_bookmarked: false }) },
+    })
+    expect(result.current.bookmarked).toBe(false)
+
+    rerender({ illust: makeIllust({ is_bookmarked: true }) })
+
+    expect(result.current.bookmarked).toBe(true)
+  })
+})

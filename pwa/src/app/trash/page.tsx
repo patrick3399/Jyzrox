@@ -11,6 +11,9 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { AppImage } from '@/components/AppImage'
 import type { Gallery } from '@/lib/types'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Button } from '@/components/ui/button'
 
 function daysRemaining(deletedAt: string, retentionDays: number = 30): number {
   const deleted = new Date(deletedAt)
@@ -91,24 +94,27 @@ export default function TrashPage() {
   const galleries = data?.galleries ?? []
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
-      <div className="flex items-center justify-between gap-2 mb-6">
-        <div className="flex items-center gap-3">
-          <Trash2 size={24} className="text-vault-text-muted" />
-          <h1 className="text-xl font-bold text-vault-text">{t('trash.title')}</h1>
-          {data && <span className="text-sm text-vault-text-muted">({data.total})</span>}
-        </div>
-        {trashEnabled && galleries.length > 0 && (
-          <button
-            onClick={handleEmptyTrash}
-            disabled={actionInProgress === 'empty'}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
-          >
-            <AlertTriangle size={14} />
-            {t('trash.emptyTrash')}
-          </button>
-        )}
-      </div>
+    <PageContainer variant="secondary">
+      <PageHeader
+        title={t('trash.title')}
+        icon={<Trash2 size={24} className="text-vault-text-muted" />}
+        meta={data ? `(${data.total})` : undefined}
+        actions={
+          trashEnabled &&
+          galleries.length > 0 && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleEmptyTrash}
+              disabled={actionInProgress === 'empty'}
+              className="text-xs"
+            >
+              <AlertTriangle size={14} />
+              {t('trash.emptyTrash')}
+            </Button>
+          )
+        }
+      />
 
       {isLoading && (
         <div className="flex justify-center py-12">
@@ -163,27 +169,31 @@ export default function TrashPage() {
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <button
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={() => handleRestore(g)}
                   disabled={actionInProgress === `restore-${g.id}`}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium bg-green-600 hover:bg-green-700 text-white transition-colors disabled:opacity-50"
+                  className="gap-1 text-xs"
                 >
                   <RotateCcw size={12} />
                   {t('trash.restore')}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
                   onClick={() => handlePermanentDelete(g)}
                   disabled={actionInProgress === `delete-${g.id}`}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+                  className="gap-1 text-xs"
                 >
                   <Trash2 size={12} />
                   {t('trash.permanentDelete')}
-                </button>
+                </Button>
               </div>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

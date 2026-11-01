@@ -8,7 +8,7 @@ Filesystem operations are mocked via patch on resolve_blob_path / thumb_dir.
 """
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -84,6 +84,7 @@ def _make_gallery(
     g.library_path = library_path
     g.deleted_at = deleted_at
     g.last_scanned_at = None
+    g.source_path = None
     return g
 
 
@@ -156,6 +157,17 @@ class TestLibraryDiscoveryTrashedGuard:
 
 class TestLibraryDiscoveryCategory:
     """{category} is derived from the path on insert only (first-import-only)."""
+
+    @pytest.fixture(autouse=True)
+    def _registry(self, monkeypatch):
+        import worker.scan as scan
+
+        async def _resolve(_session, raw):
+            from core.local_category_plan import normalize_category
+
+            return normalize_category(raw)  # registry stubbed as "everything registered"
+
+        monkeypatch.setattr(scan, "resolve_category", _resolve)
 
     @staticmethod
     def _run(tmp_path, pattern, rel_parts):
@@ -266,6 +278,23 @@ class TestRescanLibraryJob:
         assert result["total"] == 0
         assert result["status"] == "done"
 
+    async def test_rescan_yields_to_the_event_loop_between_galleries(self):
+        """The per-gallery checks are synchronous filesystem calls; each gallery must yield once."""
+        from worker.scan import rescan_library_job
+
+        galleries = [_make_gallery(gallery_id=gid, pages=0) for gid in (10, 11, 12)]
+        session = _make_session(gallery_ids=[10, 11, 12], galleries=galleries, images=[])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("core.watcher.watcher_instance", None),
+            patch("worker.scan.asyncio.sleep", new_callable=AsyncMock) as sleep,
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["total"] == 3
+        assert [call.args for call in sleep.await_args_list] == [(0,), (0,), (0,)]
+
     async def test_missing_blob_files_removes_image_records(self):
         """Images whose blob files are missing on disk should be deleted."""
         from worker.scan import rescan_library_job
@@ -316,6 +345,118 @@ class TestRescanLibraryJob:
         all_executed = session.execute.call_args_list
         delete_calls = [c for c in all_executed if c.args and "DELETE" in str(c.args[0]).upper()]
         assert delete_calls, "Expected a batch DELETE execute call for missing images"
+
+    async def test_missing_file_decrements_blob_refs_before_gallery_rows_are_flushed(self):
+        """Lock order must be blobs → galleries, the same as the importer.
+
+        The loop leaves gallery updates (pages, last_scanned_at) pending. If the
+        ref_count UPDATE autoflushes them first, this job locks gallery rows
+        before blob rows. An import that holds a blob lock and then updates its
+        own gallery row deadlocks with that (prod, 2026-10-07 23:24:47:
+        "UPDATE blobs SET ref_count" vs "UPDATE galleries SET pages").
+        """
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="deadbeef")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        gallery = _make_gallery(gallery_id=10, pages=1)
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        autoflush_suspended = {"now": False}
+
+        class _NoAutoflush:
+            def __enter__(self):
+                autoflush_suspended["now"] = True
+
+            def __exit__(self, *exc):
+                autoflush_suspended["now"] = False
+                return False
+
+        session.no_autoflush = _NoAutoflush()
+        suspended_during_decrement: list[bool] = []
+
+        async def record_decrement(*_args, **_kwargs):
+            suspended_during_decrement.append(autoflush_suspended["now"])
+
+        missing_path = MagicMock(spec=Path)
+        missing_path.exists.return_value = False
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan.decrement_ref_count", side_effect=record_decrement),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        assert suspended_during_decrement == [True], (
+            "blob ref_count updates must run with autoflush suspended so pending "
+            "gallery updates are not sent (and gallery rows locked) first"
+        )
+
+    async def test_vanished_link_gallery_update_is_flushed_before_its_row_is_deleted(self):
+        """Pending gallery updates must be flushed before the raw DELETEs.
+
+        The raw `DELETE FROM galleries` is invisible to the ORM and textual
+        statements do not autoflush. With autoflush suspended around the
+        ref_count updates, `gallery.pages = 0` stayed pending until commit and
+        the UPDATE then matched no row (prod, 2026-10-07 23:42:52:
+        "UPDATE statement on table 'galleries' expected to update 1 row(s); 0
+        were matched"). The flush must also come after the blob updates so the
+        lock order stays blobs → galleries.
+        """
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="deadbeef", storage="external")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        img.external_path = "/mnt/lib/gone/001.jpg"
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1)
+
+        order: list[str] = []
+        ids_res = MagicMock()
+        ids_res.scalars.return_value.all.return_value = [10]
+        imgs_res = MagicMock()
+        imgs_res.scalars.return_value.all.return_value = [img]
+        gals_res = MagicMock()
+        gals_res.scalars.return_value.all.return_value = [gallery]
+        scripted = [ids_res, imgs_res, gals_res]
+
+        async def execute(statement, *_args, **_kwargs):
+            sql = " ".join(str(statement).split()).upper()
+            if sql.startswith("DELETE FROM"):
+                order.append(" ".join(sql.split()[:3]))
+            return scripted.pop(0) if scripted else MagicMock()
+
+        async def flush():
+            order.append("FLUSH")
+
+        async def decrement(*_args, **_kwargs):
+            order.append("DECREMENT")
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=execute)
+        session.flush = AsyncMock(side_effect=flush)
+        session.commit = AsyncMock()
+        session.no_autoflush = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        missing_path = MagicMock(spec=Path)
+        missing_path.exists.return_value = False
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan.decrement_ref_count", side_effect=decrement),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        assert order == ["DECREMENT", "FLUSH", "DELETE FROM IMAGES", "DELETE FROM GALLERIES"]
 
     async def test_gallery_with_zero_pages_marked_missing(self):
         """Gallery with 0 remaining pages (non-link mode) → download_status='missing'."""
@@ -543,6 +684,164 @@ class TestRescanLibraryJob:
             await rescan_library_job({"redis": r})
 
         mock_enqueue.assert_not_awaited()
+
+    async def test_missing_library_root_does_not_remove_link_gallery_images(self, tmp_path):
+        """An unmounted root makes every link file look deleted; nothing may be removed."""
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="deadbeef", storage="external")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        img.external_path = str(tmp_path / "unmounted" / "g" / "001.jpg")
+        gallery = _make_gallery(
+            gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(tmp_path / "unmounted")
+        )
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        decrement.assert_not_awaited()
+        statements = [str(call.args[0]).upper() for call in session.execute.call_args_list if call.args]
+        assert not any(statement.lstrip().startswith("DELETE") for statement in statements), statements
+        assert gallery.pages == 1
+
+    async def test_vanished_link_source_holds_gallery_instead_of_deleting_it(self, tmp_path):
+        """A folder renamed while nobody watched looks deleted; identity must survive it."""
+        from worker.scan import rescan_library_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "other").mkdir()
+        blob = _make_blob(sha="deadbeef", storage="external")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        img.external_path = str(root / "renamed-away" / "001.jpg")
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(root))
+        gallery.source_path = str(root / "renamed-away")
+        gallery.source_dir_mtime_ns = 123
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        decrement.assert_not_awaited()
+        statements = [str(call.args[0]).upper() for call in session.execute.call_args_list if call.args]
+        assert not any(statement.lstrip().startswith("DELETE") for statement in statements), statements
+        assert gallery.pages == 1
+        assert gallery.download_status == "missing"
+        assert gallery.deleted_at is None
+        assert gallery.last_scanned_at is not None
+        # Armed mtime would skip the diff that restores the gallery when the folder returns.
+        assert gallery.source_dir_mtime_ns is None
+
+    async def test_vanished_link_source_within_grace_stays_held(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+
+        from worker.scan import VANISHED_LINK_GALLERY_GRACE, rescan_library_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "other").mkdir()
+        img = _make_image(image_id=1, gallery_id=10, blob=_make_blob(sha="deadbeef", storage="external"))
+        img.external_path = str(root / "gone" / "001.jpg")
+        gallery = _make_gallery(
+            gallery_id=10,
+            source="local",
+            import_mode="link",
+            pages=1,
+            library_path=str(root),
+            download_status="missing",
+        )
+        gallery.source_path = str(root / "gone")
+        noticed_at = datetime.now(UTC) - VANISHED_LINK_GALLERY_GRACE + timedelta(hours=1)
+        gallery.last_scanned_at = noticed_at
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock),
+        ):
+            await rescan_library_job({"redis": _make_redis()})
+
+        assert gallery.deleted_at is None
+        # The clock must not restart on every scan, or the grace period never ends.
+        assert gallery.last_scanned_at == noticed_at
+
+    async def test_vanished_link_source_past_grace_moves_gallery_to_trash(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+
+        from worker.scan import VANISHED_LINK_GALLERY_GRACE, rescan_library_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "other").mkdir()
+        img = _make_image(image_id=1, gallery_id=10, blob=_make_blob(sha="deadbeef", storage="external"))
+        img.external_path = str(root / "gone" / "001.jpg")
+        gallery = _make_gallery(
+            gallery_id=10,
+            source="local",
+            import_mode="link",
+            pages=1,
+            library_path=str(root),
+            download_status="missing",
+        )
+        gallery.source_path = str(root / "gone")
+        gallery.last_scanned_at = datetime.now(UTC) - VANISHED_LINK_GALLERY_GRACE - timedelta(hours=1)
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock) as invalidate,
+        ):
+            await rescan_library_job({"redis": _make_redis()})
+
+        assert gallery.deleted_at is not None
+        decrement.assert_not_awaited()
+        statements = [str(call.args[0]).upper() for call in session.execute.call_args_list if call.args]
+        assert not any(statement.lstrip().startswith("DELETE") for statement in statements), statements
+        invalidate.assert_awaited_once()
+
+    async def test_link_gallery_with_live_page_outside_vanished_source_is_not_held(self, tmp_path):
+        """A merged gallery still has readable pages elsewhere, so it is not gone."""
+        from worker.scan import rescan_library_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        live = root / "other" / "001.jpg"
+        live.parent.mkdir()
+        live.write_bytes(b"jpeg")
+        img = _make_image(image_id=1, gallery_id=10, blob=_make_blob(sha="deadbeef", storage="external"))
+        img.external_path = str(live)
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(root))
+        gallery.source_path = str(root / "gone")
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan._has_thumb_160", return_value=True),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            await rescan_library_job({"redis": _make_redis()})
+
+        assert gallery.download_status == "complete"
 
 
 # ---------------------------------------------------------------------------
@@ -877,6 +1176,28 @@ class TestRescanGalleryJob:
 
         assert gallery.download_status == "missing"
 
+    async def test_link_gallery_with_live_source_dir_delegates_to_link_sync(self, tmp_path):
+        """A link gallery must use the fingerprint sync instead of re-hashing its folder."""
+        from services.link_sync import LinkSyncResult
+        from worker.scan import rescan_gallery_job
+
+        source_dir = tmp_path / "g"
+        source_dir.mkdir()
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", library_path=str(tmp_path))
+        gallery.source_path = str(source_dir)
+        session = _make_session(gallery_get_result=gallery)
+        sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=2, removed=1, pages=5))
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.sync_link_gallery", sync, create=True),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, 10)
+
+        sync.assert_awaited_once_with(10, redis=ANY, force=True)
+        assert result == {"status": "done", "gallery_id": 10, "removed": 1, "added": 2, "pages": 5}
+        session.execute.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # TestAutoDiscoverJob
@@ -1013,7 +1334,10 @@ class TestAutoDiscoverJob:
             insert_res = MagicMock()
             insert_res.scalar_one_or_none.return_value = 99
 
-            session.execute = AsyncMock(side_effect=[library_paths_res, existing_res, insert_res])
+            # _vanished_link_source_paths: no link gallery has lost its folder
+            vanished_res = MagicMock()
+            vanished_res.all.return_value = []
+            session.execute = AsyncMock(side_effect=[library_paths_res, existing_res, vanished_res, insert_res])
 
             with (
                 patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
@@ -1091,6 +1415,12 @@ class TestScheduledScanJob:
             patch("worker.scan._cron_record", new_callable=AsyncMock),
             patch("worker.scan.auto_discover_job", auto_discover_mock),
             patch("worker.scan.rescan_library_job", rescan_mock),
+            patch(
+                "worker.scan.sync_all_link_galleries",
+                new_callable=AsyncMock,
+                return_value={"checked": 0, "changed": 0},
+                create=True,
+            ),
         ):
             result = await scheduled_scan_job({"redis": r}, force=True)
 
@@ -1113,6 +1443,12 @@ class TestScheduledScanJob:
             patch("worker.scan._cron_record", new_callable=AsyncMock),
             patch("worker.scan.auto_discover_job", auto_discover_mock),
             patch("worker.scan.rescan_library_job", rescan_mock),
+            patch(
+                "worker.scan.sync_all_link_galleries",
+                new_callable=AsyncMock,
+                return_value={"checked": 0, "changed": 0},
+                create=True,
+            ),
         ):
             result = await scheduled_scan_job({"redis": r})
 
@@ -1133,6 +1469,12 @@ class TestScheduledScanJob:
             patch("worker.scan.auto_discover_job", new_callable=AsyncMock, return_value={"discovered": 0}),
             patch(
                 "worker.scan.rescan_library_job", new_callable=AsyncMock, return_value={"status": "done", "total": 0}
+            ),
+            patch(
+                "worker.scan.sync_all_link_galleries",
+                new_callable=AsyncMock,
+                return_value={"checked": 0, "changed": 0},
+                create=True,
             ),
         ):
             await scheduled_scan_job({"redis": r})
@@ -1263,3 +1605,303 @@ class TestRescanLibraryJobDeletedAtFilter:
         first_call = session.execute.call_args_list[0]
         stmt_str = str(first_call.args[0]).lower()
         assert "deleted_at" in stmt_str, "rescan_library_job must filter trashed galleries via deleted_at IS NULL"
+
+
+class TestRescanLibraryPathJob:
+    """Tests for rescan_library_path_job(ctx, library_path)."""
+
+    @staticmethod
+    def _session() -> AsyncMock:
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        relevant = MagicMock()
+        relevant.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(return_value=relevant)
+        return session
+
+    async def _run(self, tmp_path, statuses: dict[str, str | None]):
+        from worker.scan import _ImportRequest, _LibrarySpec, rescan_library_path_job
+
+        for name in statuses:
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "001.jpg").write_bytes(b"data")
+
+        async def discover(_session, _spec, current):
+            return _ImportRequest(gallery_id=7, source_dir=str(current), mode="link")
+
+        async def existing_status(_session, rel_path):
+            return statuses[rel_path]
+
+        with (
+            patch(
+                "worker.scan._get_library_specs",
+                new_callable=AsyncMock,
+                return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
+            ),
+            patch(
+                "worker.scan._existing_local_status",
+                new_callable=AsyncMock,
+                side_effect=existing_status,
+                create=True,
+            ),
+            patch(
+                "worker.scan._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover
+            ) as discover_mock,
+            patch("worker.scan.AsyncSessionLocal", return_value=self._session()),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
+        ):
+            result = await rescan_library_path_job({"redis": _make_redis()}, str(tmp_path))
+
+        discovered = sorted(call.args[2].name for call in discover_mock.await_args_list)
+        imported = sorted(
+            Path(call.kwargs["source_dir"]).name
+            for call in enqueue.await_args_list
+            if call.args[0] == "local_import_job"
+        )
+        return result, discovered, imported
+
+    async def test_completed_existing_gallery_is_not_reimported(self, tmp_path):
+        """One new folder must not replay local_import_job for the whole library."""
+        result, discovered, imported = await self._run(tmp_path, {"existing": "complete", "brand_new": None})
+
+        assert result["status"] == "done"
+        assert discovered == ["brand_new"]
+        assert imported == ["brand_new"]
+
+    async def test_interrupted_import_is_still_replayed(self, tmp_path):
+        """A gallery stranded on `importing` (HR-019) keeps its recovery path."""
+        _, discovered, imported = await self._run(tmp_path, {"stranded": "importing"})
+
+        assert discovered == ["stranded"]
+        assert imported == ["stranded"]
+
+
+class TestSyncAllLinkGalleries:
+    async def test_every_live_link_gallery_gets_a_forced_sync(self):
+        from services.link_sync import LinkSyncResult
+        from worker.scan import sync_all_link_galleries
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        ids = MagicMock()
+        ids.scalars.return_value.all.return_value = [3, 4]
+        session.execute = AsyncMock(return_value=ids)
+        sync = AsyncMock(side_effect=[LinkSyncResult(status="synced", added=1), LinkSyncResult(status="unchanged")])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.sync_link_gallery", sync),
+        ):
+            result = await sync_all_link_galleries({"redis": _make_redis()})
+
+        assert result == {"checked": 2, "changed": 1}
+        assert [call.args[0] for call in sync.await_args_list] == [3, 4]
+        assert all(call.kwargs["force"] is True for call in sync.await_args_list)
+
+
+# ---------------------------------------------------------------------------
+# Pending link pages (no blob yet) must survive the rescans
+# ---------------------------------------------------------------------------
+
+
+def _make_pending_image(image_id: int, gallery_id: int, external_path: str | None, page_num: int = 1) -> MagicMock:
+    """A pending link page: registered from the folder, not hashed yet."""
+    img = _make_image(image_id=image_id, gallery_id=gallery_id, page_num=page_num, blob=None)
+    img.blob = None
+    img.blob_sha256 = None
+    img.external_path = external_path
+    return img
+
+
+def _executed_sql(session) -> list[str]:
+    return [" ".join(str(c.args[0]).split()).upper() for c in session.execute.call_args_list if c.args]
+
+
+class TestPendingLinkPagesSurviveRescans:
+    async def test_pending_page_with_existing_file_is_kept_by_library_rescan(self, tmp_path):
+        from worker.scan import rescan_library_job
+
+        root = tmp_path / "root"
+        folder = root / "g"
+        folder.mkdir(parents=True)
+        (folder / "001.jpg").write_bytes(b"jpeg")
+        img = _make_pending_image(1, 10, str(folder / "001.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(root))
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        decrement.assert_not_awaited()
+        statements = _executed_sql(session)
+        assert not any(s.startswith("DELETE") for s in statements), statements
+        assert gallery.pages == 1
+
+    async def test_pending_page_with_missing_file_is_removed_without_decrement(self, tmp_path):
+        from worker.scan import rescan_library_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "keep.txt").write_text("root is available")
+        img = _make_pending_image(1, 10, str(root / "g" / "gone.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="cas", pages=1, library_path=str(root))
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            result = await rescan_library_job({"redis": _make_redis()})
+
+        assert result["status"] == "done"
+        decrement.assert_not_awaited()
+        assert any(s.startswith("DELETE FROM IMAGES") for s in _executed_sql(session))
+        assert gallery.pages == 0
+
+    async def test_row_with_no_blob_and_no_external_path_is_still_an_orphan(self):
+        from worker.scan import rescan_library_job
+
+        img = _make_pending_image(1, 10, None)
+        gallery = _make_gallery(gallery_id=10, import_mode="cas", pages=1)
+        session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            await rescan_library_job({"redis": _make_redis()})
+
+        decrement.assert_not_awaited()
+        assert any(s.startswith("DELETE FROM IMAGES") for s in _executed_sql(session))
+
+    def _gallery_rescan_session(self, gallery, images, surviving):
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=gallery)
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.delete = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        def _res(rows):
+            res = MagicMock()
+            res.scalars.return_value.all.return_value = rows
+            return res
+
+        session.execute = AsyncMock(
+            side_effect=[_res([]), _res(images), _res(surviving), _res(surviving)] + [MagicMock()] * 6
+        )
+        return session
+
+    async def test_pending_page_with_existing_file_is_kept_by_gallery_rescan(self, tmp_path):
+        from worker.scan import rescan_gallery_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "001.jpg").write_bytes(b"jpeg")
+        img = _make_pending_image(1, 10, str(root / "001.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(root))
+        gallery.source_path = str(tmp_path / "vanished-source")  # not a dir: legacy path
+        session = self._gallery_rescan_session(gallery, [img], [img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan.library_dir", return_value=tmp_path / "no-library-dir"),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
+
+        session.delete.assert_not_awaited()
+        decrement.assert_not_awaited()
+        assert result["removed"] == 0
+        assert result["pages"] == 1
+
+    async def test_pending_page_with_missing_file_is_removed_by_gallery_rescan_without_decrement(self, tmp_path):
+        from worker.scan import rescan_gallery_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        img = _make_pending_image(1, 10, str(root / "gone.jpg"))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="cas", pages=1)
+        session = self._gallery_rescan_session(gallery, [img], [])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan.library_dir", return_value=tmp_path / "no-library-dir"),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
+
+        session.delete.assert_awaited_with(img)
+        decrement.assert_not_awaited()
+        assert result["removed"] == 1
+
+    async def test_vanished_link_source_is_held_by_gallery_rescan(self, tmp_path):
+        """The watcher reaches this path when a folder's files are reported deleted."""
+        from worker.scan import rescan_gallery_job
+
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "other").mkdir()
+        blob = _make_blob(sha="deadbeef", storage="external")
+        img = _make_image(image_id=1, gallery_id=10, blob=blob)
+        img.external_path = str(root / "gone" / "001.jpg")
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(root))
+        gallery.source_path = str(root / "gone")
+        session = self._gallery_rescan_session(gallery, [img], [])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
+
+        assert result == {"status": "source_missing", "gallery_id": 10, "removed": 0, "added": 0, "pages": 1}
+        session.delete.assert_not_awaited()
+        decrement.assert_not_awaited()
+        assert gallery.download_status == "missing"
+        session.commit.assert_awaited()
+
+    async def test_legacy_gallery_rescan_does_not_register_a_pending_files_twice(self, tmp_path):
+        """A pending page has no sha to match on: the directory walk must
+        recognise its file by path or it would insert a duplicate page."""
+        from worker.scan import rescan_gallery_job
+
+        library = tmp_path / "library" / "local" / "g"
+        library.mkdir(parents=True)
+        real = tmp_path / "files" / "001.jpg"
+        real.parent.mkdir()
+        real.write_bytes(b"jpeg")
+        (library / "001.jpg").symlink_to(real)
+        img = _make_pending_image(1, 10, str(real))
+        gallery = _make_gallery(gallery_id=10, source="local", import_mode="link", pages=1, library_path=str(tmp_path))
+        gallery.source_path = str(tmp_path / "vanished-source")
+        session = self._gallery_rescan_session(gallery, [img], [img])
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.library_dir", return_value=library),
+            patch("worker.scan.store_blob", new_callable=AsyncMock) as store,
+            patch("worker.scan._sha256", side_effect=AssertionError("pending file must not be re-registered")),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
+
+        store.assert_not_awaited()
+        assert result["added"] == 0

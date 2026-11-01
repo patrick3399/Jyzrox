@@ -492,7 +492,7 @@ async def test_system_storage_returns_mounts_deduplicated_by_device(client):
         patch(
             "routers.system._get_real_mounts",
             return_value=[
-                ("Gallery Data", "/data/gallery"),
+                ("Gallery Data", "/data/download_temp"),
                 ("CAS (Content-Addressed)", "/data/cas"),
             ],
         ),
@@ -545,7 +545,7 @@ async def test_system_storage_shows_both_mounts_when_different_devices(client):
         patch(
             "routers.system._get_real_mounts",
             return_value=[
-                ("Gallery Data", "/data/gallery"),
+                ("Gallery Data", "/data/download_temp"),
                 ("CAS (Content-Addressed)", "/data/cas"),
             ],
         ),
@@ -565,7 +565,7 @@ async def test_system_storage_handles_oserror_gracefully(client):
         patch(
             "routers.system._get_real_mounts",
             return_value=[
-                ("Gallery Data", "/data/gallery"),
+                ("Gallery Data", "/data/download_temp"),
             ],
         ),
         patch("os.stat", side_effect=OSError("not found")),
@@ -591,7 +591,7 @@ async def test_system_storage_includes_external_mounts(client):
         patch(
             "routers.system._get_real_mounts",
             return_value=[
-                ("Gallery Data", "/data/gallery"),
+                ("Gallery Data", "/data/download_temp"),
                 ("CAS (Content-Addressed)", "/data/cas"),
                 ("nas1", "/mnt/nas1"),
             ],
@@ -617,12 +617,12 @@ async def test_system_storage_collapses_bind_mount_reporting_same_capacity_as_ro
     which listed the same storage twice under the bind mount's directory name.
     """
     devs = {
-        "/data/gallery": 1,
+        "/data/download_temp": 1,
         "/": 2,
         "/home/appuser/.config/gallery-dl": 3,
     }
     usages = {
-        "/data/gallery": (540_000_000_000, 265_000_000_000),
+        "/data/download_temp": (540_000_000_000, 265_000_000_000),
         "/": (135_000_000_000, 104_000_000_000),
         "/home/appuser/.config/gallery-dl": (135_000_000_000, 104_000_000_000),
     }
@@ -644,7 +644,7 @@ async def test_system_storage_collapses_bind_mount_reporting_same_capacity_as_ro
         patch(
             "routers.system._get_real_mounts",
             return_value=[
-                ("Gallery Data", "/data/gallery"),
+                ("Gallery Data", "/data/download_temp"),
                 ("Root Filesystem", "/"),
                 ("gallery-dl", "/home/appuser/.config/gallery-dl"),
             ],
@@ -673,7 +673,7 @@ async def test_system_storage_no_external_mounts_when_none_detected(client):
         patch(
             "routers.system._get_real_mounts",
             return_value=[
-                ("Gallery Data", "/data/gallery"),
+                ("Gallery Data", "/data/download_temp"),
                 ("CAS (Content-Addressed)", "/data/cas"),
             ],
         ),

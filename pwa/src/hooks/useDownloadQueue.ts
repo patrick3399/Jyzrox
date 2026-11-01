@@ -43,14 +43,30 @@ export function useDownloadJobs(params: JobListParams = {}) {
 export function useEnqueueDownload() {
   return useSWRMutation(
     'download/enqueue',
-    (_key: unknown, { arg }: { arg: { url: string; options?: Record<string, unknown> } }) =>
-      api.download.enqueue(arg.url, undefined, arg.options),
+    (
+      _key: unknown,
+      {
+        arg,
+      }: { arg: { url: string; options?: Record<string, unknown>; confirmSubscribed?: boolean } },
+    ) =>
+      arg.confirmSubscribed
+        ? api.download.enqueue(arg.url, undefined, arg.options, undefined, {
+            confirmSubscribed: true,
+          })
+        : api.download.enqueue(arg.url, undefined, arg.options),
   )
 }
 
 export function useCancelJob() {
   return useSWRMutation('download/cancel', (_key: unknown, { arg }: { arg: string }) =>
     api.download.cancelJob(arg),
+  )
+}
+
+/** Stop and keep: end a job early without deleting what it already imported. */
+export function useStopJob() {
+  return useSWRMutation('download/stop', (_key: unknown, { arg }: { arg: string }) =>
+    api.download.stopJob(arg),
   )
 }
 

@@ -115,7 +115,7 @@ class TestLibraryUrl:
         loads otherwise — ~half the shamakho library filenames carry a '#')."""
         from services.cas import library_url
 
-        ext_path = "/mnt/ssd-data/images/shamakho/2023-05-26-#健全彼女（線ラフver）.jpeg"
+        ext_path = "/mnt/jyzrox/images/shamakho/2023-05-26-#健全彼女（線ラフver）.jpeg"
         url = library_url(ext_path)
 
         assert "#" not in url
@@ -125,7 +125,7 @@ class TestLibraryUrl:
         """A '?' would otherwise be parsed as the query delimiter."""
         from services.cas import library_url
 
-        url = library_url("/mnt/ssd-data/images/foo/what?.jpeg")
+        url = library_url("/mnt/jyzrox/images/foo/what?.jpeg")
 
         assert "?" not in url
         assert "%3F" in url
@@ -134,9 +134,9 @@ class TestLibraryUrl:
         """The /media/libraries/ prefix and path separators stay literal."""
         from services.cas import library_url
 
-        url = library_url("/mnt/ssd-data/images/foo/bar.jpg")
+        url = library_url("/mnt/jyzrox/images/foo/bar.jpg")
 
-        assert url == "/media/libraries/ssd-data/images/foo/bar.jpg"
+        assert url == "/media/libraries/jyzrox/images/foo/bar.jpg"
 
     def test_encoded_url_round_trips_through_unquote_to_media_path(self):
         """media_authz unquotes X-Original-URI and nginx alias decodes for the
@@ -146,15 +146,51 @@ class TestLibraryUrl:
 
         from services.cas import library_url
 
-        ext_path = "/mnt/ssd-data/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
+        ext_path = "/mnt/jyzrox/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
         url = library_url(ext_path)
 
-        assert unquote(url) == "/media/libraries/ssd-data/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
+        assert unquote(url) == "/media/libraries/jyzrox/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
 
 
 # ---------------------------------------------------------------------------
 # TestSafeSourceId
 # ---------------------------------------------------------------------------
+
+
+class TestImageFileUrl:
+    """Unit tests for image_file_url(blob, external_path) -> str | None."""
+
+    def test_image_bound_external_path_wins_over_external_blob_without_cas_file(self):
+        """A hashed link page has a blob but no CAS file; the URL must follow the Image binding."""
+        from services.cas import image_file_url
+
+        blob = MagicMock(sha256=SHA, extension=".jpg", storage="external", external_path="/mnt/lib/other/copy.jpg")
+
+        assert image_file_url(blob, "/mnt/lib/book/001.jpg") == "/media/libraries/lib/book/001.jpg"
+
+    def test_pending_page_without_blob_uses_external_path(self):
+        from services.cas import image_file_url
+
+        assert image_file_url(None, "/mnt/lib/book/001.jpg") == "/media/libraries/lib/book/001.jpg"
+
+    def test_cas_blob_without_external_path_uses_cas_url(self):
+        from services.cas import cas_url, image_file_url
+
+        blob = MagicMock(sha256=SHA, extension=".png", storage="cas", external_path=None)
+
+        assert image_file_url(blob, None) == cas_url(SHA, ".png")
+
+    def test_external_blob_without_image_binding_falls_back_to_blob_path(self):
+        from services.cas import image_file_url
+
+        blob = MagicMock(sha256=SHA, extension=".jpg", storage="external", external_path="/mnt/lib/legacy.jpg")
+
+        assert image_file_url(blob) == "/media/libraries/lib/legacy.jpg"
+
+    def test_no_blob_and_no_external_path_is_none(self):
+        from services.cas import image_file_url
+
+        assert image_file_url(None, None) is None
 
 
 class TestSafeSourceId:
@@ -694,6 +730,32 @@ class TestCreateLibrarySymlink:
         link = library_root / "local" / "art__title" / "pic.jpg"
         assert link.is_symlink()
         assert os.readlink(link) == str(ext_file)
+
+    async def test_filename_with_path_components_is_refused_before_touching_disk(self, tmp_path):
+        """The link name must be a single path component.
+
+        A '../' name put the link outside the gallery's dir, after unlinking
+        whatever file already sat at that spot.
+        """
+        from services.cas import create_library_symlink
+
+        data_root = tmp_path / "data"
+        cas_root = data_root / "cas"
+        library_root = data_root / "library"
+        blob_file = cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.jpg"
+        blob_file.parent.mkdir(parents=True)
+        blob_file.write_bytes(b"image-bytes")
+        outside = data_root / "outside.jpg"
+        outside.write_bytes(b"keep me")
+
+        with patch("services.cas.settings", _mock_settings(cas=str(cas_root), library=str(library_root))):
+            for name in ("../../../outside.jpg", "sub/001.jpg", "..", ""):
+                with pytest.raises(ValueError):
+                    await create_library_symlink("webclip", "1:abc", name, self._make_cas_blob())
+
+        assert not outside.is_symlink()
+        assert outside.read_bytes() == b"keep me"
+        assert not (library_root / "webclip").exists()
 
 
 # ---------------------------------------------------------------------------

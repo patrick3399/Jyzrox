@@ -41,7 +41,12 @@ function ShareTargetContent() {
     if (result.job_id && !result.job_id.startsWith('offline-')) {
       toast.info(t('share.queuedJob', { jobId: result.job_id }))
     }
+    // Not smartBack: a share-sheet launch usually has a one-entry history, and
+    // there closing the window returns the user to the app they shared from,
+    // where smartBack would push a fallback route on top of it. router.back()
+    // only runs when there is an entry to go back to.
     if (window.history.length > 1) {
+      // eslint-disable-next-line no-restricted-syntax -- guarded by the history check above
       router.back()
     } else {
       window.close()
