@@ -362,6 +362,18 @@ async def test_get_redis_version_returns_none_when_key_missing(mock_redis):
     assert version is None
 
 
+async def test_get_redis_version_prefers_valkey_version_over_compat_redis_version(mock_redis):
+    """Valkey pins redis_version to 7.2.4 for client compatibility, so it must not be shown."""
+    from routers.system import _get_redis_version
+
+    mock_redis.info = AsyncMock(return_value={"redis_version": "7.2.4", "valkey_version": "9.1.3"})
+
+    with patch("routers.system.get_redis", return_value=mock_redis):
+        version = await _get_redis_version()
+
+    assert version == "9.1.3"
+
+
 # -- health: Redis error path (lines 112-122) ---------------------------------
 
 

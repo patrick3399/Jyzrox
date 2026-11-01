@@ -291,16 +291,20 @@ services:
     logging: *default-logging
 
   redis:
-    image: redis:8-alpine
+    # Valkey speaks the Redis protocol, so the service name, REDIS_* variables and
+    # redis:// URLs stay as they are.
+    image: valkey/valkey:9-alpine
     # --save "" disables automatic RDB snapshots. Recovery loads the AOF, never
     # dump.rdb, so the default save points (300s/100 changes) were rewriting the
     # whole dataset to disk every ~5 minutes for nothing. scripts/backup.sh still
     # issues an explicit BGSAVE for its portable point-in-time copy.
-    command: redis-server --appendonly yes --save "" --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    # The command must be valkey-server: the image entrypoint only drops root for
+    # that exact name, so its redis-server symlink would run as root.
+    command: valkey-server --appendonly yes --save "" --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      test: ["CMD", "valkey-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
       interval: 30s
       timeout: 3s
       retries: 5

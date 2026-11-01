@@ -19,7 +19,7 @@ const VERSION_LABELS: Record<string, string> = {
   gallery_dl: 'gallery-dl',
   nextjs: 'Next.js',
   postgresql: 'PostgreSQL',
-  redis: 'Redis',
+  redis: 'Valkey',
 }
 
 function versionLabel(key: string): string {
@@ -163,7 +163,7 @@ export default function SystemSettingsPage() {
                   {[
                     { label: t('settings.overall'), value: health.status },
                     { label: 'PostgreSQL', value: health.services.postgres },
-                    { label: 'Redis', value: health.services.redis },
+                    { label: 'Valkey', value: health.services.redis },
                   ].map(({ label, value }) => (
                     <div key={label} className="flex justify-between items-center px-3 py-2">
                       <span className="text-sm text-vault-text-muted">{label}</span>
