@@ -475,6 +475,49 @@ class TestGetSubscriptionJobs:
         assert job_id in job_ids
 
 
+class TestLatestJobs:
+    """GET /api/subscriptions/latest-jobs — one request instead of N per-sub calls."""
+
+    async def _insert_job(self, db_session, sub_id: int, created_at: str, user_id: int = 1) -> str:
+        job_id = str(uuid.uuid4())
+        await db_session.execute(
+            text(
+                "INSERT INTO download_jobs (id, url, status, progress, subscription_id, user_id, created_at) "
+                "VALUES (:jid, 'https://example.com/dl', 'done', '{}', :sid, :uid, :ts)"
+            ),
+            {"jid": job_id, "sid": sub_id, "uid": user_id, "ts": created_at},
+        )
+        await db_session.commit()
+        return job_id
+
+    async def test_latest_jobs_returns_newest_job_per_subscription_in_one_call(self, client, db_session):
+        """Two subs with several jobs each → one response holds only each sub's newest job."""
+        await _ensure_user(db_session)
+        sub_a = await _insert_subscription(db_session, name="A")
+        sub_b = await _insert_subscription(db_session, name="B")
+        await self._insert_job(db_session, sub_a, "2026-01-01 00:00:00")
+        newest_a = await self._insert_job(db_session, sub_a, "2026-01-03 00:00:00")
+        newest_b = await self._insert_job(db_session, sub_b, "2026-01-02 00:00:00")
+
+        resp = await client.get("/api/subscriptions/latest-jobs")
+        assert resp.status_code == 200
+        jobs = resp.json()["jobs"]
+        assert jobs[str(sub_a)]["id"] == newest_a
+        assert jobs[str(sub_b)]["id"] == newest_b
+        assert len(jobs) == 2
+
+    async def test_latest_jobs_excludes_other_users_subscriptions(self, client, db_session):
+        """A subscription owned by another user must not leak its job."""
+        await _ensure_user(db_session)
+        await _ensure_user(db_session, user_id=2)
+        other_sub = await _insert_subscription(db_session, user_id=2, name="Other")
+        await self._insert_job(db_session, other_sub, "2026-01-01 00:00:00", user_id=2)
+
+        resp = await client.get("/api/subscriptions/latest-jobs")
+        assert resp.status_code == 200
+        assert resp.json()["jobs"] == {}
+
+
 # ---------------------------------------------------------------------------
 # PATCH /api/subscriptions/{sub_id}
 # ---------------------------------------------------------------------------

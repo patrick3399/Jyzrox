@@ -212,6 +212,50 @@ async def list_subscriptions(
     }
 
 
+@router.get("/latest-jobs")
+async def get_latest_jobs(auth: dict = Depends(require_auth)):
+    """Latest download job of every subscription the user owns, keyed by subscription id.
+
+    One request replaces a per-subscription ``/{sub_id}/jobs?limit=1`` fan-out,
+    which exhausted nginx's per-IP ``api_zone`` burst on the subscriptions page.
+    """
+    from services.download_presenter import serialize_download_job
+
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        ranked = (
+            select(
+                DownloadJob.id.label("id"),
+                sa_func.row_number()
+                .over(
+                    partition_by=DownloadJob.subscription_id,
+                    order_by=(DownloadJob.created_at.desc(), DownloadJob.id.desc()),
+                )
+                .label("rn"),
+            )
+            .join(Subscription, Subscription.id == DownloadJob.subscription_id)
+            .where(Subscription.user_id == user_id)
+            .subquery()
+        )
+        jobs = (
+            (
+                await session.execute(
+                    select(DownloadJob).join(ranked, ranked.c.id == DownloadJob.id).where(ranked.c.rn == 1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        gallery_ids = [j.gallery_id for j in jobs if j.gallery_id]
+        gallery_map = {}
+        if gallery_ids:
+            gs = (await session.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
+            gallery_map = {g.id: g for g in gs}
+
+    return {"jobs": {str(j.subscription_id): serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs}}
+
+
 @router.post("/")
 async def create_subscription(
     req: CreateSubscriptionRequest,

@@ -120,20 +120,13 @@ export default function SubscriptionsPage() {
   const { data: jobsData, mutate: mutateJobs } = useSWR(
     subIds.length > 0 ? ['sub-jobs', ...subIds] : null,
     async () => {
+      // One request for all subscriptions: a per-subscription fan-out tripped
+      // nginx's api_zone burst (503) once the list grew past ~60 entries.
+      const res = await api.subscriptions.latestJobs()
       const results: Record<number, DownloadJob> = {}
-      const promises = (data?.subscriptions ?? [])
-        .filter((s) => s.last_job_id)
-        .map(async (s) => {
-          try {
-            const res = await api.subscriptions.jobs(s.id, 1)
-            if (res.jobs.length > 0) {
-              results[s.id] = res.jobs[0]
-            }
-          } catch {
-            /* ignore */
-          }
-        })
-      await Promise.all(promises)
+      for (const [subId, job] of Object.entries(res.jobs)) {
+        results[Number(subId)] = job
+      }
       return results
     },
     // Event-driven while connected (lastSubCheck/lastJobUpdate effects below +

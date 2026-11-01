@@ -65,6 +65,9 @@ export const subscriptions = {
       method: 'POST',
     }),
 
+  /** Newest job of every subscription, keyed by subscription id, in a single request. */
+  latestJobs: () => apiFetch<{ jobs: Record<string, DownloadJob> }>('/api/subscriptions/latest-jobs'),
+
   jobs: (id: number, limit = 10) =>
     apiFetch<{ jobs: DownloadJob[] }>(`/api/subscriptions/${id}/jobs${qs({ limit })}`),
 }
