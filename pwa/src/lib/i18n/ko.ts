@@ -345,8 +345,8 @@ const ko: Record<string, string> = {
   'library.deleteFailed': '삭제 실패',
   'library.deleting': '삭제 중...',
   'library.delete': '갤러리 삭제',
-  'library.favorited': '★ 즐겨찾기됨',
-  'library.unfavorited': '☆ 즐겨찾기',
+  'library.favorited': '즐겨찾기됨',
+  'library.unfavorited': '즐겨찾기',
   'library.aiTags': 'AI 태그',
   'library.confidence': '신뢰도',
   'library.noAiTagsAboveThreshold': '임계값 이상의 AI 태그 없음',
@@ -1619,6 +1619,7 @@ const ko: Record<string, string> = {
   'common.ratingOf': '평점: {rating}/5',
   'common.setRating': '평점 설정',
   'common.rateN': '{n}/5 평점',
+  'common.clearRating': '평점 지우기',
   'common.removeTag': '태그 {tag} 제거',
 
   // ── API Error Codes ──

@@ -754,8 +754,8 @@ const ja: Record<string, string> = {
   'library.deleteFailed': '削除に失敗しました',
   'library.deleting': '削除中...',
   'library.delete': 'ギャラリーを削除',
-  'library.favorited': '★ お気に入り済み',
-  'library.unfavorited': '☆ お気に入り',
+  'library.favorited': 'お気に入り済み',
+  'library.unfavorited': 'お気に入り',
   'library.aiTags': 'AI タグ',
   'library.confidence': '信頼度',
   'library.noAiTagsAboveThreshold': 'しきい値以上の AI タグなし',
@@ -1796,6 +1796,7 @@ const ja: Record<string, string> = {
   'common.ratingOf': '評価: {rating}/5',
   'common.setRating': '評価を設定',
   'common.rateN': '{n}/5で評価',
+  'common.clearRating': '評価を解除',
   'common.removeTag': 'タグ {tag} を削除',
 
   // ── API Error Codes ──

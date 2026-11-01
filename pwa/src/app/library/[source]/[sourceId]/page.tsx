@@ -39,7 +39,6 @@ import {
   X,
   Share2,
   History,
-  Star,
   FolderHeart,
   MoreHorizontal,
   ChevronDown,
@@ -968,7 +967,7 @@ function GalleryDetailPageInner() {
       <div className="bg-vault-card border border-vault-border rounded-xl p-4 md:p-5 mb-5">
         <div className="grid grid-cols-[5rem_minmax(0,1fr)] md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 md:gap-x-5 gap-y-3">
           {/* Thumbnail preview from first image */}
-          <div className="md:row-span-3">
+          <div className="md:row-span-4">
             {images[0]?.thumb_path ? (
               <AppImage
                 src={images[0].thumb_path}
@@ -987,7 +986,7 @@ function GalleryDetailPageInner() {
             )}
           </div>
 
-          {/* Title, artist, rating */}
+          {/* Title, artist */}
           <div className="min-w-0">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1.5 md:gap-2">
               {editingTitle ? (
@@ -1101,24 +1100,31 @@ function GalleryDetailPageInner() {
             {gallery.artist_id && artistDisplayName && (
               <Link
                 href={artistPageHref(gallery.artist_id)}
-                className="mt-1 block truncate text-sm text-vault-text-secondary hover:text-vault-accent hover:underline transition-colors"
+                className="block truncate py-2.5 md:mt-1 md:py-0 text-sm text-vault-text-secondary hover:text-vault-accent hover:underline transition-colors"
               >
                 {artistDisplayName}
               </Link>
             )}
-            <div className="mt-2 flex items-center gap-2">
-              <span className="hidden md:inline text-sm text-vault-text-muted">
-                {t('library.metaRating')}
-              </span>
-              <RatingStars
-                rating={gallery.my_rating ?? 0}
-                readonly={isUpdating || !canEdit}
-                onChange={handleRatingChange}
-              />
-              <span className="text-xs md:text-sm text-vault-text-secondary">
-                {(gallery.my_rating ?? 0).toFixed(1)}
-              </span>
-            </div>
+          </div>
+
+          {/* Rating — a full-width row on phones, where five tappable stars outgrow the title column */}
+          <div
+            className={`col-span-2 md:col-span-1 md:col-start-2 -my-1 md:my-0 flex items-center gap-2 ${
+              canEdit ? '-ml-2.5 md:ml-0' : ''
+            }`}
+          >
+            <span className="hidden md:inline text-sm text-vault-text-muted">
+              {t('library.metaRating')}
+            </span>
+            <RatingStars
+              rating={gallery.my_rating ?? 0}
+              readonly={!canEdit}
+              disabled={isUpdating}
+              onChange={handleRatingChange}
+            />
+            <span className="text-xs md:text-sm text-vault-text-secondary">
+              {(gallery.my_rating ?? 0).toFixed(1)}
+            </span>
           </div>
 
           {/* Action row — labels collapse to icons on phones */}
@@ -1139,14 +1145,11 @@ function GalleryDetailPageInner() {
                 title={favoriteLabel}
                 className={`${ACTION_BUTTON_CLASS} ${
                   gallery.is_favorited
-                    ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
-                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
+                    ? 'bg-red-900/40 border-red-600 text-red-400 hover:bg-red-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-red-600 hover:text-red-400'
                 }`}
               >
-                <Star
-                  size={16}
-                  className={`md:hidden ${gallery.is_favorited ? 'fill-current' : ''}`}
-                />
+                <Heart size={16} className={gallery.is_favorited ? 'fill-current' : undefined} />
                 <span className="hidden md:inline">{favoriteLabel}</span>
               </button>
             )}
@@ -1192,25 +1195,10 @@ function GalleryDetailPageInner() {
             )}
           </div>
 
-          {/* Secondary metadata — always shown from md, behind a toggle on phones */}
+          {/* Metadata — all shown from md; phones keep pages and category beside the
+              toggle, and the rest behind it. */}
           <div className="col-span-2 md:col-span-1 md:col-start-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={() => setInfoOpen((open) => !open)}
-              aria-expanded={infoOpen}
-              className="h-auto gap-1 px-1 py-1 text-xs md:hidden hover:bg-transparent"
-            >
-              <ChevronDown
-                size={14}
-                className={`transition-transform ${infoOpen ? 'rotate-180' : ''}`}
-              />
-              {infoOpen ? t('library.lessInfo') : t('library.moreInfo')}
-            </Button>
-            <div
-              className={`${infoOpen ? 'grid' : 'hidden'} md:grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mt-2 md:mt-0`}
-            >
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm md:grid md:grid-cols-3 md:items-start">
               {[
                 { labelKey: 'library.metaSource', value: gallery.source },
                 { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
@@ -1238,19 +1226,26 @@ function GalleryDetailPageInner() {
                   : []),
                 { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
               ].map(({ labelKey, value }) => (
-                <div key={labelKey} className="min-w-0 truncate">
+                <div
+                  key={labelKey}
+                  className={`min-w-0 truncate md:order-none md:block ${
+                    labelKey === 'library.metaPages'
+                      ? 'order-1 shrink-0'
+                      : `order-4 basis-[calc(50%-0.5rem)] ${infoOpen ? '' : 'hidden'}`
+                  }`}
+                >
                   <span className="text-vault-text-muted">{t(labelKey)}: </span>
                   <span className="text-vault-text">{value}</span>
                 </div>
               ))}
               {/* Category — inline select for members */}
-              <div className="col-span-2 md:col-span-1">
+              <div className="order-2 min-w-0 md:order-none">
                 <span className="text-vault-text-muted">{t('library.metaCategory')}: </span>
                 {canEdit ? (
                   <select
                     value={gallery.category ?? ''}
                     onChange={(e) => handleCategoryChange(e.target.value)}
-                    className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
+                    className="h-9 md:h-auto max-w-full bg-vault-input border border-vault-border rounded px-1 md:py-0.5 text-vault-text text-sm focus:outline-none"
                   >
                     <option value="">{t('library.categoryUncategorized')}</option>
                     {categoryOptions.map((cat) => (
@@ -1264,12 +1259,26 @@ function GalleryDetailPageInner() {
                     {gallery.category || t('library.categoryUncategorized')}
                   </span>
                 )}
-                {canEdit && gallery.source === 'local' && (
-                  <p className="mt-1 text-xs text-vault-text-muted">
-                    {t('categories.localFolderNote')}
-                  </p>
-                )}
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => setInfoOpen((open) => !open)}
+                aria-expanded={infoOpen}
+                className="order-3 ml-auto h-9 gap-1 px-1 text-xs md:hidden hover:bg-transparent"
+              >
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform ${infoOpen ? 'rotate-180' : ''}`}
+                />
+                {infoOpen ? t('library.lessInfo') : t('library.moreInfo')}
+              </Button>
+              {canEdit && gallery.source === 'local' && (
+                <p className="order-3 w-full md:order-none md:col-span-3 text-xs text-vault-text-muted">
+                  {t('categories.localFolderNote')}
+                </p>
+              )}
             </div>
             {versionsOpen && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">

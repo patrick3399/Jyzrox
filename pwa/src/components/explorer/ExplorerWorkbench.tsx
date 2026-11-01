@@ -29,7 +29,7 @@ import {
   MoreHorizontal,
   RefreshCw,
   Search,
-  Star,
+  Heart,
   Tags,
   Trash2,
   Users,
@@ -991,7 +991,7 @@ export function ExplorerWorkbench() {
       { id: 'metadata', label: t('explorer.editMetadata'), icon: Edit3, separator: true, onSelect: () => setMetadataOpen(true) },
       { id: 'tags', label: t('explorer.tags'), icon: Tags, onSelect: () => setOrganizeOpen('tags') },
       { id: 'collections', label: t('explorer.collections'), icon: Layers3, onSelect: () => setOrganizeOpen('collections') },
-      { id: 'favorite', label: t('explorer.favorite'), icon: Star, onSelect: () => void runQuickAction('favorite') },
+      { id: 'favorite', label: t('explorer.favorite'), icon: Heart, onSelect: () => void runQuickAction('favorite') },
       { id: 'read-later', label: t('explorer.readLater'), icon: Archive, onSelect: () => void runQuickAction('add_read_later') },
       { id: 'merge', label: t('explorer.merge'), icon: Merge, disabled: Boolean(querySelection) || selectedGalleries.length < 2 || selectedGalleries.length > 50, onSelect: () => setMergeOpen(true) },
       { id: 'delete', label: t('explorer.deleteFiles'), icon: Trash2, danger: true, separator: true, onSelect: () => void deleteSelection() },
@@ -1168,7 +1168,7 @@ export function ExplorerWorkbench() {
           <Button variant="ghost" size="sm" type="button" disabled={Boolean(querySelection) || selectedGalleries.length < 2 || selectedGalleries.length > 50} onClick={() => setMergeOpen(true)}><Merge size={16} /><span className="hidden sm:inline">{t('explorer.merge')}</span></Button>
           <Button variant="ghost" size="sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setOrganizeOpen('tags')}><Tags size={16} /><span className="hidden sm:inline">{t('explorer.tags')}</span></Button>
           <Button variant="ghost" size="sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => setOrganizeOpen('collections')}><Layers3 size={16} /><span className="hidden sm:inline">{t('explorer.collections')}</span></Button>
-          <Button variant="ghost" size="icon-sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => void runQuickAction('favorite')} aria-label={t('explorer.favorite')}><Star size={16} /></Button>
+          <Button variant="ghost" size="icon-sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => void runQuickAction('favorite')} aria-label={t('explorer.favorite')}><Heart size={16} /></Button>
           <Button variant="ghost" size="icon-sm" type="button" disabled={!querySelection && selectedGalleries.length === 0} onClick={() => void runQuickAction('add_read_later')} aria-label={t('explorer.readLater')}><Archive size={16} /></Button>
           <select aria-label={t('explorer.rating')} disabled={!querySelection && selectedGalleries.length === 0} defaultValue="" onChange={(event) => { if (event.target.value) void runQuickAction('rate', Number(event.target.value)); event.target.value = '' }} className="hidden rounded-md border border-vault-border bg-vault-card px-2 py-1 text-sm text-vault-text sm:block disabled:opacity-30"><option value="">{t('explorer.rating')}</option>{[0, 1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating}</option>)}</select>
           <select aria-label={t('explorer.moreActions')} disabled={!querySelection && selectedGalleries.length === 0} defaultValue="" onChange={(event) => { const action = event.target.value as 'unfavorite' | 'remove_read_later'; if (action) void runQuickAction(action); event.target.value = '' }} className="rounded-md border border-vault-border bg-vault-card px-2 py-1 text-sm text-vault-text disabled:opacity-30"><option value="">{t('explorer.moreActions')}</option><option value="unfavorite">{t('explorer.unfavorite')}</option><option value="remove_read_later">{t('explorer.removeReadLater')}</option></select>

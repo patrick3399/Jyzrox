@@ -120,10 +120,10 @@ export function GalleryTagSection({
         <div className="space-y-2">
           {Object.entries(tagGroups).map(([namespace, values]) => (
             <div key={namespace} className="flex flex-wrap gap-1 items-start">
-              <span className="text-xs text-vault-text-muted w-20 shrink-0 pt-0.5 capitalize">
+              <span className="text-xs text-vault-text-muted w-20 shrink-0 pt-2 md:pt-0.5 capitalize">
                 {namespace}:
               </span>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5 md:gap-1">
                 {values.map((value) => {
                   const fullTag = namespace === 'general' ? value : `${namespace}:${value}`
                   const translation = tagTranslations?.[fullTag]
@@ -131,13 +131,13 @@ export function GalleryTagSection({
                   return (
                     <span
                       key={value}
-                      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${getTagColor(fullTag)}`}
+                      className={`inline-flex items-center rounded border text-xs ${getTagColor(fullTag)}`}
                       title={translation ? `${namespace}:${value}` : undefined}
                     >
                       <button
                         type="button"
                         disabled={editingTags}
-                        className="cursor-pointer hover:brightness-125 disabled:cursor-default"
+                        className="cursor-pointer px-2 py-1.5 md:py-0.5 hover:brightness-125 disabled:cursor-default"
                         onClick={(e) => {
                           const src = source
                           if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
@@ -163,7 +163,7 @@ export function GalleryTagSection({
                             e.stopPropagation()
                             onUpdateTag(fullTag, 'remove')
                           }}
-                          className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
+                          className="py-1.5 pr-2 md:py-0.5 opacity-60 hover:opacity-100 leading-none"
                           aria-label={t('common.removeTag', { tag: fullTag })}
                         >
                           ×
@@ -200,7 +200,7 @@ export function GalleryTagSection({
             </div>
           </div>
           {aiTags.length > 0 ? (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-1.5 md:gap-1">
               {aiTags.map((tag) => {
                 const aiFullTag =
                   tag.namespace === 'general' ? tag.name : `${tag.namespace}:${tag.name}`
@@ -208,7 +208,7 @@ export function GalleryTagSection({
                   <button
                     type="button"
                     key={`${tag.namespace}:${tag.name}`}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs cursor-pointer hover:brightness-125"
+                    className="inline-flex items-center gap-1 px-2 py-1.5 md:py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs cursor-pointer hover:brightness-125"
                     title={`${Math.round(tag.confidence * 100)}% confidence`}
                     onClick={(e) => {
                       const src = source

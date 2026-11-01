@@ -839,8 +839,8 @@ const zhCN: Record<string, string> = {
   'library.deleteFailed': '删除失败',
   'library.deleting': '删除中...',
   'library.delete': '删除图库',
-  'library.favorited': '★ 已收藏',
-  'library.unfavorited': '☆ 收藏',
+  'library.favorited': '已收藏',
+  'library.unfavorited': '收藏',
   'library.aiTags': 'AI 标签',
   'library.confidence': '置信度',
   'library.noAiTagsAboveThreshold': '没有超过阈值的 AI 标签',
@@ -1535,6 +1535,7 @@ const zhCN: Record<string, string> = {
   'common.ratingOf': '评分：{rating} / 5',
   'common.setRating': '设置评分',
   'common.rateN': '评 {n} / 5',
+  'common.clearRating': '清除评分',
   'common.removeTag': '移除标签 {tag}',
 
   // ── API Error Codes ──

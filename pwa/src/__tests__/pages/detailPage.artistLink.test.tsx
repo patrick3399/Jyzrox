@@ -18,8 +18,18 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
 }))
 vi.mock('next/link', () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  default: ({
+    children,
+    href,
+    className,
+  }: {
+    children: React.ReactNode
+    href: string
+    className?: string
+  }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
   ),
 }))
 vi.mock('swr', () => ({
@@ -90,5 +100,11 @@ describe('gallery detail page artist links', () => {
 
     const link = screen.getByText('some artist/α').closest('a')
     expect(link).toHaveAttribute('href', ARTIST_HREF)
+  })
+
+  it('pads the artist link to a 40px phone tap target instead of the bare 20px text line', () => {
+    render(<GalleryDetailPage />)
+
+    expect(screen.getByText('some artist/α').closest('a')).toHaveClass('py-2.5', 'md:py-0')
   })
 })
