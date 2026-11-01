@@ -27,6 +27,7 @@ import { galleryHref } from '@/lib/galleryRoutes'
 import type { SearchGalleryItem } from '@/lib/api'
 import { decideAnchorRestore, restoreAnchorOffset, type BrowseAnchor } from '@/lib/browse/anchor'
 import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
+import { estimateLibraryListRowHeight } from '@/lib/gridRowHeight'
 import {
   estimateLibraryGridRowHeight,
   getLibraryGridGap,
@@ -979,7 +980,9 @@ function LibraryContent() {
           getItemKey={(gallery) => gallery.id}
           columns={viewMode === 'list' ? { base: 1 } : gridColumns}
           gap={viewMode === 'list' ? 8 : getLibraryGridGap(gridDensity)}
-          estimateHeight={viewMode === 'list' ? 150 : estimateLibraryGridRowHeight}
+          estimateHeight={
+            viewMode === 'list' ? estimateLibraryListRowHeight : estimateLibraryGridRowHeight
+          }
           measureRows={false}
           overscan={viewMode === 'list' ? 8 : 6}
           focusedIndex={focusedIndex}
