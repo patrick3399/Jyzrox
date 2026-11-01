@@ -70,12 +70,21 @@ class TestRedactingFilterOnRealLogging:
 
         log, stream = _logger_with_redaction("test_redaction.saq_repr")
         queue = Queue.from_url(f"redis://:{SECRET}@redis:6379", name="interactive")
-        assert SECRET in repr(queue), "precondition: the library really does put the password in repr"
 
         log.info("Worker starting: %s", repr(queue))
 
         assert SECRET not in stream.getvalue()
         assert "Worker starting: RedisQueue<" in stream.getvalue(), "the line itself must still be logged"
+
+    def test_unredacted_connection_repr_in_queue_line_is_masked_by_the_filter(self):
+        """redis-py >= 7 redacts the password itself; the filter must still cover older/other reprs."""
+        log, stream = _logger_with_redaction("test_redaction.saq_repr_unredacted")
+        leaky = f"RedisQueue<redis=<Redis(<Connection(password={SECRET},host=redis,port=6379)>)>, name='interactive'>"
+
+        log.info("Worker starting: %s", leaky)
+
+        assert SECRET not in stream.getvalue()
+        assert "host=redis,port=6379" in stream.getvalue(), "only the secret may be removed"
 
     def test_secret_passed_as_lazy_format_arg_is_masked(self):
         log, stream = _logger_with_redaction("test_redaction.lazy_arg")

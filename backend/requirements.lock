@@ -27,7 +27,7 @@ certifi==2026.10.19
     #   httpcore
     #   httpx
     #   requests
-cffi==2.0.0
+cffi==2.1.1
     # via
     #   cryptography
     #   curl-cffi
@@ -43,9 +43,9 @@ croniter==6.2.4
     #   saq
 cryptography==50.0.2
     # via -r requirements.txt
-curl-cffi==0.16.3
+curl-cffi==0.17.0
     # via -r requirements.txt
-fastapi==0.136.1
+fastapi==0.162.0
     # via -r requirements.txt
 greenlet==3.5.0
     # via sqlalchemy
@@ -84,6 +84,8 @@ opencc-python-reimplemented==0.1.7
     # via -r requirements.txt
 opencv-python-headless==4.13.0.92
     # via -r requirements.txt
+opentelemetry-api==1.45.2
+    # via fastapi
 pillow==13.0.0
     # via
     #   -r requirements.txt
@@ -119,7 +121,7 @@ pywavelets==1.9.0
     # via imagehash
 pyyaml==6.0.3
     # via uvicorn
-redis[hiredis]==6.4.0
+redis[hiredis]==7.4.1
     # via
     #   -r requirements.txt
     #   saq
@@ -140,7 +142,7 @@ six==1.17.0
     # via python-dateutil
 soupsieve==2.10
     # via beautifulsoup4
-sqlalchemy[asyncio]==2.0.49
+sqlalchemy[asyncio]==2.1.6
     # via
     #   -r requirements.txt
     #   alembic
