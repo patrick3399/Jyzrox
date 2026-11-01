@@ -1736,6 +1736,55 @@ class TestLibraries:
             )
         assert resp.status_code == 400
 
+    @staticmethod
+    def _library_session():
+        session = AsyncMock()
+        factory = MagicMock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        return factory
+
+    async def test_add_library_tells_the_running_watcher(self, client, mock_redis, tmp_path):
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"1")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
+
+        assert resp.status_code == 200
+        app.state.enqueue.assert_any_call("toggle_watcher_job", enabled=True)
+
+    async def test_remove_library_tells_the_running_watcher(self, client, mock_redis):
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"1")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.delete("/api/import/libraries/1")
+
+        assert resp.status_code == 200
+        app.state.enqueue.assert_any_call("toggle_watcher_job", enabled=True)
+
+    async def test_add_library_does_not_start_a_watcher_the_admin_turned_off(self, client, mock_redis, tmp_path):
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"0")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
+
+        assert resp.status_code == 200
+        app.state.enqueue.assert_not_called()
+
+    async def test_add_library_survives_a_failed_watcher_refresh(self, client, mock_redis, tmp_path):
+        """The row is committed by then, and the watcher re-reads its paths at the next worker start."""
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"1")
+        app.state.enqueue.side_effect = RuntimeError("queue down")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
+
+        assert resp.status_code == 200
+
 
 class TestImportConflicts:
     async def test_conflict_mode_round_trip(self, client, mock_redis):

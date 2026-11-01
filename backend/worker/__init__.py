@@ -10,6 +10,7 @@ import logging
 import os
 import uuid
 from datetime import UTC
+from pathlib import Path
 
 from saq import CronJob
 
@@ -707,20 +708,7 @@ async def startup(ctx: dict) -> None:
         watcher_should_start = watcher_enabled_raw not in (b"0", "0")
 
     if watcher_should_start:
-        paths = await get_monitored_library_paths()
-        loop = asyncio.get_running_loop()
-
-        def enqueue_sync(job_name: str, *args):
-            import core.queue
-
-            kwargs = _watcher_job_kwargs(job_name, args)
-            asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
-
-        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
-        await r.set(
-            "watcher:status",
-            json.dumps({"running": True, "paths": paths}),
-        )
+        await _start_library_watcher(r, await get_monitored_library_paths())
 
     # Jobs that were marked run_at_startup=True in the old config.
     import core.queue as _q
@@ -766,6 +754,20 @@ async def shutdown(ctx: dict) -> None:
 # ── Toggle Watcher ────────────────────────────────────────────────────
 
 
+async def _start_library_watcher(r, paths: list[str]) -> None:
+    """(Re)start the watcher on ``paths`` and publish whether it actually runs."""
+    loop = asyncio.get_running_loop()
+
+    def enqueue_sync(job_name: str, *args):
+        import core.queue
+
+        kwargs = _watcher_job_kwargs(job_name, args)
+        asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
+
+    _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
+    await r.set("watcher:status", json.dumps({"running": _watcher.is_running, "paths": paths}))
+
+
 async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
     """Start or stop the file system watcher on behalf of the API.
 
@@ -779,26 +781,20 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
     """
     r = ctx["redis"]
     if enabled:
-        if _watcher.is_running:
-            logger.info("[toggle_watcher] Already running — no-op")
-            return {"status": "already_running"}
-
         paths = await get_monitored_library_paths()
         if not paths:
             logger.warning("[toggle_watcher] No library paths configured — cannot start watcher")
+            _watcher.stop()
             await r.set("watcher:status", json.dumps({"running": False, "paths": []}))
             return {"status": "no_paths"}
 
-        loop = asyncio.get_running_loop()
+        # The API also enqueues this when a library is added or removed, so
+        # "running" alone does not mean the watcher is on the right paths.
+        if _watcher.is_running and set(_watcher.watched_paths) == {p for p in paths if Path(p).is_dir()}:
+            logger.info("[toggle_watcher] Already running — no-op")
+            return {"status": "already_running"}
 
-        def enqueue_sync(job_name: str, *args):
-            import core.queue
-
-            kwargs = _watcher_job_kwargs(job_name, args)
-            asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
-
-        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
-        await r.set("watcher:status", json.dumps({"running": True, "paths": paths}))
+        await _start_library_watcher(r, paths)
         logger.info("[toggle_watcher] Started, watching %d path(s)", len(paths))
         return {"status": "started", "paths": paths}
     else:

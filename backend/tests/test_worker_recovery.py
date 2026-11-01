@@ -192,6 +192,7 @@ def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
         patch("core.queue.enqueue", new_callable=AsyncMock),
     ):
         mock_watcher.start = MagicMock()
+        mock_watcher.is_running = False
         yield {"enqueue": mock_enqueue, "emit": mock_emit}
 
 

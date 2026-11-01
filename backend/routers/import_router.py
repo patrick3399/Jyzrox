@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
@@ -35,6 +36,8 @@ from services.gallery_categories import load_category_map, resolve_with_map
 from services.image_magic import validate_image_magic
 from services.media_formats import IMAGE_EXTENSIONS as _SUPPORTED_IMAGE_EXTS
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_EXTS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["import"])
 
@@ -717,6 +720,21 @@ class AddLibraryRequest(BaseModel):
     import_mode: str = DEFAULT_IMPORT_MODE
 
 
+async def _refresh_watcher_paths() -> None:
+    """Have the worker re-read its monitored paths, unless the admin turned the watcher off.
+
+    Best-effort: the library row is already committed, and the worker reads the
+    paths again whenever it starts.
+    """
+    try:
+        raw = await get_redis().get("watcher:enabled")
+        enabled = settings.library_monitor_enabled if raw is None else raw not in (b"0", "0")
+        if enabled:
+            await core.queue.enqueue("toggle_watcher_job", enabled=True)
+    except Exception as exc:
+        logger.warning("Could not refresh the library watcher: %s", exc)
+
+
 @router.post("/libraries")
 async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
     """Add a new library path."""
@@ -753,6 +771,8 @@ async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
         await session.execute(stmt)
         await session.commit()
 
+    await _refresh_watcher_paths()
+
     return {
         "status": "added",
         "path": real_path,
@@ -771,6 +791,8 @@ async def remove_library(library_id: int, _: dict = Depends(_admin)):
             raise HTTPException(status_code=404, detail="Library path not found")
         await session.delete(lp)
         await session.commit()
+
+    await _refresh_watcher_paths()
     return {"status": "removed"}
 
 
