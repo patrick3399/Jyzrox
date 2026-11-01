@@ -41,6 +41,7 @@ async def test_sync_link_gallery_returns_service_result(client, db_session):
         "replaced": 0,
         "pending": 2,
         "pages": 5,
+        "unsettled": 0,
     }
     assert sync.await_args.args == (gallery_id,)
 

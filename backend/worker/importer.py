@@ -25,7 +25,7 @@ from services.cas import (
 )
 from services.gallery_categories import resolve_category
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
-from services.link_sync import sync_link_gallery
+from services.link_sync import SETTLE_NS, LinkSyncResult, sync_link_gallery
 from services.source_identity import SourceFileChangedError, hash_file_with_identity
 from services.tag_helpers import (
     rebuild_gallery_tags_array,
@@ -40,6 +40,10 @@ from worker.constants import (
 from worker.helpers import _sha256, _validate_image_magic
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
+
+# About 10 seconds of waiting, which holds an ingest slot. A folder this is not
+# enough for stays `failed` until the next scan imports it again.
+_LINK_IMPORT_ATTEMPTS = 6
 
 
 def _subscription_artist_id(source: str, source_id: str, artist_id: str | None, source_url: str | None) -> str | None:
@@ -486,6 +490,21 @@ def _build_gallery(
     }
 
 
+async def _sync_new_link_gallery(gallery_id: int, redis) -> LinkSyncResult:
+    """Run the first sync, waiting out the states that say nothing about the folder.
+
+    A folder copied moments ago has only unsettled files, and a sweep may hold
+    the sync lock. Neither means the folder has no media.
+    """
+    for attempt in range(1, _LINK_IMPORT_ATTEMPTS + 1):
+        result = await sync_link_gallery(gallery_id, redis=redis, force=True)
+        temporary = result.status == "busy" or (result.status == "synced" and result.unsettled and not result.pages)
+        if not temporary or attempt == _LINK_IMPORT_ATTEMPTS:
+            break
+        await asyncio.sleep(SETTLE_NS / 1_000_000_000)
+    return result
+
+
 async def _link_import(ctx: dict, src_path: Path, gallery_id: int) -> dict:
     """Link mode: register the folder's files as pages now, hash them in the background (ADR 0015)."""
     r = ctx["redis"]
@@ -502,9 +521,12 @@ async def _link_import(ctx: dict, src_path: Path, gallery_id: int) -> dict:
             gallery.source_path = os.path.realpath(src_path)
             await session.commit()
 
-    result = await sync_link_gallery(gallery_id, redis=r, force=True)
+    result = await _sync_new_link_gallery(gallery_id, r)
     if result.status not in ("synced", "unchanged") or not result.pages:
-        error = "no supported files found" if result.status in ("synced", "unchanged") else result.status
+        if result.status not in ("synced", "unchanged"):
+            error = result.status
+        else:
+            error = "files are still being written" if result.unsettled else "no supported files found"
         async with AsyncSessionLocal() as session:
             gallery = await session.get(Gallery, gallery_id)
             if gallery is not None and gallery.deleted_at is None and gallery.download_status == "importing":
