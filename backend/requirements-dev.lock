@@ -108,7 +108,7 @@ pillow==13.0.0
     #   pillow-heif
 pillow-heif==1.8.1
     # via -r requirements.txt
-pip-tools==7.5.3
+pip-tools==7.6.2
     # via -r requirements-dev.txt
 pixivpy3==3.7.5
     # via -r requirements.txt
@@ -126,7 +126,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.16.1
+pydantic-settings==2.16.2
     # via -r requirements.txt
 pygments==2.20.0
     # via pytest
@@ -136,13 +136,13 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
-pytest==9.1.1
+pytest==9.2.0
     # via
     #   -r requirements-dev.txt
     #   pytest-asyncio
     #   pytest-cov
     #   pytest-mock
-pytest-asyncio==1.4.0
+pytest-asyncio==1.4.1
     # via -r requirements-dev.txt
 pytest-cov==7.1.0
     # via -r requirements-dev.txt
@@ -154,7 +154,7 @@ python-dotenv==1.2.2
     # via
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.32
+python-multipart==0.0.33
     # via -r requirements.txt
 pywavelets==1.9.0
     # via imagehash
@@ -173,9 +173,9 @@ requests-toolbelt==1.0.0
     # via
     #   cloudscraper
     #   pixivpy3
-ruff==0.17.2
+ruff==0.17.3
     # via -r requirements-dev.txt
-saq[redis]==0.26.3
+saq[redis]==0.26.5
     # via -r requirements.txt
 scipy==1.17.1
     # via imagehash

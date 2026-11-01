@@ -63,7 +63,7 @@ services:
     logging: *default-logging
 
   imgproxy:
-    image: darthsim/imgproxy:v3.31
+    image: darthsim/imgproxy:v3.31.4
     # same identity as api/worker so a 770 data volume stays readable
     user: "${PUID:-1042}:${PGID:-1042}"
     environment:

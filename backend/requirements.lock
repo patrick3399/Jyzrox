@@ -103,7 +103,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.16.1
+pydantic-settings==2.16.2
     # via -r requirements.txt
 pyparsing==3.3.2
     # via cloudscraper
@@ -113,7 +113,7 @@ python-dotenv==1.2.2
     # via
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.32
+python-multipart==0.0.33
     # via -r requirements.txt
 pywavelets==1.9.0
     # via imagehash
@@ -132,7 +132,7 @@ requests-toolbelt==1.0.0
     # via
     #   cloudscraper
     #   pixivpy3
-saq[redis]==0.26.3
+saq[redis]==0.26.5
     # via -r requirements.txt
 scipy==1.17.1
     # via imagehash
