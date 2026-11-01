@@ -169,7 +169,7 @@ services:
     env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - app_data:/data
-      # host: owned by PUID:PGID (entrypoint re-owns it when PUID != 1042); chmod 750 ./config/gallery-dl
+      # host: owned by PUID:PGID (entrypoint re-owns it on every start); chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - gallery_dl_venv:/opt/gallery-dl
       # Same directory as api: downloads (worker) and URL detection (api) must
