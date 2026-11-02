@@ -14,6 +14,7 @@ import type { Gallery, GalleryImage, WsMessage } from '@/lib/types'
 const h = vi.hoisted(() => ({
   getGallery: vi.fn(),
   getImages: vi.fn(),
+  getProgress: vi.fn(),
   lastEvent: null as WsMessage | null,
   connected: true,
   lastJobUpdate: null as unknown,
@@ -30,7 +31,7 @@ vi.mock('@/lib/api', () => ({
     library: {
       getGallery: h.getGallery,
       getImages: h.getImages,
-      getProgress: vi.fn().mockResolvedValue(null),
+      getProgress: h.getProgress,
     },
     history: { record: vi.fn().mockResolvedValue(undefined) },
   },
@@ -93,6 +94,7 @@ describe('reader page importing refresh', () => {
   beforeEach(() => {
     h.getGallery.mockReset().mockResolvedValue(gallery())
     h.getImages.mockReset().mockResolvedValue({ images, favorited_image_ids: [] })
+    h.getProgress.mockReset().mockResolvedValue(null)
     h.lastEvent = null
     h.connected = true
     h.lastJobUpdate = null
@@ -179,5 +181,23 @@ describe('reader page importing refresh', () => {
     rerender(<ReaderPage />)
 
     await waitFor(() => expect(h.getImages).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('reader page entry page', () => {
+  it('keeps a saved page numbered above the surviving page count', async () => {
+    // Pages 5-11 were deleted from the folder: 7 survive, the last numbered 14.
+    h.readerProps.length = 0
+    h.getGallery.mockReset().mockResolvedValue(gallery({ pages: 7, download_status: 'complete' }))
+    h.getImages.mockReset().mockResolvedValue({
+      images: [1, 2, 3, 4, 12, 13, 14].map((page) => pendingImage(page, page)),
+      favorited_image_ids: [],
+    })
+    h.getProgress.mockReset().mockResolvedValue({ last_page: 13 })
+
+    render(<ReaderPage />)
+
+    await waitFor(() => expect(screen.getByTestId('reader')).toBeTruthy())
+    expect(h.readerProps[h.readerProps.length - 1].initialPage).toBe(13)
   })
 })

@@ -10,6 +10,7 @@ import type {
   ReaderSettings,
 } from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
+import { nearestPage, neighbouringPages, sortPageNums, stepPage } from './pageOrder'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { toast } from 'sonner'
@@ -77,12 +78,18 @@ export function useReaderState(
   totalPages: number,
   source: string,
   sourceId: string,
+  /**
+   * The pages that exist, sorted, once the set is final: navigation then walks
+   * this list. Null while pages may still arrive (download in flight, EH proxy),
+   * where a number missing from the list can be a page worth waiting on.
+   */
+  settledPages: readonly number[] | null = null,
 ) {
   const settings = loadReaderSettings()
   const savedDirection = loadDirection(source, sourceId)
 
   const [state, dispatch] = useReducer(readerReducer, {
-    currentPage: initialPage,
+    currentPage: settledPages ? nearestPage(settledPages, initialPage) : initialPage,
     viewMode: settings.defaultViewMode,
     showOverlay: false,
     scaleMode: settings.defaultScaleMode,
@@ -92,15 +99,33 @@ export function useReaderState(
 
   const setPage = useCallback(
     (page: number) => {
-      const clamped = Math.max(1, Math.min(totalPages, page))
-      dispatch({ type: 'SET_PAGE', page: clamped })
+      const target = settledPages
+        ? nearestPage(settledPages, page)
+        : Math.max(1, Math.min(totalPages, page))
+      dispatch({ type: 'SET_PAGE', page: target })
     },
-    [totalPages],
+    [settledPages, totalPages],
   )
 
-  const nextPage = useCallback(() => setPage(state.currentPage + 1), [state.currentPage, setPage])
+  const nextPage = useCallback(
+    () =>
+      setPage(settledPages ? stepPage(settledPages, state.currentPage, 1) : state.currentPage + 1),
+    [settledPages, state.currentPage, setPage],
+  )
 
-  const prevPage = useCallback(() => setPage(state.currentPage - 1), [state.currentPage, setPage])
+  const prevPage = useCallback(
+    () =>
+      setPage(settledPages ? stepPage(settledPages, state.currentPage, -1) : state.currentPage - 1),
+    [settledPages, state.currentPage, setPage],
+  )
+
+  // The current page can stop existing: a refresh after its file was deleted,
+  // or a download settling with this page among the ones that failed.
+  useEffect(() => {
+    if (!settledPages) return
+    const page = nearestPage(settledPages, state.currentPage)
+    if (page !== state.currentPage) dispatch({ type: 'SET_PAGE', page })
+  }, [settledPages, state.currentPage])
 
   const setViewMode = useCallback((mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', mode }), [])
 
@@ -422,15 +447,17 @@ export function useSequentialPrefetch(
       } else {
         // Local: forward pages first, then backward, until the pixel budget is
         // spent. The next page is always kept so reading never waits on it.
-        const offsets = [
-          ...Array.from({ length: LOCAL_PREFETCH_AHEAD }, (_, i) => i + 1),
-          ...Array.from({ length: LOCAL_PREFETCH_BEHIND }, (_, i) => -(i + 1)),
-        ]
         const byPage = new Map(imagesRef.current.map((img) => [img.pageNum, img]))
+        const { after, before } = neighbouringPages(
+          sortPageNums([...byPage.keys()]),
+          page,
+          LOCAL_PREFETCH_AHEAD,
+          LOCAL_PREFETCH_BEHIND,
+        )
         let pixels = 0
         let kept = 0
-        for (const offset of offsets) {
-          const img = byPage.get(page + offset)
+        for (const pageNum of [...after, ...before]) {
+          const img = byPage.get(pageNum)
           if (!img || !img.url || img.mediaType === 'video') continue
           pixels += img.width && img.height ? img.width * img.height : LOCAL_PREFETCH_UNKNOWN_PIXELS
           if (kept > 0 && pixels > LOCAL_PREFETCH_PIXEL_BUDGET) break

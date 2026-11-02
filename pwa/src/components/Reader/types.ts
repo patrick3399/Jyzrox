@@ -6,6 +6,8 @@ export type ReadingDirection = 'ltr' | 'rtl' | 'vertical'
 
 export interface ReaderImage {
   pageNum: number // 1-indexed
+  /** Number to show the reader, when it differs from pageNum because page numbers have holes. */
+  position?: number
   url: string | null // resolved URL (local path or proxy API), null = not yet downloaded
   isLocal: boolean // true = served from /media/cas/
   width?: number

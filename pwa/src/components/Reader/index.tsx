@@ -34,6 +34,8 @@ import VideoPlayer from './VideoPlayer'
 import { THUMB_STRIP_CELL_HEIGHT, THUMB_STRIP_PADDING_Y } from './layout'
 import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
+import { isGalleryInProgress } from '@/lib/readerRefresh'
+import { pagePosition, sortPageNums, stepPage } from './pageOrder'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
 import { ThumbnailCell } from './ThumbnailCell'
 import { ThumbnailGridOverlay } from './ThumbnailGridOverlay'
@@ -1623,6 +1625,15 @@ export default function Reader({
     () => new Set(initialFavoritedImageIds ?? []),
   )
 
+  const pageOrder = useMemo(
+    () => sortPageNums(rawImages.map((img) => img.page_num).filter((p) => !hiddenPages.has(p))),
+    [rawImages, hiddenPages],
+  )
+  // Once no more pages can arrive, the list is the gallery: the Reader walks it
+  // and counts along it, so holes in page_num are neither shown nor counted.
+  const settledPages =
+    !isProxyMode && !isGalleryInProgress(downloadStatus) && pageOrder.length > 0 ? pageOrder : null
+
   // Memoized: this array feeds effects in the prefetch hook and the webtoon
   // observer. Rebuilding it on every render made those effects re-run on every
   // render — including the ones triggered by a prefetch settling — which tore
@@ -1633,6 +1644,7 @@ export default function Reader({
         .filter((img) => !hiddenPages.has(img.page_num))
         .map((img) => ({
           pageNum: img.page_num,
+          position: settledPages ? pagePosition(settledPages, img.page_num) : undefined,
           url: resolveImageUrl(img, source, sourceId),
           isLocal: img.file_path != null,
           width: img.width ?? undefined,
@@ -1642,7 +1654,7 @@ export default function Reader({
           thumbUrl: img.thumb_path?.replace('/data/', '/media/') ?? undefined,
           thumbhash: img.thumbhash ?? null,
         })),
-    [rawImages, hiddenPages, source, sourceId],
+    [rawImages, hiddenPages, settledPages, source, sourceId],
   )
 
   const {
@@ -1656,7 +1668,14 @@ export default function Reader({
     setReadingDirection,
     showGrid,
     hideGrid,
-  } = useReaderState(initialPage, totalPages, source, sourceId)
+  } = useReaderState(
+    initialPage,
+    // A download can have imported pages numbered above its running count.
+    Math.max(totalPages, pageOrder[pageOrder.length - 1] ?? 0),
+    source,
+    sourceId,
+    settledPages,
+  )
 
   // Reader settings (status bar, auto advance)
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS)
@@ -1674,9 +1693,10 @@ export default function Reader({
     setAutoAdvanceSeconds(s.autoAdvanceSeconds)
   }, [])
 
-  const effectiveTotalPages = totalPages - hiddenPages.size
+  const shownPage = settledPages ? pagePosition(settledPages, state.currentPage) : state.currentPage
+  const shownTotalPages = settledPages ? settledPages.length : totalPages - hiddenPages.size
   const isLastPage =
-    images.length > 0 ? state.currentPage >= images[images.length - 1].pageNum : true
+    pageOrder.length > 0 ? state.currentPage >= pageOrder[pageOrder.length - 1] : true
 
   const { countdown, resetCountdown } = useAutoAdvance(
     autoAdvanceEnabled,
@@ -1798,6 +1818,15 @@ export default function Reader({
     },
     [setPage, onSeekToPage],
   )
+
+  // The page indicator and status bar speak in the numbers they show.
+  const selectShownPage = useCallback(
+    (shown: number) => setPageWithPrefetch(settledPages ? settledPages[shown - 1] : shown),
+    [settledPages, setPageWithPrefetch],
+  )
+
+  const pageAfter = (delta: number) =>
+    settledPages ? stepPage(settledPages, state.currentPage, delta) : state.currentPage + delta
 
   const prefetchedPages = useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(source, sourceId, state.currentPage, !isProxyMode)
@@ -2111,8 +2140,13 @@ export default function Reader({
   }, [])
 
   const currentImage = images.find((i) => i.pageNum === state.currentPage)
-  const prevImage = images.find((i) => i.pageNum === state.currentPage - 1) ?? null
-  const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
+  // pageAfter() stays put at either end of a settled list.
+  const prevPageNum = pageAfter(-1)
+  const nextPageNum = pageAfter(1)
+  const prevImage =
+    prevPageNum !== state.currentPage ? (images.find((i) => i.pageNum === prevPageNum) ?? null) : null
+  const nextImage =
+    nextPageNum !== state.currentPage ? (images.find((i) => i.pageNum === nextPageNum) ?? null) : null
 
   // When downloading progressively, the current page may not have been imported yet.
   const isDownloading = downloadStatus === 'downloading'
@@ -2137,8 +2171,8 @@ export default function Reader({
         } ${!state.showOverlay ? 'pointer-events-none' : ''}`}
       >
         <ReaderOverlay
-          currentPage={state.currentPage}
-          totalPages={effectiveTotalPages}
+          currentPage={shownPage}
+          totalPages={shownTotalPages}
           viewMode={state.viewMode}
           scaleMode={state.scaleMode}
           readingDirection={state.readingDirection}
@@ -2151,7 +2185,7 @@ export default function Reader({
           onAutoAdvanceToggle={handleAutoAdvanceToggle}
           onAutoAdvanceIntervalChange={handleAutoAdvanceInterval}
           onShowHelp={handleShowHelp}
-          onPageSelect={setPageWithPrefetch}
+          onPageSelect={selectShownPage}
           onOpenGrid={showGrid}
         />
       </div>
@@ -2214,8 +2248,8 @@ export default function Reader({
             leftImage={currentImage}
             rightImage={nextImage}
             isLoading={pageLoading}
-            onNext={() => setPageWithPrefetch(state.currentPage + 2)}
-            onPrev={() => setPageWithPrefetch(state.currentPage - 2)}
+            onNext={() => setPageWithPrefetch(pageAfter(2))}
+            onPrev={() => setPageWithPrefetch(pageAfter(-2))}
             onToggleOverlay={handleToggleOverlay}
             onImageLoaded={handleImageLoaded}
             onImageError={handleImageError}
@@ -2263,12 +2297,12 @@ export default function Reader({
         onClick={(e) => e.stopPropagation()}
       >
         <StatusBar
-          currentPage={state.currentPage}
-          totalPages={effectiveTotalPages}
+          currentPage={shownPage}
+          totalPages={shownTotalPages}
           settings={readerSettings}
           countdown={countdown}
           autoAdvanceEnabled={autoAdvanceEnabled}
-          onPageSelect={setPageWithPrefetch}
+          onPageSelect={selectShownPage}
           readingDirection={state.readingDirection}
         />
       </div>

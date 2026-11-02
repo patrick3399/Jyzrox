@@ -252,6 +252,14 @@ describe('useSequentialPrefetch', () => {
       ])
     })
 
+    it('should prefetch the next surviving page across a hole in page numbers', () => {
+      const images = makeImages(20).filter((image) => image.pageNum <= 4 || image.pageNum >= 12)
+
+      renderHook(() => useSequentialPrefetch(images, 4, false))
+
+      expect(activeSrcs(instances)).toEqual(['http://proxy/page/12', 'http://proxy/page/13'])
+    })
+
     it('should fire new requests when currentPage advances', async () => {
       const images = makeImages(10)
       let currentPage = 1
