@@ -17,6 +17,8 @@ export const subscriptions = {
     auto_download?: boolean
     group_id?: number | null
     download_options?: Record<string, unknown>
+    /** Refuse with 409 `{code: "subscription_exists"}` instead of overwriting. */
+    reject_duplicate?: boolean
   }) =>
     apiFetch<{ status: string; id: number; source: string | null; duplicate?: boolean }>(
       '/api/subscriptions/',

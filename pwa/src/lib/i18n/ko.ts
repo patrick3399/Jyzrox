@@ -1761,6 +1761,10 @@ const ko: Record<string, string> = {
   'subscriptions.autoDownloadOn': '자동 다운로드 활성화 — cron이 새 콘텐츠를 자동 다운로드',
   'subscriptions.autoDownloadOff': '자동 다운로드 비활성화 — 수동만',
   'subscriptions.duplicateUpdated': '이 URL이 이미 존재합니다 — 구독 설정이 업데이트되었습니다',
+  'subscriptions.duplicateTitle': '이미 구독 중인 URL입니다',
+  'subscriptions.duplicateBody':
+    '이 URL은 이미 "{name}"에 등록되어 있습니다. 업데이트하면 이름, 일정, 자동 다운로드, 다운로드 옵션이 이 양식의 내용으로 바뀌고 구독이 다시 활성화됩니다. 그룹은 바뀌지 않습니다.',
+  'subscriptions.duplicateConfirm': '설정 업데이트',
   'subscriptions.searchPlaceholder': '구독 검색...',
   'subscriptions.noResults': '검색어와 일치하는 구독이 없습니다',
   'subscriptions.filterDownloading': '다운로드 중 ({count})',

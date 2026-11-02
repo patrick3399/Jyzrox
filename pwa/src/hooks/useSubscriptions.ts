@@ -51,6 +51,7 @@ export function useCreateSubscription() {
           auto_download?: boolean
           group_id?: number | null
           download_options?: Record<string, unknown>
+          reject_duplicate?: boolean
         }
       },
     ) => api.subscriptions.create(arg),

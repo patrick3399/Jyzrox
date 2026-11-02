@@ -1623,6 +1623,10 @@ const zhTW: Record<string, string> = {
   'subscriptions.updateFailed': '更新訂閱失敗',
   'subscriptions.disabled': '已停用',
   'subscriptions.duplicateUpdated': '此 URL 已存在 — 訂閱設定已更新',
+  'subscriptions.duplicateTitle': '已訂閱此網址',
+  'subscriptions.duplicateBody':
+    '此網址已屬於「{name}」。更新後，名稱、排程、自動下載與下載選項都會改為此表單的內容，訂閱也會重新啟用；所屬群組不變。',
+  'subscriptions.duplicateConfirm': '更新設定',
   'subscriptions.sourceOther': '其他',
   'subscriptions.ungrouped': '未分組',
   'subscriptions.viewLabel': '排列方式',

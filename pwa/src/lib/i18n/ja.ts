@@ -1409,6 +1409,10 @@ const ja: Record<string, string> = {
   'subscriptions.autoDownloadOff': '自動ダウンロード無効 — 手動のみ',
   'subscriptions.duplicateUpdated':
     'このURLはすでに存在します — サブスクリプション設定を更新しました',
+  'subscriptions.duplicateTitle': 'このURLは登録済みです',
+  'subscriptions.duplicateBody':
+    'このURLは「{name}」で登録済みです。更新すると、名前、スケジュール、自動ダウンロード、ダウンロードオプションがこのフォームの内容に置き換わり、有効に戻ります。グループは変わりません。',
+  'subscriptions.duplicateConfirm': '設定を更新',
   'subscriptions.searchPlaceholder': 'サブスクリプションを検索...',
   'subscriptions.noResults': '検索に一致するサブスクリプションがありません',
   'subscriptions.filterDownloading': 'ダウンロード中 ({count})',

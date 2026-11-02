@@ -1813,6 +1813,10 @@ const zhCN: Record<string, string> = {
   'subscriptions.updateFailed': '更新订阅失败',
   'subscriptions.disabled': '已停用',
   'subscriptions.duplicateUpdated': '该 URL 已存在 — 订阅设置已更新',
+  'subscriptions.duplicateTitle': '已订阅此网址',
+  'subscriptions.duplicateBody':
+    '此网址已属于“{name}”。更新后，名称、计划、自动下载和下载选项都会改为此表单的内容，订阅也会重新启用；所属分组不变。',
+  'subscriptions.duplicateConfirm': '更新设置',
   'subscriptions.sourceOther': '其他',
   'subscriptions.ungrouped': '未分组',
   'subscriptions.viewLabel': '排列方式',

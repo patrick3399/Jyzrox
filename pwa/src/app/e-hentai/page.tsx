@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import {
   useState,
@@ -38,6 +39,11 @@ import { VirtualGrid } from '@/components/VirtualGrid'
 import { estimateEhGridRowHeight } from '@/lib/ehLayout'
 import { CredentialBanner } from '@/components/CredentialBanner'
 import { DEFAULT_SUBSCRIPTION_CRON } from '@/components/subscriptions/constants'
+import {
+  duplicateSubscriptionHint,
+  type DuplicateSubscriptionHint,
+} from '@/components/subscriptions/duplicateSubscription'
+import { useOpenedOnce } from '@/hooks/useOpenedOnce'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { CATEGORY_META, GridCard, isLightColor, ListCard } from '@/components/eh/EhBrowseCards'
@@ -55,6 +61,14 @@ import {
 } from 'lucide-react'
 import type { EhGallery, SavedSearch, TagItem } from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
+
+const DuplicateSubscriptionDialog = dynamic(
+  () =>
+    import('@/components/subscriptions/DuplicateSubscriptionDialog').then(
+      (module) => module.DuplicateSubscriptionDialog,
+    ),
+  { ssr: false },
+)
 
 function SearchAutocompleteDropdown({
   suggestions,
@@ -254,6 +268,8 @@ function BrowsePage() {
   const [subAutoDownload, setSubAutoDownload] = useState(false)
   const [subCron, setSubCron] = useState(DEFAULT_SUBSCRIPTION_CRON)
   const { trigger: createSub, isMutating: subCreating } = useCreateSubscription()
+  const [duplicateHint, setDuplicateHint] = useState<DuplicateSubscriptionHint | null>(null)
+  const duplicateDialogOpened = useOpenedOnce(duplicateHint !== null)
   const { data: watchedData, mutate: refreshWatched } = useSubscriptions({
     source: 'ehentai',
     enabled: true,
@@ -802,20 +818,32 @@ function BrowsePage() {
     [actions],
   )
 
-  const handleSubscribe = async () => {
+  const handleSubscribe = async ({ overwrite = false }: { overwrite?: boolean } = {}) => {
     const subUrl = `https://e-hentai.org/?f_search=${encodeURIComponent(query)}`
     try {
-      await createSub({
+      const result = await createSub({
         url: subUrl,
         name: subName.trim() || query,
         auto_download: subAutoDownload,
         cron_expr: subCron,
+        ...(overwrite ? {} : { reject_duplicate: true }),
       })
-      toast.success(t('browse.subscribeSuccess'))
+      setDuplicateHint(null)
+      if (result?.duplicate) {
+        toast.info(t('subscriptions.duplicateUpdated'))
+      } else {
+        toast.success(t('browse.subscribeSuccess'))
+      }
       void refreshWatched()
       setShowSubscribe(false)
       setSubName('')
-    } catch {
+    } catch (err) {
+      const hint = duplicateSubscriptionHint(err)
+      if (hint) {
+        setDuplicateHint(hint)
+        return
+      }
+      setDuplicateHint(null)
       toast.error(t('browse.subscribeFailed'))
     }
   }
@@ -1327,12 +1355,20 @@ function BrowsePage() {
                   </div>
                 </div>
                 <Button variant="primary" size="sm" className="w-full"
-                  onClick={handleSubscribe}
+                  onClick={() => handleSubscribe()}
                   disabled={subCreating}
                 >
                   {subCreating ? t('subscriptions.adding') : t('subscriptions.add')}
                 </Button>
               </div>
+            )}
+            {duplicateDialogOpened && (
+              <DuplicateSubscriptionDialog
+                hint={duplicateHint}
+                busy={subCreating}
+                onCancel={() => setDuplicateHint(null)}
+                onConfirm={() => handleSubscribe({ overwrite: true })}
+              />
             )}
           </div>
         )}

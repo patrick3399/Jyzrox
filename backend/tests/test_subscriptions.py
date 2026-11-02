@@ -1052,3 +1052,51 @@ class TestCreateSubscriptionDuplicateAndNormalization:
         assert get_resp.json()["url"] == expected_url, (
             f"Expected stored URL '{expected_url}' but got '{get_resp.json()['url']}'"
         )
+
+
+class TestCreateSubscriptionRejectDuplicate:
+    """``reject_duplicate`` lets the form ask before an upsert overwrites a subscription."""
+
+    async def test_reject_duplicate_trailing_slash_url_returns_409_without_overwriting(self, client, db_session):
+        """A URL differing only by its trailing slash is the same subscription and stays untouched."""
+        await _ensure_user(db_session)
+        url = "https://example.com/artist/reject-dup"
+        sub_id = await _insert_subscription(db_session, url=url, name="Keep Me", cron_expr="0 */2 * * *")
+
+        resp = await client.post(
+            "/api/subscriptions/",
+            json={"url": f"  {url}/  ", "name": "Overwrite", "cron_expr": "0 0 * * *", "reject_duplicate": True},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == {
+            "code": "subscription_exists",
+            "subscription_id": sub_id,
+            "name": "Keep Me",
+            "url": url,
+        }
+        stored = (await client.get(f"/api/subscriptions/{sub_id}")).json()
+        assert stored["name"] == "Keep Me"
+        assert stored["cron_expr"] == "0 */2 * * *"
+
+    async def test_reject_duplicate_another_users_url_is_not_refused(self, client, db_session):
+        """Another user's subscription neither blocks the request nor leaks through the refusal."""
+        await _ensure_user(db_session)
+        await _ensure_user(db_session, user_id=2)
+        url = "https://example.com/artist/other-user-dup"
+        await _insert_subscription(db_session, user_id=2, url=url, name="Theirs")
+
+        resp = await client.post("/api/subscriptions/", json={"url": url, "reject_duplicate": True})
+
+        # 500 is the SQLite pg_insert limitation; what matters is not refusing.
+        assert resp.status_code != 409
+
+    async def test_without_reject_duplicate_existing_url_is_not_refused(self, client, db_session):
+        """Callers that did not opt in keep the upsert behaviour."""
+        await _ensure_user(db_session)
+        url = "https://example.com/artist/opt-out-dup"
+        await _insert_subscription(db_session, url=url)
+
+        resp = await client.post("/api/subscriptions/", json={"url": url})
+
+        assert resp.status_code != 409

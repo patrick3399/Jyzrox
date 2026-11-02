@@ -1218,6 +1218,10 @@ const en: Record<string, string> = {
   'subscriptions.autoDownloadOn': 'Auto download enabled — cron will download new content',
   'subscriptions.autoDownloadOff': 'Auto download disabled — manual only',
   'subscriptions.duplicateUpdated': 'This URL already exists — subscription settings updated',
+  'subscriptions.duplicateTitle': 'Already subscribed to this URL',
+  'subscriptions.duplicateBody':
+    'This URL already belongs to "{name}". Updating replaces its name, schedule, auto download and download options with this form, and re-enables it. Its group stays the same.',
+  'subscriptions.duplicateConfirm': 'Update settings',
   'subscriptions.searchPlaceholder': 'Search subscriptions...',
   'subscriptions.noResults': 'No subscriptions match your search',
   'subscriptions.filterDownloading': 'Downloading ({count})',

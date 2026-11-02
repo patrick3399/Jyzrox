@@ -85,6 +85,9 @@ class CreateSubscriptionRequest(BaseModel):
     auto_download: bool = False
     group_id: int | None = None
     download_options: dict | None = None
+    # Opt-in: answer 409 instead of overwriting the subscription this URL
+    # already belongs to, so the caller can ask the user first.
+    reject_duplicate: bool = False
 
 
 class PatchSubscriptionRequest(BaseModel):
@@ -282,12 +285,23 @@ async def create_subscription(
     async with async_session() as session:
         existing = (
             await session.execute(
-                select(Subscription.id).where(
+                select(Subscription.id, Subscription.name).where(
                     Subscription.user_id == user_id,
                     Subscription.url == normalized_url,
                 )
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
+
+        if existing is not None and req.reject_duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "subscription_exists",
+                    "subscription_id": existing.id,
+                    "name": existing.name,
+                    "url": normalized_url,
+                },
+            )
 
         stmt = _build_subscription_upsert(
             user_id=user_id,

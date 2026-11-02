@@ -67,11 +67,23 @@ import {
   writeSubscriptionView,
   type SubscriptionView,
 } from '@/components/subscriptions/sourceGrouping'
+import {
+  duplicateSubscriptionHint,
+  type DuplicateSubscriptionHint,
+} from '@/components/subscriptions/duplicateSubscription'
+import { useOpenedOnce } from '@/hooks/useOpenedOnce'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 
 const GroupModal = dynamic(
   () => import('@/components/subscriptions/GroupModal').then((module) => module.GroupModal),
+  { ssr: false },
+)
+const DuplicateSubscriptionDialog = dynamic(
+  () =>
+    import('@/components/subscriptions/DuplicateSubscriptionDialog').then(
+      (module) => module.DuplicateSubscriptionDialog,
+    ),
   { ssr: false },
 )
 
@@ -272,6 +284,8 @@ export default function SubscriptionsPage() {
   const [fanboxSubscriptionFeeMin, setFanboxSubscriptionFeeMin] = useState('')
   const [fanboxSubscriptionFeeMax, setFanboxSubscriptionFeeMax] = useState('')
   const [mediaPolicy, setMediaPolicy] = useState<MediaPolicy>(DEFAULT_MEDIA_POLICY)
+  const [duplicateHint, setDuplicateHint] = useState<DuplicateSubscriptionHint | null>(null)
+  const duplicateDialogOpened = useOpenedOnce(duplicateHint !== null)
   const [debouncedAddUrl, setDebouncedAddUrl] = useState('')
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedAddUrl(url), 300)
@@ -296,7 +310,7 @@ export default function SubscriptionsPage() {
   const [editingGroup, setEditingGroup] = useState<SubscriptionGroup | null>(null)
 
   // Handlers — subscriptions
-  const handleAdd = async () => {
+  const handleAdd = async ({ overwrite = false }: { overwrite?: boolean } = {}) => {
     if (!url.trim()) return
     const fanboxOptions: Record<string, unknown> = url.includes('fanbox.cc')
       ? {
@@ -318,7 +332,9 @@ export default function SubscriptionsPage() {
         cron_expr: cronExpr,
         group_id: selectedGroupId,
         ...(Object.keys(downloadOptions).length > 0 ? { download_options: downloadOptions } : {}),
+        ...(overwrite ? {} : { reject_duplicate: true }),
       })
+      setDuplicateHint(null)
       if (result?.duplicate) {
         toast.info(t('subscriptions.duplicateUpdated'))
       } else {
@@ -336,6 +352,12 @@ export default function SubscriptionsPage() {
       setShowAdd(false)
       mutate()
     } catch (err) {
+      const hint = duplicateSubscriptionHint(err)
+      if (hint) {
+        setDuplicateHint(hint)
+        return
+      }
+      setDuplicateHint(null)
       toast.error(err instanceof Error ? err.message : t('subscriptions.addFailed'))
     }
   }
@@ -786,7 +808,7 @@ export default function SubscriptionsPage() {
               ))}
             </div>
           </div>
-          <Button variant="primary" onClick={handleAdd} disabled={creating || !url.trim()}>
+          <Button variant="primary" onClick={() => handleAdd()} disabled={creating || !url.trim()}>
             {creating ? t('subscriptions.adding') : t('subscriptions.add')}
           </Button>
         </div>
@@ -1080,6 +1102,16 @@ export default function SubscriptionsPage() {
             setEditingGroup(null)
           }}
           onSave={handleGroupSave}
+        />
+      )}
+
+      {/* Overwrite confirmation for a URL that already has a subscription */}
+      {duplicateDialogOpened && (
+        <DuplicateSubscriptionDialog
+          hint={duplicateHint}
+          busy={creating}
+          onCancel={() => setDuplicateHint(null)}
+          onConfirm={() => handleAdd({ overwrite: true })}
         />
       )}
     </PageContainer>
