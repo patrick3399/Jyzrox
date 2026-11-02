@@ -43,6 +43,15 @@ export interface Gallery {
   source_path?: string | null
   deleted_at?: string | null
   metadata_updated_at?: string | null
+  media_stats?: GalleryMediaStats
+}
+
+/** Size and per-type counts over the pages the Reader shows (detail endpoint only). */
+export interface GalleryMediaStats {
+  total_size: number
+  image_count: number
+  gif_count: number
+  video_count: number
 }
 
 export interface GallerySyncResult {

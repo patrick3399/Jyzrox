@@ -30,7 +30,7 @@ import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
-import { t, formatDate } from '@/lib/i18n'
+import { t, formatDate, formatBytes } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
 import {
   Heart,
@@ -1224,6 +1224,31 @@ function GalleryDetailPageInner() {
                       },
                     ]
                   : []),
+                ...(gallery.media_stats && gallery.media_stats.total_size > 0
+                  ? [
+                      {
+                        labelKey: 'library.metaSize',
+                        value: formatBytes(gallery.media_stats.total_size),
+                      },
+                    ]
+                  : []),
+                ...(gallery.media_stats &&
+                (gallery.media_stats.gif_count > 0 || gallery.media_stats.video_count > 0)
+                  ? [
+                      {
+                        labelKey: 'library.metaMedia',
+                        value: [
+                          t('library.mediaImages', { count: String(gallery.media_stats.image_count) }),
+                          ...(gallery.media_stats.gif_count > 0
+                            ? [t('library.mediaGifs', { count: String(gallery.media_stats.gif_count) })]
+                            : []),
+                          ...(gallery.media_stats.video_count > 0
+                            ? [t('library.mediaVideos', { count: String(gallery.media_stats.video_count) })]
+                            : []),
+                        ].join(' · '),
+                      },
+                    ]
+                  : []),
                 { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
               ].map(({ labelKey, value }) => (
                 <div
@@ -1231,7 +1256,9 @@ function GalleryDetailPageInner() {
                   className={`min-w-0 truncate md:order-none md:block ${
                     labelKey === 'library.metaPages'
                       ? 'order-1 shrink-0'
-                      : `order-4 basis-[calc(50%-0.5rem)] ${infoOpen ? '' : 'hidden'}`
+                      : `order-4 ${
+                          labelKey === 'library.metaMedia' ? 'basis-full' : 'basis-[calc(50%-0.5rem)]'
+                        } ${infoOpen ? '' : 'hidden'}`
                   }`}
                 >
                   <span className="text-vault-text-muted">{t(labelKey)}: </span>

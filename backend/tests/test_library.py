@@ -4450,3 +4450,48 @@ class TestListGalleryFilesHidesSidecar:
         filenames = [f["filename"] for f in resp.json()["files"]]
         assert "001.jpg" in filenames
         assert "info.json" not in filenames
+
+
+# ---------------------------------------------------------------------------
+# Gallery detail media stats
+# ---------------------------------------------------------------------------
+
+
+class TestGalleryMediaStats:
+    """GET /api/library/galleries/{source}/{source_id} → media_stats"""
+
+    async def _add(self, db_session, gid, page_num, media_type, size, visibility="active"):
+        sha = f"ms_{gid}_{page_num}"
+        await db_session.execute(
+            text("INSERT INTO blobs (sha256, file_size, extension, media_type) VALUES (:s, :sz, 'x', :mt)"),
+            {"s": sha, "sz": size, "mt": media_type},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, visibility) "
+                "VALUES (:g, :p, 'f', :s, :v)"
+            ),
+            {"g": gid, "p": page_num, "s": sha, "v": visibility},
+        )
+        await db_session.commit()
+
+    async def test_media_stats_sums_size_and_counts_each_media_type(self, client, db_session):
+        gid = await _insert_gallery(db_session, source="local", source_id="ms_mix", title="Mixed", pages=4)
+        await self._add(db_session, gid, 1, "image", 1000)
+        await self._add(db_session, gid, 2, "image", 2000)
+        await self._add(db_session, gid, 3, "gif", 500)
+        await self._add(db_session, gid, 4, "video", 10000)
+
+        stats = (await client.get("/api/library/galleries/local/ms_mix")).json()["media_stats"]
+
+        assert stats == {"total_size": 13500, "image_count": 2, "gif_count": 1, "video_count": 1}
+
+    async def test_media_stats_excludes_hidden_images(self, client, db_session):
+        gid = await _insert_gallery(db_session, source="local", source_id="ms_hidden", title="Hidden", pages=2)
+        await self._add(db_session, gid, 1, "image", 1000)
+        await self._add(db_session, gid, 2, "video", 9000, visibility="hidden")
+
+        stats = (await client.get("/api/library/galleries/local/ms_hidden")).json()["media_stats"]
+
+        assert stats["total_size"] == 1000
+        assert stats["video_count"] == 0

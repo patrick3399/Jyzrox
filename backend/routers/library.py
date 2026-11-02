@@ -1590,6 +1590,42 @@ async def empty_trash(
     return {"status": "ok", **result}
 
 
+async def _gallery_media_stats(db: AsyncSession, gallery_id: int) -> dict:
+    """Total size and per-type counts over the pages the Reader would show."""
+    excluded_sq = (
+        select(ExcludedBlob.blob_sha256)
+        .where(ExcludedBlob.gallery_id == gallery_id)
+        .correlate(Image)
+        .where(ExcludedBlob.blob_sha256 == Image.blob_sha256)
+    )
+    visible = (Image.gallery_id == gallery_id) & (Image.visibility == "active") & ~exists(excluded_sq)
+    rows = (
+        await db.execute(
+            select(Blob.media_type, func.count(), func.coalesce(func.sum(Blob.file_size), 0))
+            .select_from(Image)
+            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .where(visible)
+            .group_by(Blob.media_type)
+        )
+    ).all()
+    counts = {"image": 0, "gif": 0, "video": 0}
+    total_size = 0
+    for media_type, count, size in rows:
+        counts[media_type if media_type in counts else "image"] += count
+        total_size += int(size)
+    # Link-mode pages not hashed yet have no blob: classify by name, size by stat.
+    pending = (
+        await db.execute(
+            select(Image).where(visible).where(Image.blob_sha256.is_(None))
+        )
+    ).scalars().all()
+    for img in pending:
+        kind = _pending_media_type(img)
+        counts[kind if kind in counts else "image"] += 1
+        total_size += int(img.source_size or 0)
+    return {"total_size": total_size, "image_count": counts["image"], "gif_count": counts["gif"], "video_count": counts["video"]}
+
+
 @router.get("/galleries/{source}/{source_id}")
 async def get_gallery(
     source: str,
@@ -1601,6 +1637,7 @@ async def get_gallery(
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
     data = _g(g, cover_thumb=cover_thumb, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
+    data["media_stats"] = await _gallery_media_stats(db, g.id)
     if g.source == "pixiv" and str(g.source_id).startswith("user:"):
         items = (
             (
