@@ -261,3 +261,14 @@ async def test_rebase_conflict_still_locks_the_repo(repos, tmp_path):
         await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: mine")
 
     assert (await novel_git.status(work))["locked"] is True
+
+
+async def test_log_file_follows_a_rename(repos):
+    """Phase B moves files into category folders; without --follow the history
+    panel started at the move and hid every earlier revision."""
+    work = repos["work"]
+    (work / "作品A" / "番外").mkdir()
+    _run(work, "mv", "作品A/第01章.md", "作品A/番外/短篇.md")
+    _run(work, "commit", "-m", "move")
+    log = await novel_git.log_file(str(work), "作品A/番外/短篇.md")
+    assert [c["message"] for c in log] == ["move", "init"]
