@@ -3,7 +3,16 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { libraryBrowseIdentityKey } from '@/lib/browse/library'
-import { parseQuery, queryText, updateFilter, withText, withoutFilters } from '@/lib/queryParser'
+import {
+  parseQuery,
+  queryText,
+  setFacet as setFacetInQuery,
+  updateFilter,
+  withText,
+  withoutFilters,
+  type FacetKey,
+  type FacetSelection,
+} from '@/lib/queryParser'
 
 export function useUnifiedSearch() {
   const searchParams = useSearchParams()
@@ -61,6 +70,12 @@ export function useUnifiedSearch() {
     setRawQuery((prev) => updateFilter(prev, key, value))
   }, [])
 
+  // Multi-select facet mutation (Source / Category include or exclude lists)
+  const setFacet = useCallback((key: FacetKey, selection: FacetSelection) => {
+    hasOutboundIntentRef.current = true
+    setRawQuery((prev) => setFacetInQuery(prev, key, selection))
+  }, [])
+
   // Drop every filter, keep the typed text.
   const clearFilters = useCallback(() => {
     hasOutboundIntentRef.current = true
@@ -112,6 +127,7 @@ export function useUnifiedSearch() {
     inputValue,
     parsed,
     setFilter,
+    setFacet,
     commitSearch,
     clearSearch,
     clearFilters,

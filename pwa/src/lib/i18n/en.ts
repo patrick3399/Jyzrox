@@ -1674,6 +1674,7 @@ const en: Record<string, string> = {
 
   // ── Common (additions) ──
   'common.close': 'Close',
+  'common.done': 'Done',
   'common.add': 'Add',
   'common.days': 'days',
 
@@ -2160,6 +2161,19 @@ const en: Record<string, string> = {
   'library.syntaxCategory': 'filter by category',
   'library.syntaxImportMode': 'filter by import mode',
   'library.syntaxReadingList': 'reading list only',
+  'library.facetOnly': 'Only these',
+  'library.facetExcept': 'All except',
+  'library.facetNot': 'Not: {value}',
+  'library.facetMore': '{label} +{count}',
+  'library.showResults': 'Show {count}',
+  'library.resetFilters': 'Reset',
+  'library.facetFilterPlaceholder': 'Filter…',
+  'library.facetOr': 'or',
+  'library.facetNotPrefix': 'not',
+  'library.facetMode': 'Filter mode',
+  'library.facetNoMatches': 'No matches',
+  'library.syntaxMultiFacet': 'repeat to match any (category:manga category:cosplay)',
+  'library.syntaxExcludeFacet': 'exclude a source or category',
   'library.datePosted': 'Date Posted',
   'library.titleSort': 'Title',
 

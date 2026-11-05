@@ -1431,3 +1431,97 @@ class TestSQLAlchemyArrayTypeRegression:
             "The generic sqlalchemy.ARRAY lacks .contains()/.overlap(), "
             "causing NotImplementedError on all tag-filtered search queries."
         )
+
+
+async def _insert_facet_gallery(db_session, source, source_id, title, category, import_mode=None):
+    """Insert a gallery with explicit (possibly NULL) category and import_mode."""
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries "
+            "(source, source_id, title, category, language, pages, rating, "
+            "favorited, download_status, tags_array, import_mode) "
+            "VALUES (:source, :source_id, :title, :category, 'english', 10, 0, 0, "
+            "'completed', '[]', :import_mode)"
+        ),
+        {
+            "source": source,
+            "source_id": source_id,
+            "title": title,
+            "category": category,
+            "import_mode": import_mode,
+        },
+    )
+    await db_session.commit()
+
+
+def _titles(resp):
+    assert resp.status_code == 200
+    return sorted(i["title"] for i in resp.json()["items"])
+
+
+class TestSearchMultiSelectFacets:
+    """Repeated / excluded source: and category: tokens."""
+
+    async def test_search_repeated_category_tokens_return_union(self, client, db_session):
+        await _insert_facet_gallery(db_session, "ms_a", "1", "Cos", "Cosplay")
+        await _insert_facet_gallery(db_session, "ms_a", "2", "Photo", "Model Photobook")
+        await _insert_facet_gallery(db_session, "ms_a", "3", "Manga", "Manga")
+
+        resp = await client.get("/api/search/", params={"q": 'category:Cosplay category:"Model Photobook"'})
+        assert _titles(resp) == ["Cos", "Photo"]
+
+    async def test_search_repeated_source_tokens_return_union(self, client, db_session):
+        await _insert_facet_gallery(db_session, "ms_x", "1", "X1", "c")
+        await _insert_facet_gallery(db_session, "ms_y", "1", "Y1", "c")
+        await _insert_facet_gallery(db_session, "ms_z", "1", "Z1", "c")
+
+        resp = await client.get("/api/search/", params={"q": "source:ms_x source:ms_y"})
+        assert _titles(resp) == ["X1", "Y1"]
+
+    async def test_search_exclude_category_keeps_uncategorized_galleries(self, client, db_session):
+        """-category:Misc must not drop NULL-category rows (NULL != 'Misc' is NULL)."""
+        await _insert_facet_gallery(db_session, "ms_e", "1", "Misc One", "Misc")
+        await _insert_facet_gallery(db_session, "ms_e", "2", "Null Cat", None)
+        await _insert_facet_gallery(db_session, "ms_e", "3", "Other Cat", "Other")
+
+        resp = await client.get("/api/search/", params={"q": "source:ms_e -category:Misc"})
+        assert _titles(resp) == ["Null Cat", "Other Cat"]
+
+    async def test_search_exclude_source_compound_local_link_keeps_local_copy(self, client, db_session):
+        await _insert_facet_gallery(db_session, "local", "1", "Linked", None, "link")
+        await _insert_facet_gallery(db_session, "local", "2", "Copied", "c", "copy")
+        await _insert_facet_gallery(db_session, "local", "3", "NoMode", "c", None)
+        await _insert_facet_gallery(db_session, "ms_o", "1", "Other", "c", None)
+
+        resp = await client.get("/api/search/", params={"q": "-source:local:link"})
+        assert _titles(resp) == ["Copied", "NoMode", "Other"]
+
+    async def test_search_exclude_uncategorized_keeps_only_categorized(self, client, db_session):
+        await _insert_facet_gallery(db_session, "ms_u", "1", "Null Cat", None)
+        await _insert_facet_gallery(db_session, "ms_u", "2", "Empty Cat", "")
+        await _insert_facet_gallery(db_session, "ms_u", "3", "Has Cat", "Art")
+
+        resp = await client.get("/api/search/", params={"q": "source:ms_u -category:__uncategorized__"})
+        assert _titles(resp) == ["Has Cat"]
+
+    async def test_search_single_source_and_import_token_still_filters(self, client, db_session):
+        await _insert_facet_gallery(db_session, "local", "1", "Linked", "c", "link")
+        await _insert_facet_gallery(db_session, "local", "2", "Copied", "c", "copy")
+        await _insert_facet_gallery(db_session, "ms_s", "1", "Other", "c", "link")
+
+        resp = await client.get("/api/search/", params={"q": "source:local import:link"})
+        assert _titles(resp) == ["Linked"]
+        resp = await client.get("/api/search/", params={"q": "source:local:link"})
+        assert _titles(resp) == ["Linked"]
+        resp = await client.get("/api/search/", params={"q": "source:ms_s"})
+        assert _titles(resp) == ["Other"]
+
+    async def test_search_more_than_twenty_tokens_keeps_all_source_filters(self, client, db_session):
+        """Source tokens beyond the old 20-token cap must not be silently truncated."""
+        for i in range(30):
+            await _insert_facet_gallery(db_session, f"ms_n{i:02d}", "1", f"G{i:02d}", "c")
+
+        q = " ".join(f"source:ms_n{i:02d}" for i in range(30))
+        resp = await client.get("/api/search/", params={"q": q})
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 30

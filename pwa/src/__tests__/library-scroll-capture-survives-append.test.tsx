@@ -33,13 +33,15 @@ vi.mock('@/hooks/useUnifiedSearch', () => ({
       nameOnlyTags: [],
       excludeTags: [],
       title: null,
-      source: null,
+      sources: [],
+      excludeSources: [],
       rating: null,
       favorited: false,
       readingList: false,
       collection: null,
       artistId: null,
-      category: null,
+      categories: [],
+      excludeCategories: [],
       importMode: null,
       sort: null,
     },
@@ -101,6 +103,9 @@ vi.mock('@/hooks/useLibraryBrowseSession', () => ({
 }))
 vi.mock('@/hooks/useProfile', () => ({
   useProfile: () => ({ data: { username: 'member', role: 'member' } }),
+}))
+vi.mock('@/hooks/useLibraryFacets', () => ({
+  useLibraryFacets: () => ({ data: { sources: [], categories: [], uncategorized: 0 } }),
 }))
 vi.mock('@/hooks/useGalleries', () => ({
   useGalleryCategories: () => ({ data: { categories: [] } }),

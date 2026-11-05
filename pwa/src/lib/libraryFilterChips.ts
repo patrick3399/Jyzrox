@@ -1,5 +1,5 @@
 import { t } from '@/lib/i18n'
-import type { ParsedFilters } from '@/lib/queryParser'
+import { facetSelection, type FacetKey, type ParsedFilters } from '@/lib/queryParser'
 
 export type LibraryFilterChipKey =
   | 'title'
@@ -22,6 +22,20 @@ export interface LibraryFilterChipContext {
   sortLabel: (value: string) => string
 }
 
+function facetChipLabel(
+  title: string,
+  parsed: ParsedFilters,
+  key: FacetKey,
+  display: (value: string) => string,
+): string | null {
+  const { mode, values } = facetSelection(parsed, key)
+  if (values.length === 0) return null
+  const shown = values.map(display)
+  return mode === 'exclude'
+    ? `${title}: ${t('library.facetNotPrefix')} ${shown.join(', ')}`
+    : `${title}: ${shown.join(` ${t('library.facetOr')} `)}`
+}
+
 /**
  * Active filters as removable chips, in a fixed order. Count = result length.
  * Favorites and reading list have toggle buttons that show their state instead.
@@ -35,18 +49,23 @@ export function libraryFilterChips(
   if (parsed.title) {
     chips.push({ key: 'title', label: `${t('library.titleFilter')}: ${parsed.title}` })
   }
-  if (parsed.source) {
-    const combined = parsed.importMode ? `${parsed.source}:${parsed.importMode}` : parsed.source
-    chips.push({ key: 'source', label: `${t('library.source')}: ${ctx.sourceLabel(combined)}` })
-  }
+  // A leftover `import:` next to a single plain source still means that combination.
+  const sourceParsed =
+    parsed.importMode && parsed.sources.length === 1 && !parsed.sources[0].includes(':')
+      ? { ...parsed, sources: [`${parsed.sources[0]}:${parsed.importMode}`] }
+      : parsed
+  const sourceLabel = facetChipLabel(t('library.source'), sourceParsed, 'source', ctx.sourceLabel)
+  if (sourceLabel) chips.push({ key: 'source', label: sourceLabel })
   if (parsed.rating !== null) {
     chips.push({ key: 'rating', label: `★≥${parsed.rating}` })
   }
-  if (parsed.category) {
-    const value =
-      parsed.category === '__uncategorized__' ? t('library.categoryUncategorized') : parsed.category
-    chips.push({ key: 'category', label: `${t('library.filterCategory')}: ${value}` })
-  }
+  const categoryLabel = facetChipLabel(
+    t('library.filterCategory'),
+    parsed,
+    'category',
+    (value) => (value === '__uncategorized__' ? t('library.categoryUncategorized') : value),
+  )
+  if (categoryLabel) chips.push({ key: 'category', label: categoryLabel })
   if (parsed.collection !== null) {
     const value = ctx.collectionName(parsed.collection) ?? `#${parsed.collection}`
     chips.push({ key: 'collection', label: `${t('collections.filterByCollection')}: ${value}` })

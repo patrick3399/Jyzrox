@@ -122,10 +122,10 @@ describe('CategoriesSettingsPage', () => {
     render(<CategoriesSettingsPage />)
     const href = screen.getByRole('link', { name: /Artist CG/ }).getAttribute('href') ?? ''
     const q = new URL(href, 'http://x').searchParams.get('q') ?? ''
-    expect(parseQuery(q).category).toBe('Artist CG')
+    expect(parseQuery(q).categories).toEqual(['Artist CG'])
     const uncategorized = screen.getByRole('link', { name: /library\.categoryUncategorized/ })
     const uq = new URL(uncategorized.getAttribute('href') ?? '', 'http://x').searchParams.get('q') ?? ''
-    expect(parseQuery(uq).category).toBe('__uncategorized__')
+    expect(parseQuery(uq).categories).toEqual(['__uncategorized__'])
   })
 
   it('test_categories_page_uncategorized_section_shows_count_and_links_to_uncategorized_filter', () => {

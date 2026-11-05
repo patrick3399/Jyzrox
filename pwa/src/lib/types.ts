@@ -1264,6 +1264,12 @@ export interface QueueOverview {
   workers: SaqWorker[]
 }
 
+export interface LibraryFacets {
+  sources: { value: string; label: string; count: number }[]
+  categories: { name: string; count: number }[]
+  uncategorized: number
+}
+
 export interface GalleryCategoryDef {
   id: number
   name: string

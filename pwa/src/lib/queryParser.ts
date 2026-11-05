@@ -3,13 +3,15 @@ export interface ParsedFilters {
   nameOnlyTags: string[] // bare name tokens (without colon, not a known filter prefix)
   excludeTags: string[] // tokens after - prefix (without the -)
   title: string | null // title:"value" token
-  source: string | null // source:xxx token
+  sources: string[] // source:xxx tokens (OR); local import modes use "local:link"
+  excludeSources: string[] // -source:xxx tokens
   rating: number | null // rating:>=N token (just the number)
   favorited: boolean // favorited:true token
   readingList: boolean // rl:true token
   collection: number | null // collection:N token
   artistId: string | null // artist_id:xxx token
-  category: string | null // category:xxx token
+  categories: string[] // category:xxx tokens (OR)
+  excludeCategories: string[] // -category:xxx tokens
   importMode: string | null // import:xxx token
   sort: string | null // sort:xxx token
 }
@@ -83,13 +85,15 @@ export function parseQuery(q: string): ParsedFilters {
     nameOnlyTags: [],
     excludeTags: [],
     title: null,
-    source: null,
+    sources: [],
+    excludeSources: [],
     rating: null,
     favorited: false,
     readingList: false,
     collection: null,
     artistId: null,
-    category: null,
+    categories: [],
+    excludeCategories: [],
     importMode: null,
     sort: null,
   }
@@ -100,6 +104,20 @@ export function parseQuery(q: string): ParsedFilters {
 
   for (const token of tokens) {
     if (!token) continue
+
+    // -source: / -category: are facet excludes, not excluded tags.
+    if (token.startsWith('-')) {
+      const facetColon = token.indexOf(':')
+      const facetKey = facetColon > 1 ? token.slice(1, facetColon).toLowerCase() : ''
+      if (facetKey === 'source' || facetKey === 'category') {
+        const facetValue = extractValue(token, facetColon)
+        if (facetValue) {
+          const list = facetKey === 'source' ? result.excludeSources : result.excludeCategories
+          if (!list.includes(facetValue)) list.push(facetValue)
+        }
+        continue
+      }
+    }
 
     // Negation prefix: -tag:value or -tagname
     if (token.startsWith('-') && token.length > 1) {
@@ -123,7 +141,7 @@ export function parseQuery(q: string): ParsedFilters {
         result.title = extractValue(token, key.length)
         break
       case 'source':
-        result.source = value || null
+        if (value && !result.sources.includes(value)) result.sources.push(value)
         break
       case 'rating': {
         // Accept: rating:>=4, rating:>4, rating:4
@@ -147,7 +165,7 @@ export function parseQuery(q: string): ParsedFilters {
         result.artistId = value || null
         break
       case 'category':
-        result.category = value || null
+        if (value && !result.categories.includes(value)) result.categories.push(value)
         break
       case 'import':
         result.importMode = value || null
@@ -162,7 +180,51 @@ export function parseQuery(q: string): ParsedFilters {
     }
   }
 
+  // Legacy `source:local import:link` is the same filter as `source:local:link`.
+  if (
+    result.sources.length === 1 &&
+    result.sources[0] === 'local' &&
+    result.importMode &&
+    result.excludeSources.length === 0
+  ) {
+    result.sources = [`local:${result.importMode}`]
+    result.importMode = null
+  }
+
   return result
+}
+
+export type FacetKey = 'source' | 'category'
+export type FacetMode = 'include' | 'exclude'
+export interface FacetSelection {
+  mode: FacetMode
+  values: string[]
+}
+
+/** Current selection of a facet: exclude only when there is an exclude and no include. */
+export function facetSelection(parsed: ParsedFilters, key: FacetKey): FacetSelection {
+  const include = key === 'source' ? parsed.sources : parsed.categories
+  const exclude = key === 'source' ? parsed.excludeSources : parsed.excludeCategories
+  if (exclude.length > 0 && include.length === 0) return { mode: 'exclude', values: [...exclude] }
+  return { mode: 'include', values: [...include] }
+}
+
+/** Replace a facet's selection. Empty values clear the facet (source also clears importMode). */
+export function setFacet(query: string, key: FacetKey, selection: FacetSelection): string {
+  const parsed = parseQuery(query)
+  const values = [...new Set(selection.values.filter(Boolean))]
+  const include = selection.mode === 'include' ? values : []
+  const exclude = selection.mode === 'exclude' ? values : []
+  if (key === 'source') {
+    parsed.sources = include
+    parsed.excludeSources = exclude
+    // Compound `local:<mode>` values carry the import mode; a leftover one would AND.
+    parsed.importMode = null
+  } else {
+    parsed.categories = include
+    parsed.excludeCategories = exclude
+  }
+  return buildQuery(parsed)
 }
 
 /**
@@ -190,8 +252,11 @@ export function buildQuery(filters: Partial<ParsedFilters>): string {
   if (filters.title) {
     parts.push(`title:${formatValue(filters.title)}`)
   }
-  if (filters.source) {
-    parts.push(`source:${formatValue(filters.source)}`)
+  for (const value of filters.sources ?? []) {
+    parts.push(`source:${formatValue(value)}`)
+  }
+  for (const value of filters.excludeSources ?? []) {
+    parts.push(`-source:${formatValue(value)}`)
   }
   if (filters.rating !== null && filters.rating !== undefined) {
     parts.push(`rating:>=${filters.rating}`)
@@ -208,8 +273,11 @@ export function buildQuery(filters: Partial<ParsedFilters>): string {
   if (filters.artistId) {
     parts.push(`artist_id:${formatValue(filters.artistId)}`)
   }
-  if (filters.category) {
-    parts.push(`category:${formatValue(filters.category)}`)
+  for (const value of filters.categories ?? []) {
+    parts.push(`category:${formatValue(value)}`)
+  }
+  for (const value of filters.excludeCategories ?? []) {
+    parts.push(`-category:${formatValue(value)}`)
   }
   if (filters.importMode) {
     parts.push(`import:${formatValue(filters.importMode)}`)
@@ -241,7 +309,8 @@ export function updateFilter(query: string, key: string, value: string | null): 
       parsed.title = value
       break
     case 'source':
-      parsed.source = value
+      parsed.sources = value ? [value] : []
+      parsed.excludeSources = []
       break
     case 'rating':
       parsed.rating = value !== null ? parseFloat(value) : null
@@ -259,7 +328,8 @@ export function updateFilter(query: string, key: string, value: string | null): 
       parsed.artistId = value
       break
     case 'category':
-      parsed.category = value
+      parsed.categories = value ? [value] : []
+      parsed.excludeCategories = []
       break
     case 'import':
       parsed.importMode = value
@@ -289,7 +359,12 @@ const FILTER_KEYS = new Set([
 
 /** True for a `key:value` token whose key is one of the structured filters. */
 export function isFilterToken(token: string): boolean {
-  if (token.startsWith('-')) return false
+  if (token.startsWith('-')) {
+    const facetColon = token.indexOf(':')
+    if (facetColon <= 1) return false
+    const facetKey = token.slice(1, facetColon).toLowerCase()
+    return facetKey === 'source' || facetKey === 'category'
+  }
   const colon = token.indexOf(':')
   return colon > 0 && FILTER_KEYS.has(token.slice(0, colon).toLowerCase())
 }
@@ -308,19 +383,23 @@ export function queryText(q: string): string {
 export function withText(q: string, text: string): string {
   const base = parseQuery(q)
   const typed = parseQuery(text)
+  const typedSource = typed.sources.length > 0 || typed.excludeSources.length > 0
+  const typedCategory = typed.categories.length > 0 || typed.excludeCategories.length > 0
   return buildQuery({
     tags: typed.tags,
     nameOnlyTags: typed.nameOnlyTags,
     excludeTags: typed.excludeTags,
     title: typed.title ?? base.title,
-    source: typed.source ?? base.source,
+    sources: typedSource ? typed.sources : base.sources,
+    excludeSources: typedSource ? typed.excludeSources : base.excludeSources,
     rating: typed.rating ?? base.rating,
     favorited: typed.favorited || base.favorited,
     readingList: typed.readingList || base.readingList,
     collection: typed.collection ?? base.collection,
     artistId: typed.artistId ?? base.artistId,
-    category: typed.category ?? base.category,
-    importMode: typed.importMode ?? base.importMode,
+    categories: typedCategory ? typed.categories : base.categories,
+    excludeCategories: typedCategory ? typed.excludeCategories : base.excludeCategories,
+    importMode: typedSource ? typed.importMode : (typed.importMode ?? base.importMode),
     sort: typed.sort ?? base.sort,
   })
 }

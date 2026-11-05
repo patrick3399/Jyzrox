@@ -219,6 +219,12 @@ async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -
     )
 
 
+def _source_label(src: str) -> str:
+    """Display label for a non-local source (site name when known, else the raw id)."""
+    cfg = _get_gdl_site_config(src)
+    return cfg.name if cfg.source_id == src else src
+
+
 _SOURCES_CACHE_KEY = "library:sources"
 _SOURCES_CACHE_TTL = 300  # 5 minutes
 
@@ -263,9 +269,7 @@ async def list_gallery_sources(
             if not modes:
                 sources.append({"value": "local", "label": "local"})
         else:
-            cfg = _get_gdl_site_config(src)
-            label = cfg.name if cfg.source_id == src else src
-            sources.append({"value": src, "label": label})
+            sources.append({"value": src, "label": _source_label(src)})
 
     await r.set(_SOURCES_CACHE_KEY, json.dumps(sources), ex=_SOURCES_CACHE_TTL)
     return sources
@@ -284,6 +288,58 @@ async def list_gallery_categories(
         .order_by(Gallery.category)
     )
     return {"categories": [r[0] for r in result.all()]}
+
+
+@router.get("/galleries/facets")
+async def get_gallery_facets(
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-user counts for the Library Source / Category multi-select filters.
+
+    Both queries apply gallery_access_filter (also excludes soft-deleted), so a
+    viewer never sees counts for galleries they cannot open. Not cached: the
+    result differs per user and the GROUP BYs are cheap.
+    """
+    access = gallery_access_filter(auth)
+    count_col = func.count(Gallery.id)
+
+    source_rows = (
+        await db.execute(
+            select(Gallery.source, Gallery.import_mode, count_col)
+            .where(access, Gallery.source.is_not(None))
+            .group_by(Gallery.source, Gallery.import_mode)
+        )
+    ).all()
+
+    merged: dict[str, dict] = {}
+    for src, mode, cnt in source_rows:
+        if src == "local":
+            value = f"local:{mode}" if mode else "local"
+            label = value
+        else:
+            value, label = src, _source_label(src)
+        entry = merged.setdefault(value, {"value": value, "label": label, "count": 0})
+        entry["count"] += cnt
+    sources = sorted(merged.values(), key=lambda e: (-e["count"], e["label"]))
+
+    category_rows = (
+        await db.execute(
+            select(Gallery.category, count_col)
+            .where(access, Gallery.category.is_not(None), Gallery.category != "")
+            .group_by(Gallery.category)
+        )
+    ).all()
+    categories = sorted(
+        ({"name": name, "count": cnt} for name, cnt in category_rows),
+        key=lambda e: (-e["count"], e["name"]),
+    )
+
+    uncategorized = (
+        await db.execute(select(count_col).where(access, or_(Gallery.category.is_(None), Gallery.category == "")))
+    ).scalar_one()
+
+    return {"sources": sources, "categories": categories, "uncategorized": uncategorized}
 
 
 @router.get("/galleries")

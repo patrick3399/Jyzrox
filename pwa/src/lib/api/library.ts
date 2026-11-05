@@ -10,6 +10,7 @@ import type {
   ArtistSummary,
   ArtistDetail,
   ArtistImageItem,
+  LibraryFacets,
 } from '../types'
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -20,6 +21,9 @@ export const library = {
 
   getCategories: (init?: RequestInit) =>
     apiFetch<{ categories: string[] }>('/api/library/galleries/categories', init),
+
+  getFacets: (init?: RequestInit) =>
+    apiFetch<LibraryFacets>('/api/library/galleries/facets', init),
 
   getGalleries: (params: GallerySearchParams = {}, init?: RequestInit) =>
     apiFetch<GalleryListResponse>(
