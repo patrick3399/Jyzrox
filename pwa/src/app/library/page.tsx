@@ -12,6 +12,7 @@ import { useCollections } from '@/hooks/useCollections'
 import { useAddDatasetMembers, useDatasets } from '@/hooks/useDatasets'
 import { useProfile } from '@/hooks/useProfile'
 import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
+import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
@@ -136,6 +137,10 @@ function LibraryContent() {
   const batchTagOpened = useOpenedOnce(batchTagMode !== null)
   const [batchTagList, setBatchTagList] = useState<string[]>([])
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  // Desktop keeps the filter panel expanded (the `lg:` classes give the first
+  // paint); the whole block then slides away with the scroll instead.
+  const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY)
+  const filterPanelShown = isDesktop || filterPanelOpen
   // Search block: sticky, slides away on scroll down and back on scroll up.
   const [searchFocused, setSearchFocused] = useState(false)
   const searchSentinelRef = useRef<HTMLDivElement>(null)
@@ -150,7 +155,11 @@ function LibraryContent() {
   } = useScrollReveal({
     sentinelRef: searchSentinelRef,
     blockRef: searchBlockRef,
-    locked: searchFocused || filterPanelOpen || viewMenuOpen || layoutSwitch !== undefined,
+    locked:
+      searchFocused ||
+      (filterPanelOpen && !isDesktop) ||
+      viewMenuOpen ||
+      layoutSwitch !== undefined,
   })
   const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
   const displayPreferences = useDisplayPreferences()
@@ -788,9 +797,9 @@ function LibraryContent() {
         {/* Collapsible filter panel — CSS transition via grid-rows */}
         <div
           id="library-filter-panel"
-          inert={!filterPanelOpen}
-          className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
-            filterPanelOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          inert={!filterPanelShown}
+          className={`grid transition-[grid-template-rows] duration-300 ease-in-out lg:grid-rows-[1fr] ${
+            filterPanelShown ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
           }`}
         >
           <div className="overflow-hidden">

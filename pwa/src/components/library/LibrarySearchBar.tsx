@@ -141,7 +141,8 @@ export function LibrarySearchBar({
             tabIndex={focused ? -1 : undefined}
             aria-label={t('library.filters')}
             title={t('library.filters')}
-            className={`${TOOLBAR_BUTTON} ${filtersOpen ? TOOLBAR_BUTTON_ACTIVE : TOOLBAR_BUTTON_IDLE}`}
+            // The panel is always expanded on desktop, so the toggle is phone-only.
+            className={`${TOOLBAR_BUTTON} lg:hidden ${filtersOpen ? TOOLBAR_BUTTON_ACTIVE : TOOLBAR_BUTTON_IDLE}`}
           >
             <SlidersHorizontal size={16} />
             {activeFilterCount > 0 && (

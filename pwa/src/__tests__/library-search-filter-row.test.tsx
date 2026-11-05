@@ -2,7 +2,7 @@
  * Library header + one-row search/filter bar.
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const emptyParsed = {
   tags: [],
@@ -277,7 +277,9 @@ describe('Library favorite and reading-list toggles', () => {
   it('test_filter_panel_no_longer_holds_the_favorite_and_reading_list_checkboxes', () => {
     const { container } = render(<LibraryPage />)
 
-    expect(container.querySelectorAll('#library-filter-panel input[type="checkbox"]')).toHaveLength(0)
+    expect(container.querySelectorAll('#library-filter-panel input[type="checkbox"]')).toHaveLength(
+      0,
+    )
   })
 })
 
@@ -419,5 +421,86 @@ describe('Library search block scroll reveal', () => {
     // At the top of the page nothing is slid away.
     expect(block).not.toHaveAttribute('data-scroll-hidden')
     expect(block.style.transform).toBe('')
+  })
+})
+
+describe('Library filter panel on desktop', () => {
+  function mockViewport(desktop: boolean) {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: desktop && query === '(min-width: 64rem)',
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    )
+  }
+
+  function scrollPage(sentinel: HTMLElement, y: number) {
+    // The sentinel moves up exactly as far as the page scrolls.
+    sentinel.getBoundingClientRect = () => ({ top: 100 - y, bottom: 100 - y }) as DOMRect
+    Object.defineProperty(window, 'scrollY', { value: y, configurable: true })
+    act(() => {
+      window.dispatchEvent(new Event('scroll'))
+    })
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0)
+      return 0
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('test_desktop_viewport_shows_the_filter_panel_expanded_without_a_toggle', () => {
+    mockViewport(true)
+    const { container } = render(<LibraryPage />)
+    const panel = container.querySelector('#library-filter-panel') as HTMLElement
+
+    expect(panel).not.toHaveAttribute('inert')
+    expect(panel.className).toMatch(/(^|\s)grid-rows-\[1fr\](\s|$)/)
+    // First paint (before matchMedia is read) already expands it at lg.
+    expect(panel.className).toMatch(/(^|\s)lg:grid-rows-\[1fr\](\s|$)/)
+    expect(panel.querySelectorAll('select').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'library.filters' }).className).toMatch(
+      /(^|\s)lg:hidden(\s|$)/,
+    )
+  })
+
+  it('test_desktop_expanded_panel_does_not_pin_the_block_so_scrolling_down_hides_it', () => {
+    mockViewport(true)
+    render(<LibraryPage />)
+    const block = screen.getByTestId('library-search-block')
+    const sentinel = block.previousElementSibling as HTMLElement
+
+    scrollPage(sentinel, 400)
+    scrollPage(sentinel, 800)
+    expect(block).toHaveAttribute('data-scroll-hidden')
+
+    scrollPage(sentinel, 760)
+    expect(block).not.toHaveAttribute('data-scroll-hidden')
+  })
+
+  it('test_phone_viewport_keeps_panel_collapsed_and_an_opened_panel_pins_the_block', () => {
+    mockViewport(false)
+    const { container } = render(<LibraryPage />)
+    const panel = container.querySelector('#library-filter-panel') as HTMLElement
+    const block = screen.getByTestId('library-search-block')
+    const sentinel = block.previousElementSibling as HTMLElement
+
+    expect(panel).toHaveAttribute('inert')
+    fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
+    expect(panel).not.toHaveAttribute('inert')
+
+    scrollPage(sentinel, 400)
+    scrollPage(sentinel, 800)
+    expect(block).not.toHaveAttribute('data-scroll-hidden')
   })
 })
