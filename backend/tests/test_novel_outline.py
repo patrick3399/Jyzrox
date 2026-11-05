@@ -1,75 +1,69 @@
-"""Plot outline convention + parsing (Phase 1.7)."""
+"""Plot outline convention + parsing."""
 
 from services.novel_outline import find_outline, link_chapters, outline_path, parse_outline
 
-# The shape the corpus uses: ### chapter node, bolded-bullet beats, detail lines.
+# The outline shape: one ### node per chapter, bolded-bullet beats, detail lines.
 _HEADING_OUTLINE = """---
 title: 大綱
 ---
 
 # 全書大綱
 
-前言，不屬於任何節點。
+## 逐章大綱
 
-### 第7章：星核的救贖
-**項目狀態：** 脫離公司掌控
+### 第7章·星辰之門
+**項目狀態：** 脫離掌控
 
-*   **第一幕：命運的劫獄**
-    *   **劇情節點：** 卡芙卡攔截運輸艦。
-*   **第二幕：銀狼的代碼**
+*   **第一幕：劫獄**
+    *   **劇情節點：** 甲攔截運輸艦。
+*   **第二幕：代碼**
 
-### 第8章：匹諾康尼的幻夢
-**項目狀態：** 夢境投影連線
+### 第8章·夢境
+**項目狀態：** 連線
 
-*   **第一幕：黃金的時刻**
+*   **第一幕：黃金時刻**
 
 ### 番外：無章節對應
 只是一個構想。
 """
 
-_BULLET_OUTLINE = """# 關鍵劇情節點
 
-*   **第1章（受肉儀式）：** 流螢被裝入裝甲。
-*   **第2章（馴火）：** 投入戰場。
-*   **不是章節的粗體項目：** 應被忽略。
-"""
-
-
-def test_canonical_outline_path_is_under_the_reference_folder():
-    """A work-root 大綱.md would classify as main text and pollute the chapter
-    list, so the convention puts it under 參考/."""
-    assert outline_path("作品A") == "作品A/參考/大綱.md"
+def test_canonical_outline_path_is_the_setting_folder_outline():
+    """The author keeps the outline in Setting/ next to the setting notes;
+    Setting/ classifies it as reference by its filename."""
+    assert outline_path("作品A") == "作品A/Setting/大綱.md"
 
 
 def test_parses_headings_into_nodes_with_beats_and_chapter_numbers():
     nodes = parse_outline(_HEADING_OUTLINE)
-    assert [n["title"] for n in nodes] == ["第7章：星核的救贖", "第8章：匹諾康尼的幻夢", "番外：無章節對應"]
-    assert [n["chapter_no"] for n in nodes] == [7, 8, None]
-    assert [n["order"] for n in nodes] == [0, 1, 2]
-    assert nodes[0]["preview"].startswith("項目狀態")
-    # Beats are the labelled sub-sections; `**劇情節點：** …` is a detail line.
-    assert [b["title"] for b in nodes[0]["beats"]] == ["第一幕：命運的劫獄", "第二幕：銀狼的代碼"]
+    # `# 全書大綱` is level 1, which is not a node.
+    assert [n["title"] for n in nodes] == ["逐章大綱", "第7章·星辰之門", "第8章·夢境", "番外：無章節對應"]
+    chapter_nodes = [n for n in nodes if n["chapter_no"] is not None]
+    assert [n["chapter_no"] for n in chapter_nodes] == [7, 8]
+    assert chapter_nodes[0]["preview"].startswith("項目狀態")
+    assert [b["title"] for b in chapter_nodes[0]["beats"]] == ["第一幕：劫獄", "第二幕：代碼"]
 
 
 def test_node_line_numbers_are_real_file_lines_past_the_frontmatter():
-    nodes = parse_outline(_HEADING_OUTLINE)
     lines = _HEADING_OUTLINE.splitlines()
-    for n in nodes:
+    for n in parse_outline(_HEADING_OUTLINE):
         assert lines[n["line"] - 1].endswith(n["title"])
 
 
-def test_preamble_before_the_first_node_is_ignored():
-    nodes = parse_outline(_HEADING_OUTLINE)
-    assert all("前言" not in n["preview"] for n in nodes)
-
-
-def test_heading_less_outline_falls_back_to_chapter_bullets():
-    """The outline already written in the corpus lists chapters as bolded bullets
-    with the synopsis inline."""
-    nodes = parse_outline(_BULLET_OUTLINE)
-    assert [n["chapter_no"] for n in nodes] == [1, 2]
-    assert nodes[0]["title"] == "第1章（受肉儀式）"
-    assert nodes[0]["preview"] == "流螢被裝入裝甲。"
+def test_bold_chapter_lines_are_not_nodes():
+    """Only headings are nodes; a `**第N章·…**：` line must be converted to a
+    heading in the corpus (plan Task B3), not guessed at by the parser."""
+    assert parse_outline("## 逐章大綱\n\n**第1章·開場**：概要\n") == [
+        {
+            "order": 0,
+            "level": 2,
+            "title": "逐章大綱",
+            "line": 1,
+            "chapter_no": None,
+            "preview": "第1章·開場：概要",
+            "beats": [],
+        }
+    ]
 
 
 def test_empty_outline_yields_no_nodes():
@@ -78,25 +72,26 @@ def test_empty_outline_yields_no_nodes():
 
 
 def test_link_chapters_matches_by_number_not_by_title():
-    """Chapters are named 01.md/02.md, so a node keeps its link across renames."""
-    nodes = parse_outline(_HEADING_OUTLINE)
-    chapters = [{"path": "作品A/07.md"}, {"path": "作品A/09.md"}]
-    linked = link_chapters(nodes, chapters)
+    nodes = [n for n in parse_outline(_HEADING_OUTLINE) if n["level"] == 3]
+    linked = link_chapters(nodes, [{"path": "作品A/07.md"}, {"path": "作品A/09.md"}])
     assert linked[0]["chapter_path"] == "作品A/07.md"
-    # Chapter 8 is planned but not written yet, and a node with no chapter number
-    # can never be linked.
     assert linked[1]["chapter_path"] is None
     assert linked[2]["chapter_path"] is None
 
 
-def test_find_outline_accepts_the_alternate_names(tmp_path):
+def test_link_chapters_prefers_the_base_chapter_over_its_parts():
+    nodes = [{"chapter_no": 1}]
+    chapters = [{"path": "作品A/01.md"}, {"path": "作品A/01-1.md"}]
+    assert link_chapters(nodes, chapters)[0]["chapter_path"] == "作品A/01.md"
+
+
+def test_find_outline_only_accepts_the_setting_outline(tmp_path):
     (tmp_path / "作品A" / "參考").mkdir(parents=True)
-    assert find_outline(tmp_path, "作品A") is None
-    (tmp_path / "作品A" / "參考" / "outline.md").write_text("# x\n", encoding="utf-8")
-    assert find_outline(tmp_path, "作品A") == "作品A/參考/outline.md"
-    # The canonical name wins when both exist.
     (tmp_path / "作品A" / "參考" / "大綱.md").write_text("# x\n", encoding="utf-8")
-    assert find_outline(tmp_path, "作品A") == "作品A/參考/大綱.md"
+    assert find_outline(tmp_path, "作品A") is None
+    (tmp_path / "作品A" / "Setting").mkdir()
+    (tmp_path / "作品A" / "Setting" / "大綱.md").write_text("# x\n", encoding="utf-8")
+    assert find_outline(tmp_path, "作品A") == "作品A/Setting/大綱.md"
 
 
 def test_find_outline_rejects_a_traversing_work(tmp_path):
