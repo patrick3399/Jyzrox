@@ -110,6 +110,7 @@ export interface NovelNoteSummary {
   path: string
   title: string
   note_type: string | null
+  aliases: string[]
   frontmatter: Record<string, unknown>
 }
 export interface NovelAppearance {

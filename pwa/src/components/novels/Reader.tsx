@@ -5,7 +5,7 @@ import useSWR, { mutate } from 'swr'
 import { toast } from 'sonner'
 import { Code, Eye } from 'lucide-react'
 import { api, type NovelFile } from '@/lib/api'
-import { novelNoteHref } from '@/lib/novels'
+import { buildEntityIndex, novelNoteHref } from '@/lib/novels'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { MarkdownView, type BlockRange } from './MarkdownView'
@@ -53,23 +53,10 @@ export function Reader({ path, canEdit = false }: { path: string; canEdit?: bool
 
   // Knowledge-index entity linking: recognized names in this work's notes become
   // clickable links to their cards. Scoped to the current work to avoid linking a
-  // name that only belongs to another work. Empty/unindexed → no behavior change.
+  // name that only belongs to another work; names come from the server-derived aliases. Empty/unindexed → no behavior change.
   const { data: notesData } = useSWR('novel-notes-all', () => api.novels.notes())
   const work = path.split('/')[0]
-  const entityIndex = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const n of notesData?.notes ?? []) {
-      if (n.path.split('/')[0] !== work) continue
-      const rawAliases = (n.frontmatter as { aliases?: unknown })?.aliases
-      const aliases = Array.isArray(rawAliases)
-        ? rawAliases.filter((a): a is string => typeof a === 'string')
-        : []
-      for (const name of [n.title, ...aliases]) {
-        if (name && !map.has(name)) map.set(name, n.path)
-      }
-    }
-    return map
-  }, [notesData, work])
+  const entityIndex = useMemo(() => buildEntityIndex(notesData?.notes ?? [], work), [notesData, work])
   const entityNames = useMemo(() => Array.from(entityIndex.keys()), [entityIndex])
   const entityHrefFor = useCallback(
     (name: string) => {

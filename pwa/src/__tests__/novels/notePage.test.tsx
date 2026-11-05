@@ -13,7 +13,7 @@ vi.mock('@/components/LoadingSpinner', () => ({
 }))
 
 // A note path with a space and CJK — every segment is percent-encoded in the URL.
-const DECODED = ['挪德卡萊 - 最後的月之容器', 'Setting', '參考-菈烏瑪.md']
+const DECODED = ['作品A - 副標題', 'Setting', '設定-甲v1.md']
 // Next's useParams() returns catch-all segments still percent-encoded (as they
 // appear in the URL); the page must decode them before hitting the API.
 const ENCODED_SEGMENTS = DECODED.map(encodeURIComponent)
