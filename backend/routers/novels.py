@@ -452,11 +452,7 @@ async def work_outline(work: str, _: dict = Depends(require_auth)):
 
 
 def _lint_file(repo: str, path: str) -> list[dict]:
-    return novel_format.check_text(
-        novel_fs.read_file(repo, path),
-        variant=novel_format.variant_for(path),
-        category=novel_fs.classify_path(path),
-    )
+    return novel_format.check_text(novel_fs.read_file(repo, path), category=novel_fs.classify_path(path))
 
 
 @router.get("/file/lint")
@@ -518,7 +514,7 @@ async def fix_file(body: FixBody, auth: dict = Depends(_member)):
             current = novel_fs.read_file(repo, body.path)
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail="not found")
-        fixed, changes = novel_format.fix_text(current, variant=novel_format.variant_for(body.path))
+        fixed, changes = novel_format.fix_text(current)
         if not changes:
             return {"changes": [], "head": body.base_sha, "pushed": False}
         novel_fs.write_file(repo, body.path, fixed)
