@@ -169,7 +169,8 @@ export function createBrowseReducer<Item, Cursor>(getItemId: (item: Item) => str
           items: [...state.items, ...fresh],
           cursor: action.page.cursor,
           hasMore: fresh.length === 0 && !cursorAdvanced ? false : action.page.hasMore,
-          total: action.page.total,
+          // A page without a total (Library cursor pages) leaves the known one alone.
+          total: action.page.total ?? state.total,
           status: 'idle',
           error: null,
           requestKind: null,

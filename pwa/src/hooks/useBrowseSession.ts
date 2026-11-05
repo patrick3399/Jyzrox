@@ -288,6 +288,8 @@ export function useBrowseSession<Item, Cursor, Identity>({
           let cursor: Cursor | null = null
           let lastPage: BrowsePageResult<Item, Cursor> | null = null
           let meta: unknown
+          // Later pages may carry no total (Library cursor pages): keep the latest known one.
+          let total: number | null = null
 
           for (let pageIndex = 0; pageIndex < request.targetDepth; pageIndex += 1) {
             const page = await adapterRef.current.fetchPage(
@@ -304,6 +306,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
             }
             pages.push(page.items)
             if (page.meta !== undefined) meta = page.meta
+            if (page.total !== null) total = page.total
             lastPage = page
 
             if (!page.hasMore || page.cursor === null) break
@@ -319,7 +322,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
             pages,
             cursor: lastPage.cursor,
             hasMore: lastPage.hasMore,
-            total: lastPage.total,
+            total,
             meta,
           }
           const currentView = liveViewRef.current

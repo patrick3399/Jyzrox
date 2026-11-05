@@ -415,6 +415,37 @@ describe('useBrowseSession', () => {
       })
     })
 
+    it('deep_refresh_keeps_first_page_total_when_later_pages_have_none', async () => {
+      const storage = new MemoryStorage()
+      createBrowseSnapshotStore<Item, Cursor>({ storage, scope }).save(key('refresh-total'), {
+        pages: [[{ id: 1, label: 'one' }], [{ id: 2, label: 'two' }]],
+        cursor: 'old-tail',
+        hasMore: true,
+        total: 8,
+        anchor: { itemId: 2, offset: 0, scrollY: 400 },
+        layout: { columns: 4, width: 1200, mode: 'grid' },
+      })
+      const fetchPage = vi
+        .fn()
+        .mockResolvedValueOnce({ items: [{ id: 1, label: 'one' }], cursor: 'p2', hasMore: true, total: 9 })
+        .mockResolvedValueOnce({ items: [{ id: 2, label: 'two' }], cursor: 'tail', hasMore: true, total: null })
+      const view = renderHook(() =>
+        useBrowseSession<Item, Cursor, Identity>({
+          identity: identity('refresh-total'),
+          identityKey: key('refresh-total'),
+          adapter: { getItemId: (item) => item.id, fetchPage },
+          scope,
+          storage,
+        }),
+      )
+      await waitFor(() => expect(view.result.current.state.items).toHaveLength(2))
+
+      await act(async () => refreshSession(view.result.current))
+
+      expect(fetchPage).toHaveBeenCalledTimes(2)
+      expect(view.result.current.state.total).toBe(9)
+    })
+
     it.each([
       ['missing item', { itemId: 9, offset: 16, scrollY: 900 }],
       ['pixel-only', { itemId: null, offset: 0, scrollY: 900 }],
