@@ -15,9 +15,9 @@ _RESERVED_DIRS = {"設定"}
 _H1 = re.compile(r"^#\s+(.*)$", re.MULTILINE)
 _WS = re.compile(r"\s+")
 
-# Canon layout (Phase 1.5, spec 2026-07-08): category is derived purely from
-# the path. Folder-name matching is case-insensitive; legacy names (Old, DEMO,
-# extend) map to standard categories without moving any files.
+# Canon layout (spec 2026-07-08, corpus fit 2026-11-05): category is derived
+# purely from the path. Folder-name matching is case-insensitive; legacy names
+# (Old, DEMO, extend) map to standard categories without moving any files.
 _CATEGORY_DIRS = {
     "setting": "setting",
     "設定": "setting",
@@ -30,30 +30,55 @@ _CATEGORY_DIRS = {
     "demo": "draft",
     "extend": "draft",
 }
-# Work-root files that are not chapters.
-_SPECIAL_ROOT_FILES = {"setting.md": "setting", "format.md": "reference"}
+# Main text is a numbered file at the work root: `01.md`, a part `01-2.md`, or
+# the older `第01章.md` spelling. Anything else at the root is reference, so a
+# side story or draft parked there is never silently counted as a chapter.
+_MAIN_STEM = re.compile(r"^(?:\d+(?:-\d+)?|第\d+章)$")
 
 
 class NovelPathError(Exception):
     """Raised when a requested path is outside the repo or not an allowed file."""
 
 
+def _setting_dir_category(stem: str) -> str:
+    """Inside Setting/ the filename prefix decides: the corpus keeps drafts
+    (`草稿-…`) and reference notes (`參考-…`, outlines, format notes) next to
+    the entity notes (`設定-…`, `setting…`)."""
+    if stem.startswith("設定-") or stem.lower().startswith("setting"):
+        return "setting"
+    if stem.startswith("草稿-"):
+        return "draft"
+    return "reference"
+
+
 def classify_path(rel_path: str | Path) -> str:
     """Category of a repo-relative `.md` path: main | extra | draft |
     reference | scrap | setting. First matching directory (walking down from
-    the work root) decides; the whole subtree inherits it. Unknown subdirs are
-    'reference' so nothing is ever silently promoted to main."""
+    the work root) decides; the whole subtree inherits it, except Setting/,
+    where the filename prefix decides. Unknown subdirs and non-chapter root
+    files are 'reference' so nothing is ever silently promoted to main."""
     parts = Path(rel_path).parts
     if len(parts) < 2:
         return "reference"  # repo-root file, not part of any work
+    stem = Path(parts[-1]).stem
     dirs = parts[1:-1]
     if not dirs:
-        return _SPECIAL_ROOT_FILES.get(parts[-1].lower(), "main")
+        if parts[-1].lower() == "setting.md":
+            return "setting"
+        return "main" if _MAIN_STEM.match(stem) else "reference"
     for d in dirs:
         cat = _CATEGORY_DIRS.get(d.lower())
+        if cat == "setting":
+            return _setting_dir_category(stem)
         if cat:
             return cat
     return "reference"
+
+
+def chapter_sort_key(path: Path) -> tuple[int, int, str]:
+    """Reading order: chapter number, then part number (`01` < `01-1` < `02`)."""
+    nums = [int(n) for n in re.findall(r"\d+", path.stem)]
+    return (nums[0] if nums else 0, nums[1] if len(nums) > 1 else 0, path.name)
 
 
 def safe_repo_path(repo_root: str | Path, rel_path: str) -> Path:
@@ -140,7 +165,7 @@ def main_chapter_paths(repo_root: str | Path, work: str) -> list[str]:
     """
     root, work_dir = _work_dir_of(repo_root, work)
     paths: list[str] = []
-    for f in sorted(work_dir.glob("*.md"), key=lambda p: p.name):
+    for f in sorted(work_dir.glob("*.md"), key=chapter_sort_key):
         rel = f.relative_to(root)
         # Main text lives at the work root's first level only (spec §3 rule 4).
         if classify_path(rel) != "main":
@@ -152,7 +177,7 @@ def main_chapter_paths(repo_root: str | Path, work: str) -> list[str]:
 def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
     root, work_dir = _work_dir_of(repo_root, work)
     chapters: list[dict] = []
-    for f in sorted(work_dir.glob("*.md"), key=lambda p: p.name):
+    for f in sorted(work_dir.glob("*.md"), key=chapter_sort_key):
         rel = f.relative_to(root)
         # Main text lives at the work root's first level only (spec §3 rule 4).
         if classify_path(rel) != "main":

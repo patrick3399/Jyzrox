@@ -153,7 +153,7 @@ def test_list_chapters_excludes_setting_dir(tmp_path):
     w = tmp_path / "作品A"
     (w / "Setting").mkdir(parents=True)
     (w / "01.md").write_text("x", encoding="utf-8")
-    (w / "Setting" / "角色-張三.md").write_text("# 張三\n", encoding="utf-8")
+    (w / "Setting" / "設定-張三.md").write_text("# 張三\n", encoding="utf-8")
     chapters = list_chapters(tmp_path, "作品A")
     assert [c["path"] for c in chapters] == ["作品A/01.md"]
 
@@ -161,16 +161,16 @@ def test_list_chapters_excludes_setting_dir(tmp_path):
 def test_list_notes_finds_setting_notes_with_title(tmp_path):
     w = tmp_path / "作品A"
     (w / "Setting").mkdir(parents=True)
-    (w / "Setting" / "角色-張三.md").write_text("# 張三\n\n內容", encoding="utf-8")
+    (w / "Setting" / "設定-張三.md").write_text("# 張三\n\n內容", encoding="utf-8")
     notes = list_notes(tmp_path)
-    assert notes == [{"path": "作品A/Setting/角色-張三.md", "work": "作品A", "title": "張三"}]
+    assert notes == [{"path": "作品A/Setting/設定-張三.md", "work": "作品A", "title": "張三"}]
 
 
 def test_list_notes_title_falls_back_to_stem(tmp_path):
     w = tmp_path / "作品A"
     (w / "Setting").mkdir(parents=True)
-    (w / "Setting" / "地點-王城.md").write_text("no heading here", encoding="utf-8")
-    assert list_notes(tmp_path)[0]["title"] == "地點-王城"
+    (w / "Setting" / "設定-王城.md").write_text("no heading here", encoding="utf-8")
+    assert list_notes(tmp_path)[0]["title"] == "設定-王城"
 
 
 def test_parse_frontmatter_none_returns_empty():
@@ -200,7 +200,7 @@ def _polluted_repo(tmp_path: Path) -> Path:
     (w / "FORMAT.md").write_text("# 格式\n", encoding="utf-8")
     (w / "Old" / "01.md").write_text("# 舊版\n\n張三登場。\n", encoding="utf-8")
     (w / "DEMO" / "demo1.md").write_text("# 試寫\n", encoding="utf-8")
-    (w / "Setting" / "設定-1號-張三v1.md").write_text("# 張三\n", encoding="utf-8")
+    (w / "Setting" / "設定-張三v1.md").write_text("# 張三\n", encoding="utf-8")
     return tmp_path
 
 
@@ -229,22 +229,22 @@ def test_list_works_chapter_count_excludes_legacy_and_special_files(tmp_path):
         ("作品A/FORMAT.md", "reference"),
         ("作品A/format.md", "reference"),
         # standard category dirs
-        ("作品A/Setting/設定-1號-角色v1.md", "setting"),
-        ("作品A/設定/角色.md", "setting"),
+        ("作品A/Setting/設定-角色v1.md", "setting"),
+        ("作品A/設定/設定-角色.md", "setting"),
         ("作品A/參考/大綱.md", "reference"),
         ("作品A/草稿/03alt.md", "draft"),
         ("作品A/廢案/03.md", "scrap"),
         ("作品A/番外/短篇.md", "extra"),
         # legacy aliases (read-only compatibility), case-insensitive
-        ("流螢 - 熔火之繭/Old/01.md", "scrap"),
-        ("流螢 - 熔火之繭/old/01.md", "scrap"),
-        ("璃月 - 等價交換/DEMO/demo1.md", "draft"),
-        ("惡靈古堡 - 赤紅深淵/extend/01n.md", "draft"),
+        ("作品A/Old/01.md", "scrap"),
+        ("作品A/old/01.md", "scrap"),
+        ("作品A/DEMO/demo1.md", "draft"),
+        ("作品A/extend/01n.md", "draft"),
         # unknown subdir → reference, never silently main
         ("作品A/notes/random.md", "reference"),
         # nested subtree inherits the category
         ("作品A/廢案/v1/03.md", "scrap"),
-        ("作品A/Setting/deep/角色.md", "setting"),
+        ("作品A/Setting/deep/設定-角色.md", "setting"),
         # repo-root file (FORMAT.md, AGENTS.md at repo root) → reference
         ("FORMAT.md", "reference"),
     ],
@@ -259,7 +259,7 @@ def test_list_notes_includes_work_root_setting_md(tmp_path):
     assert "作品B/setting.md" in notes
     assert notes["作品B/setting.md"]["title"] == "世界觀"
     assert notes["作品B/setting.md"]["work"] == "作品B"
-    assert "作品B/Setting/設定-1號-張三v1.md" in notes
+    assert "作品B/Setting/設定-張三v1.md" in notes
 
 
 def test_list_work_files_returns_category_subtree(tmp_path):
@@ -453,3 +453,61 @@ def test_main_chapter_paths_matches_list_chapters_selection(tmp_path):
     (work / "設定" / "人物.md").write_text("y\n", encoding="utf-8")
 
     assert main_chapter_paths(tmp_path, "作品A") == [c["path"] for c in list_chapters(tmp_path, "作品A")]
+
+
+# ── Corpus fit (2026-11-05): prefix classification inside Setting/ ──────────
+
+
+@pytest.mark.parametrize(
+    ("rel", "expected"),
+    [
+        ("作品A/Setting/設定-甲v2.md", "setting"),
+        ("作品A/Setting/setting-v1.md", "setting"),
+        ("作品A/Setting/參考-甲-乙.md", "reference"),
+        ("作品A/Setting/草稿-25章-甲.md", "draft"),
+        ("作品A/Setting/大綱.md", "reference"),
+        ("作品A/Setting/FORMAT.md", "reference"),
+        ("作品A/Setting/角色總覽.md", "reference"),
+    ],
+)
+def test_setting_dir_files_are_classified_by_filename_prefix(rel, expected):
+    """Setting/ in the real corpus mixes drafts and reference notes; only
+    `設定-*` and `setting*` files are entity notes. Anything else must not feed
+    the knowledge index or (later) an AI prompt."""
+    assert classify_path(rel) == expected
+
+
+@pytest.mark.parametrize("stem", ["番外・短篇", "某篇番外草稿", "大綱", "notes"])
+def test_root_file_without_a_chapter_stem_is_not_main(stem):
+    """A side story or draft parked at the work root was counted as a chapter,
+    inflating chapter_count and feeding the mention scan."""
+    assert classify_path(f"作品A/{stem}.md") == "reference"
+
+
+@pytest.mark.parametrize("stem", ["01", "12", "01-2", "第01章"])
+def test_chapter_stems_are_main(stem):
+    assert classify_path(f"作品A/{stem}.md") == "main"
+
+
+def test_list_chapters_orders_part_files_after_their_base_chapter(tmp_path):
+    """`01-1.md` sorted before `01.md` because '-' < '.' — reading order broke."""
+    w = tmp_path / "作品A"
+    w.mkdir()
+    for stem in ("02", "01-1", "01", "10", "01-2"):
+        (w / f"{stem}.md").write_text("x", encoding="utf-8")
+    assert [c["name"] for c in list_chapters(tmp_path, "作品A")] == ["01", "01-1", "01-2", "02", "10"]
+    assert main_chapter_paths(tmp_path, "作品A") == [
+        "作品A/01.md",
+        "作品A/01-1.md",
+        "作品A/01-2.md",
+        "作品A/02.md",
+        "作品A/10.md",
+    ]
+
+
+def test_list_notes_excludes_reference_and_draft_notes_in_setting(tmp_path):
+    s = tmp_path / "作品A" / "Setting"
+    s.mkdir(parents=True)
+    for name in ("設定-甲v1.md", "參考-甲.md", "草稿-甲.md", "大綱.md"):
+        (s / name).write_text("# t\n", encoding="utf-8")
+    assert [n["path"] for n in list_notes(tmp_path)] == ["作品A/Setting/設定-甲v1.md"]

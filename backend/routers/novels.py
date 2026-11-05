@@ -625,7 +625,15 @@ async def list_notes_ep(
             continue
         if tag and tag not in (fm.get("tags") or []):
             continue
-        out.append({"path": n.file_path, "title": n.title, "note_type": n.note_type, "frontmatter": fm})
+        out.append(
+            {
+                "path": n.file_path,
+                "title": n.title,
+                "note_type": n.note_type,
+                "aliases": list(n.aliases or []),
+                "frontmatter": fm,
+            }
+        )
     if sort == "story_order":
         out.sort(key=lambda x: _story_order(x["frontmatter"]))
     return {"notes": out}

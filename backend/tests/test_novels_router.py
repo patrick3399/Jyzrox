@@ -614,7 +614,7 @@ async def test_reset_allowed_for_admin(admin_client, novel_repo):
 def _make_indexed_repo(root):
     w = root / "作品A"
     (w / "Setting").mkdir(parents=True)
-    (w / "Setting" / "角色-張三.md").write_text(
+    (w / "Setting" / "設定-張三.md").write_text(
         "---\ntype: character\naliases: [小三]\ntags: [第一卷]\n---\n# 張三\n設定", encoding="utf-8"
     )
     (w / "01.md").write_text("張三與小三在此。", encoding="utf-8")
@@ -663,8 +663,17 @@ async def test_notes_filter_by_type_excludes_nonmatching(viewer_client, seed_ind
     assert r.json()["notes"] == []
 
 
+async def test_notes_carry_the_derived_aliases(viewer_client, seed_index):
+    """The reader links entity names from this list; without the server-derived
+    aliases it only had titles, which never appear in the prose."""
+    r = await viewer_client.get("/api/novels/notes")
+    assert r.status_code == 200
+    (note,) = r.json()["notes"]
+    assert note["aliases"] == ["張三", "小三"]
+
+
 async def test_appearances_ordered_by_chapter(viewer_client, seed_index):
-    r = await viewer_client.get("/api/novels/notes/appearances", params={"path": "作品A/Setting/角色-張三.md"})
+    r = await viewer_client.get("/api/novels/notes/appearances", params={"path": "作品A/Setting/設定-張三.md"})
     assert r.status_code == 200
     aps = r.json()["appearances"]
     chapters = [a["chapter_path"] for a in aps]
