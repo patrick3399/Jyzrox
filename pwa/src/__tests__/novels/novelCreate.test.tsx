@@ -18,12 +18,12 @@ describe('NovelCreateDialog', () => {
 
     fireEvent.change(screen.getByLabelText('novels.workName'), { target: { value: '新作品' } })
     fireEvent.change(screen.getByLabelText('novels.firstChapterName'), {
-      target: { value: '第一章' },
+      target: { value: '01' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
 
-    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('新作品', '第一章', undefined))
-    expect(onCreated).toHaveBeenCalledWith('新作品', '第一章', '新作品/第一章.md')
+    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('新作品', '01', undefined))
+    expect(onCreated).toHaveBeenCalledWith('新作品', '01', '新作品/01.md')
   })
 
   it('creates a chapter in an existing work', async () => {
@@ -31,11 +31,11 @@ describe('NovelCreateDialog', () => {
     const onCreated = vi.fn()
     render(<NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={onCreated} />)
 
-    fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '第二章' } })
+    fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '02' } })
     fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
 
-    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('作品A', '第二章', undefined))
-    expect(onCreated).toHaveBeenCalledWith('作品A', '第二章', '作品A/第二章.md')
+    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('作品A', '02', undefined))
+    expect(onCreated).toHaveBeenCalledWith('作品A', '02', '作品A/02.md')
   })
 
   it('rejects an empty name without calling the API', () => {
@@ -58,7 +58,7 @@ describe('NovelCreateDialog', () => {
   it('surfaces a file-exists conflict from the server', async () => {
     h.createFile.mockResolvedValue({ ok: false, status: 409, message: 'file exists' })
     render(<NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '第一章' } })
+    fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '01' } })
     fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
     await waitFor(() => expect(screen.getByText('novels.fileExists')).toBeInTheDocument())
   })
@@ -74,5 +74,15 @@ describe('NovelCreateDialog', () => {
 
     await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('作品A', '03alt', '草稿'))
     expect(onCreated).toHaveBeenCalledWith('作品A', '03alt', '作品A/草稿/03alt.md')
+  })
+
+  it('rejects a non-numeric name for main text', async () => {
+    // A side story created at the work root became "chapter" 23 of the real
+    // corpus; main text must be a chapter number.
+    render(<NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '番外短篇' } })
+    fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
+    expect(await screen.findByText('novels.chapterNameNumeric')).toBeInTheDocument()
+    expect(h.createFile).not.toHaveBeenCalled()
   })
 })
