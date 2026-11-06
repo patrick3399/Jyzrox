@@ -342,7 +342,7 @@ export default function SubscriptionsPage() {
       }
       setUrl('')
       setName('')
-      setAutoDownload(true)
+      setAutoDownload(false)
       setCronExpr(DEFAULT_SUBSCRIPTION_CRON)
       setSelectedGroupId(null)
       setFanboxSubscriptionContent('accessible')
