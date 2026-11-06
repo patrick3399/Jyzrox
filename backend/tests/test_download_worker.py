@@ -295,6 +295,8 @@ def _make_plugin_result(status="done", downloaded=3, total=3, error=None, failed
     result.total = total
     result.error = error
     result.failed_pages = failed_pages or []
+    result.halt = None
+    result.retry_after = None
     return result
 
 
@@ -2836,3 +2838,97 @@ class TestOnFileGalleryIdentity:
         importer.ensure_gallery_from_url.assert_awaited_once()
         importer.ensure_gallery_from_identity.assert_not_awaited()
         importer.ensure_gallery.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Subscription halt (rate limit / login expiry) and pause-key re-arm (ADR 0030)
+# ---------------------------------------------------------------------------
+
+
+async def test_pause_check_rearms_pause_key_ttl_while_job_is_paused():
+    from worker.download import make_pause_check
+
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=b"1")
+    redis.expire = AsyncMock()
+    assert await make_pause_check(redis, "download:pause:j1")() is True
+    redis.expire.assert_awaited_once_with("download:pause:j1", 86400)
+
+
+async def test_pause_check_does_not_touch_ttl_when_pause_key_absent():
+    from worker.download import make_pause_check
+
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=None)
+    redis.expire = AsyncMock()
+    assert await make_pause_check(redis, "download:pause:j1")() is False
+    redis.expire.assert_not_awaited()
+
+
+async def test_pause_check_redis_error_fails_open_to_not_paused():
+    from worker.download import make_pause_check
+
+    redis = AsyncMock()
+    redis.get = AsyncMock(side_effect=RuntimeError("down"))
+    assert await make_pause_check(redis, "download:pause:j1")() is False
+
+
+async def _run_halted_job(*, halted: bool):
+    from plugins.models import DownloadResult
+    from worker.download import download_job
+
+    plugin_result = DownloadResult(status="failed", downloaded=0, total=0, error="Fanbox 429", halt="rate_limited")
+    plugin = MagicMock()
+    plugin.meta.source_id = "fanbox"
+    plugin.meta.name = "Fanbox"
+    plugin.meta.semaphore_key = None
+    plugin.meta.needs_all_credentials = False
+    plugin.meta.concurrency = 1
+    plugin.download = AsyncMock(return_value=plugin_result)
+
+    importer = MagicMock()
+    importer.gallery_id = None
+    importer.title = None
+    importer.source_url = None
+    importer.abort = AsyncMock()
+    importer.cleanup = AsyncMock()
+    importer.import_file = AsyncMock()
+    importer.ensure_gallery_from_url = AsyncMock()
+    importer.finalize = AsyncMock()
+
+    mock_registry = MagicMock()
+    mock_registry.get_handler = AsyncMock(return_value=plugin)
+    mock_registry.get_fallback = MagicMock(return_value=None)
+    mock_registry.get_downloader = MagicMock(return_value=None)
+
+    halt = AsyncMock(return_value=halted)
+    with (
+        patch("plugins.registry.plugin_registry", mock_registry),
+        patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+        patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
+        patch("worker.download._set_job_progress", new_callable=AsyncMock),
+        patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+        patch("worker.progressive.ProgressiveImporter", return_value=importer),
+        patch("worker.download.DownloadAdmission", return_value=_make_mock_admission()),
+        patch("core.redis_client.get_redis", return_value=MagicMock()),
+        patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        # imported at module level or lazily - patch both homes with the same mock
+        patch("worker.download.halt_subscription_for_job", halt, create=True),
+        patch("services.subscription_pause.halt_subscription_for_job", halt),
+    ):
+        result = await download_job(_make_ctx(), "https://www.fanbox.cc/@a/posts/1", db_job_id="job-halt")
+    return result, importer, mock_status, halt
+
+
+async def test_download_job_with_rate_limited_halt_returns_paused_not_failed():
+    result, importer, mock_status, halt = await _run_halted_job(halted=True)
+    assert result == {"status": "paused", "halt": "rate_limited"}
+    halt.assert_awaited_once_with("job-halt", "rate_limited", None)
+    importer.abort.assert_awaited()
+    assert all(call.args[1] != "failed" for call in mock_status.await_args_list if len(call.args) > 1)
+
+
+async def test_download_job_with_halt_but_no_subscription_falls_through_to_failed():
+    result, importer, mock_status, halt = await _run_halted_job(halted=False)
+    assert result["status"] == "failed"
+    mock_status.assert_any_call("job-halt", "failed", "Fanbox 429")

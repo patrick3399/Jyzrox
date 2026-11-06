@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import {
   Rss,
@@ -20,6 +20,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { Button } from '@/components/ui/button'
 import { useWsJobs, useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
+import { createRequestCoalescer } from '@/lib/requestCoalescer'
 import {
   useAllSubscriptions,
   useCreateSubscription,
@@ -52,6 +53,7 @@ import type {
   Subscription,
   SubscriptionGroup,
   DownloadJob,
+  SubscriptionRun,
   JobListParams,
   MediaPolicy,
 } from '@/lib/types'
@@ -129,7 +131,7 @@ export default function SubscriptionsPage() {
     [data?.subscriptions],
   )
 
-  const { data: jobsData, mutate: mutateJobs } = useSWR(
+  const { data: jobsAndRuns, mutate: mutateJobs } = useSWR(
     subIds.length > 0 ? ['sub-jobs', ...subIds] : null,
     async () => {
       // One request for all subscriptions: a per-subscription fan-out tripped
@@ -139,12 +141,33 @@ export default function SubscriptionsPage() {
       for (const [subId, job] of Object.entries(res.jobs)) {
         results[Number(subId)] = job
       }
-      return results
+      const runs: Record<number, SubscriptionRun> = {}
+      for (const [subId, run] of Object.entries(res.runs ?? {})) {
+        runs[Number(subId)] = run
+      }
+      return { jobs: results, runs }
     },
     // Event-driven while connected (lastSubCheck/lastJobUpdate effects below +
     // wsInvalidation.tsx); poll as a fallback when WS is down.
     { refreshInterval: pollingRefreshInterval(connected, 5000) },
   )
+
+  const jobsData = jobsAndRuns?.jobs
+  const jobsRef = useRef(jobsData)
+  useEffect(() => {
+    jobsRef.current = jobsData
+  }, [jobsData])
+  const runsData = useMemo(() => jobsAndRuns?.runs ?? {}, [jobsAndRuns?.runs])
+
+  // Job updates that are not the representative job still change the run totals.
+  const refetchCoalescer = useMemo(
+    () =>
+      createRequestCoalescer(async () => {
+        await mutateJobs()
+      }, 3000),
+    [mutateJobs],
+  )
+  useEffect(() => () => refetchCoalescer.cancel(), [refetchCoalescer])
 
   useEffect(() => {
     if (lastSubCheck) {
@@ -159,7 +182,7 @@ export default function SubscriptionsPage() {
     mutateJobs(
       (prev) => {
         if (!prev) return prev
-        const updated = { ...prev }
+        const updated = { ...prev.jobs }
         for (const [subIdStr, job] of Object.entries(updated)) {
           if (job.id === lastJobUpdate.job_id) {
             updated[Number(subIdStr)] = {
@@ -173,14 +196,17 @@ export default function SubscriptionsPage() {
             break
           }
         }
-        return updated
+        return { ...prev, jobs: updated }
       },
       { revalidate: false },
     )
-    if (['done', 'failed', 'partial', 'cancelled'].includes(lastJobUpdate.status)) {
-      mutateJobs()
-    }
-  }, [lastJobUpdate, mutateJobs])
+    // Run totals only change server-side: refetch (coalesced) when the update is not a
+    // plain progress tick of the representative job.
+    const isRepresentative = Object.values(jobsRef.current ?? {}).some(
+      (job) => job.id === lastJobUpdate.job_id,
+    )
+    if (!isRepresentative || lastJobUpdate.status !== 'running') refetchCoalescer.trigger()
+  }, [lastJobUpdate, mutateJobs, refetchCoalescer])
 
   // Search
   const [searchInput, setSearchInput] = useState('')
@@ -1015,6 +1041,7 @@ export default function SubscriptionsPage() {
               showSubGroup
               subs={section.subs}
               jobsData={cardJobs}
+              run={runsData}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}
@@ -1047,6 +1074,7 @@ export default function SubscriptionsPage() {
                 group={group}
                 subs={groupedSubs.byGroup[group.id] ?? []}
                 jobsData={cardJobs}
+              run={runsData}
                 groups={groups}
                 onEdit={openEditGroup}
                 onRun={handleGroupRun}
@@ -1072,6 +1100,7 @@ export default function SubscriptionsPage() {
               group={null}
               subs={groupedSubs.ungrouped}
               jobsData={cardJobs}
+              run={runsData}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}

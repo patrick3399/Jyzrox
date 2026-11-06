@@ -379,6 +379,14 @@ async def _settle_orphan_downloading_galleries() -> int:
     return settled
 
 
+async def clear_subscription_check_locks(redis) -> int:
+    """One worker runs checks; locks left by a killed check would block it for 30 min."""
+    keys = [k async for k in redis.scan_iter(match="subscription:check_lock:*")]
+    if keys:
+        await redis.delete(*keys)
+    return len(keys)
+
+
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
     # Fail fast if the DB is not migrated to this image's schema head (e.g. a
@@ -462,6 +470,8 @@ async def startup(ctx: dict) -> None:
         await r.delete(*pid_keys)
     # NOTE: do NOT delete download:pause:* — paused jobs are preserved
 
+    await clear_subscription_check_locks(r)
+
     running_strategy = ((await r.get("setting:recovery_running")) or b"auto_retry").decode()
     paused_strategy = ((await r.get("setting:recovery_paused")) or b"keep_paused").decode()
     if running_strategy not in ("auto_retry", "mark_failed"):
@@ -483,7 +493,7 @@ async def startup(ctx: dict) -> None:
     from sqlalchemy import func, select, update
 
     from core.database import AsyncSessionLocal
-    from db.models import DownloadJob, Gallery
+    from db.models import DownloadJob, Gallery, Subscription
 
     async with AsyncSessionLocal() as session:
         # Recovery: running → queued (re-enqueue, not fail)
@@ -580,12 +590,21 @@ async def startup(ctx: dict) -> None:
         # Without this, resume after restart thinks the coroutine is alive and sets status
         # to "running" without re-enqueueing — leaving the job stuck forever.
         paused_jobs = (await session.execute(select(DownloadJob).where(DownloadJob.status == "paused"))).scalars().all()
+        paused_sub_ids = set(
+            (await session.execute(select(Subscription.id).where(Subscription.paused_at.is_not(None)))).scalars().all()
+        )
         if paused_jobs:
             for job in paused_jobs:
                 job.admission_token = None
                 if await _finish_stop_requested(r, job):
                     await r.delete(f"download:pause:{job.id}")
                     recovery_counts["stop_finalized"] += 1
+                    continue
+                job_sub_paused = job.subscription_id is not None and job.subscription_id in paused_sub_ids
+                if job_sub_paused:
+                    # Resume re-enqueues token-less paused rows, so nothing is queued now.
+                    logger.info("kept paused: subscription %d is paused", job.subscription_id)
+                    recovery_counts["paused_kept"] += 1
                     continue
                 if paused_strategy == "keep_paused":
                     job_key = compute_job_key(job.id, job.retry_count)

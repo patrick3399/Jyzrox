@@ -906,6 +906,20 @@ export interface MediaPolicy {
   include_videos: boolean
 }
 
+export type SubscriptionPauseReason = 'manual' | 'rate_limited' | 'auth'
+
+export interface SubscriptionRun {
+  total: number
+  queued: number
+  running: number
+  paused: number
+  done: number
+  stopped: number
+  failed: number
+  partial: number
+  cancelled: number
+}
+
 export interface Subscription {
   id: number
   name: string | null
@@ -924,6 +938,10 @@ export interface Subscription {
   created_at: string | null
   last_job_id: string | null
   group_id: number | null
+  paused_at?: string | null
+  paused_reason?: SubscriptionPauseReason | null
+  paused_until?: string | null
+  checking?: boolean
   download_options?: Record<string, unknown>
   gallery_id?: number | null
   gallery_source?: string | null

@@ -6,6 +6,8 @@ import { SubscriptionCard } from '@/components/subscriptions/SubscriptionCard'
 const h = vi.hoisted(() => ({
   pauseJob: vi.fn(async () => ({ status: 'paused' })),
   resumeJob: vi.fn(async () => ({ status: 'running' })),
+  pause: vi.fn(async () => ({ status: 'ok', paused_jobs: 1 })),
+  resume: vi.fn(async () => ({ status: 'ok', resumed_jobs: 1 })),
 }))
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -15,6 +17,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     api: {
       ...actual.api,
       download: { ...actual.api.download, pauseJob: h.pauseJob, resumeJob: h.resumeJob },
+      subscriptions: { ...actual.api.subscriptions, pause: h.pause, resume: h.resume },
     },
   }
 })
@@ -43,6 +46,10 @@ const sub: Subscription = {
   created_at: null,
   last_job_id: 'job-1',
   group_id: null,
+  paused_at: null,
+  paused_reason: null,
+  paused_until: null,
+  checking: false,
 }
 
 function makeJob(status: DownloadJob['status']): DownloadJob {
@@ -148,19 +155,21 @@ describe('SubscriptionCard active job controls', () => {
   })
 
   it('offers resume instead of pause while the subscription job is paused', async () => {
-    renderCard(makeJob('paused'))
+    renderCard(makeJob('paused'), { paused_at: '2026-11-07T01:00:00+00:00', paused_reason: 'manual' })
 
     expect(screen.queryByTestId('subscription-pause')).not.toBeInTheDocument()
     expect(screen.getByTestId('subscription-stop')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('subscription-resume'))
-    await waitFor(() => expect(h.resumeJob).toHaveBeenCalledWith('job-1'))
+    await waitFor(() => expect(h.resume).toHaveBeenCalledWith(1))
+    expect(h.resumeJob).not.toHaveBeenCalled()
   })
 
-  it('pauses the latest job by id', async () => {
+  it('pauses the whole subscription by id, not the single latest job', async () => {
     renderCard(makeJob('running'))
 
     fireEvent.click(screen.getByTestId('subscription-pause'))
-    await waitFor(() => expect(h.pauseJob).toHaveBeenCalledWith('job-1'))
+    await waitFor(() => expect(h.pause).toHaveBeenCalledWith(1))
+    expect(h.pauseJob).not.toHaveBeenCalled()
   })
 
   it('hides pause once a stop was requested so the stop is not undone', () => {

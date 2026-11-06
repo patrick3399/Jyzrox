@@ -6,17 +6,19 @@ from datetime import UTC, datetime
 from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, case, delete, select, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import core.queue
+import core.redis_client
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
 from db.models import DEFAULT_SUBSCRIPTION_CRON, DownloadJob, Gallery, Subscription
 from services.download_policy import normalize_download_options
 from services.download_stop import StopNotAllowed, request_stop
+from services.subscription_pause import check_lock_key, pause_subscription, resume_subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
@@ -104,7 +106,7 @@ class BulkMoveRequest(BaseModel):
     group_id: int | None
 
 
-def _serialize_subscription(s, gallery: Gallery | None = None) -> dict:
+def _serialize_subscription(s, gallery: Gallery | None = None, checking: bool = False) -> dict:
     data = {
         "id": s.id,
         "name": s.name,
@@ -124,6 +126,10 @@ def _serialize_subscription(s, gallery: Gallery | None = None) -> dict:
         "last_job_id": str(s.last_job_id) if s.last_job_id else None,
         "next_check_at": s.next_check_at.isoformat() if s.next_check_at else None,
         "created_at": s.created_at.isoformat() if s.created_at else None,
+        "paused_at": s.paused_at.isoformat() if s.paused_at else None,
+        "paused_reason": s.paused_reason,
+        "paused_until": s.paused_until.isoformat() if s.paused_until else None,
+        "checking": checking,
     }
     if gallery:
         data["gallery_id"] = gallery.id
@@ -131,6 +137,19 @@ def _serialize_subscription(s, gallery: Gallery | None = None) -> dict:
         data["gallery_source_id"] = gallery.source_id
         data["gallery_title"] = gallery.title
     return data
+
+
+async def _checking_flags(sub_ids: list[int]) -> list[bool]:
+    """Per-subscription check-lock state; Redis is best-effort here."""
+    if not sub_ids:
+        return []
+    try:
+        locks = list(await core.redis_client.get_redis().mget([check_lock_key(i) for i in sub_ids]))
+    except Exception:
+        locks = []
+    if len(locks) != len(sub_ids):
+        locks = [None] * len(sub_ids)
+    return [lock is not None for lock in locks]
 
 
 @router.get("/")
@@ -209,8 +228,12 @@ async def list_subscriptions(
             count_q = count_q.where(Subscription.group_id == group_id)
         total = (await session.execute(count_q)).scalar() or 0
 
+    checking = await _checking_flags([s.id for s in subs])
     return {
-        "subscriptions": [_serialize_subscription(s, gallery_by_sub_id.get(s.id)) for s in subs],
+        "subscriptions": [
+            _serialize_subscription(s, gallery_by_sub_id.get(s.id), checking=c)
+            for s, c in zip(subs, checking, strict=True)
+        ],
         "total": total,
     }
 
@@ -226,13 +249,28 @@ async def get_latest_jobs(auth: dict = Depends(require_auth)):
 
     user_id = auth["user_id"]
     async with async_session() as session:
+        active = DownloadJob.status.in_(["queued", "running", "paused"])
+        prio = case(
+            (DownloadJob.status == "running", 0),
+            (DownloadJob.status == "paused", 1),
+            (DownloadJob.status == "queued", 2),
+            else_=3,
+        )
         ranked = (
             select(
                 DownloadJob.id.label("id"),
                 sa_func.row_number()
                 .over(
                     partition_by=DownloadJob.subscription_id,
-                    order_by=(DownloadJob.created_at.desc(), DownloadJob.id.desc()),
+                    order_by=(
+                        prio.asc(),
+                        case((DownloadJob.status == "queued", DownloadJob.admission_ticket), else_=None)
+                        .asc()
+                        .nulls_last(),
+                        DownloadJob.finished_at.desc().nulls_last(),
+                        DownloadJob.created_at.desc(),
+                        DownloadJob.id.desc(),
+                    ),
                 )
                 .label("rn"),
             )
@@ -256,7 +294,44 @@ async def get_latest_jobs(auth: dict = Depends(require_auth)):
             gs = (await session.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
             gallery_map = {g.id: g for g in gs}
 
-    return {"jobs": {str(j.subscription_id): serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs}}
+        # Run = jobs created at or after the oldest still-active job, or the
+        # latest batch when nothing is active.
+        bounds = (
+            select(
+                DownloadJob.subscription_id.label("sid"),
+                sa_func.coalesce(
+                    sa_func.min(DownloadJob.created_at).filter(active), sa_func.max(DownloadJob.created_at)
+                ).label("run_start"),
+            )
+            .join(Subscription, Subscription.id == DownloadJob.subscription_id)
+            .where(Subscription.user_id == user_id)
+            .group_by(DownloadJob.subscription_id)
+            .subquery()
+        )
+        stopped = DownloadJob.progress["outcome"].as_string() == "stopped"
+        bucket = case((and_(DownloadJob.status == "done", stopped), "stopped"), else_=DownloadJob.status)
+        rows = (
+            await session.execute(
+                select(DownloadJob.subscription_id, bucket, sa_func.count())
+                .join(
+                    bounds,
+                    and_(bounds.c.sid == DownloadJob.subscription_id, DownloadJob.created_at >= bounds.c.run_start),
+                )
+                .group_by(DownloadJob.subscription_id, bucket)
+            )
+        ).all()
+        runs: dict[str, dict[str, int]] = {}
+        keys = ("queued", "running", "paused", "done", "stopped", "failed", "partial", "cancelled")
+        for sid, status, n in rows:
+            run = runs.setdefault(str(sid), {"total": 0, **dict.fromkeys(keys, 0)})
+            if status in run:
+                run[status] += n
+            run["total"] += n
+
+    return {
+        "jobs": {str(j.subscription_id): serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs},
+        "runs": runs,
+    }
 
 
 @router.post("/")
@@ -368,7 +443,8 @@ async def get_subscription(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    return _serialize_subscription(sub)
+    checking = await _checking_flags([sub.id])
+    return _serialize_subscription(sub, checking=checking[0])
 
 
 @router.get("/{sub_id}/jobs")
@@ -569,6 +645,9 @@ async def check_subscription(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
+    if sub.paused_at is not None:
+        raise HTTPException(status_code=409, detail="Subscription is paused")
+
     try:
         await core.queue.enqueue("check_single_subscription", _timeout=600, sub_id=sub_id)
     except Exception as exc:
@@ -635,9 +714,68 @@ async def stop_subscription(
                 continue
             stopped += 1
 
+        # Stop wins over pause: a stopped subscription is no longer paused.
+        await session.execute(
+            update(Subscription)
+            .where(Subscription.id == sub_id)
+            .values(paused_at=None, paused_reason=None, paused_until=None)
+        )
+        await session.commit()
+
     if failed and not stopped:
         raise HTTPException(status_code=503, detail="Failed to stop subscription jobs")
     return {"status": "ok", "stopped": stopped}
+
+
+@router.post("/{sub_id}/pause")
+async def pause_subscription_route(sub_id: int, auth: dict = Depends(_member)):
+    """Pause a subscription and every queued/running job it owns."""
+    async with async_session() as session:
+        sub = (
+            await session.execute(
+                select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == auth["user_id"])
+            )
+        ).scalar_one_or_none()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        out = await pause_subscription(session, sub_id, reason="manual")
+    await core.redis_client.publish_job_event(
+        {
+            "type": "subscription_checked",
+            "sub_id": sub_id,
+            "status": "paused",
+            "job_id": None,
+            "user_id": auth["user_id"],
+        }
+    )
+    return {"status": "ok", "paused_jobs": out["paused_jobs"]}
+
+
+@router.post("/{sub_id}/resume")
+async def resume_subscription_route(sub_id: int, auth: dict = Depends(_member)):
+    """Resume a paused subscription, re-queueing its paused jobs in ticket order."""
+    async with async_session() as session:
+        sub = (
+            await session.execute(
+                select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == auth["user_id"])
+            )
+        ).scalar_one_or_none()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        try:
+            out = await resume_subscription(session, sub_id)
+        except RuntimeError:
+            raise HTTPException(status_code=503, detail="Failed to re-enqueue some jobs; resume again")
+    await core.redis_client.publish_job_event(
+        {
+            "type": "subscription_checked",
+            "sub_id": sub_id,
+            "status": "resumed",
+            "job_id": None,
+            "user_id": auth["user_id"],
+        }
+    )
+    return {"status": "ok", "resumed_jobs": out["resumed_jobs"]}
 
 
 @router.post("/{sub_id}/backfill")
@@ -663,6 +801,9 @@ async def backfill_subscription(
 
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
+
+    if sub.paused_at is not None:
+        raise HTTPException(status_code=409, detail="Subscription is paused")
 
     try:
         await core.queue.enqueue("check_single_subscription", _timeout=600, sub_id=sub_id, force_full_scan=True)

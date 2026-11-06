@@ -791,6 +791,10 @@ _SQLITE_SCHEMA = [
         batch_enqueued INTEGER DEFAULT 0,
         group_id INTEGER,
         last_job_id TEXT,
+        paused_at TIMESTAMP,
+        paused_reason TEXT,
+        paused_until TIMESTAMP,
+        halt_count INTEGER NOT NULL DEFAULT 0,
         UNIQUE (user_id, url)
     )
     """,

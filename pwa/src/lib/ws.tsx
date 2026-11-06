@@ -122,6 +122,8 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             new_works: msg.new_works ?? 0,
             job_id: msg.job_id ?? null,
           })
+        } else if (msg.type === 'subscription_checking' && msg.sub_id) {
+          setLastSubCheck({ sub_id: msg.sub_id, status: 'checking', new_works: 0, job_id: null })
         } else if (msg.type === 'log_entry' && msg.log) {
           setLastLogEntry(msg.log as LogEntry)
         } else if (msg.type === 'gdl_upgrade') {

@@ -1207,6 +1207,11 @@ const en: Record<string, string> = {
   'subscriptions.downloadNow': 'Download Now',
   'subscriptions.downloadQueued': 'Download queued',
   'subscriptions.viewGallery': 'View Gallery',
+  'subscriptions.runProgress': 'Posts {done} / {total}',
+  'subscriptions.checking': 'Checking…',
+  'subscriptions.pausedManual': 'Paused',
+  'subscriptions.pausedRateLimited': 'Rate limited — resumes automatically at {time}',
+  'subscriptions.pausedAuth': 'Login expired — update the credential, then resume',
   'subscriptions.queued': 'Queued',
   'subscriptions.batchImport': 'Batch Import',
   'subscriptions.batchPlaceholder':

@@ -317,3 +317,62 @@ async def test_restricted_post_with_null_body_is_skipped_not_saved_as_cover_only
     assert options["diagnostic_ctx"]["source_summary"]["skipped_inaccessible"] == 1
     assert not list(tmp_path.iterdir())
     callback.assert_not_awaited()
+
+
+def _status_client(status_code, *, content_type="application/json", retry_after=None, on="post.info"):
+    class _C(_Client):
+        async def get(self, url, **kwargs):
+            if on in url:
+                headers = {"content-type": content_type}
+                if retry_after:
+                    headers["retry-after"] = str(retry_after)
+                return _Response(status_code=status_code, payload={}, headers=headers)
+            return _Response(
+                payload={
+                    "body": {
+                        "post": {
+                            "id": "42",
+                            "feeRequired": 0,
+                            "isRestricted": False,
+                            "body": {"images": [{"originalUrl": "https://cdn.test/1.png"}]},
+                        }
+                    }
+                }
+            )
+
+    return _C
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [429, 503])
+async def test_fanbox_post_info_throttled_returns_rate_limited_halt(monkeypatch, tmp_path, code):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(code, retry_after=120))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt, r.retry_after) == ("failed", "rate_limited", 120)
+
+
+@pytest.mark.asyncio
+async def test_fanbox_403_html_challenge_is_rate_limited_but_403_json_stays_inaccessible(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(403, content_type="text/html")
+    )
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert r.halt == "rate_limited"
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(403))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt) == ("done", None)
+
+
+@pytest.mark.asyncio
+async def test_fanbox_401_returns_auth_halt_instead_of_done_with_zero_files(monkeypatch, tmp_path):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(401))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt) == ("failed", "auth")
+
+
+@pytest.mark.asyncio
+async def test_fanbox_media_429_stops_the_post_and_returns_rate_limited_halt(monkeypatch, tmp_path):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(429, on="cdn.test"))
+    monkeypatch.setattr("plugins.builtin.fanbox.source.get_typed_download_delay", AsyncMock(return_value=0))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt) == ("failed", "rate_limited")

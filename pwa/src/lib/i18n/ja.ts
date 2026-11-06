@@ -1409,6 +1409,11 @@ const ja: Record<string, string> = {
   'subscriptions.backfillFailed': '強制再スキャンをキューに追加できませんでした',
   'subscriptions.downloadQueued': 'ダウンロードをキューに追加しました',
   'subscriptions.viewGallery': 'ギャラリーを見る',
+  'subscriptions.runProgress': '投稿 {done} / {total}',
+  'subscriptions.checking': '確認中…',
+  'subscriptions.pausedManual': '一時停止中',
+  'subscriptions.pausedRateLimited': 'レート制限中です。{time} に自動で再開します',
+  'subscriptions.pausedAuth': 'ログインの期限が切れました。認証情報を更新してから再開してください',
   'subscriptions.queued': 'キュー済み',
   'subscriptions.batchImport': '一括インポート',
   'subscriptions.batchPlaceholder':

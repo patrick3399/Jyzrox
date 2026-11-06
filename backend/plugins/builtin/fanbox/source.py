@@ -80,6 +80,28 @@ def _api_headers() -> dict[str, str]:
     )
 
 
+_THROTTLE_STATUSES = frozenset({429, 503})
+
+
+def _halt_for(response) -> str | None:
+    """Map a Fanbox response to a subscription halt, or None for per-post handling."""
+    if response.status_code in _THROTTLE_STATUSES:
+        return "rate_limited"
+    content_type = (response.headers.get("content-type") or "").lower()
+    if response.status_code == 403 and "text/html" in content_type:
+        return "rate_limited"  # Cloudflare / access challenge page, not a plan restriction
+    if response.status_code == 401:
+        return "auth"
+    return None
+
+
+def _retry_after(response) -> int | None:
+    try:
+        return int(response.headers.get("retry-after") or 0) or None
+    except ValueError:
+        return None
+
+
 def _media_headers() -> dict[str, str]:
     """An <img> on www.fanbox.cc loading from downloads.fanbox.cc."""
     return browser_headers("image", site="same-site", referer=f"{_FANBOX_ORIGIN}/")
@@ -352,7 +374,17 @@ class FanboxSourcePlugin(SourcePlugin):
                 response = await client.get(
                     "https://api.fanbox.cc/post.info", params={"postId": post_id}, headers=_api_headers()
                 )
-                if response.status_code in (401, 403):
+                halt = _halt_for(response)
+                if halt:
+                    return DownloadResult(
+                        status="failed",
+                        downloaded=0,
+                        total=0,
+                        error=f"Fanbox {response.status_code}",
+                        halt=halt,
+                        retry_after=_retry_after(response),
+                    )
+                if response.status_code == 403:
                     summary["skipped_inaccessible"] = 1
                     return DownloadResult(status="done", downloaded=0, total=0)
                 response.raise_for_status()
@@ -402,6 +434,17 @@ class FanboxSourcePlugin(SourcePlugin):
                     await asyncio.sleep(0.5)
                 try:
                     media = await client.get(media_url, headers=_media_headers())
+                    halt = _halt_for(media)
+                    if halt:
+                        return DownloadResult(
+                            status="failed",
+                            downloaded=downloaded,
+                            total=len(urls),
+                            failed_pages=failed,
+                            error=f"Fanbox media {media.status_code}",
+                            halt=halt,
+                            retry_after=_retry_after(media),
+                        )
                     media.raise_for_status()
                     path = (
                         dest_dir / f"{post_id}_p{index:04d}{_extension(media_url, media.headers.get('content-type'))}"

@@ -101,6 +101,18 @@ export function useStopSubscription() {
   )
 }
 
+export function usePauseSubscription() {
+  return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
+    api.subscriptions.pause(arg),
+  )
+}
+
+export function useResumeSubscription() {
+  return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
+    api.subscriptions.resume(arg),
+  )
+}
+
 export function useBackfillSubscription() {
   return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
     api.subscriptions.backfill(arg),

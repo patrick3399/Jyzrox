@@ -1,6 +1,6 @@
 import { apiFetch, qs } from './client'
 
-import type { DownloadJob, Subscription, SubscriptionGroup } from '../types'
+import type { DownloadJob, Subscription, SubscriptionGroup, SubscriptionRun } from '../types'
 
 // ── Subscriptions ────────────────────────────────────────────────────
 
@@ -68,7 +68,21 @@ export const subscriptions = {
     }),
 
   /** Newest job of every subscription, keyed by subscription id, in a single request. */
-  latestJobs: () => apiFetch<{ jobs: Record<string, DownloadJob> }>('/api/subscriptions/latest-jobs'),
+  latestJobs: () =>
+    apiFetch<{ jobs: Record<string, DownloadJob>; runs: Record<string, SubscriptionRun> }>(
+      '/api/subscriptions/latest-jobs',
+    ),
+
+  /** Pause every active job of this subscription and block new checks. */
+  pause: (id: number) =>
+    apiFetch<{ status: string; paused_jobs: number }>(`/api/subscriptions/${id}/pause`, {
+      method: 'POST',
+    }),
+
+  resume: (id: number) =>
+    apiFetch<{ status: string; resumed_jobs: number }>(`/api/subscriptions/${id}/resume`, {
+      method: 'POST',
+    }),
 
   jobs: (id: number, limit = 10) =>
     apiFetch<{ jobs: DownloadJob[] }>(`/api/subscriptions/${id}/jobs${qs({ limit })}`),

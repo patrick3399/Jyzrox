@@ -632,6 +632,11 @@ class Subscription(Base):
     last_job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("download_jobs.id", ondelete="SET NULL"), nullable=True
     )
+    # Durable pause (ADR 0030). paused_reason: manual | rate_limited | auth.
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    halt_count: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0", nullable=False)
 
     __table_args__ = (UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),)
 

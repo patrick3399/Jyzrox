@@ -478,14 +478,22 @@ class TestGetSubscriptionJobs:
 class TestLatestJobs:
     """GET /api/subscriptions/latest-jobs — one request instead of N per-sub calls."""
 
-    async def _insert_job(self, db_session, sub_id: int, created_at: str, user_id: int = 1) -> str:
+    async def _insert_job(
+        self,
+        db_session,
+        sub_id: int,
+        created_at: str,
+        user_id: int = 1,
+        status: str = "done",
+        ticket: int | None = None,
+    ) -> str:
         job_id = str(uuid.uuid4())
         await db_session.execute(
             text(
-                "INSERT INTO download_jobs (id, url, status, progress, subscription_id, user_id, created_at) "
-                "VALUES (:jid, 'https://example.com/dl', 'done', '{}', :sid, :uid, :ts)"
+                "INSERT INTO download_jobs (id, url, status, progress, subscription_id, user_id, created_at, "
+                "admission_ticket) VALUES (:jid, 'https://example.com/dl', :st, '{}', :sid, :uid, :ts, :tk)"
             ),
-            {"jid": job_id, "sid": sub_id, "uid": user_id, "ts": created_at},
+            {"jid": job_id, "sid": sub_id, "uid": user_id, "ts": created_at, "st": status, "tk": ticket},
         )
         await db_session.commit()
         return job_id
@@ -516,6 +524,123 @@ class TestLatestJobs:
         resp = await client.get("/api/subscriptions/latest-jobs")
         assert resp.status_code == 200
         assert resp.json()["jobs"] == {}
+
+    async def test_latest_jobs_same_batch_returns_running_job_not_arbitrary_queued(self, client, db_session):
+        """A discovery batch shares one created_at and has random uuid4 ids."""
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        ts = "2026-11-07 00:31:22"
+        for i in range(20):
+            await self._insert_job(db_session, sub, ts, status="queued", ticket=100 + i)
+        running = await self._insert_job(db_session, sub, ts, status="running", ticket=50)
+        resp = await client.get("/api/subscriptions/latest-jobs")
+        assert resp.json()["jobs"][str(sub)]["id"] == running
+
+    async def test_latest_jobs_no_running_job_returns_lowest_ticket_queued_job(self, client, db_session):
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        ts = "2026-11-07 00:31:22"
+        for i in (130, 110, 120):
+            await self._insert_job(db_session, sub, ts, status="queued", ticket=i)
+        first = await self._insert_job(db_session, sub, ts, status="queued", ticket=105)
+        resp = await client.get("/api/subscriptions/latest-jobs")
+        assert resp.json()["jobs"][str(sub)]["id"] == first
+
+    async def test_latest_jobs_run_summary_counts_the_active_run(self, client, db_session):
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        await self._insert_job(db_session, sub, "2026-11-01 00:00:00", status="done")  # previous run
+        ts = "2026-11-07 00:31:22"
+        await self._insert_job(db_session, sub, ts, status="done")
+        await self._insert_job(db_session, sub, ts, status="running", ticket=2)
+        await self._insert_job(db_session, sub, ts, status="queued", ticket=3)
+        await self._insert_job(db_session, sub, ts, status="queued", ticket=4)
+        run = (await client.get("/api/subscriptions/latest-jobs")).json()["runs"][str(sub)]
+        assert (run["total"], run["done"], run["running"], run["queued"]) == (4, 1, 1, 2)
+
+    async def test_latest_jobs_run_summary_with_nothing_active_covers_only_latest_batch(self, client, db_session):
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        await self._insert_job(db_session, sub, "2026-11-01 00:00:00", status="done")
+        await self._insert_job(db_session, sub, "2026-11-07 00:31:22", status="done")
+        await self._insert_job(db_session, sub, "2026-11-07 00:31:22", status="failed")
+        run = (await client.get("/api/subscriptions/latest-jobs")).json()["runs"][str(sub)]
+        assert (run["total"], run["done"], run["failed"]) == (2, 1, 1)
+
+
+class TestSubscriptionPauseApi:
+    @pytest.fixture(autouse=True)
+    def _service_redis(self, mock_redis):
+        with (
+            patch("services.subscription_pause.get_redis", return_value=mock_redis),
+            patch("services.download_pause.get_redis", return_value=mock_redis),
+            patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
+        ):
+            yield
+
+    async def test_check_returns_409_while_subscription_paused(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session)
+        await db_session.execute(
+            text("UPDATE subscriptions SET paused_at = CURRENT_TIMESTAMP, paused_reason = 'manual' WHERE id = :i"),
+            {"i": sub_id},
+        )
+        await db_session.commit()
+        for path in ("check", "backfill"):
+            resp = await client.post(f"/api/subscriptions/{sub_id}/{path}")
+            assert resp.status_code == 409, path
+
+    async def test_list_reports_checking_when_check_lock_is_held(self, client, db_session, mock_redis):
+        await _ensure_user(db_session)
+        await _insert_subscription(db_session)
+        mock_redis.mget = AsyncMock(return_value=[b"token"])
+        resp = await client.get("/api/subscriptions/?limit=50")
+        sub = resp.json()["subscriptions"][0]
+        assert sub["checking"] is True
+        assert sub["paused_at"] is None and sub["paused_reason"] is None
+
+    async def test_list_reports_not_checking_when_redis_mget_fails(self, client, db_session, mock_redis):
+        await _ensure_user(db_session)
+        await _insert_subscription(db_session)
+        mock_redis.mget = AsyncMock(side_effect=RuntimeError("redis down"))
+        resp = await client.get("/api/subscriptions/?limit=50")
+        assert resp.status_code == 200
+        assert resp.json()["subscriptions"][0]["checking"] is False
+
+    async def test_pause_endpoint_pauses_subscription_for_owner_only(self, client, db_session):
+        await _ensure_user(db_session)
+        await _ensure_user(db_session, user_id=2)
+        other = await _insert_subscription(db_session, user_id=2)
+        assert (await client.post(f"/api/subscriptions/{other}/pause")).status_code == 404
+        mine = await _insert_subscription(db_session)
+        resp = await client.post(f"/api/subscriptions/{mine}/pause")
+        assert resp.status_code == 200
+        assert "paused_jobs" in resp.json()
+        got = (await client.get(f"/api/subscriptions/{mine}")).json()
+        assert got["paused_reason"] == "manual"
+
+    async def test_resume_endpoint_clears_pause_and_reports_resumed_jobs(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session)
+        await client.post(f"/api/subscriptions/{sub_id}/pause")
+        resp = await client.post(f"/api/subscriptions/{sub_id}/resume")
+        assert resp.status_code == 200 and resp.json()["resumed_jobs"] == 0
+        got = (await client.get(f"/api/subscriptions/{sub_id}")).json()
+        assert got["paused_at"] is None and got["paused_reason"] is None
+
+    async def test_resume_other_users_subscription_returns_404(self, client, db_session):
+        await _ensure_user(db_session)
+        await _ensure_user(db_session, user_id=2)
+        other = await _insert_subscription(db_session, user_id=2)
+        assert (await client.post(f"/api/subscriptions/{other}/resume")).status_code == 404
+
+    async def test_stop_on_paused_subscription_clears_pause(self, client, db_session):
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session)
+        await client.post(f"/api/subscriptions/{sub_id}/pause")
+        await client.post(f"/api/subscriptions/{sub_id}/stop")
+        got = (await client.get(f"/api/subscriptions/{sub_id}")).json()
+        assert got["paused_at"] is None
 
 
 # ---------------------------------------------------------------------------

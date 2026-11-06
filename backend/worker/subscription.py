@@ -15,6 +15,7 @@ from db.models import DownloadJob, Subscription
 from plugins.models import NewWork
 from services.download_admission import admission_key_for
 from services.download_mode import subscription_mode
+from services.subscription_pause import check_lock_key
 from worker.constants import GROUP_MAX_DURATION, logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
@@ -141,6 +142,13 @@ async def _enqueue_discovered_works(ctx: dict, sub, subscriber, *, force_full_sc
     return {"status": "ok", "job_id": str(enqueued[-1][0]) if enqueued else None, "enqueued": len(enqueued)}
 
 
+async def _current_paused_at(sub_id: int):
+    async with AsyncSessionLocal() as session:
+        return (
+            await session.execute(select(Subscription.paused_at).where(Subscription.id == sub_id))
+        ).scalar_one_or_none()
+
+
 async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = False, manual: bool = False) -> dict:
     """Create a download job for a subscription and enqueue it.
 
@@ -166,13 +174,19 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
     # lock is released in `finally`, so this longer TTL only delays recovery
     # after a hard worker crash.
     redis = get_redis()
-    lock_key = f"subscription:check_lock:{sub.id}"
+    lock_key = check_lock_key(sub.id)
     lock_value = await acquire_lock(redis, lock_key, ttl=GROUP_MAX_DURATION)
     if not lock_value:
         logger.info("[subscription] sub=%d check already in progress, skipping", sub.id)
         return {"status": "skipped", "reason": "check_in_progress"}
 
     try:
+        # Re-read under the lock: the row passed in may predate a pause (ADR 0030).
+        if await _current_paused_at(sub.id) is not None:
+            logger.info("[subscription] sub=%d paused, skipping check", sub.id)
+            return {"status": "skipped", "reason": "paused"}
+        await publish_job_event({"type": "subscription_checking", "sub_id": sub.id, "user_id": sub.user_id})
+
         # DL-007: back off automatic checks for chronically failing subs
         # (expired cookies, dead accounts). Manual checks bypass the gate.
         if not manual:

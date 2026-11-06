@@ -15,6 +15,7 @@ from services.credential import get_credential
 from services.download_admission import DownloadAdmission, admission_key_for
 from services.download_mode import REPAIR, effective_mode
 from services.download_stop import claim_stop_finish, read_stop_intent, run_started_at
+from services.subscription_pause import halt_subscription_for_job
 from worker.constants import _IMAGE_EXTS, _MEDIA_EXTS, DISK_LOW_KEY, logger
 from worker.helpers import (
     _set_job_progress,
@@ -198,6 +199,26 @@ async def _load_credentials(plugin) -> tuple[dict | str | None, dict[str, str]]:
     return values, accounts
 
 
+def make_pause_check(redis, key: str | None):
+    # Lazy: services.download_pause imports worker.helpers, whose package init imports this module.
+    from services.download_pause import PAUSE_KEY_TTL
+
+    async def pause_check() -> bool:
+        if not key:
+            return False
+        try:
+            val = await redis.get(key)
+            if val is not None:
+                # Keep the signal alive while the job waits; only a dead worker lets it lapse,
+                # and recovery then rebuilds the job from its durable `paused` row.
+                await redis.expire(key, PAUSE_KEY_TTL)
+            return val is not None
+        except Exception:
+            return False  # fail open
+
+    return pause_check
+
+
 async def _set_subscription_result(
     db_job_id: str | None,
     status: str,
@@ -252,6 +273,8 @@ async def _set_subscription_result(
                     )
             elif status == "done" and advance_success:
                 values["last_success_at"] = datetime.now(UTC)
+            if status == "done" and job_mode != REPAIR:
+                values["halt_count"] = 0
             await session.execute(update(Subscription).where(Subscription.id == subscription_id).values(**values))
             await session.commit()
 
@@ -973,14 +996,7 @@ async def _run_download_job(
 
     pause_key = f"download:pause:{db_job_id}" if db_job_id else None
 
-    async def pause_check() -> bool:
-        if not pause_key:
-            return False
-        try:
-            val = await redis.get(pause_key)
-            return val is not None
-        except Exception:
-            return False
+    pause_check = make_pause_check(redis, pause_key)
 
     # ── 10. Unified on_file callback (ALL sources) ──────────────────
     _gallery_create_lock = asyncio.Lock()
@@ -1165,6 +1181,12 @@ async def _run_download_job(
         await _set_job_status(db_job_id, "cancelled")
         await _set_subscription_result(db_job_id, "cancelled")
         return {"status": "cancelled"}
+
+    if result.status == "failed" and getattr(result, "halt", None) and db_job_id:
+        if await halt_subscription_for_job(db_job_id, result.halt, getattr(result, "retry_after", None)):
+            await importer.abort()
+            logger.warning("[download] %s halted subscription (%s): %s", db_job_id, result.halt, result.error)
+            return {"status": "paused", "halt": result.halt}
 
     if result.status == "failed":
         # Gate on what this run fetched, not on what the gallery holds: a repair

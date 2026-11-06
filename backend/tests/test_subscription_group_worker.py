@@ -248,6 +248,39 @@ class TestSubscriptionScheduler:
         assert result["dispatched"] == 1
         mock_enqueue.assert_awaited_once()
 
+    async def test_scheduler_auto_resume_failure_still_dispatches_groups(self):
+        """A raising auto-resume must not stop the tick from dispatching due groups."""
+        from worker.subscription_group import subscription_scheduler
+
+        group = _make_group(last_completed_at=datetime.now(UTC) - timedelta(hours=3))
+        call_count = [0]
+
+        async def _execute_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            result = MagicMock()
+            if call_count[0] == 1:
+                result.scalars.return_value.all.return_value = [group]
+            else:
+                result.fetchone = MagicMock(return_value=MagicMock(id=group.id))
+            return result
+
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        session.execute = _execute_side_effect
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("worker.subscription_group.resume_due_rate_limited", AsyncMock(side_effect=RuntimeError("boom"))),
+            patch("worker.subscription_group.AsyncSessionLocal", return_value=session),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await subscription_scheduler(_make_ctx())
+
+        assert result["status"] == "ok"
+        assert result["dispatched"] == 1
+        mock_enqueue.assert_awaited_once()
+
     async def test_claim_race_lost_is_not_counted(self):
         """If the atomic claim returns no row (another worker won), dispatched stays 0."""
         from worker.subscription_group import subscription_scheduler

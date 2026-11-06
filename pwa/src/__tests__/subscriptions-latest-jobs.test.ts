@@ -10,4 +10,13 @@ describe('subscriptions page latest-job loading', () => {
     expect(PAGE).toContain('api.subscriptions.latestJobs()')
     expect(PAGE).not.toMatch(/api\.subscriptions\.jobs\(/)
   })
+
+  it('reads the run summary from latest-jobs and passes the sub run to the card', () => {
+    expect(PAGE).toMatch(/\.runs\b/)
+    expect(PAGE).toMatch(/run=\{/)
+  })
+
+  it('coalesces refetches when a job update is not the representative job', () => {
+    expect(PAGE).toContain('createRequestCoalescer')
+  })
 })

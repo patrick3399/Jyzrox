@@ -25,13 +25,23 @@ import { toast } from 'sonner'
 import { useSWRConfig } from 'swr'
 import { t } from '@/lib/i18n'
 import { Button } from '@/components/ui/button'
-import { useCheckUrl, usePauseJob } from '@/hooks/useDownloadQueue'
-import { useStopSubscription } from '@/hooks/useSubscriptions'
+import { useCheckUrl } from '@/hooks/useDownloadQueue'
+import {
+  usePauseSubscription,
+  useResumeSubscription,
+  useStopSubscription,
+} from '@/hooks/useSubscriptions'
 import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
 import { isDefaultMediaPolicy, mediaPolicyFromOptions, withMediaPolicy } from '@/lib/mediaPolicy'
 import { CRON_PRESETS } from './constants'
 import { sourceLabel } from './sourceGrouping'
-import type { DownloadJob, MediaPolicy, Subscription, SubscriptionGroup } from '@/lib/types'
+import type {
+  DownloadJob,
+  MediaPolicy,
+  Subscription,
+  SubscriptionGroup,
+  SubscriptionRun,
+} from '@/lib/types'
 
 const SOURCE_COLORS: Record<string, string> = {
   pixiv: 'bg-blue-500/20 text-blue-400',
@@ -329,6 +339,7 @@ function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | nul
 export function SubscriptionCard({
   sub,
   latestJob,
+  run = null,
   groups,
   onToggle,
   onCheck,
@@ -344,6 +355,8 @@ export function SubscriptionCard({
 }: {
   sub: Subscription
   latestJob: DownloadJob | null
+  /** Aggregate of the current multi-job run (null when unknown). */
+  run?: SubscriptionRun | null
   groups: SubscriptionGroup[]
   onToggle: (sub: Subscription) => void
   onCheck: (sub: Subscription) => void
@@ -367,12 +380,17 @@ export function SubscriptionCard({
   const galleryTitle = sub.gallery_title?.trim() || latestJob?.progress?.title?.trim()
   const isRunning = latestJob?.status === 'running'
   // The card knows its latest job only; a subscription with a job in flight can be stopped.
-  const hasActiveJob =
-    latestJob?.status === 'queued' ||
-    latestJob?.status === 'running' ||
-    latestJob?.status === 'paused'
+  const hasActiveJob = run
+    ? run.queued + run.running + run.paused > 0
+    : latestJob?.status === 'queued' ||
+      latestJob?.status === 'running' ||
+      latestJob?.status === 'paused'
   const { trigger: stopSubscription, isMutating: isStoppingSubscription } = useStopSubscription()
-  const { trigger: pauseJob, isMutating: isPausing } = usePauseJob()
+  const { trigger: pauseSub, isMutating: isPausingSub } = usePauseSubscription()
+  const { trigger: resumeSub, isMutating: isResumingSub } = useResumeSubscription()
+  const isPausing = isPausingSub || isResumingSub
+  const isPaused = !!sub.paused_at
+  const runBlocked = !!sub.checking || isPaused
   const { mutate: refreshLists } = useSWRConfig()
   const isStopping = isStoppingSubscription || !!latestJob?.stop_requested_at
   // Subscription list, per-card latest jobs and the queue lists all show the job.
@@ -384,9 +402,9 @@ export function SubscriptionCard({
     )
 
   const handlePause = async (action: 'pause' | 'resume') => {
-    if (!latestJob) return
     try {
-      await pauseJob({ id: latestJob.id, action })
+      if (action === 'pause') await pauseSub(sub.id)
+      else await resumeSub(sub.id)
       await refreshJobLists()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('queue.pauseError'))
@@ -516,6 +534,27 @@ export function SubscriptionCard({
           <JobStatusBadge job={latestJob} />
         </div>
       )}
+      {run && run.total > 1 && (
+        <p data-testid="subscription-run" className="mt-1 truncate text-[10px] text-vault-text-muted">
+          {t('subscriptions.runProgress', { done: String(run.done), total: String(run.total) })}
+        </p>
+      )}
+      {sub.checking && (
+        <span className="mt-1 inline-block rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-400">
+          {t('subscriptions.checking')}
+        </span>
+      )}
+      {isPaused && (
+        <p className="mt-1 truncate text-[10px] text-amber-400">
+          {sub.paused_reason === 'rate_limited'
+            ? t('subscriptions.pausedRateLimited', {
+                time: sub.paused_until ? new Date(sub.paused_until).toLocaleTimeString() : '',
+              })
+            : sub.paused_reason === 'auth'
+              ? t('subscriptions.pausedAuth')
+              : t('subscriptions.pausedManual')}
+        </p>
+      )}
       {sub.last_error && !latestJob && (
         <p className="mt-1 truncate text-[10px] text-red-400" title={sub.last_error}>
           {sub.last_error}
@@ -541,7 +580,7 @@ export function SubscriptionCard({
           {sub.last_status === 'stopped' && ` · ${t('subscriptions.statusStopped')}`}
         </span>
         <div className="flex shrink-0 items-center gap-1 sm:gap-0.5">
-          {latestJob?.status === 'running' && !isStopping && (
+          {!isPaused && hasActiveJob && !isStopping && (
             <Button
               variant="ghost"
               size="icon"
@@ -555,7 +594,7 @@ export function SubscriptionCard({
               <Pause size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
             </Button>
           )}
-          {latestJob?.status === 'paused' && !isStopping && (
+          {isPaused && !isStopping && (
             <Button
               variant="ghost"
               size="icon"
@@ -569,7 +608,7 @@ export function SubscriptionCard({
               <Play size={FOOTER_ICON} className={FOOTER_ICON_CLASS} />
             </Button>
           )}
-          {hasActiveJob && (
+          {(hasActiveJob || isPaused) && (
             <Button
               variant="ghost"
               size="icon"
@@ -590,7 +629,7 @@ export function SubscriptionCard({
             variant="ghost"
             size="icon"
             onClick={() => onCheck(sub)}
-            disabled={checkingId === sub.id}
+            disabled={checkingId === sub.id || runBlocked}
             className={`${FOOTER_ACTION} hover:text-emerald-400`}
             title={t('subscriptions.downloadNow')}
             aria-label={t('subscriptions.downloadNow')}
@@ -618,7 +657,7 @@ export function SubscriptionCard({
         <div className="mt-2 grid grid-cols-2 gap-1 border-t border-vault-border/50 pt-2 text-xs">
           <button
             onClick={() => onBackfill(sub)}
-            disabled={checkingId === sub.id}
+            disabled={checkingId === sub.id || runBlocked}
             className="flex items-center gap-1.5 rounded px-2 py-1.5 text-vault-text-muted transition-colors hover:bg-vault-card hover:text-amber-400 disabled:opacity-60"
           >
             <ScanSearch size={13} />

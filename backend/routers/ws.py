@@ -83,6 +83,8 @@ def _event_to_ws_message(event_data: dict) -> str:
             "new_works": data.get("new_works", 0),
             "user_id": actor,
         }
+    elif event_type == "subscription.checking":
+        message = {"type": "subscription_checking", "sub_id": resource_id, "user_id": actor}
     elif event_type == "semaphore.changed":
         message = {
             "type": "semaphore_changed",
