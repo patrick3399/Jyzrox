@@ -100,6 +100,40 @@ def _extension(url: str, content_type: str | None) -> str:
     }.get((content_type or "").split(";", 1)[0].lower(), ".bin")
 
 
+def _api_list(body: object, key: str, endpoint: str) -> list:
+    """Return the list an API ``body`` carries, bare or wrapped as ``{key: [...]}``.
+
+    Fanbox moved from bare lists to wrapped objects (``pageUrls``, ``posts``).
+    An unrecognised shape raises instead of reading as "no posts", which would
+    otherwise record a subscription as up to date without ever listing it.
+    """
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict) and isinstance(body.get(key), list):
+        return body[key]
+    shape = sorted(body) if isinstance(body, dict) else type(body).__name__
+    raise ValueError(f"Unexpected Fanbox {endpoint} response (expected {key!r}): {shape}")
+
+
+def _api_post(body: object) -> dict | None:
+    """Return the post object from ``post.info``, bare or wrapped as ``{"post": {...}}``."""
+    if isinstance(body, dict) and isinstance(body.get("post"), dict):
+        return body["post"]
+    if isinstance(body, dict) and "id" in body:
+        return body
+    return None
+
+
+def _list_cover_url(item: dict) -> str | None:
+    """Cover URL of a creator-list item (``coverImageUrl`` or the newer ``cover.url``)."""
+    if item.get("coverImageUrl"):
+        return str(item["coverImageUrl"])
+    cover = item.get("cover")
+    if isinstance(cover, dict) and cover.get("url"):
+        return str(cover["url"])
+    return None
+
+
 def _media_urls(post: dict, policy: FanboxDownloadPolicy) -> list[str]:
     """Extract direct media URLs from a Fanbox post body in display order."""
     body = post.get("body") or {}
@@ -186,16 +220,12 @@ class FanboxSourcePlugin(SourcePlugin):
                 headers=_api_headers(),
             )
             response.raise_for_status()
-            pages = response.json().get("body")
-            if not isinstance(pages, list):
-                return works, latest_id
+            pages = _api_list(response.json().get("body"), "pageUrls", "post.paginateCreator")
             reached_boundary = False
             for page_url in pages:
                 response = await client.get(str(page_url), headers=_api_headers())
                 response.raise_for_status()
-                posts = response.json().get("body")
-                if not isinstance(posts, list):
-                    continue
+                posts = _api_list(response.json().get("body"), "posts", "post.listCreator")
                 for item in posts:
                     if not isinstance(item, dict) or not item.get("id"):
                         continue
@@ -218,7 +248,7 @@ class FanboxSourcePlugin(SourcePlugin):
                                 url=f"https://www.fanbox.cc/@{creator_id}/posts/{post_id}",
                                 title=str(item.get("title") or ""),
                                 source_id=post_id,
-                                thumbnail_url=item.get("coverImageUrl"),
+                                thumbnail_url=_list_cover_url(item),
                                 posted_at=posted_at,
                             )
                         )
@@ -326,15 +356,20 @@ class FanboxSourcePlugin(SourcePlugin):
                     summary["skipped_inaccessible"] = 1
                     return DownloadResult(status="done", downloaded=0, total=0)
                 response.raise_for_status()
-                post = response.json().get("body")
+                post = _api_post(response.json().get("body"))
             except (httpx.HTTPError, ValueError) as exc:
                 return DownloadResult(status="failed", downloaded=0, total=0, error=f"Fanbox post lookup failed: {exc}")
-            if not isinstance(post, dict):
+            if post is None:
                 return DownloadResult(status="failed", downloaded=0, total=0, error="Fanbox returned no post data")
 
             fee = int(post.get("feeRequired") or 0)
             if not policy.includes_fee(fee):
                 summary["skipped_policy"] = 1
+                return DownloadResult(status="done", downloaded=0, total=0)
+            # A locked post still answers 200 with its cover but a null body;
+            # importing it would create a cover-only gallery.
+            if post.get("isRestricted") or not isinstance(post.get("body"), dict):
+                summary["skipped_inaccessible"] = 1
                 return DownloadResult(status="done", downloaded=0, total=0)
 
             urls = _media_urls(post, policy)
