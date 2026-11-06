@@ -142,7 +142,7 @@ six==1.17.0
     # via python-dateutil
 soupsieve==2.10
     # via beautifulsoup4
-sqlalchemy[asyncio]==2.1.6
+sqlalchemy[asyncio]==2.1.8
     # via
     #   -r requirements.txt
     #   alembic
