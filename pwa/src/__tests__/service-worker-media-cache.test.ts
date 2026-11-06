@@ -41,6 +41,14 @@ interface Harness {
   setStorageUsage: (bytes: number) => void
   /** Make the network report this Content-Length for a URL. */
   setResponseBytes: (url: string, bytes: number) => void
+  /** Make the network answer this URL with the given HTTP status. */
+  setResponseStatus: (url: string, status: number) => void
+  /**
+   * Hold every `caches.open()` pending until the returned release function is
+   * called — how CacheStorage behaves on an iOS standalone cold start while
+   * WebKit loads a large cache from disk.
+   */
+  stallCacheOpen: () => () => void
   /** Let fire-and-forget work (cache writes, eviction sweeps) settle. */
   settle: () => Promise<void>
 }
@@ -60,6 +68,8 @@ function loadServiceWorker(): Harness {
   let storageUsage = 0
   let offline = false
   const responseBytes = new Map<string, number>()
+  const responseStatus = new Map<string, number>()
+  let cacheOpenGate: Promise<void> | null = null
 
   const keyOf = (req: Request | string) => (typeof req === 'string' ? req : req.url)
 
@@ -101,7 +111,10 @@ function loadServiceWorker(): Harness {
       skipWaiting: () => {},
     },
     caches: {
-      open: async (name: string) => getCache(name),
+      open: async (name: string) => {
+        if (cacheOpenGate) await cacheOpenGate
+        return getCache(name)
+      },
       delete: async (name: string) => {
         stats.cacheDeletes++
         return caches_.delete(name)
@@ -120,7 +133,7 @@ function loadServiceWorker(): Harness {
       if (offline) throw new TypeError('Failed to fetch')
       stats.network++
       const res = new Response('imagebytes', {
-        status: 200,
+        status: responseStatus.get(url) ?? 200,
         headers: {
           'Content-Length': String(responseBytes.get(url) ?? 10000),
           'Content-Type': 'image/webp',
@@ -203,6 +216,19 @@ function loadServiceWorker(): Harness {
     },
     setResponseBytes(url: string, bytes: number) {
       responseBytes.set(url, bytes)
+    },
+    setResponseStatus(url: string, status: number) {
+      responseStatus.set(url, status)
+    },
+    stallCacheOpen() {
+      let release = () => {}
+      cacheOpenGate = new Promise<void>((resolve) => {
+        release = () => {
+          cacheOpenGate = null
+          resolve()
+        }
+      })
+      return release
     },
     async settle() {
       await Promise.allSettled(pendingWork.splice(0))
@@ -374,5 +400,59 @@ describe('service worker media cache performance', () => {
     await sw.settle()
 
     expect(sw.stats.cachePut).toBe(1)
+  })
+
+  it('sends a library original to the network while CacheStorage is still opening', async () => {
+    // Regression (cold start > Gallery > Reader took 8–13 s on iPhone for local
+    // library galleries): the path-addressed branch awaited
+    // caches.open(MEDIA_CACHE_NAME) before fetch(). On an iOS standalone cold
+    // start WebKit loads the large media cache from disk first, so every Reader
+    // original queued behind it — nginx logs showed eight requests arrive in the
+    // same 50 ms, 6–8 s after the Reader mounted, all 304 (already cached).
+    const page = `${ORIGIN}/media/libraries/comfyui-output/Misc/AI/mp2/mp2_00191_.png`
+    const release = sw.stallCacheOpen()
+
+    const responded = sw.request(page)
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+
+    expect(sw.stats.network).toBe(1)
+    const res = await Promise.race([
+      responded,
+      new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 50)),
+    ])
+    expect(res).not.toBe('stalled')
+    expect((res as Response).status).toBe(200)
+
+    release()
+    await sw.settle()
+    // The offline copy is still written once CacheStorage is available.
+    expect(sw.stats.cachePut).toBe(1)
+  })
+
+  it('does not mask a library 403 with a previously authorized cached copy', async () => {
+    // Revocation (high-risk invariant "a cached response must not hide a
+    // current 401/403 for path-addressed media"): the cached copy is only an
+    // offline fallback, never a substitute for a live rejection.
+    const page = `${ORIGIN}/media/libraries/comfyui-output/private/001.png`
+    await sw.seedMedia(page)
+    sw.setResponseStatus(page, 403)
+
+    const res = await sw.request(page)
+    await sw.settle()
+
+    expect(res.status).toBe(403)
+    expect(sw.stats.cacheMatch).toBe(0)
+  })
+
+  it('falls back to the media cache for library media when offline', async () => {
+    const page = `${ORIGIN}/media/libraries/comfyui-output/Misc/AI/mp2/mp2_00001_.png`
+    await sw.seedMedia(page)
+    sw.setOffline(true)
+
+    const res = await sw.request(page)
+    await sw.settle()
+
+    expect(res.status).toBe(200)
+    expect(sw.stats.network).toBe(0)
   })
 })

@@ -354,27 +354,35 @@ self.addEventListener('fetch', (event) => {
     // Path-addressed media (/media/avatars/, /media/libraries/): the same URL
     // can change content or be revoked per-gallery, so it stays network-first
     // and revalidates, and a 401/403 is never masked by a previously authorized
-    // copy. Unchanged from the pre-split behavior.
+    // copy: the media store is consulted only when the network is unreachable.
+    //
+    // The request goes out before CacheStorage is touched. Awaiting
+    // caches.open(MEDIA_CACHE_NAME) first made every library original wait for
+    // WebKit to load the media cache from disk after an iOS standalone cold
+    // start — 6–13 s in which no Reader page reached the network, then all
+    // were released at once. The cache write runs in the background instead,
+    // as in the content-addressed branch above.
     let backgroundMediaWork = Promise.resolve();
-    const mediaResponse = caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
-      try {
-        const response = await fetch(event.request, { cache: 'no-cache' });
+    const mediaResponse = fetch(event.request, { cache: 'no-cache' })
+      .then((response) => {
         if (isCacheableMediaResponse(response)) {
           const stamped = wrapResponseWithTimestamp(response.clone());
-          backgroundMediaWork = cache
-            .put(event.request, stamped)
+          backgroundMediaWork = caches
+            .open(MEDIA_CACHE_NAME)
+            .then((cache) => cache.put(event.request, stamped))
             .then(maybeEnforceMediaCacheLimit, () => {});
         }
         return response;
-      } catch (_) {
+      })
+      .catch(async () => {
+        const cache = await caches.open(MEDIA_CACHE_NAME);
         const cached = await cache.match(event.request);
         if (cached && cached.status >= 200 && cached.status < 300) {
           if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
           await cache.delete(event.request);
         }
         return new Response('', { status: 503 });
-      }
-    });
+      });
     event.respondWith(mediaResponse);
     event.waitUntil(mediaResponse.then(() => backgroundMediaWork, () => backgroundMediaWork));
   } else if (event.request.mode === 'navigate') {
