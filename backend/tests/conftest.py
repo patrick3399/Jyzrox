@@ -429,6 +429,9 @@ _SQLITE_SCHEMA = [
         created_by_user_id INTEGER REFERENCES users(id),
         source_url TEXT,
         deleted_at TIMESTAMP,
+        deleted_reason TEXT,
+        deleted_by_user_id INTEGER,
+        merged_into_gallery_id INTEGER,
         metadata_updated_at TIMESTAMP,
         content_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )

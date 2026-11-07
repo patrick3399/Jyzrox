@@ -46,6 +46,36 @@ export interface Gallery {
   media_stats?: GalleryMediaStats
 }
 
+export type TrashReason = 'user' | 'merged' | 'source_missing'
+
+/** Item of GET /api/library/trash. */
+export interface TrashGallery extends Gallery {
+  deleted_at: string
+  /** null = trashed before the reason column existed. */
+  deleted_reason: TrashReason | null
+  deleted_by: { id: number; username: string } | null
+  merged_into: { source: string; source_id: string; title: string | null } | null
+  cover_thumb: string | null
+}
+
+export interface TrashPreviewImage {
+  id: number
+  page_num: number
+  thumb_path: string | null
+  thumb_srcset: string | null
+  media_type: string
+  pending: boolean
+}
+
+/** Response of GET /api/library/trash/{gallery_id}/preview. */
+export interface TrashPreview {
+  gallery: TrashGallery
+  media: { total_size: number; counts: { image: number; gif: number; video: number } }
+  images: TrashPreviewImage[]
+  images_total: number
+  page: number
+}
+
 /** Size and per-type counts over the pages the Reader shows (detail endpoint only). */
 export interface GalleryMediaStats {
   total_size: number

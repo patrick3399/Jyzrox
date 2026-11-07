@@ -772,6 +772,16 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_job_id UUID REFERENCES d
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_galleries_deleted_at ON galleries (deleted_at) WHERE deleted_at IS NOT NULL;
 
+-- Mirrors migration 0039: why / by whom / into what a gallery was trashed.
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_reason TEXT;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS merged_into_gallery_id BIGINT REFERENCES galleries(id) ON DELETE SET NULL;
+DO $$ BEGIN
+    ALTER TABLE galleries ADD CONSTRAINT chk_galleries_deleted_reason
+        CHECK (deleted_reason IS NULL OR deleted_reason IN ('user', 'merged', 'source_missing'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- ── User Image Favorites ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_image_favorites (
     user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

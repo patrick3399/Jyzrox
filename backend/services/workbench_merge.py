@@ -30,6 +30,7 @@ from db.models import (
     UserReadingList,
 )
 from services.cas import increment_ref_count
+from services.gallery_lifecycle import mark_trashed
 from services.workbench_metadata import load_writable_galleries, metadata_json_value
 
 MERGE_SCALAR_FIELDS = frozenset(
@@ -533,8 +534,13 @@ async def execute_gallery_merge(
         )
     ).scalar_one()
     target.metadata_updated_at = now
-    for source in sources:
-        source.deleted_at = now
+    mark_trashed(
+        sources,
+        reason="merged",
+        actor_user_id=auth["user_id"],
+        merged_into_gallery_id=target.id,
+        now=now,
+    )
 
     return {
         "target_id": target.id,

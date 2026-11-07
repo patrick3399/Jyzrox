@@ -11,6 +11,9 @@ Accepted risk — reconciliation can clean these up.
 import asyncio
 import logging
 import shutil
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import Literal
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +29,8 @@ logger = logging.getLogger(__name__)
 _SOURCES_CACHE_KEY = "library:sources"
 _ACTIVE_JOB_STATUSES = ("queued", "running", "paused")
 
+TrashReason = Literal["user", "merged", "source_missing"]
+
 
 async def invalidate_sources_cache() -> None:
     """Delete the cached sources list so the next request re-queries."""
@@ -33,6 +38,50 @@ async def invalidate_sources_cache() -> None:
         await get_redis().delete(_SOURCES_CACHE_KEY)
     except Exception:
         pass
+
+
+def mark_trashed(
+    galleries: Iterable[Gallery],
+    *,
+    reason: TrashReason,
+    actor_user_id: int | None,
+    merged_into_gallery_id: int | None = None,
+    now: datetime | None = None,
+) -> datetime:
+    """Soft-delete galleries and record why. Caller commits."""
+    stamp = now or datetime.now(UTC)
+    for g in galleries:
+        g.deleted_at = stamp
+        g.deleted_reason = reason
+        g.deleted_by_user_id = actor_user_id
+        g.merged_into_gallery_id = merged_into_gallery_id
+    return stamp
+
+
+def clear_trash_state(gallery: Gallery, *, now: datetime | None = None) -> None:
+    """Un-trash one gallery in memory. Caller commits.
+
+    A held link gallery (``download_status == 'missing'``) gets a fresh ADR 0027
+    grace period, otherwise the next scan re-trashes it at once (amendment 2026-11-07).
+    """
+    gallery.deleted_at = None
+    gallery.deleted_reason = None
+    gallery.deleted_by_user_id = None
+    gallery.merged_into_gallery_id = None
+    if gallery.download_status == "missing":
+        gallery.last_scanned_at = now or datetime.now(UTC)
+
+
+async def restore_galleries(db: AsyncSession, galleries: list[Gallery]) -> int:
+    """Restore trashed galleries, commit, and drop the sources cache."""
+    now = datetime.now(UTC)
+    restored = [g for g in galleries if g.deleted_at is not None]
+    for g in restored:
+        clear_trash_state(g, now=now)
+    await db.commit()
+    if restored:
+        await invalidate_sources_cache()
+    return len(restored)
 
 
 def _delete_library_dirs_sync(galleries: list) -> int:

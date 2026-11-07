@@ -121,6 +121,13 @@ class Gallery(Base):
     # mtime of source_path at the last clean link sync; NULL forces a full diff.
     source_dir_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    merged_into_gallery_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True
+    )
     metadata_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Maintained by a PG trigger that sets it to now() whenever ``pages`` increases.
     # No server_onupdate: expiring it on every UPDATE makes serializers lazy-load

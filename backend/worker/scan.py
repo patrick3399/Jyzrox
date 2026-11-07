@@ -32,7 +32,7 @@ from services.cas import (
     thumbnails_complete_at,
 )
 from services.gallery_categories import resolve_category
-from services.gallery_lifecycle import invalidate_sources_cache
+from services.gallery_lifecycle import invalidate_sources_cache, mark_trashed
 from services.link_sync import library_root_available, sync_link_gallery
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_MEDIA_EXTS
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
@@ -163,7 +163,7 @@ def _hold_vanished_link_gallery(gallery: Gallery) -> str | None:
         noticed_at = noticed_at.replace(tzinfo=UTC)
     if now - noticed_at < VANISHED_LINK_GALLERY_GRACE:
         return None
-    gallery.deleted_at = now
+    mark_trashed([gallery], reason="source_missing", actor_user_id=None, now=now)
     logger.warning(
         "[link_source] gallery_id=%d: source %s stayed gone; moved to trash", gallery.id, gallery.source_path
     )

@@ -61,7 +61,7 @@ from services.explorer_query import (
     build_explorer_gallery_query,
     normalize_explorer_query,
 )
-from services.gallery_lifecycle import invalidate_sources_cache
+from services.gallery_lifecycle import invalidate_sources_cache, mark_trashed
 from services.image_purge import purge_hidden_images
 from services.media_formats import media_type_for_extension
 from services.workbench_metadata import (
@@ -838,8 +838,7 @@ async def bulk_delete_galleries(
         finished_at=now,
     )
     db.add(operation)
-    for gallery in affected:
-        gallery.deleted_at = now
+    mark_trashed(affected, reason="user", actor_user_id=auth["user_id"], now=now)
     await db.commit()
     await emit_safe(
         EventType.GALLERY_BATCH_UPDATED,

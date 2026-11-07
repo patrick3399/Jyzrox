@@ -11,6 +11,8 @@ import type {
   ArtistDetail,
   ArtistImageItem,
   LibraryFacets,
+  TrashGallery,
+  TrashPreview,
 } from '../types'
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -296,8 +298,38 @@ export const library = {
     ),
 
   trashList: (params: { limit?: number; offset?: number } = {}, init?: RequestInit) =>
-    apiFetch<{ total: number; galleries: Gallery[] }>(
+    apiFetch<{ total: number; galleries: TrashGallery[] }>(
       `/api/library/trash${qs(params as Record<string, unknown>)}`,
+      init,
+    ),
+
+  trashRestore: (
+    body: { gallery_ids: number[] } | { all: true },
+    init?: RequestInit,
+  ) =>
+    apiFetch<{ status: string; affected: number }>('/api/library/trash/restore', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...init,
+    }),
+
+  trashPurge: (galleryIds: number[], init?: RequestInit) =>
+    apiFetch<{ status: string; affected: number; deleted_dirs: number }>(
+      '/api/library/trash/purge',
+      {
+        method: 'POST',
+        body: JSON.stringify({ gallery_ids: galleryIds }),
+        ...init,
+      },
+    ),
+
+  trashPreview: (
+    galleryId: number,
+    params: { page?: number; limit?: number } = {},
+    init?: RequestInit,
+  ) =>
+    apiFetch<TrashPreview>(
+      `/api/library/trash/${galleryId}/preview${qs(params as Record<string, unknown>)}`,
       init,
     ),
 
