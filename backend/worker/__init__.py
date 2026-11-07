@@ -15,6 +15,7 @@ from pathlib import Path
 from saq import CronJob
 
 from core.config import get_monitored_library_paths, settings
+from core.logging_setup import configure_logging
 from core.redis_client import close_redis
 from core.scheduled_task_catalog import CATALOG
 from core.watcher import LibraryWatcher
@@ -54,7 +55,6 @@ from worker.liveness import (
     record_memory_sample,
     start_run_marker,
 )
-from worker.log_redaction import install_log_redaction
 from worker.memory import after_process_hook
 from worker.novel_index import novel_index_job
 from worker.novel_sync import novel_sync_job
@@ -83,11 +83,7 @@ from worker.thumbhash_backfill import thumbhash_backfill_job
 from worker.thumbnail import cover_thumbnail_job, thumbnail_job
 from worker.trash import trash_gc_job, trash_purge_job
 
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-install_log_redaction()
+configure_logging()
 logger = logging.getLogger("worker")
 
 

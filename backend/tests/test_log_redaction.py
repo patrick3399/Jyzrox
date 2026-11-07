@@ -15,7 +15,7 @@ SECRET = "s3cr3t-r3dis-pw"
 
 
 def _logger_with_redaction(name: str) -> tuple[logging.Logger, io.StringIO]:
-    from worker.log_redaction import install_log_redaction
+    from core.log_redaction import install_log_redaction
 
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
@@ -30,7 +30,7 @@ def _logger_with_redaction(name: str) -> tuple[logging.Logger, io.StringIO]:
 
 class TestRedactSecrets:
     def test_redis_connection_repr_password_is_masked(self):
-        from worker.log_redaction import redact_secrets
+        from core.log_redaction import redact_secrets
 
         text = f"Connection(password={SECRET},host=redis,port=6379)"
 
@@ -40,7 +40,7 @@ class TestRedactSecrets:
         assert "host=redis,port=6379" in out, "only the secret may be removed, not the diagnostic context"
 
     def test_password_in_redis_url_is_masked(self):
-        from worker.log_redaction import redact_secrets
+        from core.log_redaction import redact_secrets
 
         out = redact_secrets(f"connecting to redis://:{SECRET}@redis:6379/0")
 
@@ -48,7 +48,7 @@ class TestRedactSecrets:
         assert "@redis:6379/0" in out
 
     def test_password_in_url_with_username_is_masked(self):
-        from worker.log_redaction import redact_secrets
+        from core.log_redaction import redact_secrets
 
         out = redact_secrets(f"postgresql://vault:{SECRET}@postgres:5432/vault")
 
@@ -56,7 +56,7 @@ class TestRedactSecrets:
         assert "vault" in out and "@postgres:5432/vault" in out
 
     def test_text_without_secrets_is_returned_unchanged(self):
-        from worker.log_redaction import redact_secrets
+        from core.log_redaction import redact_secrets
 
         text = "[progressive] imported: 2092948190224101502_1.jpg (page 770)"
 
@@ -105,7 +105,7 @@ class TestRedactingFilterOnRealLogging:
 
     def test_child_logger_records_are_masked_by_a_handler_level_filter(self):
         """A filter on a *logger* skips child loggers' records; it must sit on the handler."""
-        from worker.log_redaction import install_log_redaction
+        from core.log_redaction import install_log_redaction
 
         stream = io.StringIO()
         handler = logging.StreamHandler(stream)

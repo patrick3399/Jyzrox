@@ -15,6 +15,7 @@ from core.auth import require_auth
 from core.config import settings
 from core.csrf import CSRFMiddleware
 from core.database import engine
+from core.logging_setup import configure_logging
 from core.queue import close_queue, get_all_queues, init_queue
 from core.rate_limit import RateLimitMiddleware
 from core.redis_client import close_redis, get_redis, init_redis
@@ -72,10 +73,7 @@ from routers import (
 )
 from services.pixiv_client import PixivRateLimitError
 
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -99,7 +97,7 @@ async def lifespan(app: FastAPI):
     await init_redis()
     from core.log_handler import apply_log_level_from_redis, install_log_handler
 
-    install_log_handler("api", extra_loggers=["uvicorn", "uvicorn.access"])
+    install_log_handler("api", extra_loggers=["uvicorn"])
     level = await apply_log_level_from_redis("api")
     logger.info("Log handler installed, level=%s", level)
     await init_queue()
@@ -295,12 +293,3 @@ async def ready():
         status_code=status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE,
         content=payload,
     )
-
-
-class _HealthCheckFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        return '"GET /api/health' not in msg and '"GET /api/ready' not in msg
-
-
-logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())
