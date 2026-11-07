@@ -4,8 +4,8 @@ Covers:
 - trash_gc_job: uses configured retention_days from settings_store
 - trash_gc_job: defaults to 30 days when no setting exists
 - trash_gc_job: returns deleted=0 when no galleries are expired
-- trash_gc_job: calls hard_delete_galleries for expired galleries
-- trash_gc_job: exception in hard_delete_galleries propagates
+- trash_gc_job: calls hard_delete_in_chunks for expired galleries
+- hard_delete_in_chunks: a failing chunk is counted, not raised
 """
 
 import os
@@ -32,6 +32,7 @@ def _make_mock_session(galleries: list | None = None):
 
     scalars_mock = MagicMock()
     scalars_mock.all.return_value = galleries
+    scalars_mock.__iter__.side_effect = lambda: iter(galleries)
     execute_result = MagicMock()
     execute_result.scalars.return_value = scalars_mock
     session.execute = AsyncMock(return_value=execute_result)
@@ -104,7 +105,7 @@ class TestTrashGcJob:
             patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
-                "worker.trash.hard_delete_galleries",
+                "worker.trash.hard_delete_in_chunks",
                 new_callable=AsyncMock,
             ) as mock_delete,
         ):
@@ -115,7 +116,7 @@ class TestTrashGcJob:
         mock_delete.assert_not_awaited()
 
     async def test_expired_galleries_are_hard_deleted(self):
-        """When expired galleries exist, hard_delete_galleries is called with them."""
+        """When expired galleries exist, hard_delete_in_chunks is called with their ids."""
         from worker.trash import trash_gc_job
 
         galleries = [_make_gallery(1), _make_gallery(2)]
@@ -128,39 +129,42 @@ class TestTrashGcJob:
             patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
-                "worker.trash.hard_delete_galleries",
+                "worker.trash.hard_delete_in_chunks",
                 new_callable=AsyncMock,
                 return_value=delete_result,
             ) as mock_delete,
         ):
             result = await trash_gc_job({})
 
-        mock_delete.assert_awaited_once_with(session, galleries)
+        mock_delete.assert_awaited_once()
+        assert mock_delete.await_args.args[1] == galleries
         assert result["status"] == "ok"
         assert result["affected"] == 2
 
-    async def test_hard_delete_exception_propagates(self):
-        """If hard_delete_galleries raises, the exception propagates out of trash_gc_job."""
-        import pytest
+    async def test_gc_chunk_failure_is_counted_not_raised(self):
+        """A chunk whose hard delete raises is logged and counted (failed_chunks), not propagated."""
+        from unittest.mock import AsyncMock as AM
 
-        from worker.trash import trash_gc_job
+        from services.gallery_lifecycle import hard_delete_in_chunks
 
-        galleries = [_make_gallery(1)]
-        session = _make_mock_session(galleries=galleries)
+        def factory():
+            s = AM()
+            s.__aenter__ = AM(return_value=s)
+            s.__aexit__ = AM(return_value=False)
+            r = MagicMock()
+            r.scalars.return_value.all.return_value = [_make_gallery(1)]
+            s.execute = AM(return_value=r)
+            return s
 
-        with (
-            patch("worker.trash.get_int_setting", new_callable=AsyncMock, return_value=30),
-            patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
-            patch("core.events.emit_safe", new_callable=AsyncMock),
-            patch(
-                "worker.trash.hard_delete_galleries",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("DB connection lost"),
-            ),
+        with patch(
+            "services.gallery_lifecycle.hard_delete_galleries",
+            new_callable=AM,
+            side_effect=RuntimeError("DB connection lost"),
         ):
-            with pytest.raises(RuntimeError, match="DB connection lost"):
-                await trash_gc_job({})
+            result = await hard_delete_in_chunks(factory, [1, 2, 3], chunk_size=2)
+
+        assert result["failed_chunks"] == 2
+        assert result["affected"] == 0
 
 
 # ---------------------------------------------------------------------------

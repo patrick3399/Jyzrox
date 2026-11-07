@@ -81,7 +81,7 @@ from worker.subscription_group import (
 )
 from worker.thumbhash_backfill import thumbhash_backfill_job
 from worker.thumbnail import cover_thumbnail_job, thumbnail_job
-from worker.trash import trash_gc_job
+from worker.trash import trash_gc_job, trash_purge_job
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -1235,6 +1235,7 @@ def _build_cron_jobs() -> list[CronJob]:
         "subscription_scheduler": subscription_scheduler,
         "rate_limit_schedule_job": rate_limit_schedule_job,
         "trash_gc_job": trash_gc_job,
+        "trash_purge_job": trash_purge_job,
         "log_cleanup_job": log_cleanup_job,
         "disk_monitor_job": disk_monitor_job,
         "memory_monitor_job": memory_monitor_job,
@@ -1314,6 +1315,7 @@ def build_workers() -> tuple:
             rate_limit_schedule_job,
             retry_failed_downloads_job,
             trash_gc_job,
+            trash_purge_job,
             ehtag_sync_job,
             log_cleanup_job,
             database_backup_job,
@@ -1407,6 +1409,7 @@ __all__ = [
     "thumbhash_backfill_job",
     "retry_failed_downloads_job",
     "trash_gc_job",
+    "trash_purge_job",
     "ehtag_sync_job",
     "log_cleanup_job",
     "database_backup_job",

@@ -4051,29 +4051,40 @@ class TestTrashEndpoints:
         resp = await unauthed_client.post("/api/library/galleries/local/any/permanent-delete")
         assert resp.status_code == 401
 
-    async def test_empty_trash_with_galleries_removes_all(self, client, db_session):
-        """Empty trash should remove all soft-deleted galleries."""
+    async def test_empty_trash_with_galleries_queues_purge_job(self, client, db_session, mock_redis):
+        """Empty trash snapshots all trashed ids and enqueues the purge job (202), deleting nothing inline."""
+        from unittest.mock import AsyncMock, patch
+
+        ids = []
         for i in range(3):
-            await self._soft_delete_gallery(db_session, "local", f"trash_empty_{i:02d}", title=f"Trash {i}")
+            ids.append(await self._soft_delete_gallery(db_session, "local", f"trash_empty_{i:02d}", title=f"Trash {i}"))
 
         resp = await client.get("/api/library/trash/count")
         assert resp.json()["count"] == 3
 
-        resp = await client.post("/api/library/trash/empty")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "ok"
-        assert data["affected"] == 3
+        enqueue = AsyncMock()
+        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+            resp = await client.post("/api/library/trash/empty")
+        assert resp.status_code == 202
+        assert resp.json() == {"status": "queued", "total": 3}
+        enqueue.assert_awaited_once()
+        assert enqueue.await_args.args[0] == "trash_purge_job"
+        assert sorted(enqueue.await_args.kwargs["gallery_ids"]) == sorted(ids)
 
-        # Trash should now be empty
+        # Rows are untouched until the worker runs
         resp = await client.get("/api/library/trash/count")
-        assert resp.json()["count"] == 0
+        assert resp.json()["count"] == 3
 
-    async def test_empty_trash_when_already_empty_returns_zero_affected(self, client):
-        """Empty trash when no galleries are in trash should return affected=0."""
-        resp = await client.post("/api/library/trash/empty")
+    async def test_empty_trash_when_already_empty_returns_zero_total(self, client, mock_redis):
+        """Empty trash when no galleries are in trash returns 200 total=0 without enqueueing."""
+        from unittest.mock import AsyncMock, patch
+
+        enqueue = AsyncMock()
+        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+            resp = await client.post("/api/library/trash/empty")
         assert resp.status_code == 200
-        assert resp.json()["affected"] == 0
+        assert resp.json() == {"status": "ok", "total": 0}
+        enqueue.assert_not_awaited()
 
     async def test_empty_trash_requires_auth(self, unauthed_client):
         """Unauthenticated empty-trash should return 401."""

@@ -18,6 +18,7 @@ from db.models import (
     UserFavorite,
     UserReadingList,
 )
+from services.gallery_lifecycle import trash_scope
 
 UNCATEGORIZED = "__uncategorized__"
 
@@ -88,9 +89,7 @@ async def normalize_explorer_query(
 def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
     """Build an access-filtered Gallery select from a Workbench predicate spec."""
     if spec.node_kind == "trash":
-        filters = [Gallery.deleted_at.is_not(None)]
-        if auth["role"] != "admin":
-            filters.append(or_(Gallery.created_by_user_id == auth["user_id"], Gallery.created_by_user_id.is_(None)))
+        filters = [trash_scope(auth)]
     else:
         filters = [gallery_access_filter(auth)]
 
@@ -192,6 +191,7 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
 
     sort_columns = {
         "added_at": Gallery.added_at,
+        "deleted_at": Gallery.deleted_at,
         "content_updated_at": Gallery.content_updated_at,
         "posted_at": Gallery.posted_at,
         "title": Gallery.title,

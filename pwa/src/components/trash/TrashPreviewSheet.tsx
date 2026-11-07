@@ -21,6 +21,8 @@ interface TrashPreviewSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   busy?: boolean
+  /** Disables permanent delete only (e.g. while a background purge runs). */
+  deleteDisabled?: boolean
   onRestore: (gallery: TrashGallery) => void
   onDelete: (gallery: TrashGallery) => void
 }
@@ -149,6 +151,7 @@ export function TrashPreviewSheet({
   open,
   onOpenChange,
   busy = false,
+  deleteDisabled = false,
   onRestore,
   onDelete,
 }: TrashPreviewSheetProps) {
@@ -177,7 +180,7 @@ export function TrashPreviewSheet({
               variant="danger"
               size="sm"
               data-testid="trash-preview-delete"
-              disabled={busy}
+              disabled={busy || deleteDisabled}
               onClick={() => onDelete(gallery)}
             >
               <Trash2 size={14} />

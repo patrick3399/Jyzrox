@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Trash2, RotateCcw, AlertTriangle, CheckSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import useSWR, { useSWRConfig } from 'swr'
@@ -12,7 +13,13 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { AppImage } from '@/components/AppImage'
 import { Pagination } from '@/components/Pagination'
-import type { TrashGallery } from '@/lib/types'
+import type {
+  TrashFilters,
+  TrashGallery,
+  TrashReasonFilter,
+  TrashSort,
+  TrashSortDirection,
+} from '@/lib/types'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +27,12 @@ import { Button } from '@/components/ui/button'
 import { AlertDialog } from '@/components/ui/alert-dialog'
 import { useOpenedOnce } from '@/hooks/useOpenedOnce'
 import { REASON_TONE, reasonLabel } from '@/components/trash/trashReason'
+import {
+  TrashFilterBar,
+  TRASH_REASON_FILTERS,
+  TRASH_SORTS,
+} from '@/components/trash/TrashFilterBar'
+import { TrashSummaryBar } from '@/components/trash/TrashSummaryBar'
 
 const TrashPreviewSheet = dynamic(
   () => import('@/components/trash/TrashPreviewSheet').then((m) => m.TrashPreviewSheet),
@@ -28,6 +41,13 @@ const TrashPreviewSheet = dynamic(
 
 const PAGE_SIZE = 50
 const DANGER_DAYS = 3
+const PURGE_POLL_MS = 2000
+const DEFAULT_SORT: TrashSort = 'deleted_at'
+const DEFAULT_DIR: TrashSortDirection = 'desc'
+
+function isConflict(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { status?: unknown }).status === 409
+}
 
 function daysRemaining(deletedAt: string, retentionDays: number = 30): number {
   const deleted = new Date(deletedAt)
@@ -57,20 +77,81 @@ type Confirm =
 export default function TrashPage() {
   useLocale()
   const { mutate: mutateGlobal } = useSWRConfig()
-  const [page, setPage] = useState(0)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Filters, sort and page live in the URL (`page` is 1-based, omitted for the first page).
+  const q = searchParams.get('q') ?? ''
+  const source = searchParams.get('source') ?? ''
+  const reasonParam = searchParams.get('reason')
+  const reason: TrashReasonFilter | '' = TRASH_REASON_FILTERS.includes(reasonParam as TrashReasonFilter)
+    ? (reasonParam as TrashReasonFilter)
+    : ''
+  const sortParam = searchParams.get('sort')
+  const sort: TrashSort = TRASH_SORTS.includes(sortParam as TrashSort)
+    ? (sortParam as TrashSort)
+    : DEFAULT_SORT
+  const dir: TrashSortDirection = searchParams.get('dir') === 'asc' ? 'asc' : DEFAULT_DIR
+  const pageParam = Number.parseInt(searchParams.get('page') ?? '1', 10)
+  const page = Number.isFinite(pageParam) && pageParam > 1 ? pageParam - 1 : 0
+
+  const filters: TrashFilters = {
+    ...(q && { q }),
+    ...(source && { source }),
+    ...(reason && { reason }),
+  }
+  const filtersActive = q !== '' || source !== '' || reason !== ''
+  const summaryKey = JSON.stringify([q, source, reason])
+  const listKey = JSON.stringify([q, source, reason, sort, dir])
+
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
+
+  const updateUrl = (patch: Record<string, string | null>, opts: { resetPage?: boolean } = {}) => {
+    const params = new URLSearchParams(searchParams.toString())
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) params.set(k, v)
+      else params.delete(k)
+    }
+    if (opts.resetPage) {
+      params.delete('page')
+      setSelected(new Set())
+    }
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }
+  const setFilter = (patch: Record<string, string | null>) => updateUrl(patch, { resetPage: true })
+  const setPage = (p: number) => updateUrl({ page: p > 0 ? String(p + 1) : null })
+  const clearFilters = () => setFilter({ q: null, source: null, reason: null })
+
   const { data, isLoading, mutate } = useSWR(
-    ['trash-list', page],
-    ([, p]: readonly [string, number]) =>
-      api.library.trashList({ limit: PAGE_SIZE, offset: p * PAGE_SIZE }),
+    ['trash-list', listKey, page],
+    ([, , p]: readonly [string, string, number]) =>
+      api.library.trashList({
+        limit: PAGE_SIZE,
+        offset: p * PAGE_SIZE,
+        ...filters,
+        ...(sort !== DEFAULT_SORT && { sort }),
+        ...(dir !== DEFAULT_DIR && { direction: dir }),
+      }),
     { keepPreviousData: true },
   )
+  const { data: summary, mutate: mutateSummary } = useSWR(
+    ['trash-summary', summaryKey],
+    () => api.library.trashSummary(filters),
+    {
+      keepPreviousData: true,
+      // Poll only while a background purge is running; WS events cover the rest.
+      refreshInterval: (latest) => (latest?.purge ? PURGE_POLL_MS : 0),
+    },
+  )
+  const purging = summary?.purge != null
   const { data: featuresData } = useSWR('settings/features', () => api.settings.getFeatures())
   const trashEnabled = featuresData?.trash_enabled ?? true
   const retentionDays = featuresData?.trash_retention_days ?? 30
 
   const [busy, setBusy] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
-  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [previewGallery, setPreviewGallery] = useState<TrashGallery | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -99,12 +180,18 @@ export default function TrashPage() {
       setSelected(new Set())
       const fresh = await mutate()
       void mutateGlobal('nav-counts/trash')
+      void mutateSummary()
       if (fresh && fresh.galleries.length === 0 && page > 0) {
         setPage(Math.max(0, Math.min(page - 1, Math.ceil(fresh.total / PAGE_SIZE) - 1)))
       }
       return true
-    } catch {
-      toast.error(t('trash.actionFailed'))
+    } catch (err) {
+      if (isConflict(err)) {
+        toast.error(t('trash.purgeAlreadyRunning'))
+        void mutateSummary()
+      } else {
+        toast.error(t('trash.actionFailed'))
+      }
       return false
     } finally {
       setBusy(false)
@@ -132,19 +219,21 @@ export default function TrashPage() {
     let ok = false
     if (c.kind === 'restoreAll') {
       ok = await run(async () => {
-        const res = await api.library.trashRestore({ all: true })
+        const res = await api.library.trashRestore({ all: true, ...filters })
         return t('trash.restoredCount', { count: String(res.affected) })
       })
     } else if (c.kind === 'empty') {
       ok = await run(async () => {
-        await api.library.emptyTrash()
-        return t('trash.permanentlyDeleted')
+        const res = await api.library.emptyTrash(filters)
+        return res?.status === 'queued' ? t('trash.purgeQueued') : t('trash.permanentlyDeleted')
       })
     } else if (c.kind === 'deleteSelected') {
       const ids = Array.from(selected)
       ok = await run(async () => {
         const res = await api.library.trashPurge(ids)
-        return t('trash.deletedCount', { count: String(res.affected) })
+        return res.status === 'queued'
+          ? t('trash.purgeQueued')
+          : t('trash.deletedCount', { count: String(res.total ?? 0) })
       })
     } else {
       const g = c.gallery
@@ -181,9 +270,9 @@ export default function TrashPage() {
     confirm?.kind === 'deleteSelected' ? selected.size : confirm?.kind === 'deleteOne' ? 1 : total
   const confirmText =
     confirm?.kind === 'restoreAll'
-      ? { title: t('trash.restoreAll'), body: t('trash.restoreAllConfirm', { count: String(confirmCount) }), label: t('trash.restoreAll'), destructive: false }
+      ? { title: t('trash.restoreAll'), body: t(filtersActive ? 'trash.restoreFilteredConfirm' : 'trash.restoreAllConfirm', { count: String(confirmCount) }), label: t('trash.restoreAll'), destructive: false }
       : confirm?.kind === 'empty'
-        ? { title: t('trash.emptyTrash'), body: t('trash.emptyTrashConfirmCount', { count: String(confirmCount) }), label: t('trash.emptyTrash'), destructive: true }
+        ? { title: t('trash.emptyTrash'), body: t(filtersActive ? 'trash.emptyFilteredConfirm' : 'trash.emptyTrashConfirmCount', { count: String(confirmCount) }), label: t('trash.emptyTrash'), destructive: true }
         : confirm?.kind === 'deleteSelected'
           ? { title: t('trash.deleteSelected'), body: t('trash.deleteSelectedConfirm', { count: String(confirmCount) }), label: t('trash.permanentDelete'), destructive: true }
           : { title: t('trash.permanentDelete'), body: t('trash.permanentDeleteConfirm'), label: t('trash.permanentDelete'), destructive: true }
@@ -212,7 +301,7 @@ export default function TrashPage() {
                 variant="primary"
                 size="sm"
                 onClick={() => setConfirm({ kind: 'restoreAll' })}
-                disabled={busy}
+                disabled={busy || purging}
                 className="text-xs"
                 data-testid="trash-restore-all"
               >
@@ -223,7 +312,7 @@ export default function TrashPage() {
                 variant="danger"
                 size="sm"
                 onClick={() => setConfirm({ kind: 'empty' })}
-                disabled={busy}
+                disabled={busy || purging}
                 className="text-xs"
                 data-testid="trash-empty"
               >
@@ -234,6 +323,25 @@ export default function TrashPage() {
           )
         }
       />
+
+      {trashEnabled && (
+        <div className="space-y-2">
+          <TrashFilterBar
+            q={q}
+            source={source}
+            reason={reason}
+            sort={sort}
+            dir={dir}
+            sources={summary?.sources ?? []}
+            onSearchChange={(v) => setFilter({ q: v || null })}
+            onSourceChange={(v) => setFilter({ source: v || null })}
+            onReasonChange={(v) => setFilter({ reason: v || null })}
+            onSortChange={(v) => setFilter({ sort: v === DEFAULT_SORT ? null : v })}
+            onDirChange={(v) => setFilter({ dir: v === DEFAULT_DIR ? null : v })}
+          />
+          {summary && <TrashSummaryBar summary={summary} />}
+        </div>
+      )}
 
       {isLoading && (
         <div className="flex justify-center py-12">
@@ -249,7 +357,21 @@ export default function TrashPage() {
         />
       )}
 
-      {!isLoading && trashEnabled && galleries.length === 0 && (
+      {!isLoading && trashEnabled && galleries.length === 0 && filtersActive && (
+        <div className="flex flex-col items-center">
+          <EmptyState icon={Trash2} title={t('trash.noMatches')} />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={clearFilters}
+            data-testid="trash-clear-filters"
+          >
+            {t('trash.clearFilters')}
+          </Button>
+        </div>
+      )}
+
+      {!isLoading && trashEnabled && galleries.length === 0 && !filtersActive && (
         <EmptyState icon={Trash2} title={t('trash.empty')} />
       )}
 
@@ -284,7 +406,7 @@ export default function TrashPage() {
                 <Button
                   variant="danger"
                   size="sm"
-                  disabled={busy || selected.size === 0}
+                  disabled={busy || purging || selected.size === 0}
                   onClick={() => setConfirm({ kind: 'deleteSelected' })}
                   className="text-xs"
                   data-testid="trash-delete-selected"
@@ -366,7 +488,7 @@ export default function TrashPage() {
                     variant="danger"
                     size="sm"
                     onClick={() => setConfirm({ kind: 'deleteOne', gallery: g })}
-                    disabled={busy}
+                    disabled={busy || purging}
                     className="gap-1 text-xs"
                   >
                     <Trash2 size={12} />
@@ -389,6 +511,7 @@ export default function TrashPage() {
           open={previewOpen}
           onOpenChange={setPreviewOpen}
           busy={busy}
+          deleteDisabled={purging}
           onRestore={restoreOne}
           onDelete={(g) => setConfirm({ kind: 'deleteOne', gallery: g })}
         />

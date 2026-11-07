@@ -3,11 +3,37 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TrashGallery } from '@/lib/types'
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-  usePathname: () => '/trash',
-}))
+// Stateful URL: replace() updates the query string and re-renders subscribers.
+const nav = vi.hoisted(() => {
+  const state = { search: '', listeners: new Set<() => void>() }
+  return {
+    state,
+    replace: (url: string) => {
+      state.search = url.includes('?') ? url.slice(url.indexOf('?') + 1) : ''
+      state.listeners.forEach((l) => l())
+    },
+  }
+})
+
+vi.mock('next/navigation', async () => {
+  const React = await import('react')
+  const router = { push: vi.fn(), replace: vi.fn(nav.replace), back: vi.fn() }
+  return {
+    useRouter: () => router,
+    useSearchParams: () => {
+      const search = React.useSyncExternalStore(
+        (cb) => {
+          nav.state.listeners.add(cb)
+          return () => nav.state.listeners.delete(cb)
+        },
+        () => nav.state.search,
+        () => nav.state.search,
+      )
+      return React.useMemo(() => new URLSearchParams(search), [search])
+    },
+    usePathname: () => '/trash',
+  }
+})
 
 vi.mock('@/components/LocaleProvider', () => ({
   useLocale: () => ({ locale: 'en' }),
@@ -18,6 +44,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 const api = vi.hoisted(() => ({
   library: {
     trashList: vi.fn(),
+    trashSummary: vi.fn(),
     trashRestore: vi.fn(),
     trashPurge: vi.fn(),
     trashPreview: vi.fn(),
@@ -58,6 +85,15 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  nav.state.search = ''
+  api.library.trashSummary.mockResolvedValue({
+    count: 2,
+    logical_bytes: 2048,
+    reclaimable_bytes: 1024,
+    next_expiry_at: null,
+    sources: ['local'],
+    purge: null,
+  })
   api.settings.getFeatures.mockResolvedValue({ trash_enabled: true, trash_retention_days: 30 })
   api.library.trashList.mockResolvedValue({
     total: 2,
@@ -85,6 +121,8 @@ describe('Trash page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Page 2' }))
 
+    // The page lives in the URL (1-based), then drives the offset
+    expect(nav.state.search).toBe('page=2')
     await screen.findByTestId('trash-row-51')
     expect(api.library.trashList).toHaveBeenCalledWith({ limit: 50, offset: 50 })
   })

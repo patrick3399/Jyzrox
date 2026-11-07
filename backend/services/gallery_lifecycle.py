@@ -11,11 +11,12 @@ Accepted risk — reconciliation can clean these up.
 import asyncio
 import logging
 import shutil
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +31,24 @@ _SOURCES_CACHE_KEY = "library:sources"
 _ACTIVE_JOB_STATUSES = ("queued", "running", "paused")
 
 TrashReason = Literal["user", "merged", "source_missing"]
+
+PURGE_CHUNK_SIZE = 50
+
+
+def trash_scope(auth: dict) -> ColumnElement[bool]:
+    """WHERE clause for trash visibility: soft-deleted galleries the caller may see.
+
+    Single rule shared by the library router, Explorer and the purge worker.
+    """
+    filters: list[ColumnElement[bool]] = [Gallery.deleted_at.is_not(None)]
+    if auth.get("role") != "admin":
+        filters.append(
+            or_(
+                Gallery.created_by_user_id == auth["user_id"],
+                Gallery.created_by_user_id.is_(None),
+            )
+        )
+    return and_(*filters)
 
 
 async def invalidate_sources_cache() -> None:
@@ -125,6 +144,56 @@ async def hard_delete_galleries(db: AsyncSession, galleries: list[Gallery]) -> d
         deleted_count = 0
 
     return {"affected": len(galleries), "deleted_dirs": deleted_count}
+
+
+async def hard_delete_in_chunks(
+    session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    gallery_ids: Sequence[int],
+    *,
+    scope: ColumnElement[bool] | None = None,
+    chunk_size: int = PURGE_CHUNK_SIZE,
+    on_chunk: Callable[[int, int], Awaitable[None]] | None = None,
+) -> dict:
+    """Hard-delete still-trashed galleries chunk by chunk, one transaction per chunk.
+
+    Each chunk re-selects ``id IN chunk AND deleted_at IS NOT NULL`` (plus ``scope``)
+    so galleries restored meanwhile are skipped. A chunk that fails is rolled back,
+    logged and skipped. ``on_chunk(done, total)`` runs after every chunk.
+    Returns ``{"affected": int, "deleted_dirs": int, "failed_chunks": int}``.
+    """
+    ids = list(dict.fromkeys(gallery_ids))
+    total = len(ids)
+    size = max(1, chunk_size)
+    affected = 0
+    deleted_dirs = 0
+    failed_chunks = 0
+
+    for start in range(0, total, size):
+        chunk = ids[start : start + size]
+        conditions = [Gallery.id.in_(chunk), Gallery.deleted_at.is_not(None)]
+        if scope is not None:
+            conditions.append(scope)
+        async with session_factory() as session:
+            try:
+                galleries = list((await session.execute(select(Gallery).where(*conditions))).scalars().all())
+                if galleries:
+                    result = await hard_delete_galleries(session, galleries)
+                    affected += result.get("affected", 0)
+                    deleted_dirs += result.get("deleted_dirs", 0)
+            except Exception:
+                failed_chunks += 1
+                logger.error("[hard_delete_in_chunks] chunk at offset %d failed", start, exc_info=True)
+                try:
+                    await session.rollback()
+                except Exception:
+                    logger.warning("[hard_delete_in_chunks] rollback failed", exc_info=True)
+        if on_chunk is not None:
+            try:
+                await on_chunk(min(start + size, total), total)
+            except Exception:
+                logger.warning("[hard_delete_in_chunks] on_chunk callback failed", exc_info=True)
+
+    return {"affected": affected, "deleted_dirs": deleted_dirs, "failed_chunks": failed_chunks}
 
 
 async def settle_stale_downloading_galleries(db: AsyncSession, gallery_ids: list[int]) -> int:

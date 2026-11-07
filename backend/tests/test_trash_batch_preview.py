@@ -231,16 +231,38 @@ async def test_batch_purge_rejects_more_than_500_ids(client):
     assert resp.status_code == 422
 
 
-async def test_batch_purge_hard_deletes_only_trashed_scoped_rows(make_client, db_session):
+async def test_batch_purge_enqueues_only_trashed_scoped_ids(make_client, db_session, mock_redis):
     await _ensure_users(db_session)
     mine = await _gallery(db_session, "pg_mine", owner=MEMBER_ID)
     theirs = await _gallery(db_session, "pg_theirs", owner=OTHER_ID)
     live = await _gallery(db_session, "pg_live", owner=MEMBER_ID, trashed=False)
-    with patch("services.gallery_lifecycle.get_redis", return_value=AsyncMock()):
-        async with make_client(user_id=MEMBER_ID, role="member") as ac:
+    enqueue = AsyncMock()
+    async with make_client(user_id=MEMBER_ID, role="member") as ac:
+        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
             resp = await ac.post("/api/library/trash/purge", json={"gallery_ids": [mine, theirs, live]})
-    assert resp.status_code == 200
-    assert resp.json()["affected"] == 1
+    assert resp.status_code == 202
+    assert resp.json() == {"status": "queued", "total": 1}
+    assert enqueue.await_args.kwargs["gallery_ids"] == [mine]
+    assert enqueue.await_args.kwargs["user_id"] == MEMBER_ID
+    # nothing deleted in the request
+    assert await _row(db_session, mine) is not None
+
+
+async def test_purge_job_hard_deletes_only_trashed_in_scope_rows(db_session, db_session_factory, mock_redis):
+    from worker.trash import trash_purge_job
+
+    await _ensure_users(db_session)
+    mine = await _gallery(db_session, "pj_mine", owner=MEMBER_ID)
+    theirs = await _gallery(db_session, "pj_theirs", owner=OTHER_ID)
+    live = await _gallery(db_session, "pj_live", owner=MEMBER_ID, trashed=False)
+    with (
+        patch("worker.trash.AsyncSessionLocal", db_session_factory),
+        patch("worker.trash.get_redis", return_value=mock_redis),
+        patch("worker.trash.emit_safe", new_callable=AsyncMock),
+        patch("services.gallery_lifecycle.get_redis", return_value=mock_redis),
+    ):
+        result = await trash_purge_job({}, user_id=MEMBER_ID, role="member", gallery_ids=[mine, theirs, live])
+    assert result["affected"] == 1
     assert await _row(db_session, mine) is None
     assert await _row(db_session, theirs) is not None
     live_row = await _row(db_session, live)

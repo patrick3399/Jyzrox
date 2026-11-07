@@ -14,7 +14,9 @@ from typing import cast as typing_cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, model_validator
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from redis.exceptions import RedisError
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, exists, func, not_, or_, select, tuple_
 from sqlalchemy import case as sql_case
 from sqlalchemy import delete as sa_delete
@@ -22,12 +24,12 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.sql import column as sql_column
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
-from sqlalchemy.sql.elements import ColumnElement
 
+import core.queue
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import get_db
 from core.gallery_helpers import (
@@ -68,6 +70,7 @@ from services.cas import (
 )
 from services.cas import thumb_srcset as cas_thumb_srcset
 from services.cas import thumb_url as cas_thumb_url
+from services.explorer_query import ExplorerQuerySpec, build_explorer_gallery_query
 from services.gallery_lifecycle import (
     hard_delete_galleries as _hard_delete_galleries,
 )
@@ -77,10 +80,12 @@ from services.gallery_lifecycle import (
 from services.gallery_lifecycle import (
     mark_trashed,
     restore_galleries,
+    trash_scope,
 )
 from services.library_sidecar import SIDECAR_FILENAME
 from services.link_sync import LinkSyncResult, sync_link_gallery
 from services.media_formats import media_type_for_extension
+from services.settings_store import get_int_setting as _get_int_setting
 from services.settings_store import get_toggle as _get_toggle
 from services.site_catalog import get_site_config as _get_gdl_site_config
 
@@ -106,15 +111,7 @@ def _artist_display_name(artist_id: str | None, uploader: str | None) -> str:
 
 def _trash_filter(auth: dict):
     """Return WHERE clause for trash visibility: soft-deleted galleries the user can see."""
-    filters: list[ColumnElement[bool]] = [Gallery.deleted_at.is_not(None)]
-    if auth.get("role") != "admin":
-        filters.append(
-            or_(
-                Gallery.created_by_user_id == auth["user_id"],
-                Gallery.created_by_user_id.is_(None),
-            )
-        )
-    return and_(*filters)
+    return trash_scope(auth)
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -1561,28 +1558,50 @@ def _trash_item(g: Gallery, cover_thumb: str | None, users: dict[int, str], merg
     return data
 
 
+TrashSort = Literal["deleted_at", "title", "pages", "size"]
+TrashDirection = Literal["asc", "desc"]
+TrashReasonFilter = Literal["user", "merged", "source_missing", "unknown"]
+
+
+def _trash_query(
+    auth: dict,
+    q: str | None = None,
+    source: str | None = None,
+    reason: str | None = None,
+    sort: str = "deleted_at",
+    direction: str = "desc",
+):
+    """Filtered/sorted select of trashed galleries in the caller's trash scope."""
+    stmt = build_explorer_gallery_query(
+        ExplorerQuerySpec(node_kind="trash", query=q or "", sort=sort, direction=direction), auth
+    )
+    if source:
+        stmt = stmt.where(Gallery.source == source)
+    if reason == "unknown":
+        stmt = stmt.where(Gallery.deleted_reason.is_(None))
+    elif reason:
+        stmt = stmt.where(Gallery.deleted_reason == reason)
+    return stmt
+
+
 @router.get("/trash")
 async def list_trash(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, max_length=500),
+    source: str | None = Query(default=None, max_length=100),
+    reason: TrashReasonFilter | None = None,
+    sort: TrashSort = "deleted_at",
+    direction: TrashDirection = "desc",
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """List soft-deleted galleries (trash)."""
-    trash_cond = _trash_filter(auth)
+    """List soft-deleted galleries (trash), optionally filtered and sorted."""
+    stmt = _trash_query(auth, q, source, reason, sort, direction)
 
-    count_result = await db.execute(select(func.count()).select_from(Gallery).where(trash_cond))
-    total = count_result.scalar_one()
+    total = (await db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar_one()
 
-    rows = (
-        (
-            await db.execute(
-                select(Gallery).where(trash_cond).order_by(desc(Gallery.deleted_at)).limit(limit).offset(offset)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    rows = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
 
     cover_map = await _build_cover_map(db, [g.id for g in rows], {g.id: g.source for g in rows})
 
@@ -1673,31 +1692,137 @@ async def permanent_delete_gallery(
     return {"status": "ok", **result}
 
 
-@router.post("/trash/empty")
+def _purge_guard_key(user_id: int) -> str:
+    return f"trash:purge:{user_id}"
+
+
+async def _queue_purge(auth: dict, ids: list[int]) -> JSONResponse:
+    """Take the per-user purge guard and enqueue ``trash_purge_job`` for ``ids``."""
+    if not ids:
+        return JSONResponse({"status": "ok", "total": 0}, status_code=200)
+    key = _purge_guard_key(auth["user_id"])
+    try:
+        acquired = await get_redis().set(key, json.dumps({"done": 0, "total": len(ids)}), nx=True, ex=300)
+    except RedisError, RuntimeError:
+        logger.error("Trash purge guard unavailable", exc_info=True)
+        raise HTTPException(status_code=503, detail="Purge service unavailable")
+    if not acquired:
+        raise HTTPException(status_code=409, detail="A purge is already running")
+    try:
+        # No _job_id: completed SAQ jobs keep their key for a TTL and would dedupe a later purge.
+        await core.queue.enqueue("trash_purge_job", user_id=auth["user_id"], role=auth["role"], gallery_ids=ids)
+    except Exception:
+        logger.error("Failed to enqueue trash_purge_job", exc_info=True)
+        try:
+            await get_redis().delete(key)
+        except RedisError:
+            logger.warning("Could not release purge guard after enqueue failure", exc_info=True)
+        raise HTTPException(status_code=503, detail="Could not queue purge")
+    return JSONResponse({"status": "queued", "total": len(ids)}, status_code=202)
+
+
+@router.post("/trash/empty", status_code=202)
 async def empty_trash(
+    q: str | None = Query(default=None, max_length=500),
+    source: str | None = Query(default=None, max_length=100),
+    reason: TrashReasonFilter | None = None,
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Permanently delete all galleries in trash."""
-    trash_cond = _trash_filter(auth)
+    """Queue permanent deletion of the trashed galleries matching the filter."""
+    stmt = _trash_query(auth, q, source, reason).with_only_columns(Gallery.id).order_by(None)
+    ids = sorted((await db.execute(stmt)).scalars().all())
+    return await _queue_purge(auth, ids)
 
-    galleries = (await db.execute(select(Gallery).where(trash_cond))).scalars().all()
 
-    if not galleries:
-        return {"status": "ok", "affected": 0}
+@router.get("/trash/summary")
+async def trash_summary(
+    q: str | None = Query(default=None, max_length=500),
+    source: str | None = Query(default=None, max_length=100),
+    reason: TrashReasonFilter | None = None,
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Count, sizes, next expiry, sources and running-purge progress for the filtered trash."""
+    id_stmt = _trash_query(auth, q, source, reason).with_only_columns(Gallery.id).order_by(None)
+    filtered_ids = id_stmt.scalar_subquery()
 
-    result = await _hard_delete_galleries(db, list(galleries))
-    return {"status": "ok", **result}
+    count, oldest = (
+        await db.execute(
+            select(func.count(), func.min(Gallery.deleted_at)).where(Gallery.id.in_(id_stmt.scalar_subquery()))
+        )
+    ).one()
+
+    logical_bytes = (
+        await db.execute(
+            select(func.coalesce(func.sum(Blob.file_size), 0))
+            .select_from(Image)
+            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .where(Image.gallery_id.in_(filtered_ids), Image.visibility == "active")
+        )
+    ).scalar_one()
+
+    # Reclaimable: CAS blobs referenced by the filtered set and by no image outside it.
+    inside = aliased(Image)
+    outside = aliased(Image)
+    reclaimable_bytes = (
+        await db.execute(
+            select(func.coalesce(func.sum(Blob.file_size), 0)).where(
+                Blob.storage == "cas",
+                exists().where(inside.blob_sha256 == Blob.sha256, inside.gallery_id.in_(id_stmt.scalar_subquery())),
+                ~exists().where(
+                    outside.blob_sha256 == Blob.sha256,
+                    outside.gallery_id.not_in(id_stmt.scalar_subquery()),
+                ),
+            )
+        )
+    ).scalar_one()
+
+    next_expiry_at = None
+    if count and oldest is not None:
+        retention_days = await _get_int_setting("setting:trash_retention_days", 30)
+        if retention_days < 1:
+            retention_days = 30
+        next_expiry_at = (oldest + timedelta(days=retention_days)).isoformat()
+
+    sources = sorted(
+        s for s in (await db.execute(select(Gallery.source).where(_trash_filter(auth)).distinct())).scalars() if s
+    )
+
+    purge = None
+    try:
+        raw = await get_redis().get(_purge_guard_key(auth["user_id"]))
+        if raw is not None:
+            data = json.loads(raw)
+            purge = {"done": int(data["done"]), "total": int(data["total"])}
+    except Exception:
+        purge = None
+
+    return {
+        "count": count,
+        "logical_bytes": int(logical_bytes),
+        "reclaimable_bytes": int(reclaimable_bytes),
+        "next_expiry_at": next_expiry_at,
+        "sources": sources,
+        "purge": purge,
+    }
 
 
 class TrashRestoreBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     gallery_ids: list[int] | None = Field(default=None, min_length=1, max_length=500)
     all: bool = False
+    q: str | None = None
+    source: str | None = None
+    reason: TrashReasonFilter | None = None
 
     @model_validator(mode="after")
     def _exactly_one_selector(self) -> TrashRestoreBody:
         if (self.gallery_ids is not None) == bool(self.all):
             raise ValueError("Provide exactly one of gallery_ids or all=true")
+        if not self.all and (self.q or self.source or self.reason):
+            raise ValueError("q, source and reason require all=true")
         return self
 
 
@@ -1712,9 +1837,10 @@ async def restore_trash(
     db: AsyncSession = Depends(get_db),
 ):
     """Restore many trashed galleries (or all in scope). Out-of-scope ids are ignored."""
-    stmt = select(Gallery).where(_trash_filter(auth))
     if body.gallery_ids is not None:
-        stmt = stmt.where(Gallery.id.in_(body.gallery_ids))
+        stmt = select(Gallery).where(_trash_filter(auth), Gallery.id.in_(body.gallery_ids))
+    else:
+        stmt = _trash_query(auth, body.q, body.source, body.reason, "deleted_at", "desc")
     galleries = list((await db.execute(stmt)).scalars().all())
     ids = sorted(g.id for g in galleries)
     affected = await restore_galleries(db, galleries)
@@ -1731,30 +1857,17 @@ async def restore_trash(
     return {"status": "ok", "affected": affected}
 
 
-@router.post("/trash/purge")
+@router.post("/trash/purge", status_code=202)
 async def purge_trash(
     body: TrashPurgeBody,
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Permanently delete the selected trashed galleries. Out-of-scope ids are ignored."""
-    galleries = list(
-        (await db.execute(select(Gallery).where(_trash_filter(auth), Gallery.id.in_(body.gallery_ids)))).scalars().all()
+    """Queue permanent deletion of the selected trashed galleries. Out-of-scope ids are ignored."""
+    ids = sorted(
+        (await db.execute(select(Gallery.id).where(_trash_filter(auth), Gallery.id.in_(body.gallery_ids)))).scalars()
     )
-    if not galleries:
-        return {"status": "ok", "affected": 0, "deleted_dirs": 0}
-    ids = sorted(g.id for g in galleries)
-    result = await _hard_delete_galleries(db, galleries)
-    from core.events import EventType, emit_safe
-
-    await emit_safe(
-        EventType.GALLERY_BATCH_UPDATED,
-        actor_user_id=auth["user_id"],
-        resource_type="gallery",
-        action="purge",
-        gallery_ids=ids,
-    )
-    return {"status": "ok", **result}
+    return await _queue_purge(auth, ids)
 
 
 @router.get("/trash/{gallery_id}/preview")

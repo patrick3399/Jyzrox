@@ -11,7 +11,12 @@ import type {
   ArtistDetail,
   ArtistImageItem,
   LibraryFacets,
+  TrashFilters,
   TrashGallery,
+  TrashPurgeQueued,
+  TrashSort,
+  TrashSortDirection,
+  TrashSummary,
   TrashPreview,
 } from '../types'
 
@@ -297,14 +302,28 @@ export const library = {
       init,
     ),
 
-  trashList: (params: { limit?: number; offset?: number } = {}, init?: RequestInit) =>
+  trashList: (
+    params: TrashFilters & {
+      limit?: number
+      offset?: number
+      sort?: TrashSort
+      direction?: TrashSortDirection
+    } = {},
+    init?: RequestInit,
+  ) =>
     apiFetch<{ total: number; galleries: TrashGallery[] }>(
       `/api/library/trash${qs(params as Record<string, unknown>)}`,
       init,
     ),
 
+  trashSummary: (filters: TrashFilters = {}, init?: RequestInit) =>
+    apiFetch<TrashSummary>(
+      `/api/library/trash/summary${qs(filters as Record<string, unknown>)}`,
+      init,
+    ),
+
   trashRestore: (
-    body: { gallery_ids: number[] } | { all: true },
+    body: { gallery_ids: number[] } | ({ all: true } & TrashFilters),
     init?: RequestInit,
   ) =>
     apiFetch<{ status: string; affected: number }>('/api/library/trash/restore', {
@@ -314,7 +333,7 @@ export const library = {
     }),
 
   trashPurge: (galleryIds: number[], init?: RequestInit) =>
-    apiFetch<{ status: string; affected: number; deleted_dirs: number }>(
+    apiFetch<TrashPurgeQueued>(
       '/api/library/trash/purge',
       {
         method: 'POST',
@@ -350,11 +369,14 @@ export const library = {
       },
     ),
 
-  emptyTrash: (init?: RequestInit) =>
-    apiFetch<{ status: string; affected: number }>('/api/library/trash/empty', {
-      method: 'POST',
-      ...init,
-    }),
+  emptyTrash: (filters: TrashFilters = {}, init?: RequestInit) =>
+    apiFetch<TrashPurgeQueued>(
+      `/api/library/trash/empty${qs(filters as Record<string, unknown>)}`,
+      {
+        method: 'POST',
+        ...init,
+      },
+    ),
 
   checkUpdate: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{

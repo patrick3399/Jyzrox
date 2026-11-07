@@ -67,6 +67,7 @@ class EventType(StrEnum):
 
     # System maintenance
     TRASH_CLEANED = "trash.cleaned"
+    TRASH_PURGE_PROGRESS = "trash.purge_progress"
     RESCAN_COMPLETED = "rescan.completed"
     RETRY_PROCESSED = "retry.processed"
     EHTAG_SYNC_COMPLETED = "ehtag.sync_completed"

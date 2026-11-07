@@ -48,6 +48,34 @@ export interface Gallery {
 
 export type TrashReason = 'user' | 'merged' | 'source_missing'
 
+/** Reason filter values accepted by the trash endpoints ("unknown" = no recorded reason). */
+export type TrashReasonFilter = TrashReason | 'unknown'
+export type TrashSort = 'deleted_at' | 'title' | 'pages' | 'size'
+export type TrashSortDirection = 'asc' | 'desc'
+
+/** Filter params shared by GET /trash, GET /trash/summary and POST /trash/empty. */
+export interface TrashFilters {
+  q?: string
+  source?: string
+  reason?: TrashReasonFilter
+}
+
+/** Response of GET /api/library/trash/summary. */
+export interface TrashSummary {
+  count: number
+  logical_bytes: number
+  reclaimable_bytes: number
+  next_expiry_at: string | null
+  sources: string[]
+  purge: { done: number; total: number } | null
+}
+
+/** Response of POST /trash/empty and /trash/purge (202 queued, or 200 ok with total 0). */
+export interface TrashPurgeQueued {
+  status: 'queued' | 'ok'
+  total: number
+}
+
 /** Item of GET /api/library/trash. */
 export interface TrashGallery extends Gallery {
   deleted_at: string

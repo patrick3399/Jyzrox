@@ -102,6 +102,15 @@ const RULES: InvalidationRule[] = [
       keyHasPrefix(key, 'library/gallery') ||
       keyHasPrefix(key, 'gallery/'),
   },
+  {
+    // trash.* — trash list + summary (keyed ['trash-list', ...] / ['trash-summary', ...]),
+    // and the nav badge count. Includes trash.purge_progress / trash.cleaned.
+    matchesEvent: (eventType) => eventType.startsWith('trash.'),
+    keyFilter: (key) =>
+      keyHasPrefix(key, 'trash-list') ||
+      keyHasPrefix(key, 'trash-summary') ||
+      keyHasPrefix(key, 'nav-counts/trash'),
+  },
 ]
 
 /** Returns the SWR key filter for a given EventBus `event_type`, or null if unmapped. */
