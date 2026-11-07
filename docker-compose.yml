@@ -3,9 +3,10 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 x-logging: &default-logging
-  driver: "json-file"
+  # ADR 0031: stdout carries diagnostics only; `local` compresses rotated files.
+  driver: "local"
   options:
-    max-size: "50m"
+    max-size: "20m"
     max-file: "5"
 
 x-backend-env: &backend-env
@@ -32,6 +33,8 @@ services:
       - "${HTTP_PORT:-35689}:80"
     environment:
       - NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-100m}
+      # 1 = also log GET/HEAD (media investigations); recreate nginx to apply
+      - NGINX_ACCESS_LOG_READS=${NGINX_ACCESS_LOG_READS:-0}
       # 05-data-group.sh adds the nginx worker to this group so it can read a 770 data volume
       - PGID=${PGID:-1042}
     volumes:
@@ -68,6 +71,8 @@ services:
     user: "${PUID:-1042}:${PGID:-1042}"
     environment:
       IMGPROXY_LOCAL_FILESYSTEM_ROOT: /data
+      IMGPROXY_LOG_LEVEL: ${IMGPROXY_LOG_LEVEL:-warn}
+      IMGPROXY_LOG_FORMAT: structured
       IMGPROXY_MAX_SRC_RESOLUTION: ${IMGPROXY_MAX_SRC_RESOLUTION:-100}
       IMGPROXY_TTL: ${IMGPROXY_TTL:-2592000}
       IMGPROXY_WEBP_QUALITY: ${IMGPROXY_WEBP_QUALITY:-82}
@@ -95,7 +100,7 @@ services:
       args:
         APP_VERSION: ${APP_VERSION:-dev}
         GDL_VERSION: ${GDL_VERSION:-}
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8'
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8' --no-access-log
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     # uvicorn drains in-flight requests on SIGTERM; 10s is plenty for a personal gallery
     stop_grace_period: 10s
@@ -264,11 +269,11 @@ services:
 
   postgres:
     image: postgres:18-alpine
+    # health checks made ~97% of postgres log lines; log slow statements instead (ADR 0031)
     command: >
       postgres
       -c password_encryption=scram-sha-256
-      -c log_connections=on
-      -c log_disconnections=on
+      -c log_min_duration_statement=1000
     env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - postgres_data:/var/lib/postgresql
