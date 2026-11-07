@@ -7,6 +7,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Node 25+ ships a native Web Storage global that shadows jsdom's
+    // localStorage/sessionStorage; disable it so tests use jsdom's.
+    execArgv: ['--no-experimental-webstorage'],
     globals: false,
     setupFiles: ['./src/__tests__/setup.ts'],
   },
