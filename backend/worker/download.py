@@ -607,7 +607,7 @@ async def download_job(
     total: int | None = None,
 ) -> dict:
     """Claim durable source capacity before starting any expensive work."""
-    logger.info("[download] url=%s", url)
+    logger.debug("[download] admission check url=%s", url)
     from plugins.registry import plugin_registry
 
     plugin = await plugin_registry.get_handler(url)
