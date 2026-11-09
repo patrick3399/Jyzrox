@@ -4287,6 +4287,108 @@ class TestCheckGalleryUpdate:
         assert resp.status_code == 200
         assert resp.json() == {"status": "error", "reason": "invalid_metadata"}
 
+    # -- write access: check-update applies source metadata, so it is a mutation --
+
+    @staticmethod
+    def _remote_eh_client():
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get_gallery_metadata(self, gid, token):
+                return {
+                    "title": "REMOTE TITLE",
+                    "title_jpn": None,
+                    "category": "manga",
+                    "uploader": "remote_uploader",
+                    "pages": 20,
+                    "rating": 4.0,
+                    "tags": ["female:remote_tag"],
+                }
+
+        async def _make_client():
+            return _Client()
+
+        return _make_client
+
+    async def _eh_gallery(self, db_session, source_id: str, owner: int | None, visibility: str) -> int:
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (60, 'u60', 'x', 'member')")
+        )
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (61, 'u61', 'x', 'viewer')")
+        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id=source_id, title="LOCAL TITLE")
+        await db_session.execute(
+            text("UPDATE galleries SET created_by_user_id = :o, visibility = :v, source_url = :u WHERE id = :g"),
+            {"o": owner, "v": visibility, "u": f"https://e-hentai.org/g/{source_id}/abcdef1234/", "g": gid},
+        )
+        await db_session.commit()
+        return gid
+
+    async def _metadata_state(self, db_session, gid: int) -> tuple[str, int, int]:
+        db_session.expire_all()
+        title = (await db_session.execute(text("SELECT title FROM galleries WHERE id = :g"), {"g": gid})).scalar_one()
+        changes = (
+            await db_session.execute(
+                text("SELECT count(*) FROM gallery_metadata_changes WHERE gallery_id = :g"), {"g": gid}
+            )
+        ).scalar_one()
+        tags = (
+            await db_session.execute(text("SELECT count(*) FROM gallery_tags WHERE gallery_id = :g"), {"g": gid})
+        ).scalar_one()
+        return title, changes, tags
+
+    async def test_check_update_readonly_collaborator_gets_403_and_metadata_unchanged(self, make_client, db_session):
+        """A can_edit=false collaborator can see the gallery but must not refresh its metadata."""
+        gid = await self._eh_gallery(db_session, "880001", owner=1, visibility="private")
+        await db_session.execute(
+            text("INSERT INTO gallery_permissions (gallery_id, user_id, can_edit) VALUES (:g, 60, :e)"),
+            {"g": gid, "e": False},
+        )
+        await db_session.commit()
+
+        with patch("plugins.builtin.ehentai.browse._make_client", self._remote_eh_client()):
+            async with make_client(user_id=60, role="member") as ac:
+                resp = await ac.post("/api/library/galleries/ehentai/880001/check-update")
+
+        assert resp.status_code == 403
+        assert await self._metadata_state(db_session, gid) == ("LOCAL TITLE", 0, 0)
+
+    async def test_check_update_viewer_on_unowned_gallery_gets_403_and_metadata_unchanged(
+        self, make_client, db_session
+    ):
+        """Unowned galleries pass the per-gallery write check, so the viewer role gate must stop the refresh."""
+        gid = await self._eh_gallery(db_session, "880002", owner=None, visibility="public")
+
+        with patch("plugins.builtin.ehentai.browse._make_client", self._remote_eh_client()):
+            async with make_client(user_id=61, role="viewer") as ac:
+                resp = await ac.post("/api/library/galleries/ehentai/880002/check-update")
+
+        assert resp.status_code == 403
+        assert await self._metadata_state(db_session, gid) == ("LOCAL TITLE", 0, 0)
+
+    async def test_check_update_owner_member_refreshes_metadata(self, make_client, db_session):
+        """The owning member keeps the ability to refresh metadata from the source."""
+        gid = await self._eh_gallery(db_session, "880003", owner=60, visibility="private")
+
+        with patch("plugins.builtin.ehentai.browse._make_client", self._remote_eh_client()):
+            async with make_client(user_id=60, role="member") as ac:
+                resp = await ac.post("/api/library/galleries/ehentai/880003/check-update")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "updated"
+        title, changes, tags = await self._metadata_state(db_session, gid)
+        assert title == "REMOTE TITLE"
+        assert changes > 0
+        assert tags == 1
+
 
 # ---------------------------------------------------------------------------
 # Regression: edge case #101 — search ILIKE must escape % and _ wildcards

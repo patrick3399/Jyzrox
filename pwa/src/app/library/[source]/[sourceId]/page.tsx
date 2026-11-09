@@ -260,6 +260,10 @@ function GalleryDetailPageInner() {
   // Auto-check gallery metadata update (once per page visit)
   useEffect(() => {
     if (!gallery || !featureSettings || updateCheckedRef.current) return
+    // Applying source metadata is a write (member + gallery write access on the
+    // backend). Viewers would only get a 403; wait for the profile instead of
+    // latching the ref so a member's check still runs once it loads.
+    if (!canEdit) return
     // Only EH and Pixiv galleries support metadata check
     if (!['ehentai', 'pixiv'].includes(gallery.source)) {
       updateCheckedRef.current = true
@@ -315,7 +319,7 @@ function GalleryDetailPageInner() {
         setIsCheckingUpdate(false)
         updateCheckedRef.current = true
       })
-  }, [gallery, featureSettings, mutateGallery])
+  }, [gallery, featureSettings, mutateGallery, canEdit])
 
   // "Update" (outdated) and "repair" go through the gallery action endpoint: the
   // server knows whether this gallery belongs to a subscription (an update is

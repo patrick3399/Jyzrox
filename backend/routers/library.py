@@ -30,7 +30,7 @@ from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
 
 import core.queue
-from core.auth import gallery_access_filter, require_auth, require_role
+from core.auth import gallery_access_filter, has_gallery_write_access, require_auth, require_role
 from core.database import get_db
 from core.gallery_helpers import (
     build_cover_map,
@@ -3078,11 +3078,18 @@ async def restore_excluded_blob(
 async def check_gallery_update(
     source: str,
     source_id: str,
-    auth: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Auto-check and update gallery metadata from source."""
+    """Auto-check and update gallery metadata from source.
+
+    Applying source metadata rewrites title/tags and records change history, so
+    this is a mutation: visibility alone is not enough (read-only collaborators
+    can see the gallery), the caller needs gallery write access.
+    """
     g = await _get_or_404_by_source(db, source, source_id, auth)
+    if not await has_gallery_write_access(db, g.id, g.created_by_user_id, auth):
+        raise HTTPException(status_code=403, detail="Gallery write access is required")
 
     from plugins.registry import plugin_registry
 
