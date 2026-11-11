@@ -1314,12 +1314,8 @@ const en: Record<string, string> = {
 
   // ── Browser Cache ──
   'settings.browserCache': 'Browser Cache',
-  'settings.browserCacheDesc': 'Configure how the browser caches media and pages for offline use',
-  'settings.mediaCacheTTL': 'Media Cache TTL',
-  'settings.mediaCacheTTLDesc': 'How long to keep cached images and thumbnails',
-  'settings.mediaCacheSizeLimit': 'Media Cache Size Limit',
-  'settings.mediaCacheSizeLimitDesc':
-    'Maximum storage for cached media (the media cache resets when exceeded)',
+  'settings.browserCacheDesc':
+    'Configure how long pages are kept for offline use. Images stay in the browser cache',
   'settings.pageCacheTTL': 'Page Cache TTL',
   'settings.pageCacheTTLDesc': 'How long to keep cached page responses for offline use',
   'settings.clearBrowserCache': 'Clear Browser Cache',

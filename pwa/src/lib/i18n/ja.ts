@@ -1520,12 +1520,7 @@ const ja: Record<string, string> = {
 
   // ── Browser Cache ──
   'settings.browserCache': 'ブラウザキャッシュ',
-  'settings.browserCacheDesc': 'メディアとページのブラウザキャッシュをオフライン用に設定',
-  'settings.mediaCacheTTL': 'メディアキャッシュTTL',
-  'settings.mediaCacheTTLDesc': '画像とサムネイルのキャッシュ保持時間',
-  'settings.mediaCacheSizeLimit': 'メディアキャッシュサイズ制限',
-  'settings.mediaCacheSizeLimitDesc':
-    'キャッシュメディアの上限（超過時にメディアキャッシュを再作成）',
+  'settings.browserCacheDesc': 'オフライン用にページを保持する期間を設定（画像はブラウザ自体のキャッシュが保持）',
   'settings.pageCacheTTL': 'ページキャッシュTTL',
   'settings.pageCacheTTLDesc': 'オフライン用ページレスポンスのキャッシュ保持時間',
   'settings.clearBrowserCache': 'ブラウザキャッシュをクリア',

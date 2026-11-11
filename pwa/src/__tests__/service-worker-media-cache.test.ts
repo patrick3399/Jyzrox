@@ -6,13 +6,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 const source = readFileSync(resolve(process.cwd(), 'public/sw.template.js'), 'utf8')
 
 const ORIGIN = 'https://jyzrox.test'
+const LEGACY_MEDIA_CACHE = 'jyzrox-media-v2'
+const PAGE_CACHE = 'jyzrox-pages'
 
 interface Stats {
   network: number
+  cacheOpen: number
   cacheMatch: number
   cacheKeys: number
   cachePut: number
-  cacheDeletes: number
   /** `clone()` calls on responses the fake network handed the worker. */
   responseClones: number
 }
@@ -27,49 +29,46 @@ interface Harness {
    * browser's own network stack.
    */
   handle: (url: string) => { responded: Promise<Response> | undefined }
-  /** Seed the media cache as if the image had already been fetched once. */
-  seedMedia: (url: string, bytes?: number) => Promise<void>
   /**
-   * Prime the browser HTTP cache as if the immutable resource had been fetched
-   * on an earlier visit. A later plain `fetch()` is then served from disk with
-   * no network round trip — exactly how the browser answers an `immutable`
-   * response.
+   * Prime the browser HTTP cache as if the resource had been fetched on an
+   * earlier visit. A later plain `fetch()` is then served from disk with no
+   * network round trip — how the browser answers an `immutable` response.
    */
   seedHttpCache: (url: string) => void
+  /** Create a CacheStorage cache holding one entry, as an older worker left it. */
+  seedCacheStorage: (name: string, url: string) => Promise<void>
+  cacheNames: () => string[]
   /** Simulate loss of connectivity: uncached `fetch()` calls reject. */
   setOffline: (offline: boolean) => void
-  setStorageUsage: (bytes: number) => void
-  /** Make the network report this Content-Length for a URL. */
-  setResponseBytes: (url: string, bytes: number) => void
   /** Make the network answer this URL with the given HTTP status. */
   setResponseStatus: (url: string, status: number) => void
-  /**
-   * Hold every `caches.open()` pending until the returned release function is
-   * called — how CacheStorage behaves on an iOS standalone cold start while
-   * WebKit loads a large cache from disk.
-   */
-  stallCacheOpen: () => () => void
-  /** Let fire-and-forget work (cache writes, eviction sweeps) settle. */
+  /** Fire a lifecycle or message event and let its waitUntil() work run. */
+  dispatch: (type: string, data?: unknown) => Promise<void>
+  /** Let fire-and-forget work settle. */
   settle: () => Promise<void>
 }
 
 /**
- * Evaluate the real sw.template.js in a sandbox with a fake CacheStorage so we
- * can observe what it actually does per request. The sibling
- * service-worker-template.test.ts asserts on source text, which cannot catch
- * behavioral regressions like "how many cache reads does one image cost".
+ * Evaluate the real sw.template.js in a sandbox with a fake CacheStorage and a
+ * fake browser HTTP cache so we can observe what it actually does per request.
+ * The sibling service-worker-template.test.ts asserts on source text, which
+ * cannot catch behavioral regressions like "does one image touch CacheStorage".
  */
 function loadServiceWorker(): Harness {
-  const stats: Stats = { network: 0, cacheMatch: 0, cacheKeys: 0, cachePut: 0, cacheDeletes: 0, responseClones: 0 }
+  const stats: Stats = {
+    network: 0,
+    cacheOpen: 0,
+    cacheMatch: 0,
+    cacheKeys: 0,
+    cachePut: 0,
+    responseClones: 0,
+  }
   const listeners = new Map<string, (event: unknown) => void>()
   const caches_ = new Map<string, FakeCache>()
   const httpCache = new Map<string, Response>()
   const pendingWork: Promise<unknown>[] = []
-  let storageUsage = 0
   let offline = false
-  const responseBytes = new Map<string, number>()
   const responseStatus = new Map<string, number>()
-  let cacheOpenGate: Promise<void> | null = null
 
   const keyOf = (req: Request | string) => (typeof req === 'string' ? req : req.url)
 
@@ -112,20 +111,23 @@ function loadServiceWorker(): Harness {
     },
     caches: {
       open: async (name: string) => {
-        if (cacheOpenGate) await cacheOpenGate
+        stats.cacheOpen++
         return getCache(name)
       },
-      delete: async (name: string) => {
-        stats.cacheDeletes++
-        return caches_.delete(name)
-      },
+      delete: async (name: string) => caches_.delete(name),
       keys: async () => [...caches_.keys()],
+      match: async () => undefined,
     },
     fetch: async (req: Request | string, opts?: { cache?: string }) => {
       const url = typeof req === 'string' ? req : req.url
-      // Model the browser HTTP cache: a plain fetch() of an `immutable` resource
-      // seen before is served from disk with no network. A `cache: 'no-cache'`
-      // fetch always revalidates over the network.
+      // Model the browser HTTP cache. `only-if-cached` answers from disk (stale
+      // or not) and fails on a miss; `no-cache` always revalidates over the
+      // network; a plain fetch() of a resource seen before is served from disk.
+      if (opts?.cache === 'only-if-cached') {
+        const hit = httpCache.get(url)
+        if (hit) return hit.clone()
+        throw new TypeError('Failed to fetch')
+      }
       if (opts?.cache !== 'no-cache') {
         const hit = httpCache.get(url)
         if (hit) return hit.clone()
@@ -135,7 +137,7 @@ function loadServiceWorker(): Harness {
       const res = new Response('imagebytes', {
         status: responseStatus.get(url) ?? 200,
         headers: {
-          'Content-Length': String(responseBytes.get(url) ?? 10000),
+          'Content-Length': '10000',
           'Content-Type': 'image/webp',
           'Cache-Control': 'private, immutable',
         },
@@ -149,8 +151,10 @@ function loadServiceWorker(): Harness {
       }
       return handed
     },
+    // The share-queue DB never opens in this sandbox; activation's replay step
+    // simply stays pending, which is fine for the cache assertions below.
     indexedDB: { open: () => ({}) },
-    navigator: { storage: { estimate: async () => ({ usage: storageUsage, quota: 10 * 1024 ** 3 }) } },
+    navigator: {},
     Response,
     Request,
     Headers,
@@ -166,6 +170,12 @@ function loadServiceWorker(): Harness {
 
   const fetchHandler = listeners.get('fetch')
   if (!fetchHandler) throw new Error('sw.template.js registered no fetch handler')
+
+  const flush = async () => {
+    for (let i = 0; i < 50; i++) await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 0))
+    for (let i = 0; i < 50; i++) await Promise.resolve()
+  }
 
   return {
     stats,
@@ -185,20 +195,6 @@ function loadServiceWorker(): Harness {
       if (!responded) throw new Error(`SW did not respondWith for ${url}`)
       return responded
     },
-    async seedMedia(url: string, bytes = 10000) {
-      const cache = getCache('jyzrox-media-v2')
-      await cache.put(
-        url,
-        new Response('imagebytes', {
-          status: 200,
-          headers: {
-            'Content-Length': String(bytes),
-            'X-Cache-Time': String(Date.now()),
-          },
-        }),
-      )
-      stats.cachePut = 0
-    },
     seedHttpCache(url: string) {
       httpCache.set(
         url,
@@ -208,125 +204,82 @@ function loadServiceWorker(): Harness {
         }),
       )
     },
+    async seedCacheStorage(name: string, url: string) {
+      getCache(name).store.set(url, new Response('imagebytes', { status: 200 }))
+    },
+    cacheNames() {
+      return [...caches_.keys()]
+    },
     setOffline(value: boolean) {
       offline = value
-    },
-    setStorageUsage(bytes: number) {
-      storageUsage = bytes
-    },
-    setResponseBytes(url: string, bytes: number) {
-      responseBytes.set(url, bytes)
     },
     setResponseStatus(url: string, status: number) {
       responseStatus.set(url, status)
     },
-    stallCacheOpen() {
-      let release = () => {}
-      cacheOpenGate = new Promise<void>((resolve) => {
-        release = () => {
-          cacheOpenGate = null
-          resolve()
-        }
-      })
-      return release
+    async dispatch(type: string, data?: unknown) {
+      const handler = listeners.get(type)
+      if (!handler) throw new Error(`sw.template.js registered no ${type} handler`)
+      handler({ data, waitUntil: () => {} })
+      await flush()
     },
     async settle() {
       await Promise.allSettled(pendingWork.splice(0))
-      for (let i = 0; i < 50; i++) await Promise.resolve()
-      await new Promise((r) => setTimeout(r, 0))
-      for (let i = 0; i < 50; i++) await Promise.resolve()
+      await flush()
     },
   }
 }
 
-const IMG = `${ORIGIN}/media/image/insecure/rs:fit:400:0:0/bG9jYWw6Ly8vY2FzL2FhL2JiLndlYnA.webp`
+const CONTENT_ADDRESSED = [
+  `${ORIGIN}/media/image/insecure/rs:fit:400:0:0/bG9jYWw6Ly8vY2FzL2FhL2JiLndlYnA.webp`,
+  `${ORIGIN}/media/thumbs/aa/bb/aabb_320.webp`,
+  `${ORIGIN}/media/cas/aa/bb/aabb.jpg`,
+]
 
-describe('service worker media cache performance', () => {
+describe('service worker media handling', () => {
   let sw: Harness
 
   beforeEach(() => {
     sw = loadServiceWorker()
   })
 
-  it('serves a repeat immutable image from the HTTP cache without a network round trip', async () => {
-    // Regression (91af972): the media branch must not force revalidation. The
-    // request uses a plain fetch() (never `cache: 'no-cache'`), so an immutable
-    // resource already in the browser HTTP cache is answered from disk with no
-    // network. cas/thumbs/image are sha256 capability URLs — the bytes behind a
-    // URL can never change, so revalidation buys nothing.
-    sw.seedHttpCache(IMG)
+  it.each(CONTENT_ADDRESSED)(
+    'leaves content-addressed media to the browser HTTP cache without touching CacheStorage: %s',
+    async (url) => {
+      // Regression (unbounded second copy): every sha256-addressed image was
+      // stored twice — once in the browser HTTP cache (`immutable`, 7–30 days)
+      // and again in a CacheStorage media cache whose size budget was lost on
+      // every worker restart, checked at most every 10 minutes, and whose TTL
+      // was never enforced. The browser already bounds and evicts its HTTP
+      // cache, so the worker no longer handles these requests at all.
+      const { responded } = sw.handle(url)
+      await sw.settle()
 
-    const res = await sw.request(IMG)
+      expect(responded).toBeUndefined()
+      expect(sw.stats.cacheOpen).toBe(0)
+      expect(sw.stats.cachePut).toBe(0)
+      expect(sw.stats.responseClones).toBe(0)
+    },
+  )
+
+  it('never copies path-addressed library media into CacheStorage', async () => {
+    const page = `${ORIGIN}/media/libraries/jyzrox/images/Cosplay/a/027.jpg`
+
+    const res = await sw.request(page)
     await sw.settle()
 
     expect(res.status).toBe(200)
-    expect(sw.stats.network).toBe(0)
+    expect(sw.stats.cacheOpen).toBe(0)
+    expect(sw.stats.cachePut).toBe(0)
+    // No tee'd body: leaving a gallery of huge originals must not keep a
+    // cache-write branch downloading in the worker (FE-T23).
+    expect(sw.stats.responseClones).toBe(0)
   })
 
-  it('does not read CacheStorage on the online content-addressed hot path', async () => {
-    // The iOS cold-start latency fix: gating every image on
-    // caches.open(MEDIA_CACHE_NAME) + cache.match() added seconds per thumbnail
-    // on iOS standalone. Online, the response must come straight from fetch()
-    // (served by the immutable HTTP cache) with zero CacheStorage reads; the
-    // media store is still populated in the background for offline use.
-    sw.seedHttpCache(IMG)
-
-    await sw.request(IMG)
-    expect(sw.stats.cacheMatch).toBe(0)
-
-    await sw.settle()
-    // Background population keeps the explicit offline store / logout-clear
-    // path (security-model BR-006) intact without blocking rendering.
-    expect(sw.stats.cachePut).toBeGreaterThanOrEqual(1)
-  })
-
-  it('falls back to the media cache for content-addressed media when offline', async () => {
-    // Offline (or HTTP cache miss): fetch() rejects, so the explicit media store
-    // is the fallback and the image still renders.
-    const url = `${ORIGIN}/media/cas/aa/bb.webp`
-    await sw.seedMedia(url)
-    sw.setOffline(true)
-
-    const res = await sw.request(url)
-    await sw.settle()
-
-    expect(res.status).toBe(200)
-    expect(sw.stats.network).toBe(0)
-  })
-
-  it('does not rescan every cached entry when a media response is stored', async () => {
-    // Regression (91af972): enforceMediaCacheLimit() moved from the cache-miss
-    // path onto *every* media response. It walks the whole cache with a
-    // sequential `await cache.match()` per entry, so with M entries cached each
-    // image costs O(M) CacheStorage reads on the SW's single thread — and with
-    // the 8GB default limit it evicts nothing, so the scan is pure waste.
-    for (let i = 0; i < 40; i++) await sw.seedMedia(`${ORIGIN}/media/cas/seed/${i}.webp`)
-
-    const cold = `${ORIGIN}/media/cas/cold/new.webp`
-    await sw.request(cold)
-    await sw.settle()
-
-    // One miss lookup for the requested URL is fine; walking all 40 seeded
-    // entries is the bug.
-    expect(sw.stats.cacheMatch).toBeLessThan(10)
-    expect(sw.stats.cacheKeys).toBe(0)
-  })
-
-  it('resets the media cache without enumerating entries when the budget is exceeded', async () => {
-    sw.setStorageUsage(9 * 1024 ** 3)
-
-    await sw.request(`${ORIGIN}/media/cas/cold/oversize.webp`)
-    await sw.settle()
-
-    expect(sw.stats.cacheDeletes).toBe(1)
-    expect(sw.stats.cacheKeys).toBe(0)
-  })
-
-  it('still revalidates mutable non-content-addressed media', async () => {
+  it('still revalidates mutable path-addressed media even when the HTTP cache holds it', async () => {
     // /media/avatars/ is NOT content-addressed: the same URL changes when the
-    // user uploads a new avatar, so it must not be served cache-first forever.
+    // user uploads a new avatar, and nginx marks it `max-age=1d`.
     const avatar = `${ORIGIN}/media/avatars/7.png`
-    await sw.seedMedia(avatar)
+    sw.seedHttpCache(avatar)
 
     await sw.request(avatar)
     await sw.settle()
@@ -334,119 +287,22 @@ describe('service worker media cache performance', () => {
     expect(sw.stats.network).toBe(1)
   })
 
-  it('leaves video requests to the browser instead of routing them through the worker', async () => {
-    // Regression (Reader video playback crash): responding to a video means
-    // `response.clone()` buffers the whole body in the worker for the
-    // CacheStorage write, on top of what the <video> element already holds. A
-    // 144 MB clip did that repeatedly until iOS Safari killed the tab. Media
-    // elements also stream by Range, and a 206 can never be stored in
-    // CacheStorage anyway — so the copy was pure cost.
-    const clip = `${ORIGIN}/media/cas/2b/ff/2bff41ba.mp4`
-
-    const { responded } = sw.handle(clip)
-    await sw.settle()
-
-    expect(responded).toBeUndefined()
-    expect(sw.stats.cachePut).toBe(0)
-    expect(sw.stats.cacheMatch).toBe(0)
-  })
-
-  it('keeps handling images that merely live next to a video in the same store', async () => {
-    // The video bypass must key on the media type, not on /media/cas/.
-    const still = `${ORIGIN}/media/cas/2b/ff/2bff41ba.webp`
-
-    const { responded } = sw.handle(still)
-    await sw.settle()
-
-    expect(responded).toBeDefined()
-    expect(sw.stats.cachePut).toBeGreaterThanOrEqual(1)
-  })
-
-  it('does not copy an oversized library original into the media cache', async () => {
-    // Regression (Reader freeze after leaving a huge gallery): path-addressed
-    // originals went through `response.clone()` + `cache.put()` under
-    // waitUntil. The tee'd branch kept reading the whole body after the page
-    // dropped the <img>, so backing out of a gallery of ~40 MB JPEGs left
-    // hundreds of MB still downloading and buffered in the worker, and the next
-    // screen's requests stalled behind them on iOS Safari.
-    const original = `${ORIGIN}/media/libraries/jyzrox/images/Cosplay/a/GalleryEpic.top_03.jpg`
-    sw.setResponseBytes(original, 42_674_088)
-
-    const res = await sw.request(original)
-    await sw.settle()
-
-    expect(res.status).toBe(200)
-    expect(sw.stats.responseClones).toBe(0)
-    expect(sw.stats.cachePut).toBe(0)
-  })
-
-  it('does not copy an oversized content-addressed original into the media cache', async () => {
-    const original = `${ORIGIN}/media/cas/aa/bb/aabb.jpg`
-    sw.setResponseBytes(original, 42_674_088)
-
-    const res = await sw.request(original)
-    await sw.settle()
-
-    expect(res.status).toBe(200)
-    expect(sw.stats.responseClones).toBe(0)
-    expect(sw.stats.cachePut).toBe(0)
-  })
-
-  it('still caches ordinary-sized library images for offline use', async () => {
-    const page = `${ORIGIN}/media/libraries/jyzrox/images/Cosplay/a/027.jpg`
-    sw.setResponseBytes(page, 789_628)
-
-    await sw.request(page)
-    await sw.settle()
-
-    expect(sw.stats.cachePut).toBe(1)
-  })
-
-  it('sends a library original to the network while CacheStorage is still opening', async () => {
-    // Regression (cold start > Gallery > Reader took 8–13 s on iPhone for local
-    // library galleries): the path-addressed branch awaited
-    // caches.open(MEDIA_CACHE_NAME) before fetch(). On an iOS standalone cold
-    // start WebKit loads the large media cache from disk first, so every Reader
-    // original queued behind it — nginx logs showed eight requests arrive in the
-    // same 50 ms, 6–8 s after the Reader mounted, all 304 (already cached).
-    const page = `${ORIGIN}/media/libraries/comfyui-output/Misc/AI/mp2/mp2_00191_.png`
-    const release = sw.stallCacheOpen()
-
-    const responded = sw.request(page)
-    for (let i = 0; i < 20; i++) await Promise.resolve()
-
-    expect(sw.stats.network).toBe(1)
-    const res = await Promise.race([
-      responded,
-      new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 50)),
-    ])
-    expect(res).not.toBe('stalled')
-    expect((res as Response).status).toBe(200)
-
-    release()
-    await sw.settle()
-    // The offline copy is still written once CacheStorage is available.
-    expect(sw.stats.cachePut).toBe(1)
-  })
-
-  it('does not mask a library 403 with a previously authorized cached copy', async () => {
+  it('does not mask a library 403 with a previously authorized HTTP-cached copy', async () => {
     // Revocation (high-risk invariant "a cached response must not hide a
-    // current 401/403 for path-addressed media"): the cached copy is only an
-    // offline fallback, never a substitute for a live rejection.
+    // current 401/403 for path-addressed media").
     const page = `${ORIGIN}/media/libraries/comfyui-output/private/001.png`
-    await sw.seedMedia(page)
+    sw.seedHttpCache(page)
     sw.setResponseStatus(page, 403)
 
     const res = await sw.request(page)
     await sw.settle()
 
     expect(res.status).toBe(403)
-    expect(sw.stats.cacheMatch).toBe(0)
   })
 
-  it('falls back to the media cache for library media when offline', async () => {
+  it('falls back to the HTTP-cached copy of library media when offline', async () => {
     const page = `${ORIGIN}/media/libraries/comfyui-output/Misc/AI/mp2/mp2_00001_.png`
-    await sw.seedMedia(page)
+    sw.seedHttpCache(page)
     sw.setOffline(true)
 
     const res = await sw.request(page)
@@ -454,5 +310,50 @@ describe('service worker media cache performance', () => {
 
     expect(res.status).toBe(200)
     expect(sw.stats.network).toBe(0)
+    expect(sw.stats.cacheOpen).toBe(0)
+  })
+
+  it('answers 503 for library media that is offline and was never cached', async () => {
+    sw.setOffline(true)
+
+    const res = await sw.request(`${ORIGIN}/media/libraries/comfyui-output/never/seen.png`)
+
+    expect(res.status).toBe(503)
+  })
+
+  it('leaves video requests to the browser instead of routing them through the worker', async () => {
+    // Regression (Reader video playback crash, FE-T16): responding to a video
+    // means the worker holds a second copy of a body the <video> element is
+    // already buffering, and media elements stream by Range anyway.
+    for (const clip of [
+      `${ORIGIN}/media/cas/2b/ff/2bff41ba.mp4`,
+      `${ORIGIN}/media/libraries/jyzrox/videos/a/clip.webm`,
+    ]) {
+      const { responded } = sw.handle(clip)
+      expect(responded).toBeUndefined()
+    }
+  })
+
+  it('deletes the legacy media cache when the new worker activates', async () => {
+    // Devices upgraded from the CacheStorage media store still hold up to the
+    // old 8 GB default; nothing reads it any more, so activation reclaims it.
+    await sw.seedCacheStorage(LEGACY_MEDIA_CACHE, `${ORIGIN}/media/cas/aa/bb.webp`)
+    await sw.seedCacheStorage(PAGE_CACHE, `${ORIGIN}/library`)
+
+    await sw.dispatch('activate')
+
+    expect(sw.cacheNames()).not.toContain(LEGACY_MEDIA_CACHE)
+    expect(sw.cacheNames()).toContain(PAGE_CACHE)
+  })
+
+  it('clears the page cache and any leftover legacy media cache on logout', async () => {
+    // BR-003: cached private content must not outlive the session.
+    await sw.seedCacheStorage(LEGACY_MEDIA_CACHE, `${ORIGIN}/media/cas/aa/bb.webp`)
+    await sw.seedCacheStorage(PAGE_CACHE, `${ORIGIN}/library`)
+
+    await sw.dispatch('message', { type: 'SW_CLEAR_USER_CACHES' })
+
+    expect(sw.cacheNames()).not.toContain(LEGACY_MEDIA_CACHE)
+    expect(sw.cacheNames()).not.toContain(PAGE_CACHE)
   })
 })

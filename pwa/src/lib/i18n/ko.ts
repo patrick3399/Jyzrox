@@ -941,11 +941,7 @@ const ko: Record<string, string> = {
 
   // ── Browser Cache ──
   'settings.browserCache': '브라우저 캐시',
-  'settings.browserCacheDesc': '오프라인 사용을 위해 미디어 및 페이지를 캐시하는 방식 설정',
-  'settings.mediaCacheTTL': '미디어 캐시 TTL',
-  'settings.mediaCacheTTLDesc': '캐시된 이미지 및 썸네일 보관 기간',
-  'settings.mediaCacheSizeLimit': '미디어 캐시 크기 제한',
-  'settings.mediaCacheSizeLimitDesc': '캐시된 미디어 저장 공간 한도 (초과 시 미디어 캐시 재생성)',
+  'settings.browserCacheDesc': '오프라인 사용을 위해 페이지를 보관할 기간 설정 (이미지는 브라우저 자체 캐시가 보관)',
   'settings.pageCacheTTL': '페이지 캐시 TTL',
   'settings.pageCacheTTLDesc': '오프라인 사용을 위해 캐시된 페이지 응답 보관 기간',
   'settings.clearBrowserCache': '브라우저 캐시 지우기',

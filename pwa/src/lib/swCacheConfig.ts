@@ -1,12 +1,9 @@
+// Media is left to the browser HTTP cache; the worker only keeps pages offline.
 export interface SWCacheConfig {
-  mediaCacheTTLHours: number
-  mediaCacheSizeMB: number
   pageCacheTTLHours: number
 }
 
 export const DEFAULT_SW_CACHE_CONFIG: SWCacheConfig = {
-  mediaCacheTTLHours: 72,
-  mediaCacheSizeMB: 8192,
   pageCacheTTLHours: 24,
 }
 
@@ -18,7 +15,9 @@ export function loadSWCacheConfig(): SWCacheConfig {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_SW_CACHE_CONFIG
     const parsed = JSON.parse(raw)
-    return { ...DEFAULT_SW_CACHE_CONFIG, ...parsed }
+    // Older builds also stored media cache settings here; keep only known keys.
+    const pageCacheTTLHours = Number(parsed?.pageCacheTTLHours)
+    return Number.isFinite(pageCacheTTLHours) ? { pageCacheTTLHours } : DEFAULT_SW_CACHE_CONFIG
   } catch {
     return DEFAULT_SW_CACHE_CONFIG
   }

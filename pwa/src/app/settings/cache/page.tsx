@@ -64,52 +64,6 @@ export default function CacheSettingsPage() {
           </div>
 
           <div className="space-y-4">
-            {/* Media Cache TTL */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-vault-text">{t('settings.mediaCacheTTL')}</p>
-                <p className="text-xs text-vault-text-muted mt-0.5">
-                  {t('settings.mediaCacheTTLDesc')}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={swCacheConfig.mediaCacheTTLHours}
-                  onChange={(e) =>
-                    handleSWCacheChange('mediaCacheTTLHours', Number(e.target.value))
-                  }
-                  onBlur={handleSWCacheBlur}
-                  className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
-                />
-                <span className="text-xs text-vault-text-muted w-8">{t('settings.hours')}</span>
-              </div>
-            </div>
-
-            {/* Media Cache Size */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-vault-text">{t('settings.mediaCacheSizeLimit')}</p>
-                <p className="text-xs text-vault-text-muted mt-0.5">
-                  {t('settings.mediaCacheSizeLimitDesc')}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <input
-                  type="number"
-                  min={0}
-                  step={256}
-                  value={swCacheConfig.mediaCacheSizeMB}
-                  onChange={(e) => handleSWCacheChange('mediaCacheSizeMB', Number(e.target.value))}
-                  onBlur={handleSWCacheBlur}
-                  className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
-                />
-                <span className="text-xs text-vault-text-muted w-8">{t('settings.mb')}</span>
-              </div>
-            </div>
-
             {/* Page Cache TTL */}
             <div className="flex items-center justify-between">
               <div>
