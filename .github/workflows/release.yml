@@ -1,13 +1,18 @@
 name: Release
 
+# FROZEN (2026-11-11): automatic triggers are commented out while remote CI
+# and Docker Hub publishing are paused. Only a manual run from the Actions tab
+# can start this workflow. To unfreeze, restore the commented `on:` block.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - ".claude/**"
-      - "TODO.md"
+  workflow_dispatch:
+# on:
+#   push:
+#     branches: [main]
+#     paths-ignore:
+#       - "**.md"
+#       - "docs/**"
+#       - ".claude/**"
+#       - "TODO.md"
 
 concurrency:
   group: release-main

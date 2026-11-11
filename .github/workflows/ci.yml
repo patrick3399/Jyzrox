@@ -1,7 +1,12 @@
 name: CI
 
+# FROZEN (2026-11-11): automatic triggers are commented out while remote CI
+# and Docker Hub publishing are paused. Only a manual run from the Actions tab
+# can start this workflow. To unfreeze, restore the commented `on:` block.
 on:
-  pull_request:
+  workflow_dispatch:
+# on:
+#   pull_request:
 
 permissions:
   contents: read
