@@ -323,6 +323,29 @@ class TestImportJob:
         assert result["status"] == "failed"
         assert "no media files found" in result["error"]
 
+    async def test_media_file_walk_runs_off_the_event_loop(self, tmp_path, monkeypatch):
+        """rglob over a large gallery stats every file; it must not run on the worker event loop thread."""
+        import threading
+
+        from worker.importer import import_job
+
+        gallery_dir = tmp_path / "gallery"
+        gallery_dir.mkdir()
+        (gallery_dir / "001.txt").write_text("not media")
+
+        rglob_threads: list[int] = []
+        real_rglob = Path.rglob
+
+        def _rglob(self, pattern, **kwargs):
+            if pattern == "*":
+                rglob_threads.append(threading.get_ident())
+            return real_rglob(self, pattern, **kwargs)
+
+        monkeypatch.setattr(Path, "rglob", _rglob)
+        await import_job(_make_ctx(), path=str(gallery_dir))
+
+        assert rglob_threads and threading.get_ident() not in rglob_threads
+
     async def test_file_path_instead_of_directory_returns_failed(self, tmp_path):
         """Passing a file path (not a directory) must return status=failed."""
         from worker.importer import import_job

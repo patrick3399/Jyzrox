@@ -685,6 +685,42 @@ class TestRescanLibraryJob:
 
         mock_enqueue.assert_not_awaited()
 
+    async def test_page_and_thumbnail_stats_run_off_the_event_loop(self):
+        """Per-image exists() calls stalled every job sharing the worker; they must run in a thread."""
+        import threading
+
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="offloop")
+        img = _make_image(image_id=6, gallery_id=60, blob=blob)
+        gallery = _make_gallery(gallery_id=60, pages=1)
+        session = _make_session(gallery_ids=[60], galleries=[gallery], images=[img])
+
+        stat_threads: list[int] = []
+
+        def _exists():
+            stat_threads.append(threading.get_ident())
+            return True
+
+        def _thumbs_complete(_dir):
+            stat_threads.append(threading.get_ident())
+            return True
+
+        existing_path = MagicMock(spec=Path)
+        existing_path.exists.side_effect = _exists
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan.thumbnails_complete_at", side_effect=_thumbs_complete),
+            patch("core.watcher.watcher_instance", None),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            await rescan_library_job({"redis": _make_redis()})
+
+        assert len(stat_threads) == 2
+        assert threading.get_ident() not in stat_threads
+
     async def test_missing_library_root_does_not_remove_link_gallery_images(self, tmp_path):
         """An unmounted root makes every link file look deleted; nothing may be removed."""
         from worker.scan import rescan_library_job
@@ -1125,6 +1161,58 @@ class TestRescanGalleryJob:
         assert gallery.download_status == "complete"
         assert result["status"] == "done"
         assert result["pages"] == 1
+
+    async def test_page_and_thumbnail_stats_run_off_the_event_loop(self):
+        """Per-image exists() calls stalled every job sharing the worker; they must run in a thread."""
+        import threading
+
+        from worker.scan import rescan_gallery_job
+
+        gallery = _make_gallery(gallery_id=410, pages=1, download_status="complete")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=gallery)
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        img = _make_image(image_id=31, gallery_id=410, blob=_make_blob(sha="offloop2"))
+        results = []
+        for rows in ([], [img], [img], [img]):
+            res = MagicMock()
+            res.scalars.return_value.all.return_value = rows
+            results.append(res)
+        session.execute = AsyncMock(side_effect=results)
+
+        stat_threads: list[int] = []
+
+        def _exists():
+            stat_threads.append(threading.get_ident())
+            return True
+
+        def _thumbs_complete(_dir):
+            stat_threads.append(threading.get_ident())
+            return True
+
+        existing_path = MagicMock(spec=Path)
+        existing_path.exists.side_effect = _exists
+        fake_gallery_dir = MagicMock(spec=Path)
+        fake_gallery_dir.exists.return_value = True
+        fake_gallery_dir.is_dir.return_value = True
+        fake_gallery_dir.iterdir.return_value = []
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan.thumbnails_complete_at", side_effect=_thumbs_complete),
+            patch("worker.scan.library_dir", return_value=fake_gallery_dir),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=410)
+
+        assert result["status"] == "done"
+        assert len(stat_threads) >= 2
+        assert threading.get_ident() not in stat_threads[:2]
 
     async def test_zero_pages_non_link_mode_marks_missing(self):
         """Gallery with 0 pages and import_mode != 'link' should be marked 'missing'."""

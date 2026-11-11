@@ -1,5 +1,6 @@
 """Gallery import handling (Link and Copy modes)."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -183,6 +184,18 @@ def _build_pattern_regex(pattern: str) -> re.Pattern:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _walk_media_dirs(real_root: str) -> list[tuple[str, list[str]]]:
+    """Return (directory, media filenames) for every non-hidden directory holding media."""
+    found: list[tuple[str, list[str]]] = []
+    for dirpath, dirnames, filenames in os.walk(real_root):
+        # Skip hidden directories
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        media_files = [f for f in filenames if Path(f).suffix.lower() in _SUPPORTED_EXTS]
+        if media_files:
+            found.append((dirpath, media_files))
+    return found
+
+
 @router.post("/batch/scan")
 async def batch_scan(
     req: BatchScanRequest,
@@ -197,14 +210,9 @@ async def batch_scan(
     matches = []
     unmatched = []
 
-    for dirpath, dirnames, filenames in os.walk(real_root):
-        # Skip hidden directories
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-
-        media_files = [f for f in filenames if Path(f).suffix.lower() in _SUPPORTED_EXTS]
-        if not media_files:
-            continue
-
+    # The walk stats every directory under the root; on a large NFS library
+    # that takes seconds, so it runs in a thread instead of on the event loop.
+    for dirpath, media_files in await asyncio.to_thread(_walk_media_dirs, real_root):
         abs_path = dirpath
         try:
             rel_path = os.path.relpath(abs_path, real_root)

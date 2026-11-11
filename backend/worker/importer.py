@@ -88,6 +88,20 @@ def _disambiguate_library_filenames(paths: list[Path]) -> list[str]:
     return names
 
 
+def _collect_media_files(gallery_path: Path) -> tuple[list[Path], int]:
+    """Return the gallery's valid media files and the count rejected by the magic check."""
+    media_files_raw = [f for f in gallery_path.rglob("*") if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
+    # Validate magic bytes for images; pass video files through without check
+    media_files: list[Path] = []
+    skipped = 0
+    for f in media_files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
+            media_files.append(f)
+        else:
+            skipped += 1
+    return media_files, skipped
+
+
 async def import_job(
     ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None, source_url: str | None = None
 ) -> dict:
@@ -136,15 +150,9 @@ async def import_job(
             break
 
     tags = _normalize_tags(_extract_tags(gallery_path, metadata), source)
-    media_files_raw = [f for f in gallery_path.rglob("*") if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
-    # Validate magic bytes for images; pass video files through without check
-    media_files = []
-    skipped = 0
-    for f in media_files_raw:
-        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
-            media_files.append(f)
-        else:
-            skipped += 1
+    # Listing and magic-checking every file blocks for seconds on a large
+    # gallery; run it in a thread so other jobs on this worker keep moving.
+    media_files, skipped = await asyncio.to_thread(_collect_media_files, gallery_path)
     media_files.sort(key=_natural_sort_key)
     if skipped:
         logger.warning("[import] %s: skipped %d file(s) with invalid magic bytes", gallery_path.name, skipped)

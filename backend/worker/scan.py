@@ -124,6 +124,20 @@ def _page_file_exists(img: Image) -> bool:
     return resolve_blob_path(img.blob, img.external_path).exists()
 
 
+def _probe_page(img: Image) -> tuple[bool, bool]:
+    file_exists = _page_file_exists(img)
+    return file_exists, file_exists and img.blob is not None and _has_thumb_160(img.blob)
+
+
+async def _probe_pages(images: list[Image]) -> list[tuple[bool, bool]]:
+    """Return (file exists, 160px thumbnail complete) for each image.
+
+    The stats run in a thread: inline, one large gallery on the NFS data root
+    stalled every other job sharing the worker's event loop.
+    """
+    return await asyncio.to_thread(lambda: [_probe_page(img) for img in images])
+
+
 def _link_source_vanished(gallery: Gallery, images: list[Image]) -> bool:
     """Return True when a link gallery's folder and every page file are gone.
 
@@ -590,7 +604,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                     cover_image = _cover_image_for_gallery(gallery, images)
                     existing_images_for_cover: list[Image] = []
 
-                    for img in images:
+                    for img, (file_exists, has_thumb) in zip(images, await _probe_pages(images), strict=True):
                         blob = img.blob
                         if not blob:
                             if img.external_path:
@@ -598,7 +612,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                                 # but not hashed yet, so it has no blob. It is
                                 # live data; only a vanished file removes it,
                                 # and there is no blob ref_count to give back.
-                                if Path(img.external_path).exists():
+                                if file_exists:
                                     existing_images_for_cover.append(img)
                                     continue
                                 logger.warning(
@@ -611,20 +625,18 @@ async def rescan_library_job(ctx: dict) -> dict:
                             images_to_delete.append(img.id)
                             removed += 1
                             continue
-                        src = resolve_blob_path(blob, img.external_path)
-                        if not src.exists():
+                        if not file_exists:
                             logger.warning(
                                 "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
                                 gid,
                                 img.id,
-                                str(src),
+                                str(resolve_blob_path(blob, img.external_path)),
                             )
                             shas_to_decrement.append(blob.sha256)
                             images_to_delete.append(img.id)
                             removed += 1
                             continue
                         existing_images_for_cover.append(img)
-                        has_thumb = _has_thumb_160(blob)
                         if not has_thumb:
                             missing_thumb = True
                             if img is cover_image:
@@ -651,7 +663,11 @@ async def rescan_library_job(ctx: dict) -> dict:
 
                     if missing_thumb and not missing_cover_thumb:
                         current_cover = _cover_image_for_gallery(gallery, existing_images_for_cover)
-                        if current_cover and current_cover.blob and not _has_thumb_160(current_cover.blob):
+                        if (
+                            current_cover
+                            and current_cover.blob
+                            and not await asyncio.to_thread(_has_thumb_160, current_cover.blob)
+                        ):
                             missing_cover_thumb = True
 
                     if missing_thumb:
@@ -848,10 +864,10 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         removed = 0
         removed_blob_sha256s: list[str] = []
         cover_image = _cover_image_for_gallery(gallery, images, excluded_set)
-        for img in images:
+        for img, (file_exists, has_thumb) in zip(images, await _probe_pages(images), strict=True):
             blob = img.blob
             if not blob:
-                if img.external_path and Path(img.external_path).exists():
+                if img.external_path and file_exists:
                     # Pending link page (not hashed yet): live data, keep it.
                     pending_paths.add(img.external_path)
                     continue
@@ -860,13 +876,12 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 await session.delete(img)
                 removed += 1
                 continue
-            src = resolve_blob_path(blob, img.external_path)
-            if not src.exists():
+            if not file_exists:
                 logger.warning(
                     "[rescan_gallery] gallery_id=%d image_id=%d missing: %s",
                     gallery_id,
                     img.id,
-                    str(src),
+                    str(resolve_blob_path(blob, img.external_path)),
                 )
                 await decrement_ref_count(blob.sha256, session)
                 removed_blob_sha256s.append(blob.sha256)
@@ -874,7 +889,6 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 removed += 1
                 continue
             known_sha256s.add(blob.sha256)
-            has_thumb = _has_thumb_160(blob)
             if not has_thumb:
                 missing_thumb = True
                 if img is cover_image:

@@ -28,6 +28,36 @@ from sqlalchemy import text
 class TestBatchScan:
     """POST /api/import/batch/scan — scan root_dir using a pattern."""
 
+    async def test_scan_walks_directory_tree_off_the_event_loop(self, client, mock_redis):
+        """os.walk on a large NFS library must not run on the API event loop thread."""
+        import threading
+
+        walk_threads: list[int] = []
+
+        def _walk(_root):
+            walk_threads.append(threading.get_ident())
+            return iter([("/mnt/test_lib/root/gallery1", [], ["1.jpg"])])
+
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("os.sep", "/"),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("os.walk", side_effect=_walk),
+        ):
+            resp = await client.post(
+                "/api/import/batch/scan",
+                json={"root_dir": "/mnt/test_lib/root", "pattern": "{title}"},
+            )
+
+        assert resp.status_code == 200
+        assert [m["title"] for m in resp.json()["matches"]] == ["gallery1"]
+        assert walk_threads and threading.get_ident() not in walk_threads
+
     async def test_scan_with_title_pattern(self, client, mock_redis):
         """Pattern {title} should match all immediate subdirs that contain media."""
         walk_data = [
@@ -859,6 +889,9 @@ def _to_thread_stub(fixed_hash: str):
             path = Path(args[0])
             # Real stat, so the commit-boundary re-check sees an unchanged file.
             return fixed_hash, SourceFileIdentity._from_stat(path, path.stat())
+        if fn is _importer._collect_media_files:
+            # The directory listing also runs in a thread; let it read the real files.
+            return fn(*args, **kwargs)
         return fixed_hash
 
     return _fake

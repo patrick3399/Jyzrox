@@ -710,6 +710,10 @@ async def refresh_physical_size(
     return {"status": "queued", "path": canonical_path}
 
 
+def _has_direct_media(directory: Path) -> bool:
+    return any(entry.is_file() and entry.suffix.lower() in MEDIA_EXTENSIONS for entry in directory.iterdir())
+
+
 @router.post("/physical/{library_id}/import")
 async def import_physical_folder(
     library_id: int,
@@ -727,7 +731,7 @@ async def import_physical_folder(
     directory = resolve_library_relative(root, path, require_directory=True)
     canonical_path = relative_posix(root, directory)
     try:
-        has_media = any(entry.is_file() and entry.suffix.lower() in MEDIA_EXTENSIONS for entry in directory.iterdir())
+        has_media = await asyncio.to_thread(_has_direct_media, directory)
     except OSError:
         raise HTTPException(status_code=403, detail="Library directory is not readable")
     if not has_media:
