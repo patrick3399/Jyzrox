@@ -470,9 +470,7 @@ async def upgrade_job(ctx: dict, version: str | None = None, source: str = "pypi
     return await _upgrade(version, source=source)
 
 
-async def _upgrade(
-    version: str | None, *, offline: bool = False, quiet: bool = False, source: str = "pypi"
-) -> dict:
+async def _upgrade(version: str | None, *, offline: bool = False, quiet: bool = False, source: str = "pypi") -> dict:
     """Build a fresh venv and swap it in; one upgrade/rollback runs at a time."""
     try:
         async with _single_flight_guard():
