@@ -122,15 +122,32 @@ export function VirtualGrid<T>({
     onLayoutChangeRef.current = onLayoutChange
   }, [onColCountChange, onLayoutChange])
 
-  // Emit the initial column count on mount. The ResizeObserver below only calls
-  // onColCountChange when it detects a CHANGE from this initial value, so without
-  // this the parent would never learn the real count and would keep its own
-  // default (e.g. useGridKeyboard's colCount staying at 4, making ArrowUp/Down
-  // jump by 4 instead of a full row on wider desktop grids).
+  // Report every committed column count, including the initial one: a parent
+  // that never hears the first value keeps its own default (e.g.
+  // useGridKeyboard's colCount staying at 4, making ArrowUp/Down jump by 4
+  // instead of a full row on wider desktop grids).
+  const reportedColCountRef = useRef<number | null>(null)
   useEffect(() => {
+    if (reportedColCountRef.current === colCount) return
+    reportedColCountRef.current = colCount
     onColCountChangeRef.current?.(colCount)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [colCount])
+
+  // Measure the container before the first paint. The initial colCount is a
+  // window-width guess, and the desktop sidebar makes it one breakpoint too
+  // wide; correcting it from the passive effect below lets the browser paint
+  // the guessed grid first, so every cell resizes in place and shifts the
+  // content under it (CLS 0.14–0.25 on /library, /history, /artists). A zero
+  // width means the container is not laid out yet: keep the guess and let the
+  // ResizeObserver settle it.
+  useIsomorphicLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const width = el.getBoundingClientRect().width
+    if (width <= 0) return
+    setContainerWidth(width)
+    setColCount(getColumnCount(width, columns))
+  }, [columnsKey])
 
   // ResizeObserver on the container to detect width changes and keep scrollMargin up to date
   useEffect(() => {
@@ -158,13 +175,7 @@ export function VirtualGrid<T>({
       setHasMeasuredLayout(true)
       setContainerWidth(width)
       const next = getColumnCount(width, columns)
-      setColCount((prev) => {
-        if (prev !== next) {
-          onColCountChangeRef.current?.(next)
-          return next
-        }
-        return prev
-      })
+      setColCount(next)
       // Update scrollMargin in case content above the grid changed, only when value differs
       const newMargin = el.offsetTop
       if (newMargin !== prevScrollMarginRef.current) {
