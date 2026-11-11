@@ -152,7 +152,8 @@ const zhTW: Record<string, string> = {
   'collections.galleryAddedTo': '已加入「{name}」',
   'collections.addDenied': '有 {count} 個圖庫無法加入（無權限）',
   'collections.inCollection': '已在此收藏集中',
-  'collections.emptyHint': '在圖庫頁面使用「加入收藏集」，或在圖庫列表選取圖庫後使用「加入收藏集」。',
+  'collections.emptyHint':
+    '在圖庫頁面使用「加入收藏集」，或在圖庫列表選取圖庫後使用「加入收藏集」。',
   'collections.browseLibrary': '瀏覽圖庫',
   'collections.coverGallery': '封面圖庫',
   // ── Admin Queue ──
@@ -557,7 +558,8 @@ const zhTW: Record<string, string> = {
   'novelRemote.save': '儲存',
   'novelRemote.saved': '已儲存',
   'novelRemote.recloneTitle': '取代本地副本？',
-  'novelRemote.recloneBody': '新遠端的歷史與現有副本無關（{reason}）。本地副本（{unpushed} 個未推送 commit）會被丟棄並重新 clone。',
+  'novelRemote.recloneBody':
+    '新遠端的歷史與現有副本無關（{reason}）。本地副本（{unpushed} 個未推送 commit）會被丟棄並重新 clone。',
   'novelRemote.recloneConfirm': '丟棄並重新 clone',
   'novelRemote.cancel': '取消',
   'settingsCategory.categories': '圖庫分類',
@@ -568,18 +570,21 @@ const zhTW: Record<string, string> = {
   'categories.add': '新增',
   'categories.galleryCount': '{count} 個圖庫',
   'categories.delete': '刪除',
-  'categories.deleteConfirm': '刪除「{name}」？{count} 個圖庫將變成未分類。磁碟上的資料夾不會改變。',
+  'categories.deleteConfirm':
+    '刪除「{name}」？{count} 個圖庫將變成未分類。磁碟上的資料夾不會改變。',
   'categories.created': '已新增分類',
   'categories.deleted': '已刪除分類',
   'categories.colorUpdated': '已更新顏色',
   'categories.backfillTitle': '依資料夾補套分類',
-  'categories.backfillDesc': '分類建立之前就被發現的本地圖庫會維持未分類。此動作會依最上層資料夾名稱補上分類，已有分類的圖庫不會被更動。',
+  'categories.backfillDesc':
+    '分類建立之前就被發現的本地圖庫會維持未分類。此動作會依最上層資料夾名稱補上分類，已有分類的圖庫不會被更動。',
   'categories.backfillPreview': '預覽',
   'categories.backfillApply': '套用',
   'categories.backfillMatched': '將更新 {count} 個圖庫',
   'categories.backfillApplied': '已更新 {count} 個圖庫',
   'categories.localFolderNote': '變更分類不會移動此圖庫在磁碟上的資料夾。',
-  'categories.uncategorizedDesc': '尚未指定分類的圖庫。可在圖庫中指定，本地圖庫也可使用下方「依資料夾補套分類」。',
+  'categories.uncategorizedDesc':
+    '尚未指定分類的圖庫。可在圖庫中指定，本地圖庫也可使用下方「依資料夾補套分類」。',
   'categories.viewInLibrary': '在圖庫中檢視',
   'import.batch.categoryUnregistered': '不在分類清單內，將成為未分類',
   'settingsGroup.personal': '個人',
@@ -722,7 +727,8 @@ const zhTW: Record<string, string> = {
   'settings.galleryDlUpgradeTo': '升級至 {version}',
   'settings.galleryDlRollback': '回退',
   'settings.galleryDlMaster': '更換成最新測試版本',
-  'settings.galleryDlMasterConfirm': '要安裝 master 的未發佈開發版嗎？可能不穩定，之後可用升級或回退切換回來。',
+  'settings.galleryDlMasterConfirm':
+    '要安裝 master 的未發佈開發版嗎？可能不穩定，之後可用升級或回退切換回來。',
   'settings.galleryDlMasterQueued': '已排入開發版安裝工作',
   'settings.galleryDlUpgradeQueued': '升級任務已排入佇列',
   'settings.galleryDlRollbackQueued': '回退任務已排入佇列',
@@ -993,7 +999,8 @@ const zhTW: Record<string, string> = {
   'queue.stop': '停止',
   'queue.stopping': '停止中…',
   'queue.stopped': '已停止',
-  'queue.stopConfirm': '停止此下載？已下載的內容都會保留；尚未抓到的貼文將被永久略過，之後的檢查只會抓取更新的貼文。',
+  'queue.stopConfirm':
+    '停止此下載？已下載的內容都會保留；尚未抓到的貼文將被永久略過，之後的檢查只會抓取更新的貼文。',
   'queue.stopError': '停止任務失敗',
   'queue.discard': '捨棄',
   'queue.discardConfirm': '捨棄此下載？這次已下載的檔案將被刪除。',
@@ -1001,7 +1008,8 @@ const zhTW: Record<string, string> = {
   'queue.modeIncremental': '增量',
   'queue.modeRepair': '修復',
   'queue.subscribedTitle': '已訂閱此網址',
-  'queue.subscribedBody': '你已訂閱「{name}」。檢查訂閱只會抓取新貼文；仍要下載可能會抓回你已選擇略過的舊貼文。',
+  'queue.subscribedBody':
+    '你已訂閱「{name}」。檢查訂閱只會抓取新貼文；仍要下載可能會抓回你已選擇略過的舊貼文。',
   'queue.checkSubscriptionNow': '立即檢查訂閱',
   'queue.downloadAnyway': '仍要下載',
   'queue.subscriptionCheckQueued': '訂閱檢查已排入佇列',
@@ -1632,7 +1640,8 @@ const zhTW: Record<string, string> = {
   'subscriptions.statusPaused': '已暫停',
   'subscriptions.checkFailed': '檢查訂閱失敗',
   'subscriptions.stop': '停止',
-  'subscriptions.stopConfirm': '停止「{name}」正在進行的下載？已下載的內容都會保留；尚未抓到的舊貼文將被略過，之後的檢查只會抓取更新的貼文。',
+  'subscriptions.stopConfirm':
+    '停止「{name}」正在進行的下載？已下載的內容都會保留；尚未抓到的舊貼文將被略過，之後的檢查只會抓取更新的貼文。',
   'subscriptions.stopRequested': '正在停止，已下載的內容會保留',
   'subscriptions.stopFailed': '停止下載失敗',
   'subscriptions.statusStopped': '已停止',
@@ -1922,7 +1931,8 @@ const zhTW: Record<string, string> = {
   'admin.sites.downloadSettings': '下載設定',
   'admin.sites.concurrency': '並發數',
   'admin.sites.spreadPersonas': '分散到多個身分',
-  'admin.sites.spreadPersonasHint': '並發數將變為每個身分的上限。僅手動發起的下載會被分散；訂閱仍使用目前啟用的帳號。',
+  'admin.sites.spreadPersonasHint':
+    '並發數將變為每個身分的上限。僅手動發起的下載會被分散；訂閱仍使用目前啟用的帳號。',
   'admin.sites.httpTimeout': 'HTTP 逾時',
   'admin.sites.retries': '重試次數',
   'admin.sites.seconds': '秒',
@@ -2081,7 +2091,8 @@ const zhTW: Record<string, string> = {
   'credentials.accountActionFailed': '帳號操作失敗',
   'credentials.newAccountName': '存到指定帳號（選填）',
   'credentials.newAccountPlaceholder': '例如 backup',
-  'credentials.newAccountHint': '留空則更新使用中的帳號。新名稱會新增帳號，既有名稱會被覆寫。只能使用英數字與 . _ @ -。',
+  'credentials.newAccountHint':
+    '留空則更新使用中的帳號。新名稱會新增帳號，既有名稱會被覆寫。只能使用英數字與 . _ @ -。',
   'credentials.showAccounts': '顯示 {source} 的帳號',
   'credentials.accountsOf': '{source} 的帳號',
   'credentials.accountCount': '{count} 個帳號',
@@ -2139,7 +2150,8 @@ const zhTW: Record<string, string> = {
   'trash.disabledDesc': '在設定中啟用垃圾桶以使用此功能',
   'trash.restoreAll': '全部還原',
   'trash.restoreAllConfirm': '要還原垃圾桶中的全部 {count} 個圖庫嗎？',
-  'trash.emptyTrashConfirmCount': '這將永久刪除垃圾桶中的全部 {count} 個圖庫，且無法復原。要繼續嗎？',
+  'trash.emptyTrashConfirmCount':
+    '這將永久刪除垃圾桶中的全部 {count} 個圖庫，且無法復原。要繼續嗎？',
   'trash.select': '選取',
   'trash.selectPage': '選取本頁',
   'trash.selectedCount': '已選取 {count} 項',
@@ -2179,7 +2191,8 @@ const zhTW: Record<string, string> = {
   'trash.purgeQueued': '已在背景開始永久刪除',
   'trash.purgeAlreadyRunning': '已有永久刪除作業正在執行',
   'trash.restoreFilteredConfirm': '要還原符合目前篩選條件的 {count} 個圖庫嗎？',
-  'trash.emptyFilteredConfirm': '要永久刪除符合目前篩選條件的 {count} 個圖庫嗎？此操作無法復原。是否繼續？',
+  'trash.emptyFilteredConfirm':
+    '要永久刪除符合目前篩選條件的 {count} 個圖庫嗎？此操作無法復原。是否繼續？',
   'trash.noMatches': '沒有符合目前篩選條件的圖庫',
   'trash.clearFilters': '清除篩選',
 

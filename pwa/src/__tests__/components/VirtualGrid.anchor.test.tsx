@@ -136,7 +136,15 @@ describe('VirtualGrid browse-anchor contracts', () => {
   it('test_visible_start_index_falls_back_to_first_rendered_row_when_range_is_null', () => {
     rangeModel.value = null
     const onVisibleRangeChange = vi.fn()
-    render(grid([{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], { onVisibleRangeChange }))
+    render(
+      grid(
+        [
+          { id: 'a', label: 'A' },
+          { id: 'b', label: 'B' },
+        ],
+        { onVisibleRangeChange },
+      ),
+    )
 
     expect(onVisibleRangeChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ startIndex: 0, visibleStartIndex: 0 }),

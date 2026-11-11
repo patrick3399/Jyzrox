@@ -48,9 +48,7 @@ export const auth = {
     }),
 
   getUiPreferences: () =>
-    apiFetch<{ preferences: import('../uiPreferences').UiPreferences }>(
-      '/api/auth/ui-preferences',
-    ),
+    apiFetch<{ preferences: import('../uiPreferences').UiPreferences }>('/api/auth/ui-preferences'),
 
   updateUiPreferences: (data: import('../uiPreferences').UiPreferencesPatch) =>
     apiFetch<{ status: string; preferences: import('../uiPreferences').UiPreferences }>(

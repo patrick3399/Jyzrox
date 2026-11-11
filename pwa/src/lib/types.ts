@@ -305,10 +305,7 @@ export interface EhImageMap {
  * `repair` change what the user can do with a job (a repair is never discarded).
  */
 export type DownloadJobMode =
-  | 'download'
-  | 'subscription_initial'
-  | 'subscription_incremental'
-  | 'repair'
+  'download' | 'subscription_initial' | 'subscription_incremental' | 'repair'
 
 export interface DownloadJob {
   id: string

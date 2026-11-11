@@ -166,11 +166,7 @@ describe('E-Hentai search seeding', () => {
     fireEvent.click(screen.getByRole('button', { name: 'browse.clearSearch' }))
 
     await waitFor(() =>
-      expect(replaceState).toHaveBeenCalledWith(
-        window.history.state,
-        '',
-        '/e-hentai?tab=popular',
-      ),
+      expect(replaceState).toHaveBeenCalledWith(window.history.state, '', '/e-hentai?tab=popular'),
     )
     const urls = replaceState.mock.calls.map(([, , url]) => String(url))
     expect(urls.at(-1)).not.toMatch(/q=|adv_open=|minrating=/)

@@ -6,7 +6,9 @@ vi.mock('@/lib/i18n', () => ({
     vars ? `${key} ${Object.values(vars).join(' ')}` : key,
 }))
 vi.mock('@/components/LocaleProvider', () => ({ useLocale: () => 'en' }))
-vi.mock('@/components/LoadingSpinner', () => ({ LoadingSpinner: () => <span data-testid="spin" /> }))
+vi.mock('@/components/LoadingSpinner', () => ({
+  LoadingSpinner: () => <span data-testid="spin" />,
+}))
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }))
@@ -14,7 +16,14 @@ vi.mock('next/navigation', () => ({
 const h = vi.hoisted(() => ({
   keys: [] as unknown[],
   data: {
-    notes: [{ path: '作品A/Setting/角色-張三.md', title: '張三', note_type: 'character', frontmatter: {} }],
+    notes: [
+      {
+        path: '作品A/Setting/角色-張三.md',
+        title: '張三',
+        note_type: 'character',
+        frontmatter: {},
+      },
+    ],
   },
 }))
 

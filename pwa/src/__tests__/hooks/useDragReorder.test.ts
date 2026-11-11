@@ -26,17 +26,13 @@ beforeEach(() => {
 describe('useDragReorder — initial state', () => {
   it('test_useDragReorder_initialState_dragIdxIsNull', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     expect(result.current.dragIdx).toBeNull()
   })
 
   it('test_useDragReorder_initialState_dragOverIsNull', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     expect(result.current.dragOver).toBeNull()
   })
 })
@@ -44,36 +40,28 @@ describe('useDragReorder — initial state', () => {
 describe('useDragReorder — getDragProps shape', () => {
   it('test_useDragReorder_getDragProps_returnsDraggableTrue', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     const props = result.current.getDragProps(1)
     expect(props.draggable).toBe(true)
   })
 
   it('test_useDragReorder_getDragProps_returnsCorrectDataDragIndex', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     const props = result.current.getDragProps(2)
     expect(props['data-drag-index']).toBe(2)
   })
 
   it('test_useDragReorder_getDragProps_styleHasTouchActionNone', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     const props = result.current.getDragProps(0)
     expect(props.style).toEqual({ touchAction: 'none' })
   })
 
   it('test_useDragReorder_onDragOver_callsPreventDefault', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     const props = result.current.getDragProps(0)
     const mockEvent = { preventDefault: vi.fn() } as unknown as React.DragEvent
     props.onDragOver(mockEvent)
@@ -84,9 +72,7 @@ describe('useDragReorder — getDragProps shape', () => {
 describe('useDragReorder — HTML5 drag reordering', () => {
   it('test_useDragReorder_dragStart_setsDragIdx', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     act(() => {
       result.current.getDragProps(1).onDragStart()
     })
@@ -95,9 +81,7 @@ describe('useDragReorder — HTML5 drag reordering', () => {
 
   it('test_useDragReorder_dragEnd_differentIndex_callsOnReorder', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     act(() => {
       result.current.getDragProps(0).onDragStart()
       result.current.getDragProps(2).onDragEnter()
@@ -108,9 +92,7 @@ describe('useDragReorder — HTML5 drag reordering', () => {
 
   it('test_useDragReorder_dragEnd_sameIndex_doesNotCallOnReorder', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     act(() => {
       result.current.getDragProps(1).onDragStart()
       result.current.getDragProps(1).onDragEnter()
@@ -122,9 +104,7 @@ describe('useDragReorder — HTML5 drag reordering', () => {
   it('test_useDragReorder_dragReorder_index0To2_movesItemCorrectly', () => {
     const onReorder = vi.fn()
     const items = ['a', 'b', 'c']
-    const { result } = renderHook(() =>
-      useDragReorder({ items, onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items, onReorder }))
     act(() => {
       result.current.getDragProps(0).onDragStart()
       result.current.getDragProps(2).onDragEnter()
@@ -135,9 +115,7 @@ describe('useDragReorder — HTML5 drag reordering', () => {
 
   it('test_useDragReorder_dragEnd_resetsStateToNull', () => {
     const onReorder = vi.fn()
-    const { result } = renderHook(() =>
-      useDragReorder({ items: ['a', 'b', 'c'], onReorder }),
-    )
+    const { result } = renderHook(() => useDragReorder({ items: ['a', 'b', 'c'], onReorder }))
     act(() => {
       result.current.getDragProps(0).onDragStart()
       result.current.getDragProps(2).onDragEnter()

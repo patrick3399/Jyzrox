@@ -15,7 +15,12 @@ export const overlayBackdropClass =
 export const sheetPopupClass =
   'flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-vault-border bg-vault-card pb-(--sab) text-vault-text shadow-vault-popup outline-none transition-[transform,opacity] duration-(--motion-base) ease-vault-out data-[starting-style]:translate-y-full data-[ending-style]:translate-y-full sm:rounded-xl sm:pb-0 sm:data-[starting-style]:translate-y-0 sm:data-[starting-style]:scale-95 sm:data-[starting-style]:opacity-0 sm:data-[ending-style]:translate-y-0 sm:data-[ending-style]:scale-95 sm:data-[ending-style]:opacity-0'
 
-const SIZE = { sm: 'sm:max-w-sm', md: 'sm:max-w-md', lg: 'sm:max-w-xl', xl: 'sm:max-w-3xl' } as const
+const SIZE = {
+  sm: 'sm:max-w-sm',
+  md: 'sm:max-w-md',
+  lg: 'sm:max-w-xl',
+  xl: 'sm:max-w-3xl',
+} as const
 
 interface DialogProps {
   open: boolean
@@ -52,21 +57,39 @@ export function Dialog({
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={overlayBackdropClass} />
         <BaseDialog.Viewport className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-4">
-          <BaseDialog.Popup className={cn(sheetPopupClass, SIZE[size], className)} initialFocus={initialFocus}>
+          <BaseDialog.Popup
+            className={cn(sheetPopupClass, SIZE[size], className)}
+            initialFocus={initialFocus}
+          >
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-vault-border px-5 py-3">
-              <BaseDialog.Title className="min-w-0 truncate font-semibold">{title}</BaseDialog.Title>
+              <BaseDialog.Title className="min-w-0 truncate font-semibold">
+                {title}
+              </BaseDialog.Title>
               <BaseDialog.Close
-                render={<Button variant="ghost" size="icon" aria-label={t('common.close')} disabled={!dismissible} />}
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t('common.close')}
+                    disabled={!dismissible}
+                  />
+                }
               >
                 <X size={18} />
               </BaseDialog.Close>
             </header>
             {description && (
-              <BaseDialog.Description className="px-5 pt-3 text-sm text-vault-text-secondary">{description}</BaseDialog.Description>
+              <BaseDialog.Description className="px-5 pt-3 text-sm text-vault-text-secondary">
+                {description}
+              </BaseDialog.Description>
             )}
-            <div className={cn('min-h-0 flex-1 overflow-y-auto', padded && 'px-5 py-4')}>{children}</div>
+            <div className={cn('min-h-0 flex-1 overflow-y-auto', padded && 'px-5 py-4')}>
+              {children}
+            </div>
             {footer && (
-              <footer className="flex shrink-0 justify-end gap-2 border-t border-vault-border px-5 py-3">{footer}</footer>
+              <footer className="flex shrink-0 justify-end gap-2 border-t border-vault-border px-5 py-3">
+                {footer}
+              </footer>
             )}
           </BaseDialog.Popup>
         </BaseDialog.Viewport>

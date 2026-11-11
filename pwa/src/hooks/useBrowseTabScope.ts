@@ -9,11 +9,10 @@ type UseBrowseTabScopeOptions = {
   requestedTabId?: string
 }
 
-export function useBrowseTabScope({
-  storage,
-  enabled,
-  requestedTabId,
-}: UseBrowseTabScopeOptions): { tabId: string; ready: boolean } {
+export function useBrowseTabScope({ storage, enabled, requestedTabId }: UseBrowseTabScopeOptions): {
+  tabId: string
+  ready: boolean
+} {
   const [claimedTabId, setClaimedTabId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -85,7 +84,5 @@ export function useBrowseTabScope({
 
   if (!enabled) return { tabId: 'pending', ready: false }
   if (requestedTabId) return { tabId: requestedTabId, ready: true }
-  return claimedTabId
-    ? { tabId: claimedTabId, ready: true }
-    : { tabId: 'pending', ready: false }
+  return claimedTabId ? { tabId: claimedTabId, ready: true } : { tabId: 'pending', ready: false }
 }

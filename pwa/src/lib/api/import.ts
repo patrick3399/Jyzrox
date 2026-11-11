@@ -23,7 +23,12 @@ export const import_ = {
   batchStart: (
     rootDir: string,
     mode: string,
-    galleries: Array<{ path: string; artist: string | null; category?: string | null; title: string }>,
+    galleries: Array<{
+      path: string
+      artist: string | null
+      category?: string | null
+      title: string
+    }>,
   ) =>
     apiFetch<{ batch_id: string; total: number }>('/api/import/batch/start', {
       method: 'POST',

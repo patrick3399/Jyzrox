@@ -29,8 +29,7 @@ export const library = {
   getCategories: (init?: RequestInit) =>
     apiFetch<{ categories: string[] }>('/api/library/galleries/categories', init),
 
-  getFacets: (init?: RequestInit) =>
-    apiFetch<LibraryFacets>('/api/library/galleries/facets', init),
+  getFacets: (init?: RequestInit) => apiFetch<LibraryFacets>('/api/library/galleries/facets', init),
 
   getGalleries: (params: GallerySearchParams = {}, init?: RequestInit) =>
     apiFetch<GalleryListResponse>(
@@ -333,14 +332,11 @@ export const library = {
     }),
 
   trashPurge: (galleryIds: number[], init?: RequestInit) =>
-    apiFetch<TrashPurgeQueued>(
-      '/api/library/trash/purge',
-      {
-        method: 'POST',
-        body: JSON.stringify({ gallery_ids: galleryIds }),
-        ...init,
-      },
-    ),
+    apiFetch<TrashPurgeQueued>('/api/library/trash/purge', {
+      method: 'POST',
+      body: JSON.stringify({ gallery_ids: galleryIds }),
+      ...init,
+    }),
 
   trashPreview: (
     galleryId: number,

@@ -37,7 +37,11 @@ function writeJson(key: string, value: unknown): void {
 
 function loadStack(): PushEntry[] {
   const value = readJson<unknown>(STACK_KEY, [])
-  return Array.isArray(value) ? (value as PushEntry[]).filter((entry) => typeof entry?.from === 'string' && typeof entry?.to === 'string') : []
+  return Array.isArray(value)
+    ? (value as PushEntry[]).filter(
+        (entry) => typeof entry?.from === 'string' && typeof entry?.to === 'string',
+      )
+    : []
 }
 
 function recordPush(from: string, to: string): void {
@@ -89,7 +93,9 @@ const scrollSavers = new Set<() => void>()
  *  the position of the list it is leaving. Returns the unregister function. */
 export function registerScrollSaver(saver: () => void): () => void {
   scrollSavers.add(saver)
-  return () => { scrollSavers.delete(saver) }
+  return () => {
+    scrollSavers.delete(saver)
+  }
 }
 
 export function saveExplorerScroll(): void {
@@ -106,7 +112,13 @@ let selectionEntryLive = false
  *  skips over it — otherwise the user needs two backs to leave a list. */
 export function markSelectionEntry(): void {
   selectionEntryLive = true
-  window.addEventListener('popstate', () => { selectionEntryLive = false }, { once: true })
+  window.addEventListener(
+    'popstate',
+    () => {
+      selectionEntryLive = false
+    },
+    { once: true },
+  )
 }
 
 export function hasSelectionEntry(): boolean {

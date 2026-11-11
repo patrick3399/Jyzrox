@@ -13,8 +13,16 @@ interface SidebarProps {
 
 export function Sidebar({ downloadStats: stats }: SidebarProps) {
   const pathname = usePathname()
-  const { profile, logout, groupedLinks, resolveHref, handleNavClick, cycleTheme, ThemeIcon, themeLabel } =
-    useNavigation()
+  const {
+    profile,
+    logout,
+    groupedLinks,
+    resolveHref,
+    handleNavClick,
+    cycleTheme,
+    ThemeIcon,
+    themeLabel,
+  } = useNavigation()
   const navCounts = useNavCounts()
 
   return (

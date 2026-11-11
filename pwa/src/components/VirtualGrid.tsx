@@ -22,8 +22,7 @@ export interface VirtualGridProps<T> {
   getItemKey?: (item: T) => string | number
   gap?: number // gap in px (default 16 = gap-4)
   estimateHeight?:
-    | number
-    | ((context: { colCount: number; containerWidth: number; gap: number }) => number)
+    number | ((context: { colCount: number; containerWidth: number; gap: number }) => number)
   renderItem: (item: T, index: number) => React.ReactNode
   onLoadMore?: () => void
   hasMore?: boolean

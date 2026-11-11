@@ -2,15 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
-import {
-  useState,
-  useRef,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  Suspense,
-} from 'react'
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
 import { useProfile } from '@/hooks/useProfile'
@@ -205,9 +197,9 @@ function getInitialViewMode(): ViewMode {
 export default function BrowsePageWrapper() {
   return (
     <PageContainer>
-    <Suspense>
-      <BrowsePage />
-    </Suspense>
+      <Suspense>
+        <BrowsePage />
+      </Suspense>
     </PageContainer>
   )
 }
@@ -382,7 +374,16 @@ function BrowsePage() {
     // to the restored snapshot.
     const timer = setTimeout(() => void loadMore(), 0)
     return () => clearTimeout(timer)
-  }, [browseUserId, ehConfigured, items.length, loadMore, seedKey, state.hasMore, state.status, tab])
+  }, [
+    browseUserId,
+    ehConfigured,
+    items.length,
+    loadMore,
+    seedKey,
+    state.hasMore,
+    state.status,
+    tab,
+  ])
 
   const previousRestoreIdentityRef = useRef(seedKey)
   const handledRestoreKeyRef = useRef<string | null>(null)
@@ -998,7 +999,10 @@ function BrowsePage() {
               />
             )}
           </div>
-          <Button variant="ghost" size="icon" className="shrink-0"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
             onClick={() => {
               setMobileSearchOpen(false)
               setShowHistory(false)
@@ -1012,7 +1016,9 @@ function BrowsePage() {
       {/* Desktop + mobile compact row */}
       <div className={`flex gap-2 ${mobileSearchOpen ? 'hidden sm:flex' : ''}`}>
         {/* Mobile search icon button */}
-        <Button variant="secondary" size="icon"
+        <Button
+          variant="secondary"
+          size="icon"
           type="button"
           onClick={() => setShowImageSearch(true)}
           title={t('browse.searchByImage')}
@@ -1021,7 +1027,10 @@ function BrowsePage() {
           <Camera size={16} />
         </Button>
 
-        <Button variant="secondary" size="icon" className="sm:hidden shrink-0"
+        <Button
+          variant="secondary"
+          size="icon"
+          className="sm:hidden shrink-0"
           onClick={() => setMobileSearchOpen(true)}
           aria-label={t('browse.search')}
         >
@@ -1030,7 +1039,9 @@ function BrowsePage() {
 
         {/* Mobile saved searches button */}
         <div ref={mobileSavedSearchesRef} className="relative sm:hidden shrink-0">
-          <Button variant="secondary" size="icon"
+          <Button
+            variant="secondary"
+            size="icon"
             onClick={() => {
               setShowSavedSearches((v) => !v)
               setShowSaveInput(false)
@@ -1069,7 +1080,10 @@ function BrowsePage() {
                     autoFocus
                     className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                   />
-                  <Button variant="primary" size="sm" className="shrink-0"
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="shrink-0"
                     onClick={handleSaveSearch}
                   >
                     {t('browse.saveSearch')}
@@ -1188,7 +1202,10 @@ function BrowsePage() {
           )}
         </div>
 
-        <Button variant="primary" size="md" className="hidden sm:inline-flex shrink-0"
+        <Button
+          variant="primary"
+          size="md"
+          className="hidden sm:inline-flex shrink-0"
           onClick={() => {
             if (debounceRef.current) clearTimeout(debounceRef.current)
             setAutocompleteOpen(false)
@@ -1200,7 +1217,9 @@ function BrowsePage() {
 
         {/* Saved Searches button (desktop) */}
         <div ref={savedSearchesRef} className="relative hidden sm:block shrink-0">
-          <Button variant="secondary" size="icon"
+          <Button
+            variant="secondary"
+            size="icon"
             onClick={() => {
               setShowSavedSearches((v) => !v)
               setShowSaveInput(false)
@@ -1239,7 +1258,10 @@ function BrowsePage() {
                     autoFocus
                     className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                   />
-                  <Button variant="primary" size="sm" className="shrink-0"
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="shrink-0"
                     onClick={handleSaveSearch}
                   >
                     {t('browse.saveSearch')}
@@ -1291,7 +1313,9 @@ function BrowsePage() {
         {/* Subscribe to search button (desktop) */}
         {query && (
           <div className="relative hidden sm:block shrink-0">
-            <Button variant="secondary" size="icon"
+            <Button
+              variant="secondary"
+              size="icon"
               onClick={() => setShowSubscribe(!showSubscribe)}
               title={t('browse.subscribeToSearch')}
             >
@@ -1354,7 +1378,10 @@ function BrowsePage() {
                     </select>
                   </div>
                 </div>
-                <Button variant="primary" size="sm" className="w-full"
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full"
                   onClick={() => handleSubscribe()}
                   disabled={subCreating}
                 >
@@ -1373,7 +1400,10 @@ function BrowsePage() {
           </div>
         )}
 
-        <Button variant="secondary" size="icon" className="hidden sm:inline-flex"
+        <Button
+          variant="secondary"
+          size="icon"
+          className="hidden sm:inline-flex"
           type="button"
           onClick={() => void refreshFromTop()}
           disabled={!canRefresh || refreshing}
@@ -1383,7 +1413,9 @@ function BrowsePage() {
           <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
         </Button>
 
-        <Button variant="secondary" size="icon"
+        <Button
+          variant="secondary"
+          size="icon"
           type="button"
           onClick={openRandomLoadedGallery}
           disabled={items.length === 0}
@@ -1420,7 +1452,9 @@ function BrowsePage() {
         >
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-vault-text">{t('browse.searchByImage')}</h2>
-            <Button variant="ghost" size="icon-sm"
+            <Button
+              variant="ghost"
+              size="icon-sm"
               type="button"
               onClick={() => setShowImageSearch(false)}
               aria-label={t('common.close')}
@@ -1461,7 +1495,9 @@ function BrowsePage() {
               {t('browse.includeExpunged')}
             </label>
           </div>
-          <Button variant="primary" size="md"
+          <Button
+            variant="primary"
+            size="md"
             type="button"
             onClick={submitImageSearch}
             disabled={!imageSearchFile || imageSearchLoading}
@@ -1925,7 +1961,9 @@ function BrowsePage() {
         >
           <p className="font-medium text-vault-text">{t('error.session_expired')}</p>
           <p className="text-sm text-vault-text-muted">{t('browse.imageSessionExpiredHelp')}</p>
-          <Button variant="primary" size="md"
+          <Button
+            variant="primary"
+            size="md"
             type="button"
             onClick={() =>
               actions.commitIdentity(
@@ -1988,9 +2026,7 @@ function BrowsePage() {
                 layoutRef.current = layout
                 actions.setLayout(layout)
               }}
-              restoreRequest={
-                restoreRequest?.identityKey === seedKey ? restoreRequest : undefined
-              }
+              restoreRequest={restoreRequest?.identityKey === seedKey ? restoreRequest : undefined}
               onRestoreApplied={handleGridRestoreApplied}
               renderItem={(g) => (
                 <GridCard
@@ -2012,7 +2048,10 @@ function BrowsePage() {
           {state.error && !loading && (
             <div className="flex flex-col items-center gap-2 py-4">
               <span className="text-xs text-red-400">{t('browse.failedLoadResults')}</span>
-              <Button variant="secondary" size="sm" className="rounded-full text-xs"
+              <Button
+                variant="secondary"
+                size="sm"
+                className="rounded-full text-xs"
                 onClick={() => loadMore()}
               >
                 {t('common.retry')}

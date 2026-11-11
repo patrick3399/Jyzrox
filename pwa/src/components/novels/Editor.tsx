@@ -168,19 +168,10 @@ export function Editor({
       />
 
       <div className="flex justify-end gap-2">
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={onCancel}
-        >
+        <Button variant="secondary" size="md" onClick={onCancel}>
           {t('novels.cancel')}
         </Button>
-        <Button
-          variant="primary"
-          size="md"
-          disabled={saving}
-          onClick={handleSave}
-        >
+        <Button variant="primary" size="md" disabled={saving} onClick={handleSave}>
           {t('novels.save')}
         </Button>
       </div>

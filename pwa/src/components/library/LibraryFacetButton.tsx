@@ -10,7 +10,8 @@ import { facetSelectionLabel, type FacetOption } from './LibraryFacetList'
 
 // Base UI Popover stays out of the page's initial JS until a facet first opens.
 const LibraryFacetPopover = dynamic(
-  () => import('@/components/library/LibraryFacetPopover').then((module) => module.LibraryFacetPopover),
+  () =>
+    import('@/components/library/LibraryFacetPopover').then((module) => module.LibraryFacetPopover),
   { ssr: false },
 )
 
@@ -47,8 +48,10 @@ export function LibraryFacetButton({
   }
 
   const text =
-    facetSelectionLabel(selection, (value) => options.find((o) => o.value === value)?.label ?? value) ??
-    label
+    facetSelectionLabel(
+      selection,
+      (value) => options.find((o) => o.value === value)?.label ?? value,
+    ) ?? label
   const active = selection.values.length > 0
 
   return (

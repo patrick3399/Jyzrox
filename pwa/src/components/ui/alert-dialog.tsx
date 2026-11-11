@@ -40,12 +40,20 @@ export function AlertDialog({
             <div className="space-y-2 px-5 pt-5">
               <BaseAlertDialog.Title className="font-semibold">{title}</BaseAlertDialog.Title>
               {description && (
-                <BaseAlertDialog.Description className="text-sm text-vault-text-secondary">{description}</BaseAlertDialog.Description>
+                <BaseAlertDialog.Description className="text-sm text-vault-text-secondary">
+                  {description}
+                </BaseAlertDialog.Description>
               )}
             </div>
             <div className="flex justify-end gap-2 px-5 py-4">
-              <BaseAlertDialog.Close render={<Button disabled={busy} />}>{cancelLabel ?? t('common.cancel')}</BaseAlertDialog.Close>
-              <Button variant={destructive ? 'danger' : 'primary'} disabled={busy} onClick={onConfirm}>
+              <BaseAlertDialog.Close render={<Button disabled={busy} />}>
+                {cancelLabel ?? t('common.cancel')}
+              </BaseAlertDialog.Close>
+              <Button
+                variant={destructive ? 'danger' : 'primary'}
+                disabled={busy}
+                onClick={onConfirm}
+              >
                 {confirmLabel}
               </Button>
             </div>

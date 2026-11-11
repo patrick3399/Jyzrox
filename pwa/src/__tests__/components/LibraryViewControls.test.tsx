@@ -25,10 +25,7 @@ describe('LibraryViewControls', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.queryByRole('radio', { name: 'Compact' })).toBeNull()
-    expect(screen.getByTestId('library-view-menu-button')).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
+    expect(screen.getByTestId('library-view-menu-button')).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('test_inline_layout_radiogroup_marks_the_active_mode_and_switches', () => {

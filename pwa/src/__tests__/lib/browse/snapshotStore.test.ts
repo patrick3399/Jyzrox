@@ -505,12 +505,17 @@ describe('browse snapshot store patchItems', () => {
     updateItem: (item: Titled) => (item.id === id ? { ...item, title } : item),
   })
 
-  function titledSnapshot(pages: Titled[][], total: number | null = 10): BrowseSnapshot<Titled, Cursor> {
+  function titledSnapshot(
+    pages: Titled[][],
+    total: number | null = 10,
+  ): BrowseSnapshot<Titled, Cursor> {
     return { pages, cursor: 'cursor', hasMore: true, total, anchor: null, layout: null }
   }
 
   function lastAccessByKey(storage: Storage): Array<[string, number]> {
-    const partition = JSON.parse(storage.getItem(snapshotStorageKey(scope)) ?? '{"entries":[]}') as {
+    const partition = JSON.parse(
+      storage.getItem(snapshotStorageKey(scope)) ?? '{"entries":[]}',
+    ) as {
       entries: Array<{ identityKey: string; lastAccess: number }>
     }
     return partition.entries.map((entry) => [entry.identityKey, entry.lastAccess])

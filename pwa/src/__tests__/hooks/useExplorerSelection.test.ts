@@ -17,7 +17,14 @@ type Rect = { left: number; top: number; right: number; bottom: number }
 
 function withRect(element: HTMLElement, rect: Rect) {
   element.getBoundingClientRect = () =>
-    ({ ...rect, x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top, toJSON: () => ({}) }) as DOMRect
+    ({
+      ...rect,
+      x: rect.left,
+      y: rect.top,
+      width: rect.right - rect.left,
+      height: rect.bottom - rect.top,
+      toJSON: () => ({}),
+    }) as DOMRect
 }
 
 /** A 500x500 scroll container at the viewport origin (jsdom reports 0 for layout metrics). */
@@ -25,7 +32,12 @@ function makeScroller(): HTMLDivElement {
   const scroller = document.createElement('div')
   document.body.appendChild(scroller)
   withRect(scroller, { left: 0, top: 0, right: 500, bottom: 500 })
-  for (const [name, value] of Object.entries({ clientWidth: 500, clientHeight: 500, scrollWidth: 500, scrollHeight: 500 })) {
+  for (const [name, value] of Object.entries({
+    clientWidth: 500,
+    clientHeight: 500,
+    scrollWidth: 500,
+    scrollHeight: 500,
+  })) {
     Object.defineProperty(scroller, name, { configurable: true, value })
   }
   return scroller
@@ -90,7 +102,9 @@ function setup(options: Partial<Parameters<typeof useExplorerSelection>[0]> = {}
     })
   const fire = (type: 'pointermove' | 'pointerup' | 'pointercancel', x: number, y: number) =>
     act(() => {
-      scroller.dispatchEvent(Object.assign(new MouseEvent(type, { clientX: x, clientY: y }), { pointerId: 1 }))
+      scroller.dispatchEvent(
+        Object.assign(new MouseEvent(type, { clientX: x, clientY: y }), { pointerId: 1 }),
+      )
     })
   const selected = () => [...hook.result.current.selectedKeys].sort()
   return { hook, scroller, empty, press, fire, selected, onMarqueeStart, onBackgroundClick }

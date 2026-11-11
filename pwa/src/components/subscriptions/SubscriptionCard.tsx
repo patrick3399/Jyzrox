@@ -324,8 +324,7 @@ function DownloadOptionsRow({
 }
 
 // Footer actions: a 40px touch target on phones, compact from `sm` up.
-const FOOTER_ACTION =
-  'sm:size-auto sm:rounded sm:p-1.5'
+const FOOTER_ACTION = 'sm:size-auto sm:rounded sm:p-1.5'
 const FOOTER_ICON = 18
 const FOOTER_ICON_CLASS = 'sm:size-3.5'
 
@@ -535,7 +534,10 @@ export function SubscriptionCard({
         </div>
       )}
       {run && run.total > 1 && (
-        <p data-testid="subscription-run" className="mt-1 truncate text-[10px] text-vault-text-muted">
+        <p
+          data-testid="subscription-run"
+          className="mt-1 truncate text-[10px] text-vault-text-muted"
+        >
           {t('subscriptions.runProgress', { done: String(run.done), total: String(run.total) })}
         </p>
       )}

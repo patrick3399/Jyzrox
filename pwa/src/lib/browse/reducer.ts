@@ -136,10 +136,7 @@ export function createBrowseReducer<Item, Cursor>(getItemId: (item: Item) => str
           terminal: null,
         }
       case 'PAGE_SUCCEEDED': {
-        if (
-          action.identityKey !== state.identityKey ||
-          action.generation !== state.generation
-        ) {
+        if (action.identityKey !== state.identityKey || action.generation !== state.generation) {
           return state
         }
         if (action.mode === 'replace') {
@@ -180,10 +177,7 @@ export function createBrowseReducer<Item, Cursor>(getItemId: (item: Item) => str
         }
       }
       case 'BUFFER_SUCCEEDED': {
-        if (
-          action.identityKey !== state.identityKey ||
-          action.generation !== state.generation
-        ) {
+        if (action.identityKey !== state.identityKey || action.generation !== state.generation) {
           return state
         }
         const seen = new Set<string | number>()
@@ -216,10 +210,7 @@ export function createBrowseReducer<Item, Cursor>(getItemId: (item: Item) => str
         }
       }
       case 'PAGE_FAILED':
-        if (
-          action.identityKey !== state.identityKey ||
-          action.generation !== state.generation
-        ) {
+        if (action.identityKey !== state.identityKey || action.generation !== state.generation) {
           return state
         }
         return {

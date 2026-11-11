@@ -111,42 +111,60 @@ describe('E-Hentai unresolved user scope', () => {
 
 describe('E-Hentai identity history intent', () => {
   const cases = [
-    ['query', (state: ReturnType<typeof useEhBrowse>, mode: EhHistoryMode) => state.actions.commitQuery('needle', mode)],
-    ['filter', (state: ReturnType<typeof useEhBrowse>, mode: EhHistoryMode) => state.actions.setFilter({ minRating: 4 }, mode)],
-    ['tab', (state: ReturnType<typeof useEhBrowse>, mode: EhHistoryMode) => state.actions.setTab('favorites', mode)],
+    [
+      'query',
+      (state: ReturnType<typeof useEhBrowse>, mode: EhHistoryMode) =>
+        state.actions.commitQuery('needle', mode),
+    ],
+    [
+      'filter',
+      (state: ReturnType<typeof useEhBrowse>, mode: EhHistoryMode) =>
+        state.actions.setFilter({ minRating: 4 }, mode),
+    ],
+    [
+      'tab',
+      (state: ReturnType<typeof useEhBrowse>, mode: EhHistoryMode) =>
+        state.actions.setTab('favorites', mode),
+    ],
   ] as const
 
-  it.each(cases)('%s performs exactly one push with no competing replace', async (_name, commit) => {
-    const pushState = vi.spyOn(window.history, 'pushState')
-    const replaceState = vi.spyOn(window.history, 'replaceState')
-    searchStr = 'tab=search'
-    const view = renderHook(() => useEhBrowse({ userId: 'alice', tabId: 'tab-a' }))
-    act(() => commit(view.result.current, 'push'))
-    await act(async () => {})
+  it.each(cases)(
+    '%s performs exactly one push with no competing replace',
+    async (_name, commit) => {
+      const pushState = vi.spyOn(window.history, 'pushState')
+      const replaceState = vi.spyOn(window.history, 'replaceState')
+      searchStr = 'tab=search'
+      const view = renderHook(() => useEhBrowse({ userId: 'alice', tabId: 'tab-a' }))
+      act(() => commit(view.result.current, 'push'))
+      await act(async () => {})
 
-    expect(pushState).toHaveBeenCalledTimes(1)
-    expect(replaceState).not.toHaveBeenCalled()
-    expect(push).not.toHaveBeenCalled()
-    expect(replace).not.toHaveBeenCalled()
-    pushState.mockRestore()
-    replaceState.mockRestore()
-  })
+      expect(pushState).toHaveBeenCalledTimes(1)
+      expect(replaceState).not.toHaveBeenCalled()
+      expect(push).not.toHaveBeenCalled()
+      expect(replace).not.toHaveBeenCalled()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+    },
+  )
 
-  it.each(cases)('%s performs exactly one replace with no competing push', async (_name, commit) => {
-    const pushState = vi.spyOn(window.history, 'pushState')
-    const replaceState = vi.spyOn(window.history, 'replaceState')
-    searchStr = 'tab=search'
-    const view = renderHook(() => useEhBrowse({ userId: 'alice', tabId: 'tab-a' }))
-    act(() => commit(view.result.current, 'replace'))
-    await act(async () => {})
+  it.each(cases)(
+    '%s performs exactly one replace with no competing push',
+    async (_name, commit) => {
+      const pushState = vi.spyOn(window.history, 'pushState')
+      const replaceState = vi.spyOn(window.history, 'replaceState')
+      searchStr = 'tab=search'
+      const view = renderHook(() => useEhBrowse({ userId: 'alice', tabId: 'tab-a' }))
+      act(() => commit(view.result.current, 'replace'))
+      await act(async () => {})
 
-    expect(replaceState).toHaveBeenCalledTimes(1)
-    expect(pushState).not.toHaveBeenCalled()
-    expect(replace).not.toHaveBeenCalled()
-    expect(push).not.toHaveBeenCalled()
-    pushState.mockRestore()
-    replaceState.mockRestore()
-  })
+      expect(replaceState).toHaveBeenCalledTimes(1)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(replace).not.toHaveBeenCalled()
+      expect(push).not.toHaveBeenCalled()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+    },
+  )
 })
 
 describe('E-Hentai cursor validation', () => {

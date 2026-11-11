@@ -29,10 +29,20 @@ describe('tagNameSearchTerm', () => {
 })
 
 describe('isFilterToken', () => {
-  it.each(['title:x', 'source:pixiv', 'rating:>=4', 'favorited:true', 'rl:true', 'collection:3',
-    'artist_id:a:b', 'category:manga', 'import:link', 'sort:rating', 'SOURCE:pixiv'])(
-    'test_isFilterToken_knownPrefix_%s_isFilter',
-    (token) => expect(isFilterToken(token)).toBe(true),
+  it.each([
+    'title:x',
+    'source:pixiv',
+    'rating:>=4',
+    'favorited:true',
+    'rl:true',
+    'collection:3',
+    'artist_id:a:b',
+    'category:manga',
+    'import:link',
+    'sort:rating',
+    'SOURCE:pixiv',
+  ])('test_isFilterToken_knownPrefix_%s_isFilter', (token) =>
+    expect(isFilterToken(token)).toBe(true),
   )
 
   it('test_isFilterToken_negatedFacetPrefix_isFilter', () => {
@@ -177,7 +187,12 @@ describe('multi-select facets', () => {
   })
 
   it('setFacet_empty_values_clears_source_include_exclude_and_import_mode', () => {
-    expect(setFacet('rem source:pixiv -source:local:link import:x', 'source', { mode: 'include', values: [] })).toBe('rem')
+    expect(
+      setFacet('rem source:pixiv -source:local:link import:x', 'source', {
+        mode: 'include',
+        values: [],
+      }),
+    ).toBe('rem')
   })
 
   it('updateFilter_source_sets_single_include_and_null_clears_both_modes', () => {

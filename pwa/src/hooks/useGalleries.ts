@@ -4,7 +4,12 @@ import useSWRMutation from 'swr/mutation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import { useWsJobs } from '@/lib/ws'
-import type { GalleryImage, GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
+import type {
+  GalleryImage,
+  GalleryListResponse,
+  GallerySearchParams,
+  EhSearchParams,
+} from '@/lib/types'
 import type { SearchGalleriesResponse } from '@/lib/api'
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -97,13 +102,20 @@ export function useInfiniteLibraryGalleries(
     }
   }, [lastJobUpdate, globalMutate])
 
-  const { data, error, size, setSize, isValidating: _isValidating, isLoading, mutate } =
-    useSWRInfinite<GalleryListResponse>(
-      getKey,
-      ([, fetchParams]: [string, GallerySearchParams], { signal }: SwrOpts = {}) =>
-        api.library.getGalleries(fetchParams, { signal }),
-      { revalidateOnFocus: false },
-    )
+  const {
+    data,
+    error,
+    size,
+    setSize,
+    isValidating: _isValidating,
+    isLoading,
+    mutate,
+  } = useSWRInfinite<GalleryListResponse>(
+    getKey,
+    ([, fetchParams]: [string, GallerySearchParams], { signal }: SwrOpts = {}) =>
+      api.library.getGalleries(fetchParams, { signal }),
+    { revalidateOnFocus: false },
+  )
 
   const galleries = useMemo(() => (data ? data.flatMap((page) => page.galleries) : []), [data])
   const total = data?.[0]?.total
@@ -150,10 +162,13 @@ export function useInfiniteGalleryImages(
   params: { limit?: number } = {},
 ) {
   const limit = params.limit ?? 120
-  const getKey = (pageIndex: number, previousPageData: {
-    images: GalleryImage[]
-    has_next?: boolean
-  } | null) => {
+  const getKey = (
+    pageIndex: number,
+    previousPageData: {
+      images: GalleryImage[]
+      has_next?: boolean
+    } | null,
+  ) => {
     if (!source || !sourceId) return null
     if (previousPageData && previousPageData.has_next === false) return null
     return ['gallery/images/infinite', source, sourceId, { page: pageIndex + 1, limit }]
@@ -161,8 +176,10 @@ export function useInfiniteGalleryImages(
 
   const { data, error, size, setSize, isLoading, mutate } = useSWRInfinite(
     getKey,
-    ([, src, sid, opts]: [string, string, string, { page: number; limit: number }], { signal }: SwrOpts = {}) =>
-      api.library.getImages(src, sid, opts, { signal }),
+    (
+      [, src, sid, opts]: [string, string, string, { page: number; limit: number }],
+      { signal }: SwrOpts = {},
+    ) => api.library.getImages(src, sid, opts, { signal }),
     { revalidateOnFocus: false },
   )
 
@@ -178,7 +195,8 @@ export function useInfiniteGalleryImages(
   const lastPage = data?.[data.length - 1]
   const isLoadingMore =
     isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
-  const isReachingEnd = lastPage?.has_next === false || (total !== undefined && images.length >= total)
+  const isReachingEnd =
+    lastPage?.has_next === false || (total !== undefined && images.length >= total)
 
   return {
     data: data?.[0]
@@ -283,7 +301,8 @@ export function useEhGalleryPreviews(gid: number | null, token: string | null) {
 export function useEhGalleryComments(gid: number | null, token: string | null, enabled = false) {
   return useSWR(
     enabled && gid && token ? ['eh/comments', gid, token] : null,
-    ([, g, t]: [string, number, string], { signal }: SwrOpts = {}) => api.eh.getComments(g, t, { signal }),
+    ([, g, t]: [string, number, string], { signal }: SwrOpts = {}) =>
+      api.eh.getComments(g, t, { signal }),
     { revalidateOnFocus: false },
   )
 }

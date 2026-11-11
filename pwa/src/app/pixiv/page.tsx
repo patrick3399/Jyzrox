@@ -1,15 +1,7 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LayoutGrid, List, RefreshCw } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
@@ -159,7 +151,10 @@ function IllustCard({
         >
           {bookmarked ? '★' : '☆'}
         </button>
-        <Button variant="primary" size="sm" className="text-xs"
+        <Button
+          variant="primary"
+          size="sm"
+          className="text-xs"
           type="button"
           onClick={handleDownload}
           disabled={downloading}
@@ -208,7 +203,10 @@ function IllustCard({
       >
         {bookmarked ? '★' : '☆'}
       </button>
-      <Button variant="primary" size="sm" className="absolute bottom-12 right-2 text-xs"
+      <Button
+        variant="primary"
+        size="sm"
+        className="absolute bottom-12 right-2 text-xs"
         type="button"
         onClick={handleDownload}
         disabled={downloading}
@@ -650,13 +648,7 @@ function PixivPageInner() {
     handledRestoreKeyRef.current = restoreInstruction.key
     window.scrollTo({ top: restoreDecision.kind === 'pixel' ? restoreDecision.scrollY : 0 })
     acknowledgeRestore(restoreInstruction.key)
-  }, [
-    acknowledgeRestore,
-    layoutReady,
-    restoreDecision,
-    restoreInstruction,
-    state.identityKey,
-  ])
+  }, [acknowledgeRestore, layoutReady, restoreDecision, restoreInstruction, state.identityKey])
 
   const handleRestoreApplied = useCallback(
     (request: { key: string; index: number }) => {
@@ -839,10 +831,7 @@ function PixivPageInner() {
           placeholder={t('pixiv.searchPlaceholder')}
           className="flex-1 rounded-lg border border-vault-border bg-vault-card px-4 py-2.5 text-sm text-vault-text"
         />
-        <Button variant="primary" size="md"
-          type="button"
-          onClick={handleSearchSubmit}
-        >
+        <Button variant="primary" size="md" type="button" onClick={handleSearchSubmit}>
           {t('pixiv.search')}
         </Button>
         <div className="flex overflow-hidden rounded-lg border border-vault-border">
@@ -865,7 +854,10 @@ function PixivPageInner() {
             <List size={18} />
           </button>
         </div>
-        <Button variant="secondary" size="icon" className="hidden sm:inline-flex"
+        <Button
+          variant="secondary"
+          size="icon"
+          className="hidden sm:inline-flex"
           type="button"
           onClick={() => void refreshFromTop()}
           disabled={!canRefresh || isRefreshing}
@@ -1156,15 +1148,15 @@ function PixivPageInner() {
 export default function PixivPage() {
   return (
     <PageContainer>
-    <Suspense
-      fallback={
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <LoadingSpinner size="lg" />
-        </div>
-      }
-    >
-      <PixivPageInner />
-    </Suspense>
+      <Suspense
+        fallback={
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <LoadingSpinner size="lg" />
+          </div>
+        }
+      >
+        <PixivPageInner />
+      </Suspense>
     </PageContainer>
   )
 }

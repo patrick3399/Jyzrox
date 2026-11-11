@@ -32,7 +32,9 @@ describe('Library browse-session page wiring contract', () => {
     expect(reading).toMatch(/refresh\(/)
 
     const batchSection =
-      source.match(/\{selectMode && selectedIds\.size > 0[\s\S]*?<Dialog\s+open=\{batchTagMode/)?.[0] ?? ''
+      source.match(
+        /\{selectMode && selectedIds\.size > 0[\s\S]*?<Dialog\s+open=\{batchTagMode/,
+      )?.[0] ?? ''
     const batchMutationCount = batchSection.match(/api\.library\.batchGalleries\(/g)?.length ?? 0
     const batchRefreshCount = batchSection.match(/refresh\(/g)?.length ?? 0
     expect(batchMutationCount).toBeGreaterThan(0)

@@ -17,12 +17,16 @@ export function AppearanceTimeline({ appearances }: { appearances: NovelAppearan
         <li key={a.chapter_path} className="relative">
           <span className="absolute -left-[23px] top-1.5 size-2 rounded-full bg-vault-accent" />
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-medium text-vault-text">{chapterName(a.chapter_path)}</span>
+            <span className="truncate font-medium text-vault-text">
+              {chapterName(a.chapter_path)}
+            </span>
             <span className="shrink-0 text-sm text-vault-text-muted">
               {t('novels.mentionCount', { count: a.mention_count })}
             </span>
           </div>
-          {i === 0 && <span className="text-xs text-vault-accent">{t('novels.firstAppearance')}</span>}
+          {i === 0 && (
+            <span className="text-xs text-vault-accent">{t('novels.firstAppearance')}</span>
+          )}
         </li>
       ))}
     </ol>

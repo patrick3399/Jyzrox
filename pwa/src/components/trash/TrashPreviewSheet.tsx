@@ -96,9 +96,7 @@ function PreviewBody({ gallery }: { gallery: TrashGallery }) {
           <LoadingSpinner />
         </div>
       )}
-      {error && !data && (
-        <p className="text-sm text-vault-danger">{t('trash.actionFailed')}</p>
-      )}
+      {error && !data && <p className="text-sm text-vault-danger">{t('trash.actionFailed')}</p>}
 
       {images.length > 0 && (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4" data-testid="trash-preview-grid">

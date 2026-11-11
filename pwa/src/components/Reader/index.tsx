@@ -2144,9 +2144,13 @@ export default function Reader({
   const prevPageNum = pageAfter(-1)
   const nextPageNum = pageAfter(1)
   const prevImage =
-    prevPageNum !== state.currentPage ? (images.find((i) => i.pageNum === prevPageNum) ?? null) : null
+    prevPageNum !== state.currentPage
+      ? (images.find((i) => i.pageNum === prevPageNum) ?? null)
+      : null
   const nextImage =
-    nextPageNum !== state.currentPage ? (images.find((i) => i.pageNum === nextPageNum) ?? null) : null
+    nextPageNum !== state.currentPage
+      ? (images.find((i) => i.pageNum === nextPageNum) ?? null)
+      : null
 
   // When downloading progressively, the current page may not have been imported yet.
   const isDownloading = downloadStatus === 'downloading'

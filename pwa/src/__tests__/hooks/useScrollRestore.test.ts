@@ -16,15 +16,21 @@ import { render, renderHook, act } from '@testing-library/react'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
-const { mockGetItem, mockSetItem, mockRemoveItem, mockScrollTo, mockAddEventListener, mockRemoveEventListener } =
-  vi.hoisted(() => ({
-    mockGetItem: vi.fn(),
-    mockSetItem: vi.fn(),
-    mockRemoveItem: vi.fn(),
-    mockScrollTo: vi.fn(),
-    mockAddEventListener: vi.fn(),
-    mockRemoveEventListener: vi.fn(),
-  }))
+const {
+  mockGetItem,
+  mockSetItem,
+  mockRemoveItem,
+  mockScrollTo,
+  mockAddEventListener,
+  mockRemoveEventListener,
+} = vi.hoisted(() => ({
+  mockGetItem: vi.fn(),
+  mockSetItem: vi.fn(),
+  mockRemoveItem: vi.fn(),
+  mockScrollTo: vi.fn(),
+  mockAddEventListener: vi.fn(),
+  mockRemoveEventListener: vi.fn(),
+}))
 
 // ── Module / global mocks ─────────────────────────────────────────────
 
@@ -264,7 +270,9 @@ describe('useScrollRestore — persist mode', () => {
     renderHook(() => useScrollRestore<{ id: number }>('feed-key', true, { persist: true }))
 
     // Grab the registered scroll handler and invoke it
-    const handler = mockAddEventListener.mock.calls.find((c) => c[0] === 'scroll')?.[1] as () => void
+    const handler = mockAddEventListener.mock.calls.find(
+      (c) => c[0] === 'scroll',
+    )?.[1] as () => void
     expect(handler).toBeTypeOf('function')
     mockSetItem.mockClear()
     handler()
@@ -324,9 +332,7 @@ describe('useScrollRestore — persist mode', () => {
 describe('useScrollRestore — restoredPages', () => {
   it('test_restoredPages_jsonFormat_returnsPages', () => {
     mockGetItem.mockReturnValue(JSON.stringify({ scrollY: 200, pages: [{ id: 42 }] }))
-    const { result } = renderHook(() =>
-      useScrollRestore<{ id: number }>('feed-key', true),
-    )
+    const { result } = renderHook(() => useScrollRestore<{ id: number }>('feed-key', true))
     expect(result.current.restoredPages).toEqual([{ id: 42 }])
   })
 
@@ -356,9 +362,7 @@ describe('useScrollRestore — restoredPages', () => {
     // useState initializer reads pages even when isReady=false
     // but effect does NOT fire (so no scrollTo, no removeItem)
     mockGetItem.mockReturnValue(JSON.stringify({ scrollY: 100, pages: [{ id: 7 }] }))
-    const { result } = renderHook(() =>
-      useScrollRestore<{ id: number }>('feed-key', false),
-    )
+    const { result } = renderHook(() => useScrollRestore<{ id: number }>('feed-key', false))
     expect(result.current.restoredPages).toEqual([{ id: 7 }])
     expect(mockScrollTo).not.toHaveBeenCalled()
     expect(mockRemoveItem).not.toHaveBeenCalled()

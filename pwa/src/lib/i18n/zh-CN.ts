@@ -465,7 +465,8 @@ const zhCN: Record<string, string> = {
   'novelRemote.save': '保存',
   'novelRemote.saved': '已保存',
   'novelRemote.recloneTitle': '替换本地副本？',
-  'novelRemote.recloneBody': '新远端的历史与现有副本无关（{reason}）。本地副本（{unpushed} 个未推送 commit）将被丢弃并重新 clone。',
+  'novelRemote.recloneBody':
+    '新远端的历史与现有副本无关（{reason}）。本地副本（{unpushed} 个未推送 commit）将被丢弃并重新 clone。',
   'novelRemote.recloneConfirm': '丢弃并重新 clone',
   'novelRemote.cancel': '取消',
   'settingsCategory.categories': '图库分类',
@@ -481,13 +482,15 @@ const zhCN: Record<string, string> = {
   'categories.deleted': '已删除分类',
   'categories.colorUpdated': '已更新颜色',
   'categories.backfillTitle': '按文件夹补套分类',
-  'categories.backfillDesc': '分类建立之前就被发现的本地图库会保持未分类。此操作会按最上层文件夹名称补上分类，已有分类的图库不会被更改。',
+  'categories.backfillDesc':
+    '分类建立之前就被发现的本地图库会保持未分类。此操作会按最上层文件夹名称补上分类，已有分类的图库不会被更改。',
   'categories.backfillPreview': '预览',
   'categories.backfillApply': '应用',
   'categories.backfillMatched': '将更新 {count} 个图库',
   'categories.backfillApplied': '已更新 {count} 个图库',
   'categories.localFolderNote': '更改分类不会移动此图库在磁盘上的文件夹。',
-  'categories.uncategorizedDesc': '尚未指定分类的图库。可在图库中指定，本地图库也可使用下方“按文件夹补套分类”。',
+  'categories.uncategorizedDesc':
+    '尚未指定分类的图库。可在图库中指定，本地图库也可使用下方“按文件夹补套分类”。',
   'categories.viewInLibrary': '在图库中查看',
   'import.batch.categoryUnregistered': '不在分类列表内，将成为未分类',
   'settingsGroup.personal': '个人',
@@ -546,7 +549,8 @@ const zhCN: Record<string, string> = {
   'settings.galleryDlUpgradeTo': '升级到 {version}',
   'settings.galleryDlRollback': '回滚',
   'settings.galleryDlMaster': '更换为最新测试版本',
-  'settings.galleryDlMasterConfirm': '要安装 master 的未发布开发版吗？可能不稳定，之后可用升级或回滚切换回来。',
+  'settings.galleryDlMasterConfirm':
+    '要安装 master 的未发布开发版吗？可能不稳定，之后可用升级或回滚切换回来。',
   'settings.galleryDlMasterQueued': '已加入开发版安装任务',
   'settings.galleryDlUpgradeQueued': '升级任务已加入队列',
   'settings.galleryDlRollbackQueued': '回滚任务已加入队列',
@@ -973,7 +977,8 @@ const zhCN: Record<string, string> = {
   'queue.stop': '停止',
   'queue.stopping': '停止中…',
   'queue.stopped': '已停止',
-  'queue.stopConfirm': '停止此下载？已下载的内容都会保留；尚未抓取到的帖子将被永久跳过，之后的检查只会抓取更新的帖子。',
+  'queue.stopConfirm':
+    '停止此下载？已下载的内容都会保留；尚未抓取到的帖子将被永久跳过，之后的检查只会抓取更新的帖子。',
   'queue.stopError': '停止任务失败',
   'queue.discard': '丢弃',
   'queue.discardConfirm': '丢弃此下载？这次已下载的文件将被删除。',
@@ -981,7 +986,8 @@ const zhCN: Record<string, string> = {
   'queue.modeIncremental': '增量',
   'queue.modeRepair': '修复',
   'queue.subscribedTitle': '已订阅此网址',
-  'queue.subscribedBody': '你已订阅「{name}」。检查订阅只会抓取新帖子；仍要下载可能会抓回你已选择跳过的旧帖子。',
+  'queue.subscribedBody':
+    '你已订阅「{name}」。检查订阅只会抓取新帖子；仍要下载可能会抓回你已选择跳过的旧帖子。',
   'queue.checkSubscriptionNow': '立即检查订阅',
   'queue.downloadAnyway': '仍要下载',
   'queue.subscriptionCheckQueued': '订阅检查已加入队列',
@@ -1623,7 +1629,8 @@ const zhCN: Record<string, string> = {
   'admin.sites.downloadSettings': '下载设置',
   'admin.sites.concurrency': '并发数',
   'admin.sites.spreadPersonas': '分散到多个身份',
-  'admin.sites.spreadPersonasHint': '并发数将变为每个身份的上限。仅手动发起的下载会被分散；订阅仍使用当前启用的账号。',
+  'admin.sites.spreadPersonasHint':
+    '并发数将变为每个身份的上限。仅手动发起的下载会被分散；订阅仍使用当前启用的账号。',
   'admin.sites.httpTimeout': 'HTTP 超时',
   'admin.sites.retries': '重试次数',
   'admin.sites.seconds': '秒',
@@ -1822,7 +1829,8 @@ const zhCN: Record<string, string> = {
   'subscriptions.statusPaused': '已暂停',
   'subscriptions.checkFailed': '检查订阅失败',
   'subscriptions.stop': '停止',
-  'subscriptions.stopConfirm': '停止「{name}」正在进行的下载？已下载的内容都会保留；尚未抓取到的旧帖子将被跳过，之后的检查只会抓取更新的帖子。',
+  'subscriptions.stopConfirm':
+    '停止「{name}」正在进行的下载？已下载的内容都会保留；尚未抓取到的旧帖子将被跳过，之后的检查只会抓取更新的帖子。',
   'subscriptions.stopRequested': '正在停止，已下载的内容会保留',
   'subscriptions.stopFailed': '停止下载失败',
   'subscriptions.statusStopped': '已停止',
@@ -1927,7 +1935,8 @@ const zhCN: Record<string, string> = {
   'trash.disabledDesc': '请在设置中启用回收站以使用此功能',
   'trash.restoreAll': '全部还原',
   'trash.restoreAllConfirm': '要还原回收站中的全部 {count} 个图库吗？',
-  'trash.emptyTrashConfirmCount': '这将永久删除回收站中的全部 {count} 个图库，且无法恢复。要继续吗？',
+  'trash.emptyTrashConfirmCount':
+    '这将永久删除回收站中的全部 {count} 个图库，且无法恢复。要继续吗？',
   'trash.select': '选择',
   'trash.selectPage': '选择本页',
   'trash.selectedCount': '已选择 {count} 项',
@@ -1967,7 +1976,8 @@ const zhCN: Record<string, string> = {
   'trash.purgeQueued': '已在后台开始永久删除',
   'trash.purgeAlreadyRunning': '已有永久删除任务正在运行',
   'trash.restoreFilteredConfirm': '要恢复符合当前筛选条件的 {count} 个图库吗？',
-  'trash.emptyFilteredConfirm': '要永久删除符合当前筛选条件的 {count} 个图库吗？此操作无法撤销。是否继续？',
+  'trash.emptyFilteredConfirm':
+    '要永久删除符合当前筛选条件的 {count} 个图库吗？此操作无法撤销。是否继续？',
   'trash.noMatches': '没有符合当前筛选条件的图库',
   'trash.clearFilters': '清除筛选',
 
@@ -2083,7 +2093,8 @@ const zhCN: Record<string, string> = {
   'credentials.accountActionFailed': '账号操作失败',
   'credentials.newAccountName': '保存到指定账号（可选）',
   'credentials.newAccountPlaceholder': '例如 backup',
-  'credentials.newAccountHint': '留空则更新使用中的账号。新名称会新增账号，已有名称会被覆盖。只能使用字母、数字和 . _ @ -。',
+  'credentials.newAccountHint':
+    '留空则更新使用中的账号。新名称会新增账号，已有名称会被覆盖。只能使用字母、数字和 . _ @ -。',
   'credentials.showAccounts': '显示 {source} 的账号',
   'credentials.accountsOf': '{source} 的账号',
   'credentials.accountCount': '{count} 个账号',

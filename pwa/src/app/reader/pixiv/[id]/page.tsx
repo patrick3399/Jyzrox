@@ -36,9 +36,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     if (!isAuthorCollection) return
     const query = searchParams.toString()
-    router.replace(
-      `/reader/gallery/pixiv/${encodeURIComponent(id)}${query ? `?${query}` : ''}`,
-    )
+    router.replace(`/reader/gallery/pixiv/${encodeURIComponent(id)}${query ? `?${query}` : ''}`)
   }, [id, isAuthorCollection, router, searchParams])
 
   const { data: pagesData, error: pagesError } = useSWR(

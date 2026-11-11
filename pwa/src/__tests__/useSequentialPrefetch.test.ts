@@ -454,7 +454,9 @@ describe('useSequentialPrefetch', () => {
       const images = makeImages(20)
       let currentPage = 1
 
-      const { result, rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+      const { result, rerender } = renderHook(() =>
+        useSequentialPrefetch(images, currentPage, true),
+      )
 
       // Concurrency 4: initial in-flight requests are for pages 2, 3, 4, 5.
       expect(instances).toHaveLength(4)
@@ -493,7 +495,9 @@ describe('useSequentialPrefetch', () => {
       const images = makeImages(20)
       let currentPage = 1
 
-      const { result, rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+      const { result, rerender } = renderHook(() =>
+        useSequentialPrefetch(images, currentPage, true),
+      )
 
       // Page 2's request started under the old epoch, before any page turn.
       const page2Image = instances[0]

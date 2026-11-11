@@ -5,14 +5,22 @@ import { PageHeader } from '@/components/layout/PageHeader'
 
 describe('PageContainer', () => {
   it('leaves primary pages unbounded so grid row heights keep their width', () => {
-    render(<PageContainer><p>x</p></PageContainer>)
+    render(
+      <PageContainer>
+        <p>x</p>
+      </PageContainer>,
+    )
     const root = screen.getByText('x').parentElement
     expect(root?.dataset.pageVariant).toBe('primary')
     expect(root?.className ?? '').not.toMatch(/max-w-|mx-auto|\bp[xy]?-\d/)
   })
 
   it('bounds secondary pages to max-w-5xl, centred, without adding padding', () => {
-    render(<PageContainer variant="secondary"><p>y</p></PageContainer>)
+    render(
+      <PageContainer variant="secondary">
+        <p>y</p>
+      </PageContainer>,
+    )
     const root = screen.getByText('y').parentElement
     expect(root?.className).toContain('max-w-5xl')
     expect(root?.className).toContain('mx-auto')
@@ -50,7 +58,14 @@ describe('PageHeader', () => {
   })
 
   it('renders subtitle, meta and actions', () => {
-    render(<PageHeader title="Library" meta={<span>12 galleries</span>} subtitle="sub" actions={<button>Go</button>} />)
+    render(
+      <PageHeader
+        title="Library"
+        meta={<span>12 galleries</span>}
+        subtitle="sub"
+        actions={<button>Go</button>}
+      />,
+    )
     expect(screen.getByText('12 galleries')).toBeTruthy()
     expect(screen.getByText('sub')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Go' })).toBeTruthy()

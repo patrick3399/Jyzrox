@@ -12,7 +12,8 @@ function formatExpiry(iso: string | null): string {
 
 export function TrashSummaryBar({ summary }: { summary: TrashSummary }) {
   const { purge } = summary
-  const percent = purge && purge.total > 0 ? Math.min(100, Math.round((purge.done / purge.total) * 100)) : 0
+  const percent =
+    purge && purge.total > 0 ? Math.min(100, Math.round((purge.done / purge.total) * 100)) : 0
   return (
     <div
       className="bg-vault-card border border-vault-border rounded-lg p-3 space-y-2"
@@ -25,7 +26,9 @@ export function TrashSummaryBar({ summary }: { summary: TrashSummary }) {
         </div>
         <div className="min-w-0">
           <dt className="text-vault-text-muted">{t('trash.summarySize')}</dt>
-          <dd className="font-medium text-vault-text truncate">{formatBytes(summary.logical_bytes)}</dd>
+          <dd className="font-medium text-vault-text truncate">
+            {formatBytes(summary.logical_bytes)}
+          </dd>
         </div>
         <div className="min-w-0">
           <dt className="text-vault-text-muted">{t('trash.summaryReclaimable')}</dt>
@@ -35,7 +38,9 @@ export function TrashSummaryBar({ summary }: { summary: TrashSummary }) {
         </div>
         <div className="min-w-0">
           <dt className="text-vault-text-muted">{t('trash.summaryNextExpiry')}</dt>
-          <dd className="font-medium text-vault-text truncate">{formatExpiry(summary.next_expiry_at)}</dd>
+          <dd className="font-medium text-vault-text truncate">
+            {formatExpiry(summary.next_expiry_at)}
+          </dd>
         </div>
       </dl>
       {purge && (

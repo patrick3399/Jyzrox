@@ -74,7 +74,9 @@ describe('GalleryListCard fixed height', () => {
   })
 
   it('keeps the meta row on one line while a download badge is showing', () => {
-    render(<GalleryListCard gallery={gallery({ download_status: 'downloading' })} onClick={() => {}} />)
+    render(
+      <GalleryListCard gallery={gallery({ download_status: 'downloading' })} onClick={() => {}} />,
+    )
 
     const pages = screen.getByText('10p')
     expect(pages.parentElement).not.toHaveClass('flex-wrap')

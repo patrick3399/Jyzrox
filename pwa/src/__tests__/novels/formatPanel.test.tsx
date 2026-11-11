@@ -21,13 +21,19 @@ const h = vi.hoisted(() => ({
     { rule: 'brand_new_backend_rule', line: 9, text: '???' },
   ] as { rule: string; line: number; text: string }[],
   status: vi.fn(async () => ({ head: 'headsha', ahead: 0, behind: 0, clean: true, locked: false })),
-  fixFile: vi.fn(async () => ({ changes: ['dialogue_colon_outside_bold'], head: 'h2', pushed: true })),
+  fixFile: vi.fn(async () => ({
+    changes: ['dialogue_colon_outside_bold'],
+    head: 'h2',
+    pushed: true,
+  })),
   mutate: vi.fn(),
 }))
 
 vi.mock('swr', () => ({
   default: (key: unknown) =>
-    key ? { data: { path: 'p', issues: h.issues }, isLoading: false } : { data: undefined, isLoading: false },
+    key
+      ? { data: { path: 'p', issues: h.issues }, isLoading: false }
+      : { data: undefined, isLoading: false },
   mutate: (...args: unknown[]) => h.mutate(...args),
 }))
 vi.mock('@/lib/api', () => ({

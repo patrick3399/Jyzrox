@@ -2,13 +2,7 @@ import { t } from '@/lib/i18n'
 import { facetSelection, type FacetKey, type ParsedFilters } from '@/lib/queryParser'
 
 export type LibraryFilterChipKey =
-  | 'title'
-  | 'source'
-  | 'rating'
-  | 'category'
-  | 'collection'
-  | 'sort'
-  | 'artist_id'
+  'title' | 'source' | 'rating' | 'category' | 'collection' | 'sort' | 'artist_id'
 
 export interface LibraryFilterChip {
   key: LibraryFilterChipKey
@@ -59,11 +53,8 @@ export function libraryFilterChips(
   if (parsed.rating !== null) {
     chips.push({ key: 'rating', label: `★≥${parsed.rating}` })
   }
-  const categoryLabel = facetChipLabel(
-    t('library.filterCategory'),
-    parsed,
-    'category',
-    (value) => (value === '__uncategorized__' ? t('library.categoryUncategorized') : value),
+  const categoryLabel = facetChipLabel(t('library.filterCategory'), parsed, 'category', (value) =>
+    value === '__uncategorized__' ? t('library.categoryUncategorized') : value,
   )
   if (categoryLabel) chips.push({ key: 'category', label: categoryLabel })
   if (parsed.collection !== null) {

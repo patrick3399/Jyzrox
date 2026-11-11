@@ -153,7 +153,8 @@ const ko: Record<string, string> = {
   'collections.galleryAddedTo': '"{name}"에 추가됨',
   'collections.addDenied': '갤러리 {count}개를 추가할 수 없습니다(접근 권한 없음)',
   'collections.inCollection': '이 컬렉션에 포함됨',
-  'collections.emptyHint': '갤러리 페이지에서 "컬렉션에 추가"를 사용하거나, 라이브러리에서 갤러리를 선택한 뒤 "컬렉션에 추가"를 사용하세요.',
+  'collections.emptyHint':
+    '갤러리 페이지에서 "컬렉션에 추가"를 사용하거나, 라이브러리에서 갤러리를 선택한 뒤 "컬렉션에 추가"를 사용하세요.',
   'collections.browseLibrary': '라이브러리 보기',
   'collections.coverGallery': '표지 갤러리',
   // ── Admin Queue ──
@@ -530,7 +531,8 @@ const ko: Record<string, string> = {
   'queue.jobSkipped': '건너뜀 (이미 저장됨)',
   'queue.jobImportSkipped': '가져오기 중 필터링됨',
   'queue.statusAlreadySaved': '이미 저장됨',
-  'queue.alreadySavedNote': '라이브러리에 이미 있습니다 ({pages}페이지) — 새로 다운로드하지 않았습니다',
+  'queue.alreadySavedNote':
+    '라이브러리에 이미 있습니다 ({pages}페이지) — 새로 다운로드하지 않았습니다',
   'queue.alreadySavedNoteNoPages': '라이브러리에 이미 있습니다 — 새로 다운로드하지 않았습니다',
   'queue.jobRecentLog': '최근 gallery-dl 로그',
   'queue.gdlStateStarting': '시작 중',
@@ -596,7 +598,8 @@ const ko: Record<string, string> = {
   'settingsCategory.novelRemote': '소설 모듈',
   'settingsCategory.novelRemoteDesc': '활성화, 동기화 소스, SSH 키',
   'settingsCategory.egressPersonas': '송신 페르소나',
-  'settingsCategory.egressPersonasDesc': '다운로드 분산을 위한 프록시, 계정, 브라우저 식별 정보 묶음',
+  'settingsCategory.egressPersonasDesc':
+    '다운로드 분산을 위한 프록시, 계정, 브라우저 식별 정보 묶음',
   'personas.title': '송신 페르소나',
   'personas.name': '이름',
   'personas.proxyUrl': '프록시 URL',
@@ -604,7 +607,8 @@ const ko: Record<string, string> = {
   'personas.browserProfile': '브라우저 프로필',
   'personas.browserNone': '없음 (사용자 지정 User-Agent)',
   'personas.userAgent': 'User-Agent',
-  'personas.identityHint': '브라우저 프로필은 그에 맞는 User-Agent를 자동으로 설정하므로 둘은 함께 지정할 수 없습니다.',
+  'personas.identityHint':
+    '브라우저 프로필은 그에 맞는 User-Agent를 자동으로 설정하므로 둘은 함께 지정할 수 없습니다.',
   'personas.enabled': '사용',
   'personas.accounts': '연결된 계정',
   'personas.noFreeAccounts': '연결 가능한 계정이 없습니다',
@@ -624,7 +628,8 @@ const ko: Record<string, string> = {
   'novelRemote.publicKeyHelp': '이 줄을 원격 계정의 authorized_keys 에 추가하세요.',
   'novelRemote.generateKey': '키 생성',
   'novelRemote.regenerateKey': '키 재생성',
-  'novelRemote.regenerateConfirm': '새 키를 원격에 추가하기 전까지 기존 키는 동작하지 않습니다. 계속할까요?',
+  'novelRemote.regenerateConfirm':
+    '새 키를 원격에 추가하기 전까지 기존 키는 동작하지 않습니다. 계속할까요?',
   'novelRemote.noKey': '먼저 키를 생성하세요.',
   'novelRemote.copy': '복사',
   'novelRemote.copied': '복사됨',
@@ -639,7 +644,8 @@ const ko: Record<string, string> = {
   'novelRemote.save': '저장',
   'novelRemote.saved': '저장됨',
   'novelRemote.recloneTitle': '로컬 사본을 교체할까요?',
-  'novelRemote.recloneBody': '새 원격의 기록이 기존 사본과 관련이 없습니다 ({reason}). 로컬 사본(푸시되지 않은 커밋 {unpushed}개)은 폐기되고 다시 clone 됩니다.',
+  'novelRemote.recloneBody':
+    '새 원격의 기록이 기존 사본과 관련이 없습니다 ({reason}). 로컬 사본(푸시되지 않은 커밋 {unpushed}개)은 폐기되고 다시 clone 됩니다.',
   'novelRemote.recloneConfirm': '폐기하고 다시 clone',
   'novelRemote.cancel': '취소',
   'settingsCategory.categories': '갤러리 분류',
@@ -650,18 +656,21 @@ const ko: Record<string, string> = {
   'categories.add': '추가',
   'categories.galleryCount': '갤러리 {count}개',
   'categories.delete': '삭제',
-  'categories.deleteConfirm': '"{name}"을(를) 삭제할까요? 갤러리 {count}개가 미분류가 됩니다. 디스크의 폴더는 변경되지 않습니다.',
+  'categories.deleteConfirm':
+    '"{name}"을(를) 삭제할까요? 갤러리 {count}개가 미분류가 됩니다. 디스크의 폴더는 변경되지 않습니다.',
   'categories.created': '분류를 추가했습니다',
   'categories.deleted': '분류를 삭제했습니다',
   'categories.colorUpdated': '색상을 변경했습니다',
   'categories.backfillTitle': '폴더 기준 분류 적용',
-  'categories.backfillDesc': '분류가 생기기 전에 발견된 로컬 갤러리는 미분류로 남아 있습니다. 최상위 폴더 이름의 분류를 지정합니다. 이미 분류가 있는 갤러리는 변경되지 않습니다.',
+  'categories.backfillDesc':
+    '분류가 생기기 전에 발견된 로컬 갤러리는 미분류로 남아 있습니다. 최상위 폴더 이름의 분류를 지정합니다. 이미 분류가 있는 갤러리는 변경되지 않습니다.',
   'categories.backfillPreview': '미리보기',
   'categories.backfillApply': '적용',
   'categories.backfillMatched': '갤러리 {count}개가 업데이트됩니다',
   'categories.backfillApplied': '갤러리 {count}개를 업데이트했습니다',
   'categories.localFolderNote': '분류를 바꿔도 디스크의 폴더는 이동하지 않습니다.',
-  'categories.uncategorizedDesc': '분류가 지정되지 않은 갤러리입니다. 라이브러리에서 지정하거나, 로컬 갤러리는 아래 "폴더 기준 분류 적용"을 사용할 수 있습니다.',
+  'categories.uncategorizedDesc':
+    '분류가 지정되지 않은 갤러리입니다. 라이브러리에서 지정하거나, 로컬 갤러리는 아래 "폴더 기준 분류 적용"을 사용할 수 있습니다.',
   'categories.viewInLibrary': '라이브러리에서 보기',
   'import.batch.categoryUnregistered': '분류 목록에 없어 미분류가 됩니다',
   'settingsGroup.personal': '개인',
@@ -795,7 +804,8 @@ const ko: Record<string, string> = {
   'settings.galleryDlUpgradeTo': '{version}으로 업그레이드',
   'settings.galleryDlRollback': '롤백',
   'settings.galleryDlMaster': '최신 개발 버전으로 교체',
-  'settings.galleryDlMasterConfirm': 'master의 미출시 개발 버전을 설치할까요? 불안정할 수 있으며, 이후 업그레이드나 롤백으로 되돌릴 수 있습니다.',
+  'settings.galleryDlMasterConfirm':
+    'master의 미출시 개발 버전을 설치할까요? 불안정할 수 있으며, 이후 업그레이드나 롤백으로 되돌릴 수 있습니다.',
   'settings.galleryDlMasterQueued': '개발 버전 설치 작업을 대기열에 추가했습니다',
   'settings.galleryDlUpgradeQueued': '업그레이드 작업 대기열에 추가됨',
   'settings.galleryDlRollbackQueued': '롤백 작업 대기열에 추가됨',
@@ -941,7 +951,8 @@ const ko: Record<string, string> = {
 
   // ── Browser Cache ──
   'settings.browserCache': '브라우저 캐시',
-  'settings.browserCacheDesc': '오프라인 사용을 위해 페이지를 보관할 기간 설정 (이미지는 브라우저 자체 캐시가 보관)',
+  'settings.browserCacheDesc':
+    '오프라인 사용을 위해 페이지를 보관할 기간 설정 (이미지는 브라우저 자체 캐시가 보관)',
   'settings.pageCacheTTL': '페이지 캐시 TTL',
   'settings.pageCacheTTLDesc': '오프라인 사용을 위해 캐시된 페이지 응답 보관 기간',
   'settings.clearBrowserCache': '브라우저 캐시 지우기',
@@ -1330,7 +1341,8 @@ const ko: Record<string, string> = {
   'browse.coversOnly': '표지만 검색',
   'browse.includeExpunged': '삭제된 항목 포함',
   'browse.imageSearchResults': '이미지 검색 결과 {count}개',
-  'browse.imageSessionExpiredHelp': '업로드한 이미지의 검색 결과가 만료되었습니다. 새 검색을 시작하세요.',
+  'browse.imageSessionExpiredHelp':
+    '업로드한 이미지의 검색 결과가 만료되었습니다. 새 검색을 시작하세요.',
   'browse.startNewSearch': '새 검색 시작',
   'browse.openRandom': '불러온 결과 무작위로 열기',
   'browse.watched': '감시 중',
@@ -2048,13 +2060,15 @@ const ko: Record<string, string> = {
   'trash.disabledDesc': '이 기능을 사용하려면 설정에서 휴지통을 활성화하세요',
   'trash.restoreAll': '모두 복원',
   'trash.restoreAllConfirm': '휴지통의 갤러리 {count}개를 모두 복원할까요?',
-  'trash.emptyTrashConfirmCount': '휴지통의 갤러리 {count}개를 모두 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다. 계속할까요?',
+  'trash.emptyTrashConfirmCount':
+    '휴지통의 갤러리 {count}개를 모두 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다. 계속할까요?',
   'trash.select': '선택',
   'trash.selectPage': '현재 페이지 선택',
   'trash.selectedCount': '{count}개 선택됨',
   'trash.restoreSelected': '선택 항목 복원',
   'trash.deleteSelected': '선택 항목 삭제',
-  'trash.deleteSelectedConfirm': '선택한 갤러리 {count}개를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.',
+  'trash.deleteSelectedConfirm':
+    '선택한 갤러리 {count}개를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.',
   'trash.restoredCount': '갤러리 {count}개를 복원했습니다',
   'trash.deletedCount': '갤러리 {count}개를 영구 삭제했습니다',
   'trash.reason.user': '삭제됨',
@@ -2088,7 +2102,8 @@ const ko: Record<string, string> = {
   'trash.purgeQueued': '백그라운드에서 영구 삭제를 시작했습니다',
   'trash.purgeAlreadyRunning': '영구 삭제가 이미 실행 중입니다',
   'trash.restoreFilteredConfirm': '현재 필터와 일치하는 갤러리 {count}개를 복원할까요?',
-  'trash.emptyFilteredConfirm': '현재 필터와 일치하는 갤러리 {count}개를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다. 계속할까요?',
+  'trash.emptyFilteredConfirm':
+    '현재 필터와 일치하는 갤러리 {count}개를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다. 계속할까요?',
   'trash.noMatches': '현재 필터와 일치하는 갤러리가 없습니다',
   'trash.clearFilters': '필터 지우기',
 
@@ -2124,9 +2139,11 @@ const ko: Record<string, string> = {
   'admin.sites.retries': '재시도 횟수',
   'admin.sites.httpTimeout': 'HTTP 타임아웃',
   'admin.sites.sleepRequest': 'API／페이지 요청 간격',
-  'admin.sites.sleepRequestHint': 'gallery-dl이 API와 페이지를 요청하는 사이의 대기입니다. 개별 파일 다운로드 속도에는 영향을 주지 않습니다.',
+  'admin.sites.sleepRequestHint':
+    'gallery-dl이 API와 페이지를 요청하는 사이의 대기입니다. 개별 파일 다운로드 속도에는 영향을 주지 않습니다.',
   'admin.sites.sleepDownload': '파일별 다운로드 간격',
-  'admin.sites.sleepDownloadHint': '각 파일을 다운로드하기 전의 대기입니다. 이미지 호스트에 과도한 부하를 주지 않도록 합니다.',
+  'admin.sites.sleepDownloadHint':
+    '각 파일을 다운로드하기 전의 대기입니다. 이미지 호스트에 과도한 부하를 주지 않도록 합니다.',
   'admin.sites.defaultValue': '기본값: {value}',
   'admin.sites.defaultExtractor': 'gallery-dl 내장: {value}',
   'admin.sites.defaultNone': '기본값: 없음',
@@ -2135,10 +2152,12 @@ const ko: Record<string, string> = {
   'admin.sites.overridden': '재정의됨',
   'admin.sites.autoTuned': '자동 조정',
   'admin.sites.resetField': '{field}을(를) 기본값으로 초기화',
-  'admin.sites.sleepInvalid': '간격 형식이 올바르지 않습니다. 2 같은 숫자 또는 1-5 같은 범위를 입력하세요.',
+  'admin.sites.sleepInvalid':
+    '간격 형식이 올바르지 않습니다. 2 같은 숫자 또는 1-5 같은 범위를 입력하세요.',
   'admin.sites.concurrency': '동시성',
   'admin.sites.spreadPersonas': '페르소나로 분산',
-  'admin.sites.spreadPersonasHint': '동시성은 페르소나별 한도가 됩니다. 수동으로 시작한 다운로드만 분산되며, 구독은 활성 계정을 그대로 사용합니다.',
+  'admin.sites.spreadPersonasHint':
+    '동시성은 페르소나별 한도가 됩니다. 수동으로 시작한 다운로드만 분산되며, 구독은 활성 계정을 그대로 사용합니다.',
   'admin.sites.inactivityTimeout': '비활성 타임아웃',
   'admin.sites.fieldMapping': '필드 매핑',
   'admin.sites.downloadSettings': '다운로드 설정',
@@ -2234,7 +2253,8 @@ const ko: Record<string, string> = {
   'novels.compareBase': '비교 기준: {rev}',
   'novels.compareClear': '비교 해제',
   'novels.revertTo': '{rev} 버전으로 되돌리기',
-  'novels.revertConfirm': '이 파일을 {rev} 버전으로 되돌릴까요? 새 커밋이 추가되며 기록은 유지됩니다.',
+  'novels.revertConfirm':
+    '이 파일을 {rev} 버전으로 되돌릴까요? 새 커밋이 추가되며 기록은 유지됩니다.',
   'novels.reverted': '되돌렸습니다',
   'novels.revertFailed': '되돌리지 못했습니다',
   'novels.format': '형식',
@@ -2616,7 +2636,8 @@ const ko: Record<string, string> = {
   'explorer.noImages': '필터와 일치하는 이미지가 없습니다',
   'explorer.hiddenBadge': '숨김',
   'explorer.sharedBadge': '공유됨',
-  'explorer.sharedHint': '이 파일은 다른 갤러리에서도 사용되므로 이 사본을 삭제해도 데이터는 유지됩니다.',
+  'explorer.sharedHint':
+    '이 파일은 다른 갤러리에서도 사용되므로 이 사본을 삭제해도 데이터는 유지됩니다.',
   'explorer.externalBadge': '외부',
   'explorer.externalHint': '외부 파일: Jyzrox는 연결된 라이브러리의 파일을 삭제하지 않습니다.',
   'explorer.imageStorage': '이미지 저장소',
@@ -2632,7 +2653,8 @@ const ko: Record<string, string> = {
   'explorer.purgeSharedKept': '유지되는 공유 파일',
   'explorer.purgeExternalSkipped': '건너뛴 외부 파일',
   'explorer.purgeOtherSkipped': '{count}개를 더 건너뜀 (숨기지 않음, 대기 중 또는 이미 없음)',
-  'explorer.purgeWarning': '이 작업은 되돌릴 수 없습니다. 삭제된 이미지는 다시 다운로드되거나 가져오기되지 않습니다.',
+  'explorer.purgeWarning':
+    '이 작업은 되돌릴 수 없습니다. 삭제된 이미지는 다시 다운로드되거나 가져오기되지 않습니다.',
   'explorer.purgeConfirm': '영구 삭제',
   'explorer.purgeDone': '이미지 {count}개를 삭제하고 {bytes}를 확보했습니다',
   'explorer.hideImagesInGallery': '선택한 이미지 숨기기 (갤러리 안)',

@@ -61,9 +61,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject }
 }
 
-function refreshSession(
-  session: BrowseSessionResult<Item, Cursor>,
-): Promise<void> {
+function refreshSession(session: BrowseSessionResult<Item, Cursor>): Promise<void> {
   return (session as BrowseSessionResult<Item, Cursor> & { refresh: () => Promise<void> }).refresh()
 }
 
@@ -427,8 +425,18 @@ describe('useBrowseSession', () => {
       })
       const fetchPage = vi
         .fn()
-        .mockResolvedValueOnce({ items: [{ id: 1, label: 'one' }], cursor: 'p2', hasMore: true, total: 9 })
-        .mockResolvedValueOnce({ items: [{ id: 2, label: 'two' }], cursor: 'tail', hasMore: true, total: null })
+        .mockResolvedValueOnce({
+          items: [{ id: 1, label: 'one' }],
+          cursor: 'p2',
+          hasMore: true,
+          total: 9,
+        })
+        .mockResolvedValueOnce({
+          items: [{ id: 2, label: 'two' }],
+          cursor: 'tail',
+          hasMore: true,
+          total: null,
+        })
       const view = renderHook(() =>
         useBrowseSession<Item, Cursor, Identity>({
           identity: identity('refresh-total'),
@@ -449,41 +457,44 @@ describe('useBrowseSession', () => {
     it.each([
       ['missing item', { itemId: 9, offset: 16, scrollY: 900 }],
       ['pixel-only', { itemId: null, offset: 0, scrollY: 900 }],
-    ])('clears a %s anchor after an atomic refresh but preserves layout', async (_label, anchor) => {
-      const storage = new MemoryStorage()
-      const layout = { columns: 4, width: 1200, mode: 'grid' as const }
-      createBrowseSnapshotStore<Item, Cursor>({ storage, scope }).save(key('anchor-refresh'), {
-        pages: [[{ id: 1, label: 'old one' }]],
-        cursor: null,
-        hasMore: false,
-        total: 1,
-        anchor,
-        layout,
-      })
-      const fetchPage = vi.fn().mockResolvedValue({
-        items: [{ id: 2, label: 'fresh two' }],
-        cursor: null,
-        hasMore: false,
-        total: 1,
-      })
-      const view = renderHook(() =>
-        useBrowseSession<Item, Cursor, Identity>({
-          identity: identity('anchor-refresh'),
+    ])(
+      'clears a %s anchor after an atomic refresh but preserves layout',
+      async (_label, anchor) => {
+        const storage = new MemoryStorage()
+        const layout = { columns: 4, width: 1200, mode: 'grid' as const }
+        createBrowseSnapshotStore<Item, Cursor>({ storage, scope }).save(key('anchor-refresh'), {
+          pages: [[{ id: 1, label: 'old one' }]],
+          cursor: null,
+          hasMore: false,
+          total: 1,
+          anchor,
+          layout,
+        })
+        const fetchPage = vi.fn().mockResolvedValue({
+          items: [{ id: 2, label: 'fresh two' }],
+          cursor: null,
+          hasMore: false,
+          total: 1,
+        })
+        const view = renderHook(() =>
+          useBrowseSession<Item, Cursor, Identity>({
+            identity: identity('anchor-refresh'),
+            identityKey: key('anchor-refresh'),
+            adapter: { getItemId: (item) => item.id, fetchPage },
+            scope,
+            storage,
+          }),
+        )
+        await waitFor(() => expect(view.result.current.state.items[0]?.id).toBe(1))
+
+        await act(async () => refreshSession(view.result.current))
+
+        expect(view.result.current.restoreInstruction).toMatchObject({
           identityKey: key('anchor-refresh'),
-          adapter: { getItemId: (item) => item.id, fetchPage },
-          scope,
-          storage,
-        }),
-      )
-      await waitFor(() => expect(view.result.current.state.items[0]?.id).toBe(1))
-
-      await act(async () => refreshSession(view.result.current))
-
-      expect(view.result.current.restoreInstruction).toMatchObject({
-        identityKey: key('anchor-refresh'),
-        target: { kind: 'view', view: { anchor: null, layout } },
-      })
-    })
+          target: { kind: 'view', view: { anchor: null, layout } },
+        })
+      },
+    )
 
     it('retries a failed refresh from the first page instead of appending the old tail cursor', async () => {
       const storage = new MemoryStorage()
@@ -580,13 +591,11 @@ describe('useBrowseSession', () => {
         signal: AbortSignal
         request: Deferred<PageResponse>
       }> = []
-      const fetchPage = vi.fn(
-        (_identity: Identity, cursor: Cursor | null, signal: AbortSignal) => {
-          const request = deferred<PageResponse>()
-          calls.push({ cursor, signal, request })
-          return request.promise
-        },
-      )
+      const fetchPage = vi.fn((_identity: Identity, cursor: Cursor | null, signal: AbortSignal) => {
+        const request = deferred<PageResponse>()
+        calls.push({ cursor, signal, request })
+        return request.promise
+      })
       const view = renderHook(() =>
         useBrowseSession<Item, Cursor, Identity>({
           identity: identity('refresh'),
@@ -704,12 +713,7 @@ describe('useBrowseSession', () => {
         retry = refreshSession(view.result.current)
       })
       await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2))
-      expect(fetchPage).toHaveBeenNthCalledWith(
-        2,
-        identity('retry'),
-        null,
-        expect.any(AbortSignal),
-      )
+      expect(fetchPage).toHaveBeenNthCalledWith(2, identity('retry'), null, expect.any(AbortSignal))
       await act(async () => {
         requests[1].resolve({
           items: [{ id: 8, label: 'retry succeeded' }],

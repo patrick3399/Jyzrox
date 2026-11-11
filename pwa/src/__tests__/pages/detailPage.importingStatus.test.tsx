@@ -61,11 +61,7 @@ vi.mock('@/lib/api', () => ({
   api: new Proxy(
     {},
     {
-      get: () =>
-        new Proxy(
-          {},
-          { get: () => vi.fn().mockResolvedValue({ tags: [], items: [] }) },
-        ),
+      get: () => new Proxy({}, { get: () => vi.fn().mockResolvedValue({ tags: [], items: [] }) }),
     },
   ),
 }))
@@ -163,7 +159,10 @@ describe('gallery detail page importing status', () => {
 
   it('renders the page count from the gallery row, falling back to the loaded images', () => {
     h.gallery = makeGallery({ pages: null as unknown as number })
-    h.images = [{ id: 1, page_num: 1 }, { id: 2, page_num: 2 }]
+    h.images = [
+      { id: 1, page_num: 1 },
+      { id: 2, page_num: 2 },
+    ]
     render(<GalleryDetailPage />)
 
     expect(screen.getByRole('heading', { name: /Images \(2 /i })).toBeInTheDocument()

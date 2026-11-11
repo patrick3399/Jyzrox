@@ -155,7 +155,10 @@ describe('SubscriptionCard active job controls', () => {
   })
 
   it('offers resume instead of pause while the subscription job is paused', async () => {
-    renderCard(makeJob('paused'), { paused_at: '2026-11-07T01:00:00+00:00', paused_reason: 'manual' })
+    renderCard(makeJob('paused'), {
+      paused_at: '2026-11-07T01:00:00+00:00',
+      paused_reason: 'manual',
+    })
 
     expect(screen.queryByTestId('subscription-pause')).not.toBeInTheDocument()
     expect(screen.getByTestId('subscription-stop')).toBeInTheDocument()

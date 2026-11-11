@@ -150,7 +150,6 @@ vi.mock('@/lib/api', () => ({ api: { library: {} } }))
 
 import LibraryPage from '@/app/library/page'
 
-
 /**
  * The scroll listener captures into a requestAnimationFrame, but the effect that
  * owns the listener also depended on `captureAnchor`, which is rebuilt whenever

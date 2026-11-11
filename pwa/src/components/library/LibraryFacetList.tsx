@@ -40,7 +40,10 @@ const GRID_COLUMNS: Record<FacetColumns, string> = {
 }
 
 /** Options shown for a selection: non-empty ones, plus every selected value even if unknown or empty. */
-export function visibleFacetOptions(options: FacetOption[], selection: FacetSelection): FacetOption[] {
+export function visibleFacetOptions(
+  options: FacetOption[],
+  selection: FacetSelection,
+): FacetOption[] {
   const selected = new Set(selection.values)
   const known = new Set(options.map((option) => option.value))
   const missing = selection.values
@@ -82,8 +85,7 @@ export function useFacetModeDraft(
   return [effective, setMode]
 }
 
-const SEGMENT =
-  'flex-1 px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap'
+const SEGMENT = 'flex-1 px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap'
 
 /** "Only these" / "All except" segmented control. */
 export function FacetModeToggle({

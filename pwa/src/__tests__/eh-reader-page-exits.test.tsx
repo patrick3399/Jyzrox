@@ -21,7 +21,9 @@ const tokenState = vi.hoisted(() => ({
   tokenMap: {} as Record<number, string>,
   error: undefined as Error | undefined,
 }))
-const readerProps = vi.hoisted(() => ({ current: undefined as Record<string, unknown> | undefined }))
+const readerProps = vi.hoisted(() => ({
+  current: undefined as Record<string, unknown> | undefined,
+}))
 const params = vi.hoisted(() => ({ gid: '123', token: 'abc' }))
 
 vi.mock('next/navigation', () => ({

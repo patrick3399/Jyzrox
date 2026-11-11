@@ -278,9 +278,7 @@ describe('Pixiv Phase 2 final blockers', () => {
       }),
     )
 
-    await waitFor(() =>
-      expect(testState.gridProps?.restoreRequest).toMatchObject({ index: 0 }),
-    )
+    await waitFor(() => expect(testState.gridProps?.restoreRequest).toMatchObject({ index: 0 }))
   })
 
   it('does not flatten a multi-page buffer for bookmark/follow mutations and patches the items in place', async () => {

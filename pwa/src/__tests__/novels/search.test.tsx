@@ -12,7 +12,9 @@ vi.mock('next/navigation', () => ({
 }))
 
 const h = vi.hoisted(() => ({
-  current: null as { hits: Array<{ path: string; line: number; text: string; category?: string }> } | null,
+  current: null as {
+    hits: Array<{ path: string; line: number; text: string; category?: string }>
+  } | null,
   hits: {
     hits: [{ path: '作品A/第01章.md', line: 4, text: '正文一段' }],
   },
@@ -26,7 +28,8 @@ const h = vi.hoisted(() => ({
 h.current = h.hits
 
 vi.mock('swr', () => ({
-  default: (key: unknown) => (key ? { data: h.current, isLoading: false } : { data: undefined, isLoading: false }),
+  default: (key: unknown) =>
+    key ? { data: h.current, isLoading: false } : { data: undefined, isLoading: false },
 }))
 vi.mock('@/lib/api', () => ({ api: { novels: { search: vi.fn() } } }))
 
@@ -58,7 +61,9 @@ describe('NovelSearchPage', () => {
     expect(settingItem).not.toBeNull()
     expect(scrapItem).not.toBeNull()
 
-    expect(within(settingItem as HTMLElement).queryByText(/^novels\.category/)).not.toBeInTheDocument()
+    expect(
+      within(settingItem as HTMLElement).queryByText(/^novels\.category/),
+    ).not.toBeInTheDocument()
     expect(within(scrapItem as HTMLElement).getByText('novels.categoryScrap')).toBeInTheDocument()
   })
 })

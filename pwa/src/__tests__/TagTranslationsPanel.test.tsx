@@ -86,9 +86,7 @@ describe('TagTranslationsPanel', () => {
     })
 
     // The debounce timer has not fired yet — no call should carry q=blue.
-    expect(mockTranslationsBrowse).not.toHaveBeenCalledWith(
-      expect.objectContaining({ q: 'blue' }),
-    )
+    expect(mockTranslationsBrowse).not.toHaveBeenCalledWith(expect.objectContaining({ q: 'blue' }))
 
     act(() => {
       vi.advanceTimersByTime(300)

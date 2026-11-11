@@ -152,7 +152,8 @@ const ja: Record<string, string> = {
   'collections.galleryAddedTo': '「{name}」に追加しました',
   'collections.addDenied': '{count} 件のギャラリーは追加できませんでした（アクセス権なし）',
   'collections.inCollection': 'このコレクションに含まれています',
-  'collections.emptyHint': 'ギャラリーのページで「コレクションに追加」を使うか、ライブラリで複数選択して「コレクションに追加」してください。',
+  'collections.emptyHint':
+    'ギャラリーのページで「コレクションに追加」を使うか、ライブラリで複数選択して「コレクションに追加」してください。',
   'collections.browseLibrary': 'ライブラリを開く',
   'collections.coverGallery': 'カバーギャラリー',
   // ── Admin Queue ──
@@ -423,7 +424,8 @@ const ja: Record<string, string> = {
   'settingsCategory.novelRemote': '小説モジュール',
   'settingsCategory.novelRemoteDesc': '有効化、同期元、SSH 鍵',
   'settingsCategory.egressPersonas': '送信元ペルソナ',
-  'settingsCategory.egressPersonasDesc': 'ダウンロードを分散するためのプロキシ・アカウント・ブラウザ識別情報のセット',
+  'settingsCategory.egressPersonasDesc':
+    'ダウンロードを分散するためのプロキシ・アカウント・ブラウザ識別情報のセット',
   'personas.title': '送信元ペルソナ',
   'personas.name': '名前',
   'personas.proxyUrl': 'プロキシ URL',
@@ -431,7 +433,8 @@ const ja: Record<string, string> = {
   'personas.browserProfile': 'ブラウザプロファイル',
   'personas.browserNone': 'なし（カスタム User-Agent）',
   'personas.userAgent': 'User-Agent',
-  'personas.identityHint': 'ブラウザプロファイルは対応する User-Agent を自動で設定するため、両方を同時に指定することはできません。',
+  'personas.identityHint':
+    'ブラウザプロファイルは対応する User-Agent を自動で設定するため、両方を同時に指定することはできません。',
   'personas.enabled': '有効',
   'personas.accounts': '紐付けたアカウント',
   'personas.noFreeAccounts': '紐付け可能なアカウントがありません',
@@ -451,12 +454,14 @@ const ja: Record<string, string> = {
   'novelRemote.publicKeyHelp': 'この行をリモートアカウントの authorized_keys に追加してください。',
   'novelRemote.generateKey': '鍵を生成',
   'novelRemote.regenerateKey': '鍵を再生成',
-  'novelRemote.regenerateConfirm': '古い鍵は新しい鍵をリモートに追加するまで使えません。続行しますか？',
+  'novelRemote.regenerateConfirm':
+    '古い鍵は新しい鍵をリモートに追加するまで使えません。続行しますか？',
   'novelRemote.noKey': '先に鍵を生成してください。',
   'novelRemote.copy': 'コピー',
   'novelRemote.copied': 'コピーしました',
   'novelRemote.scanHost': 'ホスト鍵を確認',
-  'novelRemote.hostFingerprints': 'ホスト鍵のフィンガープリント — 信頼する前にリモートと照合してください：',
+  'novelRemote.hostFingerprints':
+    'ホスト鍵のフィンガープリント — 信頼する前にリモートと照合してください：',
   'novelRemote.trustHost': 'このホストを信頼',
   'novelRemote.hostTrusted': 'ホスト信頼済み',
   'novelRemote.hostNotTrusted': 'ホスト未信頼',
@@ -466,7 +471,8 @@ const ja: Record<string, string> = {
   'novelRemote.save': '保存',
   'novelRemote.saved': '保存しました',
   'novelRemote.recloneTitle': 'ローカルコピーを置き換えますか？',
-  'novelRemote.recloneBody': '新しいリモートの履歴は既存のコピーと無関係です（{reason}）。ローカルコピー（未プッシュ {unpushed} 件）は破棄され、再 clone されます。',
+  'novelRemote.recloneBody':
+    '新しいリモートの履歴は既存のコピーと無関係です（{reason}）。ローカルコピー（未プッシュ {unpushed} 件）は破棄され、再 clone されます。',
   'novelRemote.recloneConfirm': '破棄して再 clone',
   'novelRemote.cancel': 'キャンセル',
   'settingsCategory.categories': 'ギャラリーカテゴリ',
@@ -477,18 +483,21 @@ const ja: Record<string, string> = {
   'categories.add': '追加',
   'categories.galleryCount': '{count} 件',
   'categories.delete': '削除',
-  'categories.deleteConfirm': '「{name}」を削除しますか？{count} 件が未分類になります。ディスク上のフォルダは変更されません。',
+  'categories.deleteConfirm':
+    '「{name}」を削除しますか？{count} 件が未分類になります。ディスク上のフォルダは変更されません。',
   'categories.created': 'カテゴリを追加しました',
   'categories.deleted': 'カテゴリを削除しました',
   'categories.colorUpdated': '色を更新しました',
   'categories.backfillTitle': 'フォルダからカテゴリを適用',
-  'categories.backfillDesc': 'カテゴリ作成前に検出されたローカルギャラリーは未分類のままです。最上位フォルダ名のカテゴリを割り当てます。既にカテゴリがあるものは変更されません。',
+  'categories.backfillDesc':
+    'カテゴリ作成前に検出されたローカルギャラリーは未分類のままです。最上位フォルダ名のカテゴリを割り当てます。既にカテゴリがあるものは変更されません。',
   'categories.backfillPreview': 'プレビュー',
   'categories.backfillApply': '適用',
   'categories.backfillMatched': '{count} 件が更新されます',
   'categories.backfillApplied': '{count} 件を更新しました',
   'categories.localFolderNote': 'カテゴリを変更しても、ディスク上のフォルダは移動しません。',
-  'categories.uncategorizedDesc': 'カテゴリ未設定のギャラリーです。ライブラリで設定するか、ローカルギャラリーは下の「フォルダからカテゴリを適用」を使えます。',
+  'categories.uncategorizedDesc':
+    'カテゴリ未設定のギャラリーです。ライブラリで設定するか、ローカルギャラリーは下の「フォルダからカテゴリを適用」を使えます。',
   'categories.viewInLibrary': 'ライブラリで表示',
   'import.batch.categoryUnregistered': 'カテゴリ一覧にないため未分類になります',
   'settingsGroup.personal': '個人',
@@ -578,7 +587,8 @@ const ja: Record<string, string> = {
   'settings.galleryDlUpgradeTo': '{version}にアップグレード',
   'settings.galleryDlRollback': 'ロールバック',
   'settings.galleryDlMaster': '最新の開発版に置き換える',
-  'settings.galleryDlMasterConfirm': 'master の未リリース開発版をインストールしますか？不安定な可能性があります。後でアップグレードまたはロールバックで戻せます。',
+  'settings.galleryDlMasterConfirm':
+    'master の未リリース開発版をインストールしますか？不安定な可能性があります。後でアップグレードまたはロールバックで戻せます。',
   'settings.galleryDlMasterQueued': '開発版のインストールをキューに追加しました',
   'settings.galleryDlUpgradeQueued': 'アップグレードジョブをキューに追加しました',
   'settings.galleryDlRollbackQueued': 'ロールバックジョブをキューに追加しました',
@@ -898,7 +908,8 @@ const ja: Record<string, string> = {
     'このダウンロードを停止しますか？ダウンロード済みの内容は保持されます。まだ取得していない投稿は完全にスキップされ、以降の確認では新しい投稿のみ取得されます。',
   'queue.stopError': 'ジョブの停止に失敗しました',
   'queue.discard': '破棄',
-  'queue.discardConfirm': 'このダウンロードを破棄しますか？今回ダウンロードしたファイルは削除されます。',
+  'queue.discardConfirm':
+    'このダウンロードを破棄しますか？今回ダウンロードしたファイルは削除されます。',
   'queue.modeInitial': '初回',
   'queue.modeIncremental': '差分',
   'queue.modeRepair': '修復',
@@ -946,7 +957,8 @@ const ja: Record<string, string> = {
   'queue.jobSkipped': 'スキップ済み（保存済み）',
   'queue.jobImportSkipped': 'インポート時にフィルタされました',
   'queue.statusAlreadySaved': '保存済み',
-  'queue.alreadySavedNote': 'ライブラリに保存済みです（{pages} ページ）。新規ダウンロードはありません',
+  'queue.alreadySavedNote':
+    'ライブラリに保存済みです（{pages} ページ）。新規ダウンロードはありません',
   'queue.alreadySavedNoteNoPages': 'ライブラリに保存済みです。新規ダウンロードはありません',
   'queue.jobRecentLog': '最近のgallery-dlログ',
   'queue.gdlStateStarting': '開始中',
@@ -1081,7 +1093,8 @@ const ja: Record<string, string> = {
   'browse.coversOnly': '表紙のみ検索',
   'browse.includeExpunged': '削除済みを含める',
   'browse.imageSearchResults': '画像検索結果 {count} 件',
-  'browse.imageSessionExpiredHelp': 'アップロード画像の検索結果は期限切れです。新しい検索を開始してください。',
+  'browse.imageSessionExpiredHelp':
+    'アップロード画像の検索結果は期限切れです。新しい検索を開始してください。',
   'browse.startNewSearch': '新しい検索を開始',
   'browse.openRandom': '読み込み済みの結果をランダムに開く',
   'browse.watched': 'ウォッチ中',
@@ -1258,7 +1271,8 @@ const ja: Record<string, string> = {
   'tags.health.cycleBreakFailed': '含意の削除に失敗しました',
 
   // ── Settings extra ──
-  'settings.tagDatabaseDesc': '中国語のタグ名のために EhTagTranslation データベースをインポートします。',
+  'settings.tagDatabaseDesc':
+    '中国語のタグ名のために EhTagTranslation データベースをインポートします。',
   'settings.importEhtag': 'EhTagTranslation をインポート',
   'settings.importEhtagDesc':
     'EhTagTranslation プロジェクトから約5万件の中国語タグ翻訳をインポート',
@@ -1520,7 +1534,8 @@ const ja: Record<string, string> = {
 
   // ── Browser Cache ──
   'settings.browserCache': 'ブラウザキャッシュ',
-  'settings.browserCacheDesc': 'オフライン用にページを保持する期間を設定（画像はブラウザ自体のキャッシュが保持）',
+  'settings.browserCacheDesc':
+    'オフライン用にページを保持する期間を設定（画像はブラウザ自体のキャッシュが保持）',
   'settings.pageCacheTTL': 'ページキャッシュTTL',
   'settings.pageCacheTTLDesc': 'オフライン用ページレスポンスのキャッシュ保持時間',
   'settings.clearBrowserCache': 'ブラウザキャッシュをクリア',
@@ -2059,13 +2074,15 @@ const ja: Record<string, string> = {
   'trash.disabledDesc': 'この機能を使用するには設定でゴミ箱を有効にしてください',
   'trash.restoreAll': 'すべて復元',
   'trash.restoreAllConfirm': 'ゴミ箱内の{count}件のギャラリーをすべて復元しますか？',
-  'trash.emptyTrashConfirmCount': 'ゴミ箱内の{count}件のギャラリーをすべて完全に削除します。この操作は元に戻せません。続行しますか？',
+  'trash.emptyTrashConfirmCount':
+    'ゴミ箱内の{count}件のギャラリーをすべて完全に削除します。この操作は元に戻せません。続行しますか？',
   'trash.select': '選択',
   'trash.selectPage': 'このページを選択',
   'trash.selectedCount': '{count}件選択中',
   'trash.restoreSelected': '選択を復元',
   'trash.deleteSelected': '選択を削除',
-  'trash.deleteSelectedConfirm': '選択した{count}件のギャラリーを完全に削除しますか？この操作は元に戻せません。',
+  'trash.deleteSelectedConfirm':
+    '選択した{count}件のギャラリーを完全に削除しますか？この操作は元に戻せません。',
   'trash.restoredCount': '{count}件のギャラリーを復元しました',
   'trash.deletedCount': '{count}件のギャラリーを完全に削除しました',
   'trash.reason.user': '削除済み',
@@ -2098,8 +2115,10 @@ const ja: Record<string, string> = {
   'trash.purgeProgress': '削除中 {done} / {total}…',
   'trash.purgeQueued': 'バックグラウンドで完全削除を開始しました',
   'trash.purgeAlreadyRunning': '完全削除がすでに実行中です',
-  'trash.restoreFilteredConfirm': '現在のフィルターに一致する {count} 件のギャラリーを復元しますか？',
-  'trash.emptyFilteredConfirm': '現在のフィルターに一致する {count} 件のギャラリーを完全に削除しますか？この操作は元に戻せません。続行しますか？',
+  'trash.restoreFilteredConfirm':
+    '現在のフィルターに一致する {count} 件のギャラリーを復元しますか？',
+  'trash.emptyFilteredConfirm':
+    '現在のフィルターに一致する {count} 件のギャラリーを完全に削除しますか？この操作は元に戻せません。続行しますか？',
   'trash.noMatches': '現在のフィルターに一致するギャラリーはありません',
   'trash.clearFilters': 'フィルターをクリア',
 
@@ -2141,9 +2160,11 @@ const ja: Record<string, string> = {
   'admin.sites.retries': 'リトライ数',
   'admin.sites.httpTimeout': 'HTTPタイムアウト',
   'admin.sites.sleepRequest': 'APIリクエスト／ページ取得の間隔',
-  'admin.sites.sleepRequestHint': 'gallery-dl が API やページを取得する間の待機です。個々のファイルのダウンロードは遅くなりません。',
+  'admin.sites.sleepRequestHint':
+    'gallery-dl が API やページを取得する間の待機です。個々のファイルのダウンロードは遅くなりません。',
   'admin.sites.sleepDownload': 'ファイルごとのダウンロード間隔',
-  'admin.sites.sleepDownloadHint': '各ファイルをダウンロードする前の待機です。画像ホストへの負荷を抑えます。',
+  'admin.sites.sleepDownloadHint':
+    '各ファイルをダウンロードする前の待機です。画像ホストへの負荷を抑えます。',
   'admin.sites.defaultValue': 'デフォルト：{value}',
   'admin.sites.defaultExtractor': 'gallery-dl 組み込み：{value}',
   'admin.sites.defaultNone': 'デフォルト：なし',
@@ -2152,10 +2173,12 @@ const ja: Record<string, string> = {
   'admin.sites.overridden': '上書き済み',
   'admin.sites.autoTuned': '自動調整',
   'admin.sites.resetField': '{field}をデフォルトにリセット',
-  'admin.sites.sleepInvalid': '間隔の形式が正しくありません。2 のような数値、または 1-5 のような範囲を入力してください。',
+  'admin.sites.sleepInvalid':
+    '間隔の形式が正しくありません。2 のような数値、または 1-5 のような範囲を入力してください。',
   'admin.sites.concurrency': '同時接続数',
   'admin.sites.spreadPersonas': 'ペルソナに分散する',
-  'admin.sites.spreadPersonasHint': '同時接続数はペルソナごとの上限になります。手動で開始したダウンロードのみ分散され、購読は有効なアカウントを使い続けます。',
+  'admin.sites.spreadPersonasHint':
+    '同時接続数はペルソナごとの上限になります。手動で開始したダウンロードのみ分散され、購読は有効なアカウントを使い続けます。',
   'admin.sites.inactivityTimeout': '非アクティブタイムアウト',
   'admin.sites.fieldMapping': 'フィールドマッピング',
   'admin.sites.downloadSettings': 'ダウンロード設定',
@@ -2251,7 +2274,8 @@ const ja: Record<string, string> = {
   'novels.compareBase': '比較基準：{rev}',
   'novels.compareClear': '比較を解除',
   'novels.revertTo': '{rev} に戻す',
-  'novels.revertConfirm': 'このファイルを {rev} の内容に戻しますか？新しいコミットが追加され、履歴は保持されます。',
+  'novels.revertConfirm':
+    'このファイルを {rev} の内容に戻しますか？新しいコミットが追加され、履歴は保持されます。',
   'novels.reverted': '復元しました',
   'novels.revertFailed': '復元できませんでした',
   'novels.format': '書式',
@@ -2519,7 +2543,8 @@ const ja: Record<string, string> = {
   'datasets.exclusionAspectRatio': '極端なアスペクト比',
   'datasets.exclusionPhashDuplicate': '近似重複画像',
   'datasets.captionReview': 'Caption レビュー',
-  'datasets.captionReviewHint': '画像ごとに Caption を編集するか、データセット全体に一括適用します。',
+  'datasets.captionReviewHint':
+    '画像ごとに Caption を編集するか、データセット全体に一括適用します。',
   'datasets.captions': 'Caption',
   'datasets.captionsChanged': '{count}件のCaptionを変更しました',
   'datasets.triggerWordPlaceholder': 'トリガーワード',
@@ -2636,9 +2661,11 @@ const ja: Record<string, string> = {
   'explorer.noImages': '条件に一致する画像はありません',
   'explorer.hiddenBadge': '非表示',
   'explorer.sharedBadge': '共有',
-  'explorer.sharedHint': 'このファイルは他のギャラリーでも使われているため、このコピーを削除してもデータは保持されます。',
+  'explorer.sharedHint':
+    'このファイルは他のギャラリーでも使われているため、このコピーを削除してもデータは保持されます。',
   'explorer.externalBadge': '外部',
-  'explorer.externalHint': '外部ファイル：Jyzrox はリンクされたライブラリのファイルを削除しません。',
+  'explorer.externalHint':
+    '外部ファイル：Jyzrox はリンクされたライブラリのファイルを削除しません。',
   'explorer.imageStorage': '画像ストレージ',
   'explorer.reclaimable': '回収可能な容量',
   'explorer.duration': '再生時間',
@@ -2651,8 +2678,10 @@ const ja: Record<string, string> = {
   'explorer.purgeReclaim': '解放される容量',
   'explorer.purgeSharedKept': '保持される共有ファイル',
   'explorer.purgeExternalSkipped': 'スキップされた外部ファイル',
-  'explorer.purgeOtherSkipped': '他に {count} 枚をスキップしました（非表示でない、保留中、または既に存在しない）',
-  'explorer.purgeWarning': 'この操作は元に戻せません。削除した画像は再ダウンロード・再インポートされなくなります。',
+  'explorer.purgeOtherSkipped':
+    '他に {count} 枚をスキップしました（非表示でない、保留中、または既に存在しない）',
+  'explorer.purgeWarning':
+    'この操作は元に戻せません。削除した画像は再ダウンロード・再インポートされなくなります。',
   'explorer.purgeConfirm': '完全に削除',
   'explorer.purgeDone': '{count} 枚の画像を削除し、{bytes} を解放しました',
   'explorer.hideImagesInGallery': '選択した画像を非表示にする（ギャラリー内）',

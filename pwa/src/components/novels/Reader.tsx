@@ -56,7 +56,10 @@ export function Reader({ path, canEdit = false }: { path: string; canEdit?: bool
   // name that only belongs to another work; names come from the server-derived aliases. Empty/unindexed → no behavior change.
   const { data: notesData } = useSWR('novel-notes-all', () => api.novels.notes())
   const work = path.split('/')[0]
-  const entityIndex = useMemo(() => buildEntityIndex(notesData?.notes ?? [], work), [notesData, work])
+  const entityIndex = useMemo(
+    () => buildEntityIndex(notesData?.notes ?? [], work),
+    [notesData, work],
+  )
   const entityNames = useMemo(() => Array.from(entityIndex.keys()), [entityIndex])
   const entityHrefFor = useCallback(
     (name: string) => {
@@ -191,7 +194,8 @@ export function Reader({ path, canEdit = false }: { path: string; canEdit?: bool
   )
 
   if (isLoading) return <LoadingSpinner />
-  if (!data) return <p className="py-10 text-center text-vault-text-muted">{t('novels.loadFailed')}</p>
+  if (!data)
+    return <p className="py-10 text-center text-vault-text-muted">{t('novels.loadFailed')}</p>
 
   const themeStyle = THEME_STYLES[prefs.theme]
 

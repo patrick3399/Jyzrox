@@ -61,7 +61,14 @@ describe('LibraryGalleryCard category colours', () => {
       <LibraryGalleryCard
         gallery={{ ...gallery, category: 'Novel' }}
         categories={[
-          { id: 1, name: 'Novel', color: 'teal', sort_order: 11, is_builtin: false, gallery_count: 1 },
+          {
+            id: 1,
+            name: 'Novel',
+            color: 'teal',
+            sort_order: 11,
+            is_builtin: false,
+            gallery_count: 1,
+          },
         ]}
         onClick={() => {}}
       />,
@@ -72,20 +79,14 @@ describe('LibraryGalleryCard category colours', () => {
 
   it('keeps the built-in colour when no registry data is available', () => {
     const { container } = render(
-      <LibraryGalleryCard
-        gallery={{ ...gallery, category: 'Manga' }}
-        onClick={() => {}}
-      />,
+      <LibraryGalleryCard gallery={{ ...gallery, category: 'Manga' }} onClick={() => {}} />,
     )
     expect(container.innerHTML).toContain('from-orange-950')
   })
 
   it('renders an unregistered category grey', () => {
     const { container } = render(
-      <LibraryGalleryCard
-        gallery={{ ...gallery, category: 'illust' }}
-        onClick={() => {}}
-      />,
+      <LibraryGalleryCard gallery={{ ...gallery, category: 'illust' }} onClick={() => {}} />,
     )
     expect(container.innerHTML).toContain('from-gray-900')
   })

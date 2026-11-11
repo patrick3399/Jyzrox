@@ -169,7 +169,8 @@ const en: Record<string, string> = {
   'collections.galleryAddedTo': 'Added to "{name}"',
   'collections.addDenied': '{count} galleries could not be added (no access)',
   'collections.inCollection': 'In this collection',
-  'collections.emptyHint': 'Add galleries from a gallery\'s page ("Add to Collection"), or select galleries in the library and use "Add to Collection".',
+  'collections.emptyHint':
+    'Add galleries from a gallery\'s page ("Add to Collection"), or select galleries in the library and use "Add to Collection".',
   'collections.browseLibrary': 'Browse library',
   'collections.coverGallery': 'Cover Gallery',
 
@@ -264,7 +265,8 @@ const en: Record<string, string> = {
   'settingsCategory.novelRemote': 'Novel Module',
   'settingsCategory.novelRemoteDesc': 'Enable the module, sync source and SSH key',
   'settingsCategory.egressPersonas': 'Egress Personas',
-  'settingsCategory.egressPersonasDesc': 'Proxy, account and browser identity bundles for spreading downloads',
+  'settingsCategory.egressPersonasDesc':
+    'Proxy, account and browser identity bundles for spreading downloads',
   'personas.title': 'Egress Personas',
   'personas.name': 'Name',
   'personas.proxyUrl': 'Proxy URL',
@@ -272,7 +274,8 @@ const en: Record<string, string> = {
   'personas.browserProfile': 'Browser profile',
   'personas.browserNone': 'None (custom user agent)',
   'personas.userAgent': 'User agent',
-  'personas.identityHint': 'A browser profile sets its own matching user agent, so the two are mutually exclusive.',
+  'personas.identityHint':
+    'A browser profile sets its own matching user agent, so the two are mutually exclusive.',
   'personas.enabled': 'Enabled',
   'personas.accounts': 'Bound accounts',
   'personas.noFreeAccounts': 'No unbound accounts available',
@@ -292,12 +295,14 @@ const en: Record<string, string> = {
   'novelRemote.publicKeyHelp': "Add this line to the remote account's authorized_keys.",
   'novelRemote.generateKey': 'Generate key',
   'novelRemote.regenerateKey': 'Regenerate key',
-  'novelRemote.regenerateConfirm': 'The old key stops working until the new one is added to the remote. Continue?',
+  'novelRemote.regenerateConfirm':
+    'The old key stops working until the new one is added to the remote. Continue?',
   'novelRemote.noKey': 'Generate a key first.',
   'novelRemote.copy': 'Copy',
   'novelRemote.copied': 'Copied',
   'novelRemote.scanHost': 'Check host key',
-  'novelRemote.hostFingerprints': 'Host key fingerprints — compare with the remote before trusting:',
+  'novelRemote.hostFingerprints':
+    'Host key fingerprints — compare with the remote before trusting:',
   'novelRemote.trustHost': 'Trust this host',
   'novelRemote.hostTrusted': 'Host trusted',
   'novelRemote.hostNotTrusted': 'Host not trusted yet',
@@ -307,7 +312,8 @@ const en: Record<string, string> = {
   'novelRemote.save': 'Save',
   'novelRemote.saved': 'Saved',
   'novelRemote.recloneTitle': 'Replace the local copy?',
-  'novelRemote.recloneBody': 'The new remote has unrelated history ({reason}). The local copy ({unpushed} unpushed commits) will be discarded and cloned again.',
+  'novelRemote.recloneBody':
+    'The new remote has unrelated history ({reason}). The local copy ({unpushed} unpushed commits) will be discarded and cloned again.',
   'novelRemote.recloneConfirm': 'Discard and re-clone',
   'novelRemote.cancel': 'Cancel',
   'settingsCategory.categories': 'Gallery Categories',
@@ -318,18 +324,21 @@ const en: Record<string, string> = {
   'categories.add': 'Add',
   'categories.galleryCount': '{count} galleries',
   'categories.delete': 'Delete',
-  'categories.deleteConfirm': 'Delete "{name}"? {count} galleries will become uncategorized. Folders on disk are not changed.',
+  'categories.deleteConfirm':
+    'Delete "{name}"? {count} galleries will become uncategorized. Folders on disk are not changed.',
   'categories.created': 'Category added',
   'categories.deleted': 'Category deleted',
   'categories.colorUpdated': 'Colour updated',
   'categories.backfillTitle': 'Apply folder categories',
-  'categories.backfillDesc': 'Local galleries discovered before a category existed stay uncategorized. This assigns the category named by their top-level folder. Galleries that already have a category are never changed.',
+  'categories.backfillDesc':
+    'Local galleries discovered before a category existed stay uncategorized. This assigns the category named by their top-level folder. Galleries that already have a category are never changed.',
   'categories.backfillPreview': 'Preview',
   'categories.backfillApply': 'Apply',
   'categories.backfillMatched': '{count} galleries would be updated',
   'categories.backfillApplied': '{count} galleries updated',
-  'categories.localFolderNote': 'Changing the category does not move the gallery\'s folder on disk.',
-  'categories.uncategorizedDesc': 'Active galleries with no category. Assign one in the Library, or use "Apply folder categories" below for local galleries.',
+  'categories.localFolderNote': "Changing the category does not move the gallery's folder on disk.",
+  'categories.uncategorizedDesc':
+    'Active galleries with no category. Assign one in the Library, or use "Apply folder categories" below for local galleries.',
   'categories.viewInLibrary': 'View in Library',
   'import.batch.categoryUnregistered': 'Not in category list — will be uncategorized',
   'settingsGroup.personal': 'Personal',
@@ -425,7 +434,8 @@ const en: Record<string, string> = {
   'settings.galleryDlUpgradeTo': 'Upgrade to {version}',
   'settings.galleryDlRollback': 'Rollback',
   'settings.galleryDlMaster': 'Install latest development build',
-  'settings.galleryDlMasterConfirm': 'Install the unreleased development build from master? It may be unstable. You can switch back with Upgrade or Rollback.',
+  'settings.galleryDlMasterConfirm':
+    'Install the unreleased development build from master? It may be unstable. You can switch back with Upgrade or Rollback.',
   'settings.galleryDlMasterQueued': 'Development build install queued',
   'settings.galleryDlUpgradeQueued': 'Upgrade job queued',
   'settings.galleryDlRollbackQueued': 'Rollback job queued',
@@ -937,7 +947,8 @@ const en: Record<string, string> = {
   'browse.coversOnly': 'Search covers only',
   'browse.includeExpunged': 'Include expunged',
   'browse.imageSearchResults': '{count} image search results',
-  'browse.imageSessionExpiredHelp': 'These uploaded-image results are no longer available. Start a new search to continue.',
+  'browse.imageSessionExpiredHelp':
+    'These uploaded-image results are no longer available. Start a new search to continue.',
   'browse.startNewSearch': 'Start a new search',
   'browse.openRandom': 'Open a random loaded result',
   'browse.watched': 'Watched',
@@ -1956,13 +1967,15 @@ const en: Record<string, string> = {
   'trash.disabledDesc': 'Enable trash in Settings to use this feature',
   'trash.restoreAll': 'Restore all',
   'trash.restoreAllConfirm': 'Restore all {count} galleries in trash?',
-  'trash.emptyTrashConfirmCount': 'This will permanently delete all {count} galleries in trash. This cannot be undone. Continue?',
+  'trash.emptyTrashConfirmCount':
+    'This will permanently delete all {count} galleries in trash. This cannot be undone. Continue?',
   'trash.select': 'Select',
   'trash.selectPage': 'Select page',
   'trash.selectedCount': '{count} selected',
   'trash.restoreSelected': 'Restore selected',
   'trash.deleteSelected': 'Delete selected',
-  'trash.deleteSelectedConfirm': 'Permanently delete {count} selected galleries? This cannot be undone.',
+  'trash.deleteSelectedConfirm':
+    'Permanently delete {count} selected galleries? This cannot be undone.',
   'trash.restoredCount': 'Restored {count} galleries',
   'trash.deletedCount': 'Permanently deleted {count} galleries',
   'trash.reason.user': 'Deleted',
@@ -1996,7 +2009,8 @@ const en: Record<string, string> = {
   'trash.purgeQueued': 'Permanent deletion started in the background',
   'trash.purgeAlreadyRunning': 'A permanent deletion is already running',
   'trash.restoreFilteredConfirm': 'Restore the {count} galleries matching the current filters?',
-  'trash.emptyFilteredConfirm': 'Permanently delete the {count} galleries matching the current filters? This cannot be undone. Continue?',
+  'trash.emptyFilteredConfirm':
+    'Permanently delete the {count} galleries matching the current filters? This cannot be undone. Continue?',
   'trash.noMatches': 'No galleries match the current filters',
   'trash.clearFilters': 'Clear filters',
 
@@ -2040,9 +2054,11 @@ const en: Record<string, string> = {
   'admin.sites.retries': 'Retries',
   'admin.sites.httpTimeout': 'HTTP Timeout',
   'admin.sites.sleepRequest': 'API / Page Request Interval',
-  'admin.sites.sleepRequestHint': 'Pause between gallery-dl API and page requests. It does not slow down individual file downloads.',
+  'admin.sites.sleepRequestHint':
+    'Pause between gallery-dl API and page requests. It does not slow down individual file downloads.',
   'admin.sites.sleepDownload': 'Per-File Download Interval',
-  'admin.sites.sleepDownloadHint': 'Pause before each file download, to avoid hammering the image host.',
+  'admin.sites.sleepDownloadHint':
+    'Pause before each file download, to avoid hammering the image host.',
   'admin.sites.defaultValue': 'Default: {value}',
   'admin.sites.defaultExtractor': 'gallery-dl built-in: {value}',
   'admin.sites.defaultNone': 'Default: none',
@@ -2054,7 +2070,8 @@ const en: Record<string, string> = {
   'admin.sites.sleepInvalid': 'Invalid interval. Use a number such as 2, or a range such as 1-5.',
   'admin.sites.concurrency': 'Concurrency',
   'admin.sites.spreadPersonas': 'Spread across personas',
-  'admin.sites.spreadPersonasHint': 'Concurrency becomes the limit per persona. Only manually started downloads are spread; subscriptions keep the active account.',
+  'admin.sites.spreadPersonasHint':
+    'Concurrency becomes the limit per persona. Only manually started downloads are spread; subscriptions keep the active account.',
   'admin.sites.inactivityTimeout': 'Inactivity Timeout',
   'admin.sites.fieldMapping': 'Field Mapping',
   'admin.sites.downloadSettings': 'Download Settings',
@@ -2270,7 +2287,8 @@ const en: Record<string, string> = {
   'novels.compareBase': 'Comparing against {rev}',
   'novels.compareClear': 'Clear comparison',
   'novels.revertTo': 'Restore version {rev}',
-  'novels.revertConfirm': 'Restore this file to version {rev}? A new commit is added; history is kept.',
+  'novels.revertConfirm':
+    'Restore this file to version {rev}? A new commit is added; history is kept.',
   'novels.reverted': 'Version restored',
   'novels.revertFailed': 'Could not restore that version',
   'novels.format': 'Format',
@@ -2538,7 +2556,8 @@ const en: Record<string, string> = {
   'datasets.exclusionAspectRatio': 'Extreme aspect ratio',
   'datasets.exclusionPhashDuplicate': 'Near-duplicate image',
   'datasets.captionReview': 'Caption Review',
-  'datasets.captionReviewHint': 'Edit one image\'s caption, or apply a change across the whole dataset.',
+  'datasets.captionReviewHint':
+    "Edit one image's caption, or apply a change across the whole dataset.",
   'datasets.captions': 'Captions',
   'datasets.captionsChanged': '{count} captions changed',
   'datasets.triggerWordPlaceholder': 'Trigger word',
@@ -2656,7 +2675,8 @@ const en: Record<string, string> = {
   'explorer.noImages': 'No images match these filters',
   'explorer.hiddenBadge': 'Hidden',
   'explorer.sharedBadge': 'Shared',
-  'explorer.sharedHint': 'This file is also used by another gallery, so its bytes are kept when this copy is deleted.',
+  'explorer.sharedHint':
+    'This file is also used by another gallery, so its bytes are kept when this copy is deleted.',
   'explorer.externalBadge': 'External',
   'explorer.externalHint': 'External file: Jyzrox never deletes files in linked libraries.',
   'explorer.imageStorage': 'Image storage',
@@ -2672,7 +2692,8 @@ const en: Record<string, string> = {
   'explorer.purgeSharedKept': 'Shared files kept',
   'explorer.purgeExternalSkipped': 'External skipped',
   'explorer.purgeOtherSkipped': '{count} more skipped (not hidden, pending, or already gone)',
-  'explorer.purgeWarning': 'This cannot be undone. Deleted images are blocked from being downloaded or imported again.',
+  'explorer.purgeWarning':
+    'This cannot be undone. Deleted images are blocked from being downloaded or imported again.',
   'explorer.purgeConfirm': 'Delete permanently',
   'explorer.purgeDone': 'Deleted {count} image(s), freed {bytes}',
   'explorer.hideImagesInGallery': 'Hide selected images (inside a Gallery)',

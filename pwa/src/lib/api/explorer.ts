@@ -3,7 +3,8 @@ import { apiFetch, qs } from './client'
 // ── Library Workbench ────────────────────────────────────────────────
 
 export interface ExplorerQuery {
-  node_kind?: 'all' | 'source' | 'category' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash'
+  node_kind?:
+    'all' | 'source' | 'category' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash'
   node_id?: string | null
   query?: string
   sort?: 'added_at' | 'content_updated_at' | 'posted_at' | 'title' | 'rating' | 'pages' | 'size'
@@ -168,10 +169,13 @@ export interface ExplorerPhysicalEntry {
 export const explorer = {
   roots: () => apiFetch<ExplorerRoots>('/api/explorer/roots'),
   query: (query: ExplorerQuery) =>
-    apiFetch<{ total: number; offset: number; limit: number; items: ExplorerGalleryItem[]; category_counts?: Record<string, number> }>(
-      '/api/explorer/query',
-      { method: 'POST', body: JSON.stringify(query) },
-    ),
+    apiFetch<{
+      total: number
+      offset: number
+      limit: number
+      items: ExplorerGalleryItem[]
+      category_counts?: Record<string, number>
+    }>('/api/explorer/query', { method: 'POST', body: JSON.stringify(query) }),
   createSelection: (query: ExplorerQuery) =>
     apiFetch<{ selection_token: string; count: number; expires_in: number }>(
       '/api/explorer/selections',
@@ -267,7 +271,9 @@ export const explorer = {
       }>
     }>(`/api/explorer/galleries/${galleryId}/metadata-history`),
   galleryImages: (galleryId: number, params: ExplorerImagesParams = {}) =>
-    apiFetch<ExplorerGalleryImages>(`/api/explorer/galleries/${galleryId}/images${qs({ ...params })}`),
+    apiFetch<ExplorerGalleryImages>(
+      `/api/explorer/galleries/${galleryId}/images${qs({ ...params })}`,
+    ),
   purgeImages: (
     galleryId: number,
     body: { image_ids?: number[]; all_hidden?: boolean; dry_run: boolean },

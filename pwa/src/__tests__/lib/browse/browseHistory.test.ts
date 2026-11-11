@@ -52,7 +52,11 @@ describe('commitBrowseUrl — same-page identity transitions', () => {
 
   beforeEach(() => {
     patch = installNextHistoryPatch()
-    window.history.replaceState({ __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['tree'] }, '', '/e-hentai')
+    window.history.replaceState(
+      { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['tree'] },
+      '',
+      '/e-hentai',
+    )
   })
 
   afterEach(() => {

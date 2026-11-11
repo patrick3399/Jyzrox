@@ -373,7 +373,8 @@ export function useSequentialPrefetch(
           // marching forward from the abandoned position — re-enter the
           // chain at the current frontier instead so prefetching doesn't go
           // idle until the next page turn.
-          const nextPage = capturedEpoch === epochRef.current ? pageNum + 1 : currentPageRef.current + 1
+          const nextPage =
+            capturedEpoch === epochRef.current ? pageNum + 1 : currentPageRef.current + 1
           prefetchPageRef.current(nextPage)
         }, PROXY_PREFETCH_TIMEOUT_MS)
         entry.timeoutId = timeoutId
@@ -402,7 +403,8 @@ export function useSequentialPrefetch(
           // genuinely useful page rather than re-requesting anything, and
           // keeps the buffer advancing between page turns instead of going
           // idle once every in-flight request from the old epoch settles.
-          const nextPage = capturedEpoch === epochRef.current ? pageNum + 1 : currentPageRef.current + 1
+          const nextPage =
+            capturedEpoch === epochRef.current ? pageNum + 1 : currentPageRef.current + 1
           prefetchPageRef.current(nextPage)
         }
         el.src = img.url

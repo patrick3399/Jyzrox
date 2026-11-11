@@ -59,16 +59,23 @@ export function useCreateCollection() {
 export function useUpdateCollection() {
   return useSWRMutation(
     'collections',
-    (_key: unknown, { arg }: { arg: { id: number; data: { name?: string; description?: string; cover_gallery_id?: number } } }) =>
-      api.collections.update(arg.id, arg.data),
+    (
+      _key: unknown,
+      {
+        arg,
+      }: {
+        arg: {
+          id: number
+          data: { name?: string; description?: string; cover_gallery_id?: number }
+        }
+      },
+    ) => api.collections.update(arg.id, arg.data),
   )
 }
 
 export function useDeleteCollection() {
-  return useSWRMutation(
-    'collections',
-    (_key: unknown, { arg }: { arg: number }) =>
-      api.collections.delete(arg),
+  return useSWRMutation('collections', (_key: unknown, { arg }: { arg: number }) =>
+    api.collections.delete(arg),
   )
 }
 

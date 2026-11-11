@@ -20,8 +20,7 @@ interface LibraryViewMenuProps {
   onFollowSettings: () => void
 }
 
-const OPTION =
-  'flex-1 rounded-md border px-3 py-2 text-xs transition-colors whitespace-nowrap'
+const OPTION = 'flex-1 rounded-md border px-3 py-2 text-xs transition-colors whitespace-nowrap'
 const OPTION_ACTIVE = 'border-vault-accent bg-vault-accent/10 text-vault-accent'
 const OPTION_IDLE =
   'border-vault-border text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text'

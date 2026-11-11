@@ -76,7 +76,12 @@ export const api = {
 // ── Re-exported types (preserve `@/lib/api` as the single import surface) ──
 
 export type { ReconcileStatus } from './system'
-export type { ExplorerQuery, ExplorerGalleryItem, ExplorerRoots, ExplorerPhysicalEntry } from './explorer'
+export type {
+  ExplorerQuery,
+  ExplorerGalleryItem,
+  ExplorerRoots,
+  ExplorerPhysicalEntry,
+} from './explorer'
 export type { SearchGalleryItem, SearchGalleriesResponse } from './search'
 export type { SauceNaoResult } from './saucenao'
 export type {

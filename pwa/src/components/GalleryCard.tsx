@@ -21,7 +21,6 @@ import { AppImage } from './AppImage'
 
 // ── Category colours ──────────────────────────────────────────────────
 
-
 // ── LibraryGalleryCard ────────────────────────────────────────────────
 
 interface LibraryCardProps {
@@ -202,10 +201,7 @@ export function LibraryGalleryCard({
         {/* Info: one title line + one meta line, so the card height is a pure
             function of its width (estimateLibraryGridRowHeight reserves exactly this) */}
         <div className="flex flex-col gap-1 p-2">
-          <h3
-            className="text-vault-text text-sm font-medium truncate leading-5"
-            title={title}
-          >
+          <h3 className="text-vault-text text-sm font-medium truncate leading-5" title={title}>
             {title}
           </h3>
 

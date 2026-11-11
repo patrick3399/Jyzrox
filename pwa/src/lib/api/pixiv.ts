@@ -1,6 +1,12 @@
 import { apiFetch } from './client'
 
-import type { PixivIllust, PixivSearchResult, PixivUserResult, PixivCollectionState, PixivUserPreview } from '../types'
+import type {
+  PixivIllust,
+  PixivSearchResult,
+  PixivUserResult,
+  PixivCollectionState,
+  PixivUserPreview,
+} from '../types'
 
 // ── Pixiv ─────────────────────────────────────────────────────────────
 

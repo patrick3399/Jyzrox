@@ -52,7 +52,11 @@ describe('Editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'novels.save' }))
     await waitFor(() =>
       expect(h.writeFile).toHaveBeenCalledWith(
-        expect.objectContaining({ path: '作品A/第01章.md', content: 'new body', base_sha: 'sha-100' }),
+        expect.objectContaining({
+          path: '作品A/第01章.md',
+          content: 'new body',
+          base_sha: 'sha-100',
+        }),
       ),
     )
   })

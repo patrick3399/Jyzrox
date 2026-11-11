@@ -85,7 +85,9 @@ export default function TrashPage() {
   const q = searchParams.get('q') ?? ''
   const source = searchParams.get('source') ?? ''
   const reasonParam = searchParams.get('reason')
-  const reason: TrashReasonFilter | '' = TRASH_REASON_FILTERS.includes(reasonParam as TrashReasonFilter)
+  const reason: TrashReasonFilter | '' = TRASH_REASON_FILTERS.includes(
+    reasonParam as TrashReasonFilter,
+  )
     ? (reasonParam as TrashReasonFilter)
     : ''
   const sortParam = searchParams.get('sort')
@@ -270,12 +272,36 @@ export default function TrashPage() {
     confirm?.kind === 'deleteSelected' ? selected.size : confirm?.kind === 'deleteOne' ? 1 : total
   const confirmText =
     confirm?.kind === 'restoreAll'
-      ? { title: t('trash.restoreAll'), body: t(filtersActive ? 'trash.restoreFilteredConfirm' : 'trash.restoreAllConfirm', { count: String(confirmCount) }), label: t('trash.restoreAll'), destructive: false }
+      ? {
+          title: t('trash.restoreAll'),
+          body: t(filtersActive ? 'trash.restoreFilteredConfirm' : 'trash.restoreAllConfirm', {
+            count: String(confirmCount),
+          }),
+          label: t('trash.restoreAll'),
+          destructive: false,
+        }
       : confirm?.kind === 'empty'
-        ? { title: t('trash.emptyTrash'), body: t(filtersActive ? 'trash.emptyFilteredConfirm' : 'trash.emptyTrashConfirmCount', { count: String(confirmCount) }), label: t('trash.emptyTrash'), destructive: true }
+        ? {
+            title: t('trash.emptyTrash'),
+            body: t(filtersActive ? 'trash.emptyFilteredConfirm' : 'trash.emptyTrashConfirmCount', {
+              count: String(confirmCount),
+            }),
+            label: t('trash.emptyTrash'),
+            destructive: true,
+          }
         : confirm?.kind === 'deleteSelected'
-          ? { title: t('trash.deleteSelected'), body: t('trash.deleteSelectedConfirm', { count: String(confirmCount) }), label: t('trash.permanentDelete'), destructive: true }
-          : { title: t('trash.permanentDelete'), body: t('trash.permanentDeleteConfirm'), label: t('trash.permanentDelete'), destructive: true }
+          ? {
+              title: t('trash.deleteSelected'),
+              body: t('trash.deleteSelectedConfirm', { count: String(confirmCount) }),
+              label: t('trash.permanentDelete'),
+              destructive: true,
+            }
+          : {
+              title: t('trash.permanentDelete'),
+              body: t('trash.permanentDeleteConfirm'),
+              label: t('trash.permanentDelete'),
+              destructive: true,
+            }
 
   return (
     <PageContainer variant="secondary">
@@ -467,7 +493,9 @@ export default function TrashPage() {
                         <span>{t('trash.deletedBy', { name: g.deleted_by.username })}</span>
                       )}
                       <span>{t('trash.deletedAt', { time: timeAgo(g.deleted_at) })}</span>
-                      <span className={days <= DANGER_DAYS ? 'text-vault-danger' : 'text-orange-400'}>
+                      <span
+                        className={days <= DANGER_DAYS ? 'text-vault-danger' : 'text-orange-400'}
+                      >
                         {t('trash.daysRemaining', { days: String(days) })}
                       </span>
                     </span>

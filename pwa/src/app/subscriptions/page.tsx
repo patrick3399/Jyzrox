@@ -1074,7 +1074,7 @@ export default function SubscriptionsPage() {
                 group={group}
                 subs={groupedSubs.byGroup[group.id] ?? []}
                 jobsData={cardJobs}
-              run={runsData}
+                run={runsData}
                 groups={groups}
                 onEdit={openEditGroup}
                 onRun={handleGroupRun}

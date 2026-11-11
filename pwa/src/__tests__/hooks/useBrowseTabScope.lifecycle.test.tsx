@@ -31,9 +31,7 @@ describe('useBrowseTabScope document lifecycle', () => {
     const second = deferred<{ tabId: string; release: () => void }>()
     const releaseFirst = vi.fn()
     const releaseSecond = vi.fn()
-    claimBrowseTabScope
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise)
+    claimBrowseTabScope.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
 
     const view = renderHook(() =>
       useBrowseTabScope({ storage: window.sessionStorage, enabled: true }),

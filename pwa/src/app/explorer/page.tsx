@@ -8,9 +8,15 @@ import { PageContainer } from '@/components/layout/PageContainer'
 export default function ExplorerPage() {
   return (
     <PageContainer>
-    <Suspense fallback={<div className="p-6"><SkeletonGrid /></div>}>
-      <ExplorerWorkbench />
-    </Suspense>
+      <Suspense
+        fallback={
+          <div className="p-6">
+            <SkeletonGrid />
+          </div>
+        }
+      >
+        <ExplorerWorkbench />
+      </Suspense>
     </PageContainer>
   )
 }

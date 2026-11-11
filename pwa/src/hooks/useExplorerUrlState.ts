@@ -3,11 +3,26 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-import type { ExplorerImageMedia, ExplorerImageSort, ExplorerImageVisibility, ExplorerQuery } from '@/lib/api/explorer'
+import type {
+  ExplorerImageMedia,
+  ExplorerImageSort,
+  ExplorerImageVisibility,
+  ExplorerQuery,
+} from '@/lib/api/explorer'
 
 import { canStepBackInHistory, commitExplorerUrl, stepBackInHistory } from './explorerHistory'
 
-export type ExplorerNodeKind = 'root' | 'source' | 'category' | 'collection' | 'artist' | 'saved_search' | 'smart' | 'trash' | 'physical' | 'gallery'
+export type ExplorerNodeKind =
+  | 'root'
+  | 'source'
+  | 'category'
+  | 'collection'
+  | 'artist'
+  | 'saved_search'
+  | 'smart'
+  | 'trash'
+  | 'physical'
+  | 'gallery'
 
 export interface ExplorerNode {
   kind: ExplorerNodeKind
@@ -49,7 +64,15 @@ const DEFAULTS: ExplorerRefinements = {
   ioffset: 0,
 }
 
-const SORTS: readonly Sort[] = ['added_at', 'content_updated_at', 'posted_at', 'title', 'rating', 'pages', 'size']
+const SORTS: readonly Sort[] = [
+  'added_at',
+  'content_updated_at',
+  'posted_at',
+  'title',
+  'rating',
+  'pages',
+  'size',
+]
 const DIRECTIONS: readonly Direction[] = ['asc', 'desc']
 const VISIBILITIES: readonly ExplorerImageVisibility[] = ['active', 'hidden', 'all']
 const MEDIAS: readonly ExplorerImageMedia[] = ['all', 'image', 'video', 'gif']
@@ -115,11 +138,17 @@ export function useExplorerUrlState() {
   const params = useSearchParams()
   const search = params.toString()
   const searchRef = useRef(search)
-  useLayoutEffect(() => { searchRef.current = search }, [search])
+  useLayoutEffect(() => {
+    searchRef.current = search
+  }, [search])
 
   const state = useMemo(() => {
     const parsed = new URLSearchParams(search)
-    return { node: nodeFromParams(parsed), viewParam: parsed.get('view'), ...refinementsFromParams(parsed) }
+    return {
+      node: nodeFromParams(parsed),
+      viewParam: parsed.get('view'),
+      ...refinementsFromParams(parsed),
+    }
   }, [search])
 
   const refine = useCallback((patch: ExplorerPatch) => {
@@ -153,13 +182,16 @@ export function useExplorerUrlState() {
 
   /** Workbench back: return to the list we pushed from when history has it,
    *  otherwise push `fallback` (the node's parent). */
-  const stepBack = useCallback((fallback: ExplorerNode, view: 'grid' | 'list') => {
-    if (canStepBackInHistory(urlOf(searchRef.current))) {
-      stepBackInHistory()
-      return
-    }
-    pushNode(fallback, view)
-  }, [pushNode])
+  const stepBack = useCallback(
+    (fallback: ExplorerNode, view: 'grid' | 'list') => {
+      if (canStepBackInHistory(urlOf(searchRef.current))) {
+        stepBackInHistory()
+        return
+      }
+      pushNode(fallback, view)
+    },
+    [pushNode],
+  )
 
   return { ...state, urlKey: urlOf(search), refine, pushNode, stepBack }
 }

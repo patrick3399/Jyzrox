@@ -72,7 +72,10 @@ export function ChapterSummaryEditor({
 
   return (
     <div className="border-t border-vault-border px-4 py-3">
-      <label className="mb-1 block text-xs font-semibold text-vault-text-muted" htmlFor={`sum-${path}`}>
+      <label
+        className="mb-1 block text-xs font-semibold text-vault-text-muted"
+        htmlFor={`sum-${path}`}
+      >
         {t('novels.summary')}
       </label>
       <textarea
@@ -89,22 +92,12 @@ export function ChapterSummaryEditor({
         </p>
       )}
       <div className="mt-2 flex justify-end gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          className="text-xs"
-          onClick={onCancel}
-        >
+        <Button variant="secondary" size="sm" className="text-xs" onClick={onCancel}>
           {t('novels.cancel')}
         </Button>
         {conflictSha ? (
           <>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="text-xs"
-              onClick={onSaved}
-            >
+            <Button variant="secondary" size="sm" className="text-xs" onClick={onSaved}>
               {t('novels.summaryDiscardMine')}
             </Button>
             <Button

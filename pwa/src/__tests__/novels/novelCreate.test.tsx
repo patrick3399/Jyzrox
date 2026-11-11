@@ -29,7 +29,9 @@ describe('NovelCreateDialog', () => {
   it('creates a chapter in an existing work', async () => {
     h.createFile.mockResolvedValue({ ok: true, head: 'sha', pushed: true })
     const onCreated = vi.fn()
-    render(<NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={onCreated} />)
+    render(
+      <NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={onCreated} />,
+    )
 
     fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '02' } })
     fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
@@ -66,7 +68,9 @@ describe('NovelCreateDialog', () => {
   it('creates the file inside the chosen category folder', async () => {
     h.createFile.mockResolvedValue({ ok: true, head: 'sha', pushed: true })
     const onCreated = vi.fn()
-    render(<NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={onCreated} />)
+    render(
+      <NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={onCreated} />,
+    )
 
     fireEvent.change(screen.getByLabelText('novels.createCategory'), { target: { value: '草稿' } })
     fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '03alt' } })

@@ -20,8 +20,11 @@ export function CategoryFilter({ value, counts, onChange }: CategoryFilterProps)
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((category) => category.name)
     const known = new Set(registered)
-    const extra = Object.keys(counts ?? {}).filter((key) => key !== UNCATEGORIZED_FILTER && !known.has(key))
-    if (value && value !== UNCATEGORIZED_FILTER && !known.has(value) && !extra.includes(value)) extra.push(value)
+    const extra = Object.keys(counts ?? {}).filter(
+      (key) => key !== UNCATEGORIZED_FILTER && !known.has(key),
+    )
+    if (value && value !== UNCATEGORIZED_FILTER && !known.has(value) && !extra.includes(value))
+      extra.push(value)
     return [...registered, ...extra]
   }, [registry?.categories, counts, value])
 
@@ -39,9 +42,15 @@ export function CategoryFilter({ value, counts, onChange }: CategoryFilterProps)
       className="rounded-md border border-vault-border bg-vault-bg px-2 py-1 text-xs text-vault-text"
     >
       <option value="">{t('explorer.allCategories')}</option>
-      <option value={UNCATEGORIZED_FILTER}>{label(t('explorer.uncategorized'), UNCATEGORIZED_FILTER)}</option>
+      <option value={UNCATEGORIZED_FILTER}>
+        {label(t('explorer.uncategorized'), UNCATEGORIZED_FILTER)}
+      </option>
       {names.map((name) => (
-        <option key={name} value={name} className={counts && !counts[name] ? 'text-vault-text-muted' : undefined}>
+        <option
+          key={name}
+          value={name}
+          className={counts && !counts[name] ? 'text-vault-text-muted' : undefined}
+        >
           {label(name, name)}
         </option>
       ))}

@@ -145,10 +145,7 @@ describe('i18n key consistency', () => {
   })
 
   it('fully localized pages do not reintroduce obvious hardcoded UI text', () => {
-    const protectedFiles = [
-      'app/stats/page.tsx',
-      'app/share/[token]/page.tsx',
-    ]
+    const protectedFiles = ['app/stats/page.tsx', 'app/share/[token]/page.tsx']
     const allowedText = new Set(['MB'])
     const violations: string[] = []
 

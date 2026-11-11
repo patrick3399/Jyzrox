@@ -109,7 +109,10 @@ function EhProxyReaderPage() {
         <div className="text-center">
           <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error.message}</p>
-          <Button variant="secondary" size="md" className="mt-4"
+          <Button
+            variant="secondary"
+            size="md"
+            className="mt-4"
             onClick={() => smartBack(router, backHref)}
           >
             {t('common.goBack')}
@@ -140,7 +143,10 @@ function EhProxyReaderPage() {
           {loadingTooLong && (
             <div className="mt-4 space-y-2">
               <p className="text-xs text-yellow-500">{t('reader.loadingTooLong')}</p>
-              <Button variant="secondary" size="sm" className="text-xs"
+              <Button
+                variant="secondary"
+                size="sm"
+                className="text-xs"
                 onClick={() => smartBack(router, backHref)}
               >
                 {t('common.goBack')}

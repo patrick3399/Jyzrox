@@ -172,7 +172,9 @@ export function ThumbnailGridOverlay({
             alt=""
             onLoad={(e) => {
               const { naturalWidth: w, naturalHeight: h } = e.currentTarget
-              setSpriteNaturalSizes((prev) => (prev[proxyUrl] ? prev : { ...prev, [proxyUrl]: { w, h } }))
+              setSpriteNaturalSizes((prev) =>
+                prev[proxyUrl] ? prev : { ...prev, [proxyUrl]: { w, h } },
+              )
             }}
           />
         ) : null,

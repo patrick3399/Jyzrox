@@ -47,10 +47,7 @@ vi.mock('@/components/VirtualGrid', async () => {
       return (
         <div>
           {items.map((item, index) => (
-            <div
-              key={item.gid}
-              ref={(element) => onRegisterElement?.(index, element)}
-            >
+            <div key={item.gid} ref={(element) => onRegisterElement?.(index, element)}>
               {renderItem(item, index)}
             </div>
           ))}
@@ -313,9 +310,7 @@ describe('e-hentai favorites snapshot round-trip', () => {
     const favorite = store.entries.find((entry) =>
       entry.identityKey.includes('"surface":"favorites"'),
     )
-    const popular = store.entries.find((entry) =>
-      entry.identityKey.includes('"surface":"popular"'),
-    )
+    const popular = store.entries.find((entry) => entry.identityKey.includes('"surface":"popular"'))
     expect(favorite?.snapshot.pages.flat().map((item) => item.gid)).toContain(314)
     expect(popular?.snapshot.anchor?.itemId ?? null).not.toBe(314)
   })

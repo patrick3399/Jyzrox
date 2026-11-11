@@ -16,7 +16,15 @@ interface PageHeaderProps {
   className?: string
 }
 
-export function PageHeader({ title, meta, subtitle, icon, actions, spacing = 'default', className }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  meta,
+  subtitle,
+  icon,
+  actions,
+  spacing = 'default',
+  className,
+}: PageHeaderProps) {
   return (
     <header
       className={cn(

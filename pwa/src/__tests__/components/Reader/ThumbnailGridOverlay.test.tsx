@@ -22,7 +22,17 @@ class AutoFireResizeObserver {
     this.callback = callback
   }
   observe(target: Element) {
-    const rect = { width: 1200, height: 800, top: 0, left: 0, right: 1200, bottom: 800, x: 0, y: 0, toJSON() {} }
+    const rect = {
+      width: 1200,
+      height: 800,
+      top: 0,
+      left: 0,
+      right: 1200,
+      bottom: 800,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    }
     this.callback(
       [{ target, contentRect: rect } as unknown as ResizeObserverEntry],
       this as unknown as ResizeObserver,

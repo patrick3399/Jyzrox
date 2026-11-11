@@ -4,16 +4,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
-const { mockGuard, mockRegistry, mockCreate, mockUpdateColor, mockRemove, mockBackfill, mockMutate } =
-  vi.hoisted(() => ({
-    mockGuard: vi.fn(),
-    mockRegistry: vi.fn(),
-    mockCreate: vi.fn(),
-    mockUpdateColor: vi.fn(),
-    mockRemove: vi.fn(),
-    mockBackfill: vi.fn(),
-    mockMutate: vi.fn(),
-  }))
+const {
+  mockGuard,
+  mockRegistry,
+  mockCreate,
+  mockUpdateColor,
+  mockRemove,
+  mockBackfill,
+  mockMutate,
+} = vi.hoisted(() => ({
+  mockGuard: vi.fn(),
+  mockRegistry: vi.fn(),
+  mockCreate: vi.fn(),
+  mockUpdateColor: vi.fn(),
+  mockRemove: vi.fn(),
+  mockBackfill: vi.fn(),
+  mockMutate: vi.fn(),
+}))
 
 vi.mock('@/hooks/useAdminGuard', () => ({ useAdminGuard: () => mockGuard() }))
 vi.mock('@/hooks/useCategoryRegistry', () => ({ useCategoryRegistry: () => mockRegistry() }))
@@ -95,7 +102,14 @@ describe('CategoriesSettingsPage', () => {
       data: {
         ...data,
         categories: [
-          { id: 12, name: 'Sci-Fi & Co', color: 'teal', sort_order: 12, is_builtin: false, gallery_count: 1 },
+          {
+            id: 12,
+            name: 'Sci-Fi & Co',
+            color: 'teal',
+            sort_order: 12,
+            is_builtin: false,
+            gallery_count: 1,
+          },
         ],
       },
       mutate: mockMutate,
@@ -113,7 +127,14 @@ describe('CategoriesSettingsPage', () => {
       data: {
         ...data,
         categories: [
-          { id: 1, name: 'Artist CG', color: 'yellow', sort_order: 3, is_builtin: true, gallery_count: 2 },
+          {
+            id: 1,
+            name: 'Artist CG',
+            color: 'yellow',
+            sort_order: 3,
+            is_builtin: true,
+            gallery_count: 2,
+          },
         ],
       },
       mutate: mockMutate,
@@ -124,7 +145,8 @@ describe('CategoriesSettingsPage', () => {
     const q = new URL(href, 'http://x').searchParams.get('q') ?? ''
     expect(parseQuery(q).categories).toEqual(['Artist CG'])
     const uncategorized = screen.getByRole('link', { name: /library\.categoryUncategorized/ })
-    const uq = new URL(uncategorized.getAttribute('href') ?? '', 'http://x').searchParams.get('q') ?? ''
+    const uq =
+      new URL(uncategorized.getAttribute('href') ?? '', 'http://x').searchParams.get('q') ?? ''
     expect(parseQuery(uq).categories).toEqual(['__uncategorized__'])
   })
 

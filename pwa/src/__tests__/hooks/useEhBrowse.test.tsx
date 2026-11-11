@@ -63,8 +63,18 @@ describe('useEhBrowse — init', () => {
 describe('useEhBrowse — loadMore', () => {
   it('seeds the first page then appends the next', async () => {
     ;(api.eh.search as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ galleries: [{ gid: 1, token: 'a' }], total: 9, page: 0, next_gid: 5 })
-      .mockResolvedValueOnce({ galleries: [{ gid: 2, token: 'b' }], total: 9, page: 1, next_gid: 8 })
+      .mockResolvedValueOnce({
+        galleries: [{ gid: 1, token: 'a' }],
+        total: 9,
+        page: 0,
+        next_gid: 5,
+      })
+      .mockResolvedValueOnce({
+        galleries: [{ gid: 2, token: 'b' }],
+        total: 9,
+        page: 1,
+        next_gid: 8,
+      })
     const { result } = renderHook(() => useEhBrowse())
     act(() => result.current.actions.commitQuery('foo'))
     await act(async () => {

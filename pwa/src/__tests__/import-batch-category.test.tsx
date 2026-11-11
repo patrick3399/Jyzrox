@@ -26,7 +26,14 @@ vi.mock('@/hooks/useCategoryRegistry', () => ({
     data: {
       categories: [
         { id: 1, name: 'Cosplay', color: 'red', sort_order: 8, is_builtin: true, gallery_count: 0 },
-        { id: 2, name: 'Manga', color: 'orange', sort_order: 2, is_builtin: true, gallery_count: 0 },
+        {
+          id: 2,
+          name: 'Manga',
+          color: 'orange',
+          sort_order: 2,
+          is_builtin: true,
+          gallery_count: 0,
+        },
       ],
       palette: ['red', 'orange'],
     },

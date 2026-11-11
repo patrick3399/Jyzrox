@@ -45,10 +45,13 @@ export const collections = {
     }),
 
   addGalleries: (id: number, gallery_ids: number[]) =>
-    apiFetch<{ status: string; added: number; denied: number[] }>(`/api/collections/${id}/galleries`, {
-      method: 'POST',
-      body: JSON.stringify({ gallery_ids }),
-    }),
+    apiFetch<{ status: string; added: number; denied: number[] }>(
+      `/api/collections/${id}/galleries`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ gallery_ids }),
+      },
+    ),
 
   removeGallery: (id: number, galleryId: number) =>
     apiFetch<{ status: string }>(`/api/collections/${id}/galleries/${galleryId}`, {

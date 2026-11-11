@@ -14,8 +14,7 @@ import { render, waitFor } from '@testing-library/react'
 type GridProps = {
   measureRows?: boolean
   estimateHeight?:
-    | number
-    | ((context: { colCount: number; containerWidth: number; gap: number }) => number)
+    number | ((context: { colCount: number; containerWidth: number; gap: number }) => number)
 }
 const gridProps = vi.fn<(props: GridProps) => void>()
 

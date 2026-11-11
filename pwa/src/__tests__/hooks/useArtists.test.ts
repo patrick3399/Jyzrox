@@ -44,7 +44,11 @@ const swrCalls: SwrCall[] = []
 
 const { mockUseSWR } = vi.hoisted(() => ({
   mockUseSWR: vi.fn(
-    (key: unknown, fetcher: ((...args: unknown[]) => unknown) | null, options: Record<string, unknown> = {}) => {
+    (
+      key: unknown,
+      fetcher: ((...args: unknown[]) => unknown) | null,
+      options: Record<string, unknown> = {},
+    ) => {
       swrCalls.push({ key, fetcher, options })
       return { data: undefined, isLoading: true, error: undefined }
     },

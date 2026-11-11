@@ -34,7 +34,12 @@ vi.mock('swr', () => ({
 const readFile = vi.fn()
 const appearances = vi.fn()
 vi.mock('@/lib/api', () => ({
-  api: { novels: { readFile: (...a: unknown[]) => readFile(...a), appearances: (...a: unknown[]) => appearances(...a) } },
+  api: {
+    novels: {
+      readFile: (...a: unknown[]) => readFile(...a),
+      appearances: (...a: unknown[]) => appearances(...a),
+    },
+  },
 }))
 
 import NovelNotePage from '@/app/novels/note/[...path]/page'

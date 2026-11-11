@@ -137,7 +137,9 @@ describe('Library search bar placement', () => {
   it('puts the filter button in the same row as the search input', () => {
     render(<LibraryPage />)
 
-    const row = screen.getByPlaceholderText('library.searchPlaceholder').closest('.flex.items-center')
+    const row = screen
+      .getByPlaceholderText('library.searchPlaceholder')
+      .closest('.flex.items-center')
     expect(row).not.toBeNull()
     expect(row).toContainElement(screen.getByRole('button', { name: 'library.filters' }))
   })

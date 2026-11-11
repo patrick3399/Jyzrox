@@ -74,7 +74,6 @@ vi.mock('@/components/VirtualGrid', () => ({ VirtualGrid: () => null }))
 
 import GalleryDetailPage from '@/app/library/[source]/[sourceId]/page'
 
-
 const base = {
   id: 7,
   title: 'Gallery',

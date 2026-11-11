@@ -32,13 +32,15 @@ describe('useWorkbenchKeyboard', () => {
   })
 
   function renderKeyboard(overrides: Partial<Parameters<typeof useWorkbenchKeyboard>[0]> = {}) {
-    return renderHook(() => useWorkbenchKeyboard({
-      itemCount: 12,
-      columnCount: 3,
-      listMode: false,
-      ...callbacks,
-      ...overrides,
-    }))
+    return renderHook(() =>
+      useWorkbenchKeyboard({
+        itemCount: 12,
+        columnCount: 3,
+        listMode: false,
+        ...callbacks,
+        ...overrides,
+      }),
+    )
   }
 
   it('moves grid focus with arrows, Home, and End', () => {

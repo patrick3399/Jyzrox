@@ -94,7 +94,9 @@ describe('E-Hentai live view ownership', () => {
     const partition = JSON.parse(raw ?? '{}') as {
       entries?: Array<{ identityKey: string; snapshot: { anchor: unknown } }>
     }
-    const entry = partition.entries?.find((candidate) => candidate.identityKey === queryKey(view.result.current.state))
+    const entry = partition.entries?.find(
+      (candidate) => candidate.identityKey === queryKey(view.result.current.state),
+    )
     expect(entry?.snapshot.anchor).toEqual({ itemId: 1, offset: 20, scrollY: 900 })
   })
 
@@ -128,10 +130,9 @@ describe('E-Hentai live view ownership', () => {
         snapshot: { pages: Array<Array<{ gid: number }>>; pageMeta?: unknown }
       }>
     }
-    expect(partition.entries?.[0]?.snapshot.pages.map((page) => page.map((item) => item.gid))).toEqual([
-      [1],
-      [2],
-    ])
+    expect(
+      partition.entries?.[0]?.snapshot.pages.map((page) => page.map((item) => item.gid)),
+    ).toEqual([[1], [2]])
     expect(partition.entries?.[0]?.snapshot.pageMeta).toEqual(categories)
 
     const restored = renderHook(() => useEhBrowse(scope))

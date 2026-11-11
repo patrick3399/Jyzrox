@@ -58,11 +58,7 @@ export default function NovelSearchPage() {
           placeholder={t('novels.searchPlaceholder')}
           className="flex-1 rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-sm text-vault-text"
         />
-        <Button
-          variant="primary"
-          size="md"
-          type="submit"
-        >
+        <Button variant="primary" size="md" type="submit">
           <Search className="size-4" />
           {t('novels.search')}
         </Button>

@@ -74,7 +74,8 @@ const WsGdlContext = createContext<WsGdlContextValue>({
 // ── Composite type (backward compat) ──────────────────────────────────
 
 interface WsContextValue
-  extends WsConnectionContextValue,
+  extends
+    WsConnectionContextValue,
     WsJobContextValue,
     WsAlertContextValue,
     WsEventContextValue,

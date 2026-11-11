@@ -62,7 +62,10 @@ export function normalizeEhPageBound(value: unknown): number | null {
 }
 
 export function normalizeEhAdvancedSearch(value: unknown): number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= EH_ADVANCED_SEARCH_MASK
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= EH_ADVANCED_SEARCH_MASK
     ? value
     : 0
 }
@@ -191,9 +194,7 @@ export function ehFavoritePatch(gid: number, category: number | null): BrowseLis
     },
     invalidates: (identityKey, items) => {
       const listCategory = favoritesCategoryOf(identityKey)
-      return (
-        listCategory !== null && keeps(listCategory) && !items.some((item) => item.gid === gid)
-      )
+      return listCategory !== null && keeps(listCategory) && !items.some((item) => item.gid === gid)
     },
   }
 }

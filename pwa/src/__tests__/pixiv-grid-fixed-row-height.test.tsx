@@ -156,7 +156,12 @@ beforeEach(() => {
 
 describe('pixiv grid row height wiring', () => {
   it.each([
-    { name: 'feed', search: 'tab=feed', items: [illustItem], estimator: estimatePixivIllustRowHeight },
+    {
+      name: 'feed',
+      search: 'tab=feed',
+      items: [illustItem],
+      estimator: estimatePixivIllustRowHeight,
+    },
     {
       name: 'ranking',
       search: 'tab=ranking',
@@ -232,14 +237,17 @@ describe('pixiv grid row height', () => {
       layout: { colCount: 5, containerWidth: 1160, gap: 12 },
       cardHeight: 119.461,
     },
-  ])('reserves the height of $name without rounding below it', ({ estimate, layout, cardHeight }) => {
-    const rowHeight = estimate(layout)
+  ])(
+    'reserves the height of $name without rounding below it',
+    ({ estimate, layout, cardHeight }) => {
+      const rowHeight = estimate(layout)
 
-    // Fixed rows are placed rowHeight + gap apart: any shortfall makes the next
-    // row overlap this one, and more than a pixel of slack is a visible gap.
-    expect(rowHeight).toBeGreaterThanOrEqual(cardHeight)
-    expect(rowHeight - cardHeight).toBeLessThan(1)
-  })
+      // Fixed rows are placed rowHeight + gap apart: any shortfall makes the next
+      // row overlap this one, and more than a pixel of slack is a visible gap.
+      expect(rowHeight).toBeGreaterThanOrEqual(cardHeight)
+      expect(rowHeight - cardHeight).toBeLessThan(1)
+    },
+  )
 
   it('scales the reserved text height with the root font size so larger text never overlaps the next row', () => {
     const layout = { colCount: 6, containerWidth: 1160, gap: 12 }

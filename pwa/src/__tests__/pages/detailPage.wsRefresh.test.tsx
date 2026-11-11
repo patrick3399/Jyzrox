@@ -59,11 +59,7 @@ vi.mock('@/lib/api', () => ({
   api: new Proxy(
     {},
     {
-      get: () =>
-        new Proxy(
-          {},
-          { get: () => vi.fn().mockResolvedValue({ tags: [], items: [] }) },
-        ),
+      get: () => new Proxy({}, { get: () => vi.fn().mockResolvedValue({ tags: [], items: [] }) }),
     },
   ),
 }))

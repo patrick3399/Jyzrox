@@ -276,7 +276,10 @@ describe('useNavigation — groupedLinks', () => {
 
 describe('useNavigation — cycleTheme', () => {
   it('test_cycleTheme_fromLight_setsThemeToDark', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'light', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'light',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 
@@ -288,7 +291,10 @@ describe('useNavigation — cycleTheme', () => {
   })
 
   it('test_cycleTheme_fromDark_setsThemeToAmoled', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'dark', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'dark',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 
@@ -300,7 +306,10 @@ describe('useNavigation — cycleTheme', () => {
   })
 
   it('test_cycleTheme_fromAmoled_setsThemeToSystem', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'amoled', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'amoled',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 
@@ -312,7 +321,10 @@ describe('useNavigation — cycleTheme', () => {
   })
 
   it('test_cycleTheme_fromSystem_setsThemeToLight', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'system', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'system',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 
@@ -342,7 +354,10 @@ describe('useNavigation — cycleTheme', () => {
 
 describe('useNavigation — themeLabel', () => {
   it('test_themeLabel_lightTheme_returnsCommonLightKey', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'light', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'light',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 
@@ -350,7 +365,10 @@ describe('useNavigation — themeLabel', () => {
   })
 
   it('test_themeLabel_darkTheme_returnsCommonDarkKey', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'dark', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'dark',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 
@@ -358,7 +376,10 @@ describe('useNavigation — themeLabel', () => {
   })
 
   it('test_themeLabel_amoledTheme_returnsCommonAmoledKey', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'amoled', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'amoled',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 
@@ -366,7 +387,10 @@ describe('useNavigation — themeLabel', () => {
   })
 
   it('test_themeLabel_systemTheme_returnsCommonSystemKey', () => {
-    vi.mocked(useTheme).mockReturnValue({ theme: 'system', setTheme: mockSetTheme } as unknown as ReturnType<typeof useTheme>)
+    vi.mocked(useTheme).mockReturnValue({
+      theme: 'system',
+      setTheme: mockSetTheme,
+    } as unknown as ReturnType<typeof useTheme>)
 
     const { result } = renderHook(() => useNavigation())
 

@@ -103,7 +103,9 @@ export function LibraryFilterSheet({
             {t('library.resetFilters')}
           </Button>
           <Button variant="primary" onClick={() => onOpenChange(false)}>
-            {total === null ? t('common.done') : t('library.showResults', { count: formatNumber(total) })}
+            {total === null
+              ? t('common.done')
+              : t('library.showResults', { count: formatNumber(total) })}
           </Button>
         </>
       }
@@ -130,10 +132,7 @@ export function LibraryFilterSheet({
                     }`}
                   >
                     {!checked && (
-                      <span
-                        aria-hidden="true"
-                        className={`size-2 rounded-full ${colors.swatch}`}
-                      />
+                      <span aria-hidden="true" className={`size-2 rounded-full ${colors.swatch}`} />
                     )}
                     <span>{option.label}</span>
                     <span className={checked ? 'text-white/80' : 'text-vault-text-muted'}>

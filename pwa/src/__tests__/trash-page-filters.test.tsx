@@ -153,7 +153,11 @@ describe('Trash page filters', () => {
     fireEvent.change(screen.getByTestId('trash-filter-reason'), { target: { value: 'merged' } })
     expect(router.replace).toHaveBeenCalledWith('/trash?reason=merged', { scroll: false })
     await waitFor(() =>
-      expect(api.library.trashList).toHaveBeenCalledWith({ limit: 50, offset: 0, reason: 'merged' }),
+      expect(api.library.trashList).toHaveBeenCalledWith({
+        limit: 50,
+        offset: 0,
+        reason: 'merged',
+      }),
     )
   })
 

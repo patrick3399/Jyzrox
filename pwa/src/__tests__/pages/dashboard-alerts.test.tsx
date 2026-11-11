@@ -10,10 +10,7 @@ vi.mock('swr', () => ({
     if (key === 'dashboard/alerts') {
       return {
         data: {
-          alerts: [
-            'ExHentai access denied (Sad Panda)',
-            'ExHentai access denied (Sad Panda)',
-          ],
+          alerts: ['ExHentai access denied (Sad Panda)', 'ExHentai access denied (Sad Panda)'],
         },
         mutate: mockMutateAlerts,
       }
@@ -26,14 +23,7 @@ vi.mock('swr', () => ({
 }))
 
 vi.mock('next/link', () => ({
-  default: ({
-    href,
-    children,
-    ...props
-  }: {
-    href: string
-    children: ReactNode
-  }) => (
+  default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
     <a href={href} {...props}>
       {children}
     </a>

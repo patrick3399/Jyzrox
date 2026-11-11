@@ -16,11 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import {
-  decodeRouteSegment,
-  galleryHref,
-  readerHref,
-} from '@/lib/galleryRoutes'
+import { decodeRouteSegment, galleryHref, readerHref } from '@/lib/galleryRoutes'
 
 // ── decodeRouteSegment ────────────────────────────────────────────────
 

@@ -56,7 +56,8 @@ const Dialog = dynamic(() => import('@/components/ui/dialog').then((module) => m
 })
 // The phone filter sheet is a Dialog too; it loads the first time it opens.
 const LibraryFilterSheet = dynamic(
-  () => import('@/components/library/LibraryFilterSheet').then((module) => module.LibraryFilterSheet),
+  () =>
+    import('@/components/library/LibraryFilterSheet').then((module) => module.LibraryFilterSheet),
   { ssr: false },
 )
 const AddToCollectionMenu = dynamic(
@@ -324,7 +325,9 @@ function LibraryContent() {
   // could land on a different card.
   const layoutSwitchIndex = useMemo(
     () =>
-      layoutSwitch ? displayGalleries.findIndex((gallery) => gallery.id === layoutSwitch.itemId) : -1,
+      layoutSwitch
+        ? displayGalleries.findIndex((gallery) => gallery.id === layoutSwitch.itemId)
+        : -1,
     [displayGalleries, layoutSwitch],
   )
   const layoutSwitchRequest = useMemo(

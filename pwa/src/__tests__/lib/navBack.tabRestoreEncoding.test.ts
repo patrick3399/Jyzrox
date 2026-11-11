@@ -69,6 +69,8 @@ describe('smartBack after a nav-tab restore of a deep page', () => {
     smartBack(router, root)
 
     expect(router.back).not.toHaveBeenCalled()
-    expect(router.replace).toHaveBeenCalledWith(root === '/pixiv' ? '/pixiv?tab=bookmarks' : '/library?q=x')
+    expect(router.replace).toHaveBeenCalledWith(
+      root === '/pixiv' ? '/pixiv?tab=bookmarks' : '/library?q=x',
+    )
   })
 })
