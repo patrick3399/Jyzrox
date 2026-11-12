@@ -516,21 +516,41 @@ export function useTouchGesture(
   onSwipeUp?: () => void,
   threshold = 50,
   isDisabled?: () => boolean,
+  /** Touches that start inside a match (scrollers, sliders) are not swipes. */
+  ignoreSelector?: string,
 ) {
   const startX = useRef(0)
   const startY = useRef(0)
+  // Only a gesture that began with exactly one finger, outside ignoreSelector,
+  // and never grew a second finger is a swipe. These are native listeners on
+  // the container, so a React stopPropagation() below never hides a drag.
+  const trackingRef = useRef(false)
 
   useEffect(() => {
     const el = elementRef.current
     if (!el) return
 
     const onStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return
+      if (e.touches.length !== 1) {
+        // A second finger turns the gesture into a pinch for good.
+        trackingRef.current = false
+        return
+      }
+      const target = e.target as Element | null
+      if (ignoreSelector && target?.closest?.(ignoreSelector)) {
+        trackingRef.current = false
+        return
+      }
+      trackingRef.current = true
       startX.current = e.touches[0].clientX
       startY.current = e.touches[0].clientY
     }
 
     const onEnd = (e: TouchEvent) => {
+      // Wait for the last finger; a pinch's first lift is not a swipe end.
+      if (e.touches.length !== 0) return
+      if (!trackingRef.current) return
+      trackingRef.current = false
       if (isDisabled?.()) return
       const dx = e.changedTouches[0].clientX - startX.current
       const dy = e.changedTouches[0].clientY - startY.current
@@ -544,13 +564,19 @@ export function useTouchGesture(
       }
     }
 
+    const onCancel = () => {
+      trackingRef.current = false
+    }
+
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchend', onEnd, { passive: true })
+    el.addEventListener('touchcancel', onCancel, { passive: true })
     return () => {
       el.removeEventListener('touchstart', onStart)
       el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onCancel)
     }
-  }, [elementRef, onSwipeLeft, onSwipeRight, onSwipeUp, threshold, isDisabled])
+  }, [elementRef, onSwipeLeft, onSwipeRight, onSwipeUp, threshold, isDisabled, ignoreSelector])
 }
 
 // ── useKeyboardNav ────────────────────────────────────────────────────

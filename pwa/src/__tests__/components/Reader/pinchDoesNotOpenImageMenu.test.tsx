@@ -149,4 +149,25 @@ describe('Reader image long-press vs two-finger pinch', () => {
 
     expect(screen.getByRole('menu')).toBeInTheDocument()
   })
+
+  it('does not turn the page when the finger slides away after the long-press menu opened', () => {
+    localStorage.setItem('reader_settings', JSON.stringify({ statusBarShowClock: false }))
+    const page = renderReader()
+    const counter = () => document.querySelector('.reader-status-bar')?.textContent ?? ''
+    expect(counter()).toContain('1 / 5')
+
+    const start = { identifier: 0, clientX: 500, clientY: 300 }
+    const slid = { identifier: 0, clientX: 150, clientY: 320 }
+    fireEvent.touchStart(page, { touches: [start], changedTouches: [start] })
+    act(() => {
+      vi.advanceTimersByTime(600)
+    })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    // Slide towards a menu item and lift: a swipe left by the numbers.
+    fireEvent.touchMove(page, { touches: [slid], changedTouches: [slid] })
+    fireEvent.touchEnd(page, { touches: [], changedTouches: [slid] })
+
+    expect(counter()).toContain('1 / 5')
+    localStorage.removeItem('reader_settings')
+  })
 })

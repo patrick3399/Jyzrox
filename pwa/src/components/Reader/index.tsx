@@ -76,6 +76,10 @@ function Spinner({ className = '' }: { className?: string }) {
 
 // ── Scale mode CSS helpers ────────────────────────────────────────────
 
+// The Reader's own chrome (top bar, thumbnail strip, status bar). Touches and
+// wheel events that start there are its controls' input, not page gestures.
+const READER_CHROME_SELECTOR = '.reader-overlay'
+
 function getScaleContainerClass(scaleMode: ScaleMode): string {
   switch (scaleMode) {
     case 'fit-width':
@@ -465,6 +469,9 @@ function SinglePageView({
   // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
   const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const isDoubleTapRef = useRef(false)
+  const clearDoubleTap = useCallback(() => {
+    isDoubleTapRef.current = false
+  }, [])
   useEffect(() => () => clearTimeout(centerTapTimerRef.current), [])
   const { isZoomed, transform, isGesturing } = usePinchZoom(
     containerRef as React.RefObject<HTMLElement | null>,
@@ -511,6 +518,10 @@ function SinglePageView({
     <div
       ref={containerRef}
       className={`${getScaleContainerClass(scaleMode)} h-full w-full`}
+      // usePinchZoom cancels a double-tap's touchend, so its click never comes
+      // to consume isDoubleTapRef; clear it when the next touch begins, or that
+      // tap's click is swallowed.
+      onTouchStartCapture={clearDoubleTap}
       onTouchStart={imageLongPress?.onTouchStart}
       onTouchMove={imageLongPress?.onTouchMove}
       onTouchEnd={imageLongPress?.onTouchEnd}
@@ -906,6 +917,9 @@ function DoublePageView({
   // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
   const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const isDoubleTapRef = useRef(false)
+  const clearDoubleTap = useCallback(() => {
+    isDoubleTapRef.current = false
+  }, [])
   useEffect(() => () => clearTimeout(centerTapTimerRef.current), [])
   const { isZoomed, transform, isGesturing } = usePinchZoom(
     containerRef as React.RefObject<HTMLElement | null>,
@@ -942,6 +956,10 @@ function DoublePageView({
     <div
       ref={containerRef}
       className="relative flex h-full w-full items-center justify-center overflow-hidden"
+      // usePinchZoom cancels a double-tap's touchend, so its click never comes
+      // to consume isDoubleTapRef; clear it when the next touch begins, or that
+      // tap's click is swallowed.
+      onTouchStartCapture={clearDoubleTap}
     >
       <div
         style={{
@@ -1863,6 +1881,9 @@ export default function Reader({
   }, [handleBack])
 
   const isZoomedRef = useRef(false)
+  // Set once the image long-press menu is up: a finger that slides on after the
+  // menu opened is reaching for an item, not swiping the page underneath.
+  const imageMenuOpenRef = useRef(false)
   const handleZoomChange = useCallback((z: boolean) => {
     isZoomedRef.current = z
   }, [])
@@ -1877,7 +1898,9 @@ export default function Reader({
     // listener on containerRef; without this guard a downward scroll
     // (finger swiping up) inside the grid was misread as swipe-up-to-back
     // and exited the Reader instead of just scrolling the grid.
-    () => isZoomedRef.current || state.isGridOpen,
+    () => isZoomedRef.current || imageMenuOpenRef.current || state.isGridOpen,
+    // Scrolling the thumbnail strip or dragging the seek bar is not a page swipe.
+    READER_CHROME_SELECTOR,
   )
 
   useKeyboardNav(
@@ -1905,10 +1928,9 @@ export default function Reader({
     if (state.viewMode === 'webtoon') return
     let cooldown = false
     const handler = (e: WheelEvent) => {
-      // Don't intercept wheel events on the thumbnail strip (it has its own horizontal scroll)
-      if ((e.target as HTMLElement)?.closest('.reader-thumb-strip')) return
-      // Don't intercept wheel events on the overlay controls
-      if ((e.target as HTMLElement)?.closest('.reader-overlay')) return
+      // Don't intercept wheel events on the overlay controls, the thumbnail strip
+      // (it has its own horizontal scroll) or the status bar
+      if ((e.target as HTMLElement)?.closest(READER_CHROME_SELECTOR)) return
       if (cooldown) return
       const dy = e.deltaY
       if (Math.abs(dy) < 10) return
@@ -1962,6 +1984,10 @@ export default function Reader({
   } | null>(null)
 
   const [saucenaoImageId, setSaucenaoImageId] = useState<number | null>(null)
+
+  useEffect(() => {
+    imageMenuOpenRef.current = imageMenu?.open ?? false
+  }, [imageMenu])
 
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -2181,7 +2207,7 @@ export default function Reader({
     <div ref={containerRef} className="reader-container flex flex-col bg-black">
       {/* Top overlay — always rendered, slides in/out */}
       <div
-        className={`absolute top-0 left-0 right-0 z-20 transition-transform duration-300 ${
+        className={`reader-overlay absolute top-0 left-0 right-0 z-20 transition-transform duration-300 ${
           state.showOverlay ? 'translate-y-0' : '-translate-y-full'
         } ${!state.showOverlay ? 'pointer-events-none' : ''}`}
       >
@@ -2290,7 +2316,7 @@ export default function Reader({
 
       {/* Bottom thumbnail strip — always rendered, slides in/out */}
       <div
-        className={`absolute bottom-0 left-0 right-0 z-20 transition-transform duration-300 ${
+        className={`reader-overlay absolute bottom-0 left-0 right-0 z-20 transition-transform duration-300 ${
           state.showOverlay ? 'translate-y-0' : 'translate-y-full'
         } ${!state.showOverlay ? 'pointer-events-none' : ''}`}
       >
@@ -2307,7 +2333,7 @@ export default function Reader({
 
       {/* Status bar — hidden via opacity when overlay is shown to avoid bleed-through the thumbnail strip */}
       <div
-        className={`absolute left-0 right-0 bottom-0 z-10 transition-opacity duration-300 ${state.showOverlay ? 'opacity-0' : 'opacity-100'}`}
+        className={`reader-overlay absolute left-0 right-0 bottom-0 z-10 transition-opacity duration-300 ${state.showOverlay ? 'opacity-0' : 'opacity-100'}`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         onClick={(e) => e.stopPropagation()}
       >
