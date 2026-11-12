@@ -146,6 +146,71 @@ async def test_media_authz_imgproxy_cas_source_allowed_without_gallery_lookup():
     assert allowed is True
 
 
+_THUMB_SRC = "thumbs/e5/8e/e58e3a5cc1e7a21c33407335cbe5d11c92a6cdd10e4c5882f250724106fda156/thumb_720.webp"
+_CAS_SRC = "cas/16/14/161421bf1d2126806e4644114713c00fa0d68639d644ea4a6e563dc958fa4038.jpg"
+
+
+async def test_media_authz_imgproxy_dotdot_source_escaping_cas_denied():
+    """imgproxy resolves '..' in local:// sources, so a cas/-prefixed source with a
+    '..' segment escapes CAS. The prefix check alone accepted it (returned 200
+    for local:///cas/../thumbs/... and any other image under /data)."""
+    for source in (
+        f"local:///cas/../{_THUMB_SRC}",
+        "local:///cas/../library/ehentai/a.jpg",
+        "local:///thumbs/../../data/backups/x.png",
+        "local:///cas/./16/14/x.jpg",
+    ):
+        uri = f"/media/image/insecure/rs:fit:320:0:0/{_b64_source(source)}.webp"
+        assert await authorize_media_uri({"user_id": 2, "role": "member"}, uri) is False, source
+
+
+async def test_media_authz_imgproxy_split_base64_source_validated_as_joined():
+    """imgproxy joins every source segment before base64-decoding. A source
+    whose last segment alone decodes to a cas/ path but whose joined form
+    points elsewhere must be judged by the joined form."""
+    prefix = "local:///backups/xxx/"  # 21 bytes -> 28 base64 chars, keeps the split aligned
+    assert len(prefix) % 3 == 0
+    whole = _b64_source(prefix + "local:///" + _CAS_SRC)
+    head, tail = whole[:28], whole[28:]
+    assert base64.urlsafe_b64decode(tail + "=" * (-len(tail) % 4)).decode().startswith("local:///cas/")
+    uri = f"/media/image/insecure/rs:fit:320:0:0/{head}/{tail}.webp"
+    assert await authorize_media_uri({"user_id": 2, "role": "member"}, uri) is False
+
+
+async def test_media_authz_imgproxy_plain_source_form_denied():
+    """The app only emits base64 sources. A plain/ source is resolved by
+    imgproxy from the plain path, not from the base64-looking last segment."""
+    uri = f"/media/image/insecure/rs:fit:320:0:0/plain/local:///backups/x/{_b64_source('local:///' + _CAS_SRC)}.webp"
+    assert await authorize_media_uri({"user_id": 2, "role": "member"}, uri) is False
+
+
+async def test_media_authz_imgproxy_request_dot_segments_normalized_like_nginx():
+    """nginx resolves dot segments and %2F before proxying to imgproxy but
+    forwards the raw $request_uri to auth; the check must see nginx's view."""
+    bad = _b64_source("local:///backups/xxx/")
+    good = _b64_source("local:///" + _CAS_SRC)
+    for uri in (
+        f"/media/image/insecure/rs:fit:320:0:0/{bad}/x/../{good}.webp",
+        f"/media/image/insecure/rs:fit:320:0:0/{bad}%2F{good}.webp",
+        f"/media/image/insecure/rs:fit:320:0:0/{bad}/x/%2e%2e/{good}.webp",
+    ):
+        assert await authorize_media_uri({"user_id": 2, "role": "member"}, uri) is False, uri
+
+
+async def test_media_authz_imgproxy_legitimate_source_shapes_allowed():
+    """Shapes the PWA (AppImage.tsx) or imgproxy itself legitimately accept stay allowed."""
+    cas = _b64_source("local:///" + _CAS_SRC)
+    thumb = _b64_source("local:///" + _THUMB_SRC)
+    for uri in (
+        f"/media/image/insecure/rs:fit:320:0:0/{cas}.avif",
+        f"/media/image/insecure/rs:fit:960:0:0/{cas}.webp?v=1",
+        f"/media/image/insecure/rs:fit:320:0:0/{thumb}.webp",
+        f"/media/image/insecure/{cas}.webp",
+        f"/media/image/insecure/rs:fit:320:0:0/{cas[:5]}/{cas[5:]}.webp",
+    ):
+        assert await authorize_media_uri({"user_id": 2, "role": "member"}, uri) is True, uri
+
+
 async def test_media_authz_direct_cas_uses_authenticated_capability_semantics():
     """CAS/thumb paths are session-gated by nginx, not Gallery-ACL checked here."""
     allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, "/media/cas/pr/iv/privatecas.jpg")

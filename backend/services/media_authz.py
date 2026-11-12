@@ -12,9 +12,11 @@ session validation:
   root (``/mnt``). Without this check, any authenticated user could browse
   *any* registered (or even unregistered — see #68) file under ``/mnt``.
 - ``/media/image/insecure/...<b64>.<ext>`` — imgproxy source URL, base64
-  encoded in the last path segment. imgproxy's filesystem root is the whole
-  ``/data`` directory, so an unvalidated source could read arbitrary files
-  (e.g. database backups) — see #67.
+  encoded after the processing options. imgproxy's filesystem root is the
+  whole ``/data`` directory and it resolves ``..`` in local sources, so an
+  unvalidated source could read arbitrary images under ``/data`` — see #67.
+  The source is decoded the way nginx + imgproxy will see it, not from the
+  raw last segment.
 
 Content-addressed CAS/thumb URLs use authenticated-capability semantics: nginx
 still requires a valid session, but the high-entropy SHA is not resolved back
@@ -32,6 +34,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import re
 from urllib.parse import unquote
 
 from sqlalchemy import select
@@ -44,7 +47,11 @@ logger = logging.getLogger(__name__)
 
 _LIBRARIES_PREFIX = "/media/libraries/"
 _IMAGE_PREFIX = "/media/image/"
-_ALLOWED_IMGPROXY_SOURCE_PREFIXES = ("local:///cas/", "local:///thumbs/")
+_LOCAL_SOURCE_PREFIX = "local:///"
+_ALLOWED_IMGPROXY_SOURCE_ROOTS = frozenset({"cas", "thumbs"})
+_BASE64URL_RE = re.compile(r"[A-Za-z0-9_-]+")
+# A leading dot is refused, which also rules out "." and ".." segments.
+_SOURCE_SEGMENT_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 
 
 async def authorize_media_uri(auth: dict, uri: str) -> bool:
@@ -89,18 +96,88 @@ async def _authorize_libraries(auth: dict, uri: str) -> bool:
     return allowed
 
 
+def _nginx_normalized_path(raw_path: str) -> str | None:
+    """Return the path nginx proxies upstream for a raw ``$request_uri`` path.
+
+    auth_request sees the raw URI, but nginx hands imgproxy the normalized
+    ``$uri``: percent-decoded (``%2F`` becomes a separator, ``%2e%2e`` a dot
+    segment), slashes merged, ``.``/``..`` resolved. Authorizing anything else
+    would judge a different source than the one imgproxy loads. ``None`` when
+    ``..`` climbs above the root (nginx answers 400).
+    """
+    decoded = unquote(raw_path, errors="strict")
+    if any(ord(ch) < 0x20 or ch == "\x7f" for ch in decoded):
+        return None
+    segments: list[str] = []
+    for segment in decoded.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if not segments:
+                return None
+            segments.pop()
+        else:
+            segments.append(segment)
+    return "/" + "/".join(segments)
+
+
+def _imgproxy_source(path: str) -> str | None:
+    """Decode the source imgproxy will load for a normalized ``/media/image/`` path.
+
+    Mirrors imgproxy's path parsing: the first segment is the signature,
+    leading ``name:args`` segments are processing options, and every remaining
+    segment is joined *before* base64-decoding (imgproxy accepts a base64
+    source split by ``/`` at any offset). The extension is cut at the last dot
+    of the joined string. ``plain/`` and ``enc/`` sources are never emitted by
+    the app and are rejected.
+    """
+    parts = path[len(_IMAGE_PREFIX) :].split("/")[1:]
+    first_source = 0
+    while first_source < len(parts) and ":" in parts[first_source]:
+        first_source += 1
+    source_parts = parts[first_source:]
+    if not source_parts or source_parts[0] in ("plain", "enc"):
+        return None
+    encoded = "".join(source_parts)
+    if "." in encoded:
+        encoded = encoded[: encoded.rindex(".")]
+    encoded = encoded.rstrip("=")
+    if not _BASE64URL_RE.fullmatch(encoded):
+        return None
+    return base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
+
+
+def _source_allowed(source: str) -> bool:
+    """Whether a decoded ``local:///`` source stays inside CAS/thumb storage.
+
+    imgproxy resolves ``..`` inside local sources, so a prefix check alone lets
+    ``local:///cas/../<anything>`` read any image under ``/data``. Every segment
+    must be a plain name: no dot segments, empty segments, dotfiles, or
+    characters (``%``, ``?``, ``#``, ``\\``, ``:``) that imgproxy might decode or
+    reinterpret.
+    """
+    if not source.startswith(_LOCAL_SOURCE_PREFIX):
+        return False
+    segments = source[len(_LOCAL_SOURCE_PREFIX) :].split("/")
+    return (
+        len(segments) >= 2
+        and segments[0] in _ALLOWED_IMGPROXY_SOURCE_ROOTS
+        and all(_SOURCE_SEGMENT_RE.fullmatch(segment) for segment in segments)
+    )
+
+
 def _authorize_image(uri: str) -> bool:
     """Authorize a ``/media/image/...`` imgproxy request by its decoded source.
 
-    The source prefix is constrained to CAS/thumbs. Session authentication is
-    handled by nginx/auth.py; no per-Gallery DB query is needed here.
+    The source is reconstructed exactly as nginx + imgproxy will see it and
+    must resolve inside CAS/thumbs. Session authentication is handled by
+    nginx/auth.py; no per-Gallery DB query is needed here.
     """
-    path = uri.split("?", 1)[0]
-    last_segment = path.rstrip("/").rsplit("/", 1)[-1]
-    stem = last_segment.rsplit(".", 1)[0] if "." in last_segment else last_segment
-    padded = stem + "=" * (-len(stem) % 4)
+    path = _nginx_normalized_path(uri.split("?", 1)[0])
+    if path is None or not path.startswith(_IMAGE_PREFIX):
+        return False
     try:
-        decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+        source = _imgproxy_source(path)
     except binascii.Error, UnicodeDecodeError, ValueError:
         return False
-    return decoded.startswith(_ALLOWED_IMGPROXY_SOURCE_PREFIXES)
+    return source is not None and _source_allowed(source)
