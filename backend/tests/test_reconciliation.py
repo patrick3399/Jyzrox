@@ -1538,3 +1538,197 @@ class TestPendingLinkPagesInReconciliation:
             and "images.id" not in str(c.args[0])
         )
         assert "LEFT OUTER JOIN blobs" in image_statement
+
+
+class TestReconciliationFilesystemWorkOffTheEventLoop:
+    """The data root is NFS: walks, stats and unlinks inline in the async job
+    block the whole SAQ worker loop. Each one must run in a worker thread."""
+
+    @staticmethod
+    def _record(monkeypatch, owner, name, bucket):
+        """Wrap owner.name so every call records the calling thread id."""
+        import threading
+
+        real = getattr(owner, name)
+
+        def _wrapper(*args, **kwargs):
+            bucket.append(threading.get_ident())
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(owner, name, _wrapper)
+
+    async def _run(self, tmp_path, lib_base, cas_base=None, execute_returns=None):
+        from worker.reconciliation import reconciliation_job
+
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+        mock_settings.data_cas_path = str(cas_base or tmp_path / "no_cas")
+        mock_settings.data_thumbs_path = str(tmp_path / "thumbs")
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+
+        with (
+            patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.reconciliation._cron_record", new_callable=AsyncMock),
+            patch("worker.reconciliation.settings", mock_settings),
+            patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
+        ):
+            return await reconciliation_job(_make_ctx())
+
+    async def test_reconciliation_scans_library_tree_off_the_event_loop(self, tmp_path, monkeypatch):
+        import os
+        import threading
+
+        lib_base = tmp_path / "library"
+        gdir = lib_base / "src_a" / "gal_1"
+        gdir.mkdir(parents=True)
+        (gdir / "1.jpg").write_bytes(b"x")
+        (gdir / "broken.jpg").symlink_to(tmp_path / "missing_target.jpg")
+
+        scandir_threads: list[int] = []
+        unlink_threads: list[int] = []
+        self._record(monkeypatch, os, "scandir", scandir_threads)
+        self._record(monkeypatch, os, "unlink", unlink_threads)
+
+        result = await self._run(tmp_path, lib_base)
+
+        assert result["status"] == "done"
+        assert not (gdir / "broken.jpg").is_symlink(), "broken symlink must still be removed"
+        assert scandir_threads and threading.get_ident() not in scandir_threads
+        assert unlink_threads and threading.get_ident() not in unlink_threads
+
+    async def test_reconciliation_removes_empty_gallery_dirs_off_the_event_loop(self, tmp_path, monkeypatch):
+        import threading
+
+        from services.cas import OWNER_MARKER_FILENAME
+
+        lib_base = tmp_path / "library"
+        gdir = lib_base / "src_a" / "gal_empty"
+        gdir.mkdir(parents=True)
+        (gdir / OWNER_MARKER_FILENAME).write_text("1")
+
+        rmdir_threads: list[int] = []
+        iterdir_threads: list[int] = []
+        self._record(monkeypatch, Path, "rmdir", rmdir_threads)
+        self._record(monkeypatch, Path, "iterdir", iterdir_threads)
+
+        result = await self._run(tmp_path, lib_base)
+
+        assert result["status"] == "done"
+        assert not gdir.exists() and not (lib_base / "src_a").exists()
+        assert rmdir_threads and threading.get_ident() not in rmdir_threads
+        assert iterdir_threads and threading.get_ident() not in iterdir_threads
+
+    async def test_reconciliation_cas_orphan_scan_and_delete_run_off_the_event_loop(self, tmp_path, monkeypatch):
+        import os
+        import threading
+
+        lib_base = tmp_path / "library"
+        (lib_base / "src_a" / "gal_1").mkdir(parents=True)
+        (lib_base / "src_a" / "gal_1" / "1.jpg").write_bytes(b"x")
+        sha = "ab" * 32
+        orphan = tmp_path / "cas" / sha[:2] / sha[2:4] / f"{sha}.jpg"
+        orphan.parent.mkdir(parents=True)
+        orphan.write_bytes(b"x")
+        old = orphan.stat().st_mtime - 48 * 3600
+        os.utime(orphan, (old, old))
+
+        scandir_threads: list[tuple[str, int]] = []
+        unlink_threads: list[int] = []
+        real_scandir = os.scandir
+
+        def _scandir(path):
+            scandir_threads.append((str(path), threading.get_ident()))
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", _scandir)
+        self._record(monkeypatch, Path, "unlink", unlink_threads)
+
+        result = await self._run(
+            tmp_path,
+            lib_base,
+            cas_base=tmp_path / "cas",
+            execute_returns=[
+                _make_result_with_rows([]),  # Phase 1 galleries (raw)
+                _make_result_with_rows([]),  # Phase 1 galleries (sanitized fallback)
+                _make_result_with_rows([]),  # Phase 1 images
+                _make_result_with_rows([]),  # Phase 2 galleries
+                _make_result_with_rows([]),  # Phase 3 blob GC
+                _make_result_with_rows([]),  # Phase 4 blob-row check
+            ],
+        )
+
+        assert result["status"] == "done"
+        assert result["cas_orphans_removed"] == 1 and not orphan.exists()
+        cas_scans = [tid for p, tid in scandir_threads if p.startswith(str(tmp_path / "cas"))]
+        assert cas_scans and threading.get_ident() not in cas_scans
+        assert unlink_threads and threading.get_ident() not in unlink_threads
+
+    async def test_reconciliation_thumbnail_orphan_scan_runs_off_the_event_loop(self, tmp_path, monkeypatch):
+        import os
+        import threading
+
+        lib_base = tmp_path / "library"
+        (lib_base / "src_a" / "gal_1").mkdir(parents=True)
+        (lib_base / "src_a" / "gal_1" / "1.jpg").write_bytes(b"x")
+        sha = "cd" * 32
+        tdir = tmp_path / "thumbs" / sha[:2] / sha[2:4] / sha
+        tdir.mkdir(parents=True)
+        (tdir / "t.webp").write_bytes(b"x")
+        old = tdir.stat().st_mtime - 48 * 3600
+        os.utime(tdir, (old, old))
+
+        scandir_threads: list[tuple[str, int]] = []
+        real_scandir = os.scandir
+
+        def _scandir(path):
+            scandir_threads.append((str(path), threading.get_ident()))
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", _scandir)
+
+        result = await self._run(
+            tmp_path,
+            lib_base,
+            execute_returns=[
+                _make_result_with_rows([]),  # Phase 1 galleries (raw)
+                _make_result_with_rows([]),  # Phase 1 galleries (sanitized fallback)
+                _make_result_with_rows([]),  # Phase 1 images
+                _make_result_with_rows([]),  # Phase 2 galleries
+                _make_result_with_rows([]),  # Phase 3 blob GC
+                _make_result_with_rows([]),  # thumbnail blob-row check
+            ],
+        )
+
+        assert result["status"] == "done"
+        assert result["thumbnail_orphans_removed"] == 1
+        thumb_scans = [tid for p, tid in scandir_threads if p.startswith(str(tmp_path / "thumbs"))]
+        assert thumb_scans and threading.get_ident() not in thumb_scans
+
+    async def test_reconciliation_orphan_blob_file_delete_runs_off_the_event_loop(self, tmp_path, monkeypatch):
+        import threading
+
+        lib_base = tmp_path / "library"
+        (lib_base / "src_a" / "gal_1").mkdir(parents=True)
+        (lib_base / "src_a" / "gal_1" / "1.jpg").write_bytes(b"x")
+        cas_file = tmp_path / "blob.jpg"
+        cas_file.write_bytes(b"x")
+
+        unlink_threads: list[int] = []
+        self._record(monkeypatch, Path, "unlink", unlink_threads)
+
+        with patch("worker.reconciliation.cas_path", return_value=cas_file):
+            result = await self._run(
+                tmp_path,
+                lib_base,
+                execute_returns=[
+                    _make_result_with_rows([]),  # Phase 1 galleries (raw)
+                    _make_result_with_rows([]),  # Phase 1 galleries (sanitized fallback)
+                    _make_result_with_rows([]),  # Phase 1 images
+                    _make_result_with_rows([]),  # Phase 2 galleries
+                    _make_result_with_rows([_make_blob_gc_row(SHA_A, actual_refs=0)]),  # Phase 3 blob GC
+                    _make_empty_result(),  # DELETE FROM blobs
+                ],
+            )
+
+        assert result["orphan_blobs_cleaned"] == 1 and not cas_file.exists()
+        assert unlink_threads and threading.get_ident() not in unlink_threads

@@ -1359,6 +1359,80 @@ class TestDownloadJobValidation:
         assert 1 in result.get("failed_pages", [])
         assert not corrupt_file.exists()
 
+    async def test_image_validation_walk_and_unlink_run_off_the_event_loop(self, tmp_path, monkeypatch):
+        """Post-download validation walks the staging dir and unlinks corrupt files; on NFS
+        that must not run on the SAQ event loop thread."""
+        import threading
+
+        from worker.download import download_job
+
+        job_dir = tmp_path / "job-val-02"
+        job_dir.mkdir()
+        corrupt_file = job_dir / "001.jpg"
+        corrupt_file.write_bytes(b"\x00\x00\x00\x00" * 20)  # no valid magic
+
+        rglob_threads: list[int] = []
+        unlink_threads: list[int] = []
+        real_rglob = Path.rglob
+        real_unlink = Path.unlink
+
+        def _rglob(self, *args, **kwargs):
+            rglob_threads.append(threading.get_ident())
+            return real_rglob(self, *args, **kwargs)
+
+        def _unlink(self, *args, **kwargs):
+            # Only the corrupt page: other one-off unlinks (cookie file) are out of scope here.
+            if self.name == "001.jpg":
+                unlink_threads.append(threading.get_ident())
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "rglob", _rglob)
+        monkeypatch.setattr(Path, "unlink", _unlink)
+
+        plugin_result = _make_plugin_result(status="done", downloaded=2, total=2)
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = AsyncMock(return_value=plugin_result)
+
+        importer = MagicMock()
+        importer.gallery_id = "gal-v"
+        importer.title = "Gallery V"
+        importer.source_url = None
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.ensure_gallery = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-v")
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", MagicMock(return_value=_make_mock_sem())),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.download.settings", MagicMock(data_gallery_path=str(tmp_path))),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-02")
+
+        assert result["status"] == "partial"
+        assert not corrupt_file.exists()
+        assert rglob_threads and threading.get_ident() not in rglob_threads
+        assert unlink_threads and threading.get_ident() not in unlink_threads
+
     async def test_speed_calculated_in_progress_callback(self):
         """on_progress callback computes a non-negative speed field."""
         from worker.download import download_job

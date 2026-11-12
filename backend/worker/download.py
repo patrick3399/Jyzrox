@@ -379,6 +379,24 @@ def _list_staged_media(target_dir: Path) -> list[Path]:
     return found
 
 
+def _remove_corrupt_images(target_dir: Path) -> list[tuple[str, int]]:
+    """Validate images under target_dir and unlink corrupt ones; sync, run in a thread.
+
+    Returns (file name, page number) for each removed file, in sorted path order.
+    """
+    removed: list[tuple[str, int]] = []
+    for f in sorted(target_dir.rglob("*")):
+        if f.suffix.lower() in _IMAGE_EXTS and f.is_file():
+            if not _validate_image_magic(f):
+                try:
+                    page_num = int(f.stem.lstrip("0") or "0")
+                except ValueError:
+                    page_num = 0
+                f.unlink(missing_ok=True)
+                removed.append((f.name, page_num))
+    return removed
+
+
 async def _import_staged_leftovers(importer, target_dir: Path, on_file) -> int:
     """Import the finished files in staging that never reached the importer.
 
@@ -546,7 +564,7 @@ async def _finish_stopped_inner(
             except Exception as exc:
                 logger.warning("[download] could not resolve archive source for %s: %s", url, exc)
         await importer.discard_unlinked_archive_entries()
-        _rmtree_staging_dir(target_dir)
+        await asyncio.to_thread(_rmtree_staging_dir, target_dir)
 
     # 5. Cookie writeback, as for a finished run.
     if db_job_id:
@@ -1224,16 +1242,10 @@ async def _run_download_job(
         # ── 13. Image validation ────────────────────────────────────────
         corrupt_pages: list[int] = []
         if target_dir.exists():
-            for f in sorted(target_dir.rglob("*")):
-                if f.suffix.lower() in _IMAGE_EXTS and f.is_file():
-                    if not _validate_image_magic(f):
-                        try:
-                            page_num = int(f.stem.lstrip("0") or "0")
-                        except ValueError:
-                            page_num = 0
-                        corrupt_pages.append(page_num)
-                        logger.warning("[download] corrupt image removed: %s", f.name)
-                        f.unlink(missing_ok=True)
+            # Walk + magic check + unlink hit NFS per file: keep them off the loop.
+            for name, page_num in await asyncio.to_thread(_remove_corrupt_images, target_dir):
+                corrupt_pages.append(page_num)
+                logger.warning("[download] corrupt image removed: %s", name)
 
         all_failed = sorted(set(getattr(result, "failed_pages", []) + corrupt_pages))
 

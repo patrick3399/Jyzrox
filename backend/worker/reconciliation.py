@@ -1,5 +1,6 @@
 """Reconciliation job for the worker package."""
 
+import asyncio
 import json
 import os
 from collections import Counter
@@ -93,6 +94,151 @@ def _orphan_gallery_ids(db_rows, fs_keys: set[tuple[str, str]]) -> list[int]:
     ]
 
 
+def _scan_library_tree(
+    lib_base: str,
+) -> tuple[dict[tuple[str, str], set[str]], set[tuple[str, str]], set[tuple[str, str]]]:
+    """Walk lib_base/source/source_id/ (sync, run in a thread; NFS stalls the loop).
+
+    Returns (gallery_map, empty_gallery_dirs, sidecar_missing). Broken symlinks
+    are unlinked here; they are excluded from disk_files so the subsequent DB
+    diff marks those image records for deletion.
+    """
+    gallery_map: dict[tuple[str, str], set[str]] = {}
+    empty_gallery_dirs: set[tuple[str, str]] = set()
+    sidecar_missing: set[tuple[str, str]] = set()
+
+    for source_entry in os.scandir(lib_base):
+        if not source_entry.is_dir(follow_symlinks=False):
+            continue
+        source = source_entry.name
+        for sid_entry in os.scandir(source_entry.path):
+            if not sid_entry.is_dir(follow_symlinks=False):
+                continue
+            source_id = sid_entry.name
+
+            disk_files: set[str] = set()
+            has_valid = False
+            has_sidecar = False
+            for fe in os.scandir(sid_entry.path):
+                if fe.name == SIDECAR_FILENAME:
+                    # Metadata sidecar, not gallery content: it must not make
+                    # an empty dir look valid nor enter the DB/disk diff.
+                    has_sidecar = True
+                    continue
+                if fe.name == OWNER_MARKER_FILENAME:
+                    # Ownership marker (audit #45), not gallery content: same
+                    # rules as the sidecar — never valid content, never diffed.
+                    continue
+                if fe.is_symlink() and not Path(fe.path).exists():
+                    # Broken symlink — remove it silently; absence from disk_files
+                    # will cause DB record to be deleted in batch step below.
+                    try:
+                        os.unlink(fe.path)
+                    except OSError:
+                        pass
+                else:
+                    disk_files.add(fe.name)
+                    has_valid = True
+
+            gallery_map[(source, source_id)] = disk_files
+            if not has_valid:
+                empty_gallery_dirs.add((source, source_id))
+            if not has_sidecar:
+                sidecar_missing.add((source, source_id))
+
+    return gallery_map, empty_gallery_dirs, sidecar_missing
+
+
+def _remove_empty_gallery_dirs(lib_base: str, keys: list[tuple[str, str]]) -> None:
+    """Remove empty gallery dirs (and now-empty source dirs); sync, run in a thread."""
+    base = Path(lib_base)
+    for source, sid in keys:
+        gdir = base / source / sid
+        try:
+            # The ownership marker (audit #45) must not keep an
+            # otherwise-empty gallery dir alive.
+            (gdir / OWNER_MARKER_FILENAME).unlink(missing_ok=True)
+            gdir.rmdir()
+            # Also remove source dir if now empty
+            source_dir = base / source
+            if source_dir.exists() and not any(source_dir.iterdir()):
+                source_dir.rmdir()
+        except OSError:
+            pass
+
+
+def _delete_blob_files(cas_files: list[Path], chunk_shas: list[str]) -> None:
+    """Delete CAS files and thumbnail dirs of GC'd blobs; sync, run in a thread.
+
+    Runs only after the blobs rows were deleted and committed (HR-003).
+    """
+    for cas_file in cas_files:
+        if cas_file.exists():
+            try:
+                cas_file.unlink()
+            except OSError as exc:
+                logger.warning("[reconcile] failed to delete CAS file %s: %s", cas_file, exc)
+
+    remove_thumbnail_dirs_sync(chunk_shas, directory_resolver=thumb_dir)
+
+
+def _collect_cas_orphan_candidates(cas_base: str, cutoff: float) -> list[tuple[str, Path]]:
+    """List CAS files older than cutoff as (sha, path); sync, run in a thread."""
+    candidates: list[tuple[str, Path]] = []
+    for d1 in os.scandir(cas_base):
+        if not d1.is_dir(follow_symlinks=False):
+            continue
+        for d2 in os.scandir(d1.path):
+            if not d2.is_dir(follow_symlinks=False):
+                continue
+            for fe in os.scandir(d2.path):
+                if not fe.is_file(follow_symlinks=False):
+                    continue
+                try:
+                    if fe.stat().st_mtime > cutoff:
+                        continue
+                except OSError:
+                    continue
+                # Filenames are {sha256}{ext}; anything that does not parse
+                # to a known sha (e.g. stale .tmp files from crashed atomic
+                # promotes) simply never matches a blobs row.
+                candidates.append((fe.name.split(".", 1)[0], Path(fe.path)))
+    return candidates
+
+
+def _delete_cas_orphans(paths: list[Path]) -> int:
+    """Unlink row-less CAS files; returns how many were removed. Sync, run in a thread."""
+    removed = 0
+    for path in paths:
+        try:
+            path.unlink()
+            removed += 1
+        except OSError as exc:
+            logger.warning("[reconcile] failed to delete orphan CAS file %s: %s", path, exc)
+    return removed
+
+
+def _collect_thumb_orphan_candidates(thumbs_base: str, cutoff: float) -> list[tuple[str, Path]]:
+    """List thumbnail dirs older than cutoff as (sha, path); sync, run in a thread."""
+    thumb_candidates: list[tuple[str, Path]] = []
+    for d1 in os.scandir(thumbs_base):
+        if not d1.is_dir(follow_symlinks=False):
+            continue
+        for d2 in os.scandir(d1.path):
+            if not d2.is_dir(follow_symlinks=False):
+                continue
+            for sha_entry in os.scandir(d2.path):
+                if not sha_entry.is_dir(follow_symlinks=False):
+                    continue
+                try:
+                    if sha_entry.stat().st_mtime > cutoff:
+                        continue
+                except OSError:
+                    continue
+                thumb_candidates.append((sha_entry.name, Path(sha_entry.path)))
+    return thumb_candidates
+
+
 async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
     """
     Reconcile /data/library/ symlink tree with database records.
@@ -137,53 +283,10 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
 
     # ── Phase 1: Scan filesystem once, batch-query DB, reconcile in chunks ──
 
-    # Two-level scandir pass: library structure is lib_base/source/source_id/.
-    # gallery_map[(source, source_id)] = set of filenames on disk.
-    # Broken symlinks are unlinked here; they are excluded from disk_files so
-    # the subsequent DB diff will mark those image records for deletion.
-    gallery_map: dict[tuple[str, str], set[str]] = {}
-    empty_gallery_dirs: set[tuple[str, str]] = set()
-    sidecar_missing: set[tuple[str, str]] = set()
-
+    # Library structure is lib_base/source/source_id/; the walk (and the
+    # broken-symlink unlink) runs in a thread so NFS latency cannot stall the loop.
     logger.info("[reconcile] Phase 1: scanning %s", lib_base)
-    for source_entry in os.scandir(str(lib_base)):
-        if not source_entry.is_dir(follow_symlinks=False):
-            continue
-        source = source_entry.name
-        for sid_entry in os.scandir(source_entry.path):
-            if not sid_entry.is_dir(follow_symlinks=False):
-                continue
-            source_id = sid_entry.name
-
-            disk_files: set[str] = set()
-            has_valid = False
-            has_sidecar = False
-            for fe in os.scandir(sid_entry.path):
-                if fe.name == SIDECAR_FILENAME:
-                    # Metadata sidecar, not gallery content: it must not make
-                    # an empty dir look valid nor enter the DB/disk diff.
-                    has_sidecar = True
-                    continue
-                if fe.name == OWNER_MARKER_FILENAME:
-                    # Ownership marker (audit #45), not gallery content: same
-                    # rules as the sidecar — never valid content, never diffed.
-                    continue
-                if fe.is_symlink() and not Path(fe.path).exists():
-                    # Broken symlink — remove it silently; absence from disk_files
-                    # will cause DB record to be deleted in batch step below.
-                    try:
-                        os.unlink(fe.path)
-                    except OSError:
-                        pass
-                else:
-                    disk_files.add(fe.name)
-                    has_valid = True
-
-            gallery_map[(source, source_id)] = disk_files
-            if not has_valid:
-                empty_gallery_dirs.add((source, source_id))
-            if not has_sidecar:
-                sidecar_missing.add((source, source_id))
+    gallery_map, empty_gallery_dirs, sidecar_missing = await asyncio.to_thread(_scan_library_tree, str(lib_base))
 
     all_fs_keys = sorted(gallery_map.keys())
     total_fs = len(all_fs_keys)
@@ -315,20 +418,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                         {"ids": empty_gids},
                     )
                     stats["removed_galleries"] += len(empty_gids)
-                for key in empty_in_chunk:
-                    source, sid = key
-                    gdir = lib_base / source / sid
-                    try:
-                        # The ownership marker (audit #45) must not keep an
-                        # otherwise-empty gallery dir alive.
-                        (gdir / OWNER_MARKER_FILENAME).unlink(missing_ok=True)
-                        gdir.rmdir()
-                        # Also remove source dir if now empty
-                        source_dir = lib_base / source
-                        if source_dir.exists() and not any(source_dir.iterdir()):
-                            source_dir.rmdir()
-                    except OSError:
-                        pass
+                await asyncio.to_thread(_remove_empty_gallery_dirs, str(lib_base), empty_in_chunk)
 
             await session.commit()
             processed_p1 += len(chunk_keys)
@@ -495,15 +585,11 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             )
             await session.commit()
 
-            for row in chunk:
-                cas_file = cas_path(row.sha256, row.extension)
-                if cas_file.exists():
-                    try:
-                        cas_file.unlink()
-                    except OSError as exc:
-                        logger.warning("[reconcile] failed to delete CAS file %s: %s", cas_file, exc)
-
-            remove_thumbnail_dirs_sync(chunk_shas, directory_resolver=thumb_dir)
+            await asyncio.to_thread(
+                _delete_blob_files,
+                [cas_path(row.sha256, row.extension) for row in chunk],
+                chunk_shas,
+            )
 
             stats["orphan_blobs_cleaned"] += len(chunk)
             processed_p3 += len(chunk)
@@ -528,25 +614,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
     cas_base = Path(settings.data_cas_path)
     if cas_base.exists():
         cutoff = datetime.now(UTC).timestamp() - _CAS_ORPHAN_MIN_AGE_SECONDS
-        candidates: list[tuple[str, Path]] = []
-        for d1 in os.scandir(str(cas_base)):
-            if not d1.is_dir(follow_symlinks=False):
-                continue
-            for d2 in os.scandir(d1.path):
-                if not d2.is_dir(follow_symlinks=False):
-                    continue
-                for fe in os.scandir(d2.path):
-                    if not fe.is_file(follow_symlinks=False):
-                        continue
-                    try:
-                        if fe.stat().st_mtime > cutoff:
-                            continue
-                    except OSError:
-                        continue
-                    # Filenames are {sha256}{ext}; anything that does not parse
-                    # to a known sha (e.g. stale .tmp files from crashed atomic
-                    # promotes) simply never matches a blobs row.
-                    candidates.append((fe.name.split(".", 1)[0], Path(fe.path)))
+        candidates = await asyncio.to_thread(_collect_cas_orphan_candidates, str(cas_base), cutoff)
 
         orphan_paths: list[Path] = []
         if candidates:
@@ -565,12 +633,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 logger.warning("[reconcile] Phase 4 aborted, keeping all CAS files (DB check failed): %s", exc)
                 orphan_paths = []
 
-        for path in orphan_paths:
-            try:
-                path.unlink()
-                stats["cas_orphans_removed"] += 1
-            except OSError as exc:
-                logger.warning("[reconcile] failed to delete orphan CAS file %s: %s", path, exc)
+        if orphan_paths:
+            stats["cas_orphans_removed"] += await asyncio.to_thread(_delete_cas_orphans, orphan_paths)
 
         logger.info("[reconcile] Phase 4 done: removed %d row-less CAS files", stats["cas_orphans_removed"])
 
@@ -581,22 +645,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         thumbs_base = Path(thumbs_setting)
         if thumbs_base.exists():
             cutoff = datetime.now(UTC).timestamp() - _CAS_ORPHAN_MIN_AGE_SECONDS
-            thumb_candidates: list[tuple[str, Path]] = []
-            for d1 in os.scandir(str(thumbs_base)):
-                if not d1.is_dir(follow_symlinks=False):
-                    continue
-                for d2 in os.scandir(d1.path):
-                    if not d2.is_dir(follow_symlinks=False):
-                        continue
-                    for sha_entry in os.scandir(d2.path):
-                        if not sha_entry.is_dir(follow_symlinks=False):
-                            continue
-                        try:
-                            if sha_entry.stat().st_mtime > cutoff:
-                                continue
-                        except OSError:
-                            continue
-                        thumb_candidates.append((sha_entry.name, Path(sha_entry.path)))
+            thumb_candidates = await asyncio.to_thread(_collect_thumb_orphan_candidates, str(thumbs_base), cutoff)
 
             orphan_thumb_paths: list[Path] = []
             if thumb_candidates:
@@ -620,7 +669,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
 
             orphan_thumb_map = {path.name: path for path in orphan_thumb_paths}
             if orphan_thumb_map:
-                stats["thumbnail_orphans_removed"] += remove_thumbnail_dirs_sync(
+                stats["thumbnail_orphans_removed"] += await asyncio.to_thread(
+                    remove_thumbnail_dirs_sync,
                     orphan_thumb_map,
                     directory_resolver=orphan_thumb_map.__getitem__,
                 )

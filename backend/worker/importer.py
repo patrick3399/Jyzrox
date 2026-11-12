@@ -88,6 +88,30 @@ def _disambiguate_library_filenames(paths: list[Path]) -> list[str]:
     return names
 
 
+def _read_first_metadata(gallery_path: Path) -> dict:
+    """Return the first readable .json file's content under the gallery, or {}."""
+    for meta_file in sorted(gallery_path.rglob("*.json")):
+        try:
+            return json.loads(meta_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
+            continue
+    return {}
+
+
+def _collect_top_level_media_files(src_path: Path) -> tuple[list[Path], int]:
+    """Like _collect_media_files but only looks at direct children of src_path."""
+    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
+    files_validated: list[Path] = []
+    skipped = 0
+    for f in files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
+            files_validated.append(f)
+        else:
+            skipped += 1
+    return files_validated, skipped
+
+
 def _collect_media_files(gallery_path: Path) -> tuple[list[Path], int]:
     """Return the gallery's valid media files and the count rejected by the magic check."""
     media_files_raw = [f for f in gallery_path.rglob("*") if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
@@ -116,14 +140,8 @@ async def import_job(
         return {"status": "failed", "error": f"not a directory: {path}"}
 
     # Read gallery-dl metadata (any .json file, they all have gallery info)
-    metadata: dict = {}
-    for meta_file in sorted(gallery_path.rglob("*.json")):
-        try:
-            metadata = json.loads(meta_file.read_text(encoding="utf-8"))
-            break
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-            logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
-            continue
+    # rglob + read hit NFS; run in a thread to keep the worker loop free.
+    metadata: dict = await asyncio.to_thread(_read_first_metadata, gallery_path)
 
     # Extract source from Category (gallery-dl uses "category" for the extractor name)
     raw_source = metadata.get("category")
@@ -378,7 +396,7 @@ async def import_job(
     # download directory as before.
     if not hash_failures:
         try:
-            _shutil.rmtree(str(gallery_path), ignore_errors=True)
+            await asyncio.to_thread(_shutil.rmtree, str(gallery_path), ignore_errors=True)
         except Exception as exc:
             logger.warning("[import] failed to remove temp dir %s: %s", gallery_path, exc)
 
@@ -566,15 +584,9 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     if mode == "link":
         return await _link_import(ctx, src_path, gallery_id)
 
-    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
-    # Validate magic bytes for image files; pass video files through without magic check
-    files_validated = []
-    skipped_magic = 0
-    for f in files_raw:
-        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
-            files_validated.append(f)
-        else:
-            skipped_magic += 1
+    # Validate magic bytes for image files; pass video files through without magic check.
+    # The listing and header reads hit NFS, so they run in a thread.
+    files_validated, skipped_magic = await asyncio.to_thread(_collect_top_level_media_files, src_path)
     if skipped_magic:
         logger.warning(
             "[local_import] gallery_id=%d: skipped %d file(s) with invalid magic bytes", gallery_id, skipped_magic

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -559,6 +560,45 @@ async def explorer_roots(
     }
 
 
+def _list_physical_children(root: Path, directory: Path) -> list[tuple[int, str, Path, Path]] | None:
+    """Sorted (kind, folded name, child, resolved) entries; None if the directory is unreadable."""
+    entries: list[tuple[int, str, Path, Path]] = []
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        try:
+            resolved = child.resolve(strict=True)
+        except OSError:
+            continue
+        if not resolved.is_relative_to(root):
+            continue
+        if resolved.is_dir():
+            entries.append((0, child.name.casefold(), child, resolved))
+        elif resolved.is_file() and resolved.suffix.lower() in MEDIA_EXTENSIONS:
+            entries.append((1, child.name.casefold(), child, resolved))
+    entries.sort(key=lambda item: (item[0], item[1]))
+    return entries
+
+
+def _probe_physical_page(page: list[tuple[int, str, Path, Path]]) -> list[tuple[os.stat_result, bool]]:
+    """Per page entry: its stat and, for folders, whether it has a sub-folder or media child."""
+    facts: list[tuple[os.stat_result, bool]] = []
+    for kind, _, _, resolved in page:
+        stat = resolved.stat()
+        has_children = False
+        if kind == 0:
+            try:
+                has_children = any(
+                    entry.is_dir() or entry.suffix.lower() in MEDIA_EXTENSIONS for entry in resolved.iterdir()
+                )
+            except OSError:
+                has_children = False
+        facts.append((stat, has_children))
+    return facts
+
+
 @router.get("/physical/{library_id}/entries")
 async def physical_entries(
     library_id: int,
@@ -578,25 +618,14 @@ async def physical_entries(
     directory = resolve_library_relative(root, path, require_directory=True)
     canonical_path = relative_posix(root, directory)
 
-    entries: list[tuple[int, str, Path, Path]] = []
-    try:
-        children = list(directory.iterdir())
-    except OSError:
+    # NFS listing and stats block; run them in threads so the event loop stays free.
+    listing = await asyncio.to_thread(_list_physical_children, root, directory)
+    if listing is None:
         raise HTTPException(status_code=403, detail="Library directory is not readable")
-    for child in children:
-        try:
-            resolved = child.resolve(strict=True)
-        except OSError:
-            continue
-        if not resolved.is_relative_to(root):
-            continue
-        if resolved.is_dir():
-            entries.append((0, child.name.casefold(), child, resolved))
-        elif resolved.is_file() and resolved.suffix.lower() in MEDIA_EXTENSIONS:
-            entries.append((1, child.name.casefold(), child, resolved))
-    entries.sort(key=lambda item: (item[0], item[1]))
+    entries = listing
     total = len(entries)
     page = entries[offset : offset + limit]
+    page_facts = await asyncio.to_thread(_probe_physical_page, page)
 
     directory_paths = [str(resolved) for kind, _, _, resolved in page if kind == 0]
     imported = {}
@@ -617,19 +646,12 @@ async def physical_entries(
     redis = get_redis()
     result: list[dict[str, Any]] = []
     enqueue_tasks = []
-    for kind, _, child, resolved in page:
+    for (kind, _, child, resolved), (stat, has_children) in zip(page, page_facts, strict=True):
         relative = relative_posix(root, resolved)
-        stat = resolved.stat()
         if kind == 0:
             stats = await read_folder_stats(redis, library_id, relative)
             if stats is None:
                 enqueue_tasks.append(_enqueue_folder_stats(library_id, relative))
-            try:
-                has_children = any(
-                    entry.is_dir() or entry.suffix.lower() in MEDIA_EXTENSIONS for entry in resolved.iterdir()
-                )
-            except OSError:
-                has_children = False
             result.append(
                 {
                     "kind": "folder",

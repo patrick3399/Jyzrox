@@ -650,6 +650,43 @@ class TestStoreBlobConcurrentWrite:
         leftovers = [p for p in dest.parent.iterdir() if p != dest]
         assert leftovers == [], f"temp files left in CAS dir: {leftovers!r}"
 
+    async def test_store_blob_cross_device_copy_runs_off_the_event_loop(self, tmp_path):
+        """The EXDEV copy of a multi-GB video on NFS must not block the event loop thread."""
+        import errno
+        import shutil as real_shutil
+        import threading
+
+        from services.cas import store_blob
+
+        src = tmp_path / "img.jpg"
+        src.write_bytes(b"data")
+        cas_root = tmp_path / "cas"
+
+        copy_threads: list[int] = []
+        replace_threads: list[int] = []
+        real_copy2 = real_shutil.copy2
+        real_replace = os.replace
+
+        def spy_copy2(s, d):
+            copy_threads.append(threading.get_ident())
+            return real_copy2(s, d)
+
+        def spy_replace(s, d):
+            replace_threads.append(threading.get_ident())
+            return real_replace(s, d)
+
+        with (
+            patch("services.cas.settings", _mock_settings(cas=str(cas_root))),
+            patch("services.cas.os.link", side_effect=OSError(errno.EXDEV, "cross-device link")),
+            patch("services.cas.shutil.copy2", side_effect=spy_copy2),
+            patch("services.cas.os.replace", side_effect=spy_replace),
+        ):
+            await store_blob(src, SHA, self._fake_session())
+
+        assert (cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.jpg").read_bytes() == b"data"
+        assert copy_threads and threading.get_ident() not in copy_threads
+        assert replace_threads and threading.get_ident() not in replace_threads
+
 
 # ---------------------------------------------------------------------------
 # TestCreateLibrarySymlink

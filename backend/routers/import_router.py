@@ -520,17 +520,20 @@ async def browse_filesystem(path: str = "/mnt", _: dict = Depends(_member)):
     if not target.is_dir():
         raise HTTPException(status_code=404, detail="Directory not found")
 
-    entries = []
+    def _list_subdirs() -> list[dict[str, str]]:
+        found = []
+        for item in sorted(target.iterdir(), key=lambda x: x.name):
+            if item.name.startswith("."):
+                continue
+            if item.is_dir():
+                found.append({"name": item.name, "type": "dir"})
+        return found
+
+    # Listing and is_dir per entry hit NFS; keep them off the event loop.
     try:
-        items = sorted(target.iterdir(), key=lambda x: x.name)
+        entries = await asyncio.to_thread(_list_subdirs)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to list: {exc}") from exc
-
-    for item in items:
-        if item.name.startswith("."):
-            continue
-        if item.is_dir():
-            entries.append({"name": item.name, "type": "dir"})
 
     # Build parent path for navigation
     parent = str(target.parent) if str(target) != "/" else None

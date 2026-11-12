@@ -25,6 +25,50 @@ from sqlalchemy import text
 # ---------------------------------------------------------------------------
 
 
+class TestBrowseFilesystem:
+    """GET /api/import/browse-fs."""
+
+    async def test_browse_fs_lists_directory_off_the_event_loop(self, client, tmp_path, monkeypatch):
+        """iterdir plus is_dir per entry hit NFS; they must not run on the API event loop thread."""
+        import os
+        import threading
+        import types
+
+        (tmp_path / "b_dir").mkdir()
+        (tmp_path / "a_dir").mkdir()
+        (tmp_path / "file.txt").write_text("x")
+
+        # pytest tmp dirs live under /tmp, which the endpoint blocklists. Fake only the
+        # blocklist comparison: the endpoint's own realpath(str) call, seen through its
+        # module-level `os`. Path.resolve and the real listing keep using the real os.
+        real_path_mod = os.path
+
+        def _realpath(p, *args, **kwargs):
+            if isinstance(p, str) and p == str(tmp_path) and not args and not kwargs:
+                return "/mnt/fake"
+            return real_path_mod.realpath(p, *args, **kwargs)
+
+        fake_path = types.SimpleNamespace(**{k: getattr(real_path_mod, k) for k in dir(real_path_mod)})
+        fake_path.realpath = _realpath
+        fake_os = types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os)})
+        fake_os.path = fake_path
+        monkeypatch.setattr("routers.import_router.os", fake_os)
+
+        iterdir_threads: list[int] = []
+        real_iterdir = Path.iterdir
+
+        def _iterdir(self):
+            iterdir_threads.append(threading.get_ident())
+            return real_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", _iterdir)
+        resp = await client.get("/api/import/browse-fs", params={"path": str(tmp_path)})
+
+        assert resp.status_code == 200, resp.text
+        assert [e["name"] for e in resp.json()["entries"]] == ["a_dir", "b_dir"]
+        assert iterdir_threads and threading.get_ident() not in iterdir_threads
+
+
 class TestBatchScan:
     """POST /api/import/batch/scan — scan root_dir using a pattern."""
 
@@ -889,8 +933,12 @@ def _to_thread_stub(fixed_hash: str):
             path = Path(args[0])
             # Real stat, so the commit-boundary re-check sees an unchanged file.
             return fixed_hash, SourceFileIdentity._from_stat(path, path.stat())
-        if fn is _importer._collect_media_files:
-            # The directory listing also runs in a thread; let it read the real files.
+        if fn in (
+            _importer._collect_media_files,
+            _importer._collect_top_level_media_files,
+            _importer._read_first_metadata,
+        ):
+            # Directory listing and metadata read also run in a thread; let them touch the real files.
             return fn(*args, **kwargs)
         return fixed_hash
 

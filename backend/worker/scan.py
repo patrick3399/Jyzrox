@@ -138,6 +138,32 @@ async def _probe_pages(images: list[Image]) -> list[tuple[bool, bool]]:
     return await asyncio.to_thread(lambda: [_probe_page(img) for img in images])
 
 
+def _list_media_files(directory: Path) -> list[Path]:
+    return [f for f in directory.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_MEDIA_EXTS]
+
+
+def _list_file_names(directory: Path) -> list[str]:
+    return [entry.name for entry in directory.iterdir() if entry.is_file()]
+
+
+def _walk_library_tree(root: str) -> list[tuple[str, list[str]]]:
+    """Return (dirpath, filenames) for every non-hidden directory under root.
+
+    Runs in a thread: the tree lives on the NFS data root, and walking it
+    inline blocked every other job sharing the worker's event loop.
+    """
+    found: list[tuple[str, list[str]]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Skip hidden directories in-place so os.walk won't descend into them
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        found.append((dirpath, filenames))
+    return found
+
+
+def _stat_and_list_media(directory: Path) -> tuple[os.stat_result, list[Path]]:
+    return directory.stat(), _list_media_files(directory)
+
+
 def _link_source_vanished(gallery: Gallery, images: list[Image]) -> bool:
     """Return True when a link gallery's folder and every page file are gone.
 
@@ -929,10 +955,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             max_page = max((img.page_num for img in surviving_images), default=0)
 
             try:
-                dir_files = sorted(
-                    [f for f in gallery_dir.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_MEDIA_EXTS],
-                    key=lambda f: f.name,
-                )
+                dir_files = sorted(await asyncio.to_thread(_list_media_files, gallery_dir), key=lambda f: f.name)
             except OSError as exc:
                 logger.warning("[rescan_gallery] gallery_id=%d failed to read dir: %s", gallery_id, exc)
                 dir_files = []
@@ -1109,10 +1132,7 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
                 continue
 
             # Walk the directory tree recursively; os.walk is efficient for deep trees
-            for dirpath, dirnames, filenames in os.walk(str(lib_dir)):
-                # Skip hidden directories in-place so os.walk won't descend into them
-                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-
+            for dirpath, filenames in await asyncio.to_thread(_walk_library_tree, str(lib_dir)):
                 current = Path(dirpath)
                 # Skip the library root itself — only subfolders are gallery candidates
                 if current == lib_dir:
@@ -1201,12 +1221,8 @@ async def reconcile_library_path_job(
     new_real = os.path.realpath(new_path)
     destination = Path(new_real)
     try:
-        destination_stat = destination.stat()
-        media_files = sorted(
-            entry
-            for entry in destination.iterdir()
-            if entry.is_file() and entry.suffix.lower() in _SUPPORTED_MEDIA_EXTS
-        )
+        destination_stat, listed_media = await asyncio.to_thread(_stat_and_list_media, destination)
+        media_files = sorted(listed_media)
     except OSError:
         return {"status": "stale", "reason": "destination_unavailable", "new_path": new_real}
     if destination_device is not None and destination_stat.st_dev != destination_device:
@@ -1395,7 +1411,7 @@ async def move_library_path_job(
                         "new_path": new_real,
                     }
 
-                filenames = [entry.name for entry in destination.iterdir() if entry.is_file()]
+                filenames = await asyncio.to_thread(_list_file_names, destination)
                 if _media_count(filenames) == 0:
                     return {"status": "ignored", "reason": "no_media", "new_path": new_real}
                 # The old path may be a stop along the way: an earlier rename of
@@ -1571,7 +1587,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str, watcher_origin: bool = Fa
         current = Path(real_dir)
         if current.is_dir():
             try:
-                filenames = [p.name for p in current.iterdir() if p.is_file()]
+                filenames = await asyncio.to_thread(_list_file_names, current)
             except OSError:
                 filenames = []
             if _media_count(filenames) > 0:
@@ -1659,8 +1675,7 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
                 except ValueError as exc:
                     logger.warning("[rescan_path] skipping discovery for invalid pattern %s: %s", spec.path, exc)
                 else:
-                    for dirpath, dirnames, filenames in os.walk(str(lib_dir)):
-                        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                    for dirpath, filenames in await asyncio.to_thread(_walk_library_tree, str(lib_dir)):
                         current = Path(dirpath)
                         if current == lib_dir or _media_count(filenames) == 0:
                             continue
