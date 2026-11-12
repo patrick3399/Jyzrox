@@ -107,6 +107,15 @@ body {
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
+  /* Toasts (AppToaster) stack above the mobile BottomTabBar, which is
+     calc(4rem + var(--sab)) tall and hidden from lg up. */
+  --toast-offset-bottom: calc(4rem + var(--sab) + 0.75rem);
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --toast-offset-bottom: 24px;
+  }
 }
 
 html {

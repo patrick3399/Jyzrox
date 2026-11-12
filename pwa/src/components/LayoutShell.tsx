@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar'
 import { NavMemoryTracker } from './NavMemoryTracker'
 import { MobileNav } from './MobileNav'
 import { BottomTabBar } from './BottomTabBar'
-import { Toaster } from 'sonner'
+import { AppToaster } from './AppToaster'
 import { SWUpdatePrompt } from './SWUpdatePrompt'
 import { FloatingActions } from './FloatingActions'
 import { WsProvider } from '@/lib/ws'
@@ -37,7 +37,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
     return (
       <>
         {children}
-        <Toaster position="bottom-right" theme="dark" richColors />
+        <AppToaster aboveTabBar={false} theme="dark" />
         <SWUpdatePrompt />
       </>
     )
@@ -99,7 +99,7 @@ function LayoutShellInner({
         </div>
       </main>
 
-      <Toaster position="bottom-right" richColors />
+      <AppToaster aboveTabBar={!isReader} />
       <SWUpdatePrompt />
       {!isReader && <FloatingActions />}
     </>
