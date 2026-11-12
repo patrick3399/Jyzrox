@@ -10,6 +10,7 @@
  *     (regression: firedRef must not be reset in onContextMenu before touchend runs)
  *   Desktop right-click (contextmenu without touchstart) fires onLongPress
  *   Desktop right-click does not fire onLongPress twice if contextmenu fires after touch timer
+ *   A second finger (pinch) cancels the pending long-press instead of orphaning its timer
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -234,5 +235,63 @@ describe('useLongPress — desktop right-click (contextmenu without touch)', () 
     })
 
     expect(onLongPress).toHaveBeenCalledOnce()
+  })
+})
+
+describe('useLongPress — two-finger pinch must not fire the long-press', () => {
+  function makeMultiTouchEvent(points: Array<[number, number]>): React.TouchEvent {
+    return {
+      touches: points.map(([clientX, clientY]) => ({
+        clientX,
+        clientY,
+      })) as unknown as React.TouchList,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    } as unknown as React.TouchEvent
+  }
+
+  it('does not fire when a second finger lands and only that finger moves', () => {
+    const onLongPress = vi.fn()
+    const { result } = renderHook(() => useLongPress({ onLongPress, threshold: 500 }))
+
+    act(() => {
+      result.current.onTouchStart(makeMultiTouchEvent([[100, 100]]))
+    })
+    act(() => {
+      vi.advanceTimersByTime(100)
+      result.current.onTouchStart(
+        makeMultiTouchEvent([
+          [100, 100],
+          [200, 200],
+        ]),
+      )
+      // The anchor finger (touches[0]) stays still while the second one spreads.
+      result.current.onTouchMove(
+        makeMultiTouchEvent([
+          [100, 100],
+          [300, 300],
+        ]),
+      )
+      vi.advanceTimersByTime(1000)
+    })
+
+    expect(onLongPress).not.toHaveBeenCalled()
+  })
+
+  it('does not fire when both fingers land in the same touchstart', () => {
+    const onLongPress = vi.fn()
+    const { result } = renderHook(() => useLongPress({ onLongPress, threshold: 500 }))
+
+    act(() => {
+      result.current.onTouchStart(
+        makeMultiTouchEvent([
+          [100, 100],
+          [200, 200],
+        ]),
+      )
+      vi.advanceTimersByTime(1000)
+    })
+
+    expect(onLongPress).not.toHaveBeenCalled()
   })
 })

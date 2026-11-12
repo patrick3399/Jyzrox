@@ -1966,12 +1966,27 @@ export default function Reader({
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null)
 
+  const cancelImageLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+    longPressStartRef.current = null
+  }, [])
+
   const makeImageLongPressHandlers = useCallback(
     (imageUrl: string, imageName: string, pageNum: number): ImageLongPressHandlers => ({
       onTouchStart: (e: React.TouchEvent) => {
+        // Every touchstart (including a pinch's second finger) replaces the
+        // pending timer; overwriting the ref without clearing it orphaned the
+        // first timer, which then opened the menu mid-pinch.
+        cancelImageLongPress()
+        // Only a single resting finger is a long-press; two fingers are a pinch.
+        if (e.touches.length !== 1) return
         const touch = e.touches[0]
         longPressStartRef.current = { x: touch.clientX, y: touch.clientY }
         longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null
           setImageMenu({
             open: true,
             position: { x: touch.clientX, y: touch.clientY },
@@ -1983,20 +1998,16 @@ export default function Reader({
       },
       onTouchMove: (e: React.TouchEvent) => {
         if (!longPressStartRef.current || !longPressTimerRef.current) return
+        if (e.touches.length !== 1) {
+          cancelImageLongPress()
+          return
+        }
         const touch = e.touches[0]
         const dx = touch.clientX - longPressStartRef.current.x
         const dy = touch.clientY - longPressStartRef.current.y
-        if (Math.sqrt(dx * dx + dy * dy) > 10) {
-          clearTimeout(longPressTimerRef.current)
-          longPressTimerRef.current = null
-        }
+        if (Math.sqrt(dx * dx + dy * dy) > 10) cancelImageLongPress()
       },
-      onTouchEnd: () => {
-        if (longPressTimerRef.current) {
-          clearTimeout(longPressTimerRef.current)
-          longPressTimerRef.current = null
-        }
-      },
+      onTouchEnd: cancelImageLongPress,
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault()
         setImageMenu({
@@ -2008,7 +2019,7 @@ export default function Reader({
         })
       },
     }),
-    [],
+    [cancelImageLongPress],
   )
 
   // Helper used by SinglePageView (single image, known at call site)

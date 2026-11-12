@@ -27,6 +27,11 @@ export function useLongPress({
   const onTouchStart = useCallback(
     (e: React.TouchEvent) => {
       firedRef.current = false
+      // A second finger landing fires touchstart again; clear the pending timer
+      // first or it is orphaned and still fires mid-pinch.
+      cancel()
+      // Only a single resting finger is a long-press; two fingers are a pinch.
+      if (e.touches.length !== 1) return
       const touch = e.touches[0]
       startPosRef.current = { x: touch.clientX, y: touch.clientY }
       timerRef.current = setTimeout(() => {
@@ -35,12 +40,16 @@ export function useLongPress({
         timerRef.current = null
       }, threshold)
     },
-    [threshold, onLongPress],
+    [threshold, onLongPress, cancel],
   )
 
   const onTouchMove = useCallback(
     (e: React.TouchEvent) => {
       if (!startPosRef.current) return
+      if (e.touches.length !== 1) {
+        cancel()
+        return
+      }
       const touch = e.touches[0]
       const dx = touch.clientX - startPosRef.current.x
       const dy = touch.clientY - startPosRef.current.y
