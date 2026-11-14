@@ -86,7 +86,7 @@ async def system_health():
         results["postgres"] = "ok"
     except Exception as exc:
         logger.error("Postgres health check failed: %s", exc)
-        results["postgres"] = f"error: {exc}"
+        results["postgres"] = "error"
 
     # Redis
     try:
@@ -94,7 +94,7 @@ async def system_health():
         results["redis"] = "ok"
     except Exception as exc:
         logger.error("Redis health check failed: %s", exc)
-        results["redis"] = f"error: {exc}"
+        results["redis"] = "error"
 
     # Inode check
     try:

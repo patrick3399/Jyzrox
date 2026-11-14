@@ -133,6 +133,12 @@ async def saucenao_batch(body: BatchSearchRequest, auth: dict = Depends(require_
                         await session.commit()
                         applied = True
             output.append({"image_id": image.id, "gallery_id": gallery.id, "best": best, "source_applied": applied})
-        except (HTTPException, SauceNaoError, httpx.HTTPError) as exc:
+        except HTTPException as exc:
+            output.append({"image_id": image_id, "error": str(exc.detail)})
+        except SauceNaoError as exc:
             output.append({"image_id": image_id, "error": str(exc)})
+        except httpx.HTTPError as exc:
+            # str(exc) can embed the request URL, which carries the API key.
+            logger.warning("SauceNAO request failed for image %s: %s", image_id, type(exc).__name__)
+            output.append({"image_id": image_id, "error": "saucenao_error"})
     return {"results": output}

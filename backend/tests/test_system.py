@@ -396,7 +396,7 @@ async def test_system_health_returns_503_when_redis_unavailable(client, db_sessi
     assert "detail" in data
     # Redis error should be recorded in the services dict
     assert "redis" in data["detail"]
-    assert data["detail"]["redis"].startswith("error:")
+    assert data["detail"]["redis"] == "error"
 
 
 async def test_system_health_returns_503_when_postgres_unavailable(client, mock_redis):
@@ -425,7 +425,58 @@ async def test_system_health_returns_503_when_postgres_unavailable(client, mock_
     data = resp.json()
     assert "detail" in data
     assert "postgres" in data["detail"]
-    assert data["detail"]["postgres"].startswith("error:")
+    assert data["detail"]["postgres"] == "error"
+
+
+async def test_system_health_unauthenticated_503_omits_exception_text(client, mock_redis):
+    """/api/system/health needs no login, so driver errors (hosts, users) must stay in the log."""
+    mock_redis.ping = AsyncMock(side_effect=ConnectionError("Error 111 connecting to redis.internal:6379"))
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(side_effect=Exception('password authentication failed for user "vault"'))
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("routers.system.AsyncSessionLocal", MagicMock(return_value=mock_session)),
+        patch("asyncio.create_subprocess_exec") as mock_proc,
+    ):
+        proc_mock = AsyncMock()
+        proc_mock.communicate = AsyncMock(return_value=(b"IUse%\n10\n", b""))
+        mock_proc.return_value = proc_mock
+
+        resp = await client.get("/api/system/health")
+
+    assert resp.status_code == 503
+    assert "redis.internal" not in resp.text
+    assert "vault" not in resp.text
+    assert resp.json()["detail"] == {"postgres": "error", "redis": "error", "inodes": "ok"}
+
+
+async def test_ready_unauthenticated_503_omits_exception_text_and_paths(client, mock_redis, tmp_path):
+    """/api/ready is exposed by nginx without auth: no driver errors, no filesystem layout."""
+    mock_redis.ping = AsyncMock(side_effect=ConnectionError("Error 111 connecting to redis.internal:6379"))
+    failing_engine = MagicMock()
+    failing_engine.connect = MagicMock(side_effect=Exception('password authentication failed for user "vault"'))
+    missing = str(tmp_path / "secret-layout" / "gallery")
+
+    with (
+        patch("main.engine", failing_engine),
+        patch("main.settings.data_gallery_path", missing),
+    ):
+        resp = await client.get("/api/ready")
+
+    assert resp.status_code == 503
+    assert "redis.internal" not in resp.text
+    assert "vault" not in resp.text
+    assert "secret-layout" not in resp.text
+    body = resp.json()
+    assert body["checks"]["database"] is False
+    assert body["checks"]["redis"] is False
+    assert body["checks"]["data_gallery"] is False
+    assert body["details"]["database"] == "unavailable"
+    assert body["details"]["redis"] == "unavailable"
+    assert body["details"]["data_gallery"] == "not a directory"
 
 
 # -- health: inode warning / unknown (lines 136-142) -------------------------

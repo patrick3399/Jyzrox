@@ -57,7 +57,10 @@ async def search_by_image(
         )
         if resp.status_code in (401, 403):
             raise InvalidApiKeyError(f"SauceNAO rejected the API key (HTTP {resp.status_code})")
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # Not raise_for_status(): httpx puts the request URL in that message,
+            # and the URL carries api_key as a query parameter.
+            raise SauceNaoError(f"SauceNAO returned HTTP {resp.status_code}")
 
     elapsed = time.monotonic() - start
     logger.info("SauceNAO search completed in %.1fs", elapsed)
