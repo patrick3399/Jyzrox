@@ -210,6 +210,27 @@ describe('Library filter chips', () => {
     fireEvent.click(screen.getByText('library.clearAllFilters'))
     expect(search.clearFilters).toHaveBeenCalledTimes(1)
   })
+
+  it('test_clear_all_leads_the_chip_row_outside_the_scroller_so_overflowing_chips_cannot_push_it_away', () => {
+    search.parsed = { ...emptyParsed, sources: ['pixiv'], rating: 4 }
+    render(<LibraryPage />)
+    const clear = screen.getByText('library.clearAllFilters')
+    const scroller = screen.getByTestId('library-filter-chips')
+
+    expect(scroller).not.toContainElement(clear)
+    expect(clear.compareDocumentPosition(scroller) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(removeButtons().every((button) => scroller.contains(button))).toBe(true)
+  })
+
+  it('test_chip_row_scrolls_sideways_without_a_native_scrollbar', () => {
+    search.parsed = { ...emptyParsed, sources: ['pixiv'], rating: 4 }
+    render(<LibraryPage />)
+    const scroller = screen.getByTestId('library-filter-chips')
+
+    expect(scroller.className).toMatch(/(^|\s)overflow-x-auto(\s|$)/)
+    expect(scroller.className).toContain('[scrollbar-width:none]')
+    expect(scroller.className).toContain('[&::-webkit-scrollbar]:hidden')
+  })
 })
 
 describe('Library favorite and reading-list toggles', () => {
