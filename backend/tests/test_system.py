@@ -541,6 +541,48 @@ async def test_system_health_records_unknown_when_df_raises(client, db_session_f
     assert services["inodes"] == "unknown"
 
 
+async def test_system_health_inode_check_does_not_combine_df_i_with_output(client, db_session_factory, mock_redis):
+    """GNU df rejects `-i --output=...` ("mutually exclusive"), which left inodes "unknown" forever."""
+    mock_redis.ping = AsyncMock(return_value=True)
+
+    with (
+        patch("routers.system.AsyncSessionLocal", db_session_factory),
+        patch("asyncio.create_subprocess_exec") as mock_proc,
+    ):
+        proc_mock = AsyncMock()
+        proc_mock.communicate = AsyncMock(return_value=(b"IUse%\n10\n", b""))
+        mock_proc.return_value = proc_mock
+
+        await client.get("/api/system/health")
+
+    argv = mock_proc.call_args.args
+    assert argv[0] == "df"
+    assert "--output=ipcent" in argv
+    assert "-i" not in argv
+
+
+async def test_system_health_inode_check_parses_real_df_output(client, db_session_factory, mock_redis, tmp_path):
+    """Run the real df: a mocked subprocess cannot notice an argv that df itself refuses."""
+    import shutil
+    import subprocess
+
+    if shutil.which("df") is None:
+        pytest.skip("df not available")
+    probe = subprocess.run(["df", "--output=ipcent", str(tmp_path)], capture_output=True, text=True, check=False)
+    if probe.returncode != 0 or not probe.stdout.strip().splitlines()[-1].strip().rstrip("%").isdigit():
+        pytest.skip("filesystem does not report inode usage")
+
+    mock_redis.ping = AsyncMock(return_value=True)
+    with (
+        patch("routers.system.AsyncSessionLocal", db_session_factory),
+        patch("routers.system.settings.data_cas_path", str(tmp_path)),
+    ):
+        resp = await client.get("/api/system/health")
+
+    services = resp.json().get("services") or resp.json().get("detail", {})
+    assert services["inodes"] != "unknown"
+
+
 async def test_system_storage_returns_mounts_deduplicated_by_device(client):
     """GET /api/system/storage deduplicates paths on the same filesystem device."""
     fake_stat = MagicMock()
