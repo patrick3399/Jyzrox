@@ -172,16 +172,18 @@ describe('library gallery detail thumbnail grid uses fixed width-derived row hei
     expectFixedRows(singleGrid(source, thumbnails), 'estimateGalleryThumbRowHeight')
   })
 
-  it('makes the select-mode thumbnail button a full-width block so it does not sit on a text baseline', () => {
+  it('makes the thumbnail tile a full-width block in both modes so it does not sit on a text baseline', () => {
+    // One tile element for normal and select mode (swapping elements remounted
+    // every thumbnail on toggle); its select-mode border comes from tileModeClass.
     const classes = classTemplateContaining(source, [
       'relative',
       'group',
       'rounded',
-      'border-2',
       'select-none',
+      '\\$\\{tileModeClass\\}',
     ])
 
-    expect(classes, 'select-mode wrapper button className not found').toBeDefined()
+    expect(classes, 'thumbnail tile className not found').toBeDefined()
     expect(classes).toMatch(/(^|\s)block(\s|$)/)
     expect(classes).toMatch(/(^|\s)w-full(\s|$)/)
   })

@@ -5,6 +5,9 @@
  *   actions now live in a fixed, wrapping bar outside the image card.
  * - the exclusion list used to render under the (infinite) thumbnail grid, so
  *   on a long gallery it was effectively unreachable. It now opens as a dialog.
+ * - toggling select mode used to swap each tile between a <div role="button">
+ *   and a <button>, so React remounted every tile and all thumbnails reloaded
+ *   (the grid flashed). The tile is now one element in both modes.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
@@ -14,6 +17,7 @@ const h = vi.hoisted(() => ({
   gallery: null as unknown,
   excluded: [] as Array<{ blob_sha256: string; excluded_at: string | null }>,
   images: [] as Array<Record<string, unknown>>,
+  thumbMounts: 0,
 }))
 
 vi.mock('next/navigation', () => ({
@@ -72,7 +76,18 @@ vi.mock('@/lib/api', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/components/library/GalleryTagSection', () => ({ GalleryTagSection: () => null }))
 vi.mock('@/components/library/AddToCollectionMenu', () => ({ AddToCollectionMenu: () => null }))
-vi.mock('@/components/AppImage', () => ({ AppImage: () => null }))
+vi.mock('@/components/AppImage', async () => {
+  const { useEffect } = await import('react')
+  return {
+    AppImage: ({ alt }: { alt: string }) => {
+      useEffect(() => {
+        // Only the grid's page thumbnails; the page has other images.
+        if (alt.startsWith('Page ')) h.thumbMounts += 1
+      }, [alt])
+      return <img alt={alt} />
+    },
+  }
+})
 vi.mock('@/components/Reader/ImageContextMenu', () => ({ ImageContextMenu: () => null }))
 vi.mock('@/components/SimilarImagesPanel', () => ({ SimilarImagesPanel: () => null }))
 vi.mock('@/components/LazyDialogs', () => ({ LazySauceNaoModal: () => null }))
@@ -94,6 +109,7 @@ import GalleryDetailPage from '@/app/library/[source]/[sourceId]/page'
 describe('gallery detail select bar and exclusion list', () => {
   beforeEach(() => {
     h.excluded = []
+    h.thumbMounts = 0
     h.images = Array.from({ length: 3 }, (_, i) => ({
       id: i + 1,
       page_num: i + 1,
@@ -146,5 +162,37 @@ describe('gallery detail select bar and exclusion list', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('test_detail_toggling_select_mode_keeps_thumbnail_tiles_mounted', async () => {
+    h.images = h.images.map((img) => ({ ...img, thumb_path: `/media/thumbs/${img.id}.webp` }))
+    render(<GalleryDetailPage />)
+
+    const grid = screen.getByTestId('thumb-grid')
+    const before = within(grid).getAllByRole('img')
+    expect(before).toHaveLength(3)
+    const expectSameThumbs = () => {
+      before.forEach((img, i) => {
+        expect(img.isConnected).toBe(true)
+        expect(within(grid).getAllByRole('img')[i]).toBe(img)
+      })
+      expect(h.thumbMounts).toBe(3)
+    }
+
+    // Entering select mode updates the tiles in place.
+    fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+    expectSameThumbs()
+
+    // The tile still selects in select mode.
+    const tile = within(grid).getByRole('img', { name: 'Page 2' }).closest('[role="button"]')
+    expect(tile).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(tile as HTMLElement)
+    expect(tile).toHaveAttribute('aria-pressed', 'true')
+
+    // Leaving select mode keeps them too.
+    const bar = screen.getByTestId('image-select-bar')
+    fireEvent.click(within(bar).getByRole('button', { name: 'Cancel' }))
+    expectSameThumbs()
+    expect(tile).not.toHaveAttribute('aria-pressed')
   })
 })

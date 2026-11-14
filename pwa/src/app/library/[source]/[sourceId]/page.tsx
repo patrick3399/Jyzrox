@@ -1476,114 +1476,107 @@ function GalleryDetailPageInner() {
               hasMore={!imagesReachingEnd}
               isLoading={imagesLoadingMore}
               renderItem={(image, idx) => {
-                const isSelected = selectedIds.has(image.id)
-                if (selectMode) {
-                  return (
-                    <button
-                      key={image.id}
-                      type="button"
-                      onClick={(e) => {
-                        if (e.shiftKey) rangeSelectTo(idx)
-                        else toggleSelect(image, idx)
-                      }}
-                      onTouchStart={(e) => {
-                        selectLpTargetRef.current = idx
-                        selLpStart(e)
-                      }}
-                      onTouchMove={selLpMove}
-                      onTouchEnd={selLpEnd}
-                      onContextMenu={(e) => {
-                        selectLpTargetRef.current = idx
-                        selLpCtx(e)
-                      }}
-                      className={`relative group block w-full rounded border-2 transition-colors select-none [-webkit-touch-callout:none] ${
-                        isSelected
-                          ? 'border-red-500 ring-2 ring-red-500/30'
-                          : 'border-vault-border hover:border-vault-border-hover'
-                      }`}
-                    >
-                      {image.thumb_path ? (
-                        <AppImage
-                          src={image.thumb_path}
-                          alt={`Page ${image.page_num}`}
-                          loading={idx < 20 ? undefined : 'lazy'}
-                          className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
-                        />
-                      ) : (
-                        <ThumbPlaceholder
-                          category={gallery.category}
-                          categories={categoryRegistry?.categories}
-                          className="w-full aspect-[3/4] rounded"
-                        >
-                          {image.page_num}
-                        </ThumbPlaceholder>
-                      )}
-                      {isSelected && (
-                        <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
-                          <svg
-                            className="w-3 h-3 text-white"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={3}
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                        </div>
-                      )}
-                    </button>
-                  )
-                }
+                const isSelected = selectMode && selectedIds.has(image.id)
+                const tileModeClass = !selectMode
+                  ? ''
+                  : isSelected
+                    ? 'border-2 transition-colors border-red-500 ring-2 ring-red-500/30'
+                    : 'border-2 transition-colors border-vault-border hover:border-vault-border-hover'
+                const openReader = () =>
+                  router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
+                // One element in both modes: swapping the tile between a <div> and a
+                // <button> on toggle made React remount every tile, so all thumbnails
+                // reloaded and the grid flashed. Only handlers and classes change.
                 return (
                   <div
                     key={image.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() =>
-                      router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
-                    }
+                    aria-pressed={selectMode ? isSelected : undefined}
+                    onClick={(e) => {
+                      if (!selectMode) openReader()
+                      else if (e.shiftKey) rangeSelectTo(idx)
+                      else toggleSelect(image, idx)
+                    }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter')
-                        router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
+                      if (!selectMode) {
+                        if (e.key === 'Enter') openReader()
+                        return
+                      }
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      if (e.shiftKey) rangeSelectTo(idx)
+                      else toggleSelect(image, idx)
                     }}
                     onTouchStart={(e) => {
-                      activeImageRef.current = image
-                      lpStart(e)
+                      if (selectMode) {
+                        selectLpTargetRef.current = idx
+                        selLpStart(e)
+                      } else {
+                        activeImageRef.current = image
+                        lpStart(e)
+                      }
                     }}
-                    onTouchMove={lpMove}
-                    onTouchEnd={lpEnd}
+                    onTouchMove={selectMode ? selLpMove : lpMove}
+                    onTouchEnd={selectMode ? selLpEnd : lpEnd}
                     onContextMenu={(e) => {
-                      activeImageRef.current = image
-                      lpCtx(e)
+                      if (selectMode) {
+                        selectLpTargetRef.current = idx
+                        selLpCtx(e)
+                      } else {
+                        activeImageRef.current = image
+                        lpCtx(e)
+                      }
                     }}
-                    className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
+                    className={`relative group block w-full rounded cursor-pointer select-none [-webkit-touch-callout:none] ${tileModeClass}`}
                   >
                     {image.thumb_path ? (
                       <AppImage
                         src={image.thumb_path}
                         alt={`Page ${image.page_num}`}
                         loading={idx < 20 ? undefined : 'lazy'}
-                        className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
+                        className={
+                          selectMode
+                            ? `w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`
+                            : 'w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors'
+                        }
                       />
                     ) : (
                       <ThumbPlaceholder
                         category={gallery.category}
                         categories={categoryRegistry?.categories}
-                        className="w-full aspect-[3/4] rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
+                        className={
+                          selectMode
+                            ? 'w-full aspect-[3/4] rounded'
+                            : 'w-full aspect-[3/4] rounded border border-vault-border group-hover:border-vault-border-hover transition-colors'
+                        }
                       >
                         {image.page_num}
                       </ThumbPlaceholder>
                     )}
-                    {isFavorited(image.id) && (
+                    {isSelected && (
+                      <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                        <svg
+                          className="w-3 h-3 text-white"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      </div>
+                    )}
+                    {!selectMode && isFavorited(image.id) && (
                       <div className="absolute top-1 right-1">
                         <Heart className="w-4 h-4 fill-current text-red-400 drop-shadow" />
                       </div>
                     )}
-                    {imageMenu?.imageId === image.id && (
+                    {!selectMode && imageMenu?.imageId === image.id && (
                       <div className="absolute inset-0 rounded border-2 border-vault-accent pointer-events-none" />
                     )}
                   </div>

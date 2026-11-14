@@ -1044,34 +1044,20 @@ function LibraryContent() {
             // The list card shows plain text, so only the grid card takes the registry colours.
             const cardExtras =
               viewMode === 'list' ? {} : { categories: categoryRegistry?.categories }
-            if (selectMode) {
-              const isSelected = selectedIds.has(gallery.id)
-              return (
-                <div
-                  onClick={() => {
-                    toggleSelectedId(gallery.id)
-                  }}
-                  onContextMenu={(e) => e.preventDefault()}
-                >
-                  <Card
-                    gallery={gallery}
-                    {...cardExtras}
-                    thumbUrl={gallery.cover_thumb ?? undefined}
-                    selected={isSelected}
-                    selectMode={true}
-                    onFavoriteToggle={handleFavoriteToggle}
-                    onReadingListToggle={handleReadingListToggle}
-                    onDelete={handleDelete}
-                  />
-                </div>
-              )
-            }
+            // One element tree for both modes: wrapping the card only in select
+            // mode changes its root type, so React remounts every card and each
+            // thumbnail reloads (the whole grid flashes on toggle). The card's
+            // own long-press handler already suppresses the native context menu.
             return (
               <Card
                 gallery={gallery}
                 {...cardExtras}
                 thumbUrl={gallery.cover_thumb ?? undefined}
-                onClick={() => openGallery(gallery)}
+                selected={selectMode && selectedIds.has(gallery.id)}
+                selectMode={selectMode}
+                onClick={
+                  selectMode ? () => toggleSelectedId(gallery.id) : () => openGallery(gallery)
+                }
                 onFavoriteToggle={handleFavoriteToggle}
                 onReadingListToggle={handleReadingListToggle}
                 onDelete={handleDelete}
