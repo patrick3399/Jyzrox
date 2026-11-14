@@ -32,7 +32,7 @@ from services.cas import (
     thumbnails_complete_at,
 )
 from services.gallery_categories import resolve_category
-from services.gallery_lifecycle import invalidate_sources_cache
+from services.gallery_lifecycle import invalidate_sources_cache, mark_trashed
 from services.link_sync import library_root_available, sync_link_gallery
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_MEDIA_EXTS
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
@@ -124,6 +124,46 @@ def _page_file_exists(img: Image) -> bool:
     return resolve_blob_path(img.blob, img.external_path).exists()
 
 
+def _probe_page(img: Image) -> tuple[bool, bool]:
+    file_exists = _page_file_exists(img)
+    return file_exists, file_exists and img.blob is not None and _has_thumb_160(img.blob)
+
+
+async def _probe_pages(images: list[Image]) -> list[tuple[bool, bool]]:
+    """Return (file exists, 160px thumbnail complete) for each image.
+
+    The stats run in a thread: inline, one large gallery on the NFS data root
+    stalled every other job sharing the worker's event loop.
+    """
+    return await asyncio.to_thread(lambda: [_probe_page(img) for img in images])
+
+
+def _list_media_files(directory: Path) -> list[Path]:
+    return [f for f in directory.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_MEDIA_EXTS]
+
+
+def _list_file_names(directory: Path) -> list[str]:
+    return [entry.name for entry in directory.iterdir() if entry.is_file()]
+
+
+def _walk_library_tree(root: str) -> list[tuple[str, list[str]]]:
+    """Return (dirpath, filenames) for every non-hidden directory under root.
+
+    Runs in a thread: the tree lives on the NFS data root, and walking it
+    inline blocked every other job sharing the worker's event loop.
+    """
+    found: list[tuple[str, list[str]]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Skip hidden directories in-place so os.walk won't descend into them
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        found.append((dirpath, filenames))
+    return found
+
+
+def _stat_and_list_media(directory: Path) -> tuple[os.stat_result, list[Path]]:
+    return directory.stat(), _list_media_files(directory)
+
+
 def _link_source_vanished(gallery: Gallery, images: list[Image]) -> bool:
     """Return True when a link gallery's folder and every page file are gone.
 
@@ -163,7 +203,7 @@ def _hold_vanished_link_gallery(gallery: Gallery) -> str | None:
         noticed_at = noticed_at.replace(tzinfo=UTC)
     if now - noticed_at < VANISHED_LINK_GALLERY_GRACE:
         return None
-    gallery.deleted_at = now
+    mark_trashed([gallery], reason="source_missing", actor_user_id=None, now=now)
     logger.warning(
         "[link_source] gallery_id=%d: source %s stayed gone; moved to trash", gallery.id, gallery.source_path
     )
@@ -590,7 +630,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                     cover_image = _cover_image_for_gallery(gallery, images)
                     existing_images_for_cover: list[Image] = []
 
-                    for img in images:
+                    for img, (file_exists, has_thumb) in zip(images, await _probe_pages(images), strict=True):
                         blob = img.blob
                         if not blob:
                             if img.external_path:
@@ -598,7 +638,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                                 # but not hashed yet, so it has no blob. It is
                                 # live data; only a vanished file removes it,
                                 # and there is no blob ref_count to give back.
-                                if Path(img.external_path).exists():
+                                if file_exists:
                                     existing_images_for_cover.append(img)
                                     continue
                                 logger.warning(
@@ -611,20 +651,18 @@ async def rescan_library_job(ctx: dict) -> dict:
                             images_to_delete.append(img.id)
                             removed += 1
                             continue
-                        src = resolve_blob_path(blob, img.external_path)
-                        if not src.exists():
+                        if not file_exists:
                             logger.warning(
                                 "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
                                 gid,
                                 img.id,
-                                str(src),
+                                str(resolve_blob_path(blob, img.external_path)),
                             )
                             shas_to_decrement.append(blob.sha256)
                             images_to_delete.append(img.id)
                             removed += 1
                             continue
                         existing_images_for_cover.append(img)
-                        has_thumb = _has_thumb_160(blob)
                         if not has_thumb:
                             missing_thumb = True
                             if img is cover_image:
@@ -651,7 +689,11 @@ async def rescan_library_job(ctx: dict) -> dict:
 
                     if missing_thumb and not missing_cover_thumb:
                         current_cover = _cover_image_for_gallery(gallery, existing_images_for_cover)
-                        if current_cover and current_cover.blob and not _has_thumb_160(current_cover.blob):
+                        if (
+                            current_cover
+                            and current_cover.blob
+                            and not await asyncio.to_thread(_has_thumb_160, current_cover.blob)
+                        ):
                             missing_cover_thumb = True
 
                     if missing_thumb:
@@ -848,10 +890,10 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         removed = 0
         removed_blob_sha256s: list[str] = []
         cover_image = _cover_image_for_gallery(gallery, images, excluded_set)
-        for img in images:
+        for img, (file_exists, has_thumb) in zip(images, await _probe_pages(images), strict=True):
             blob = img.blob
             if not blob:
-                if img.external_path and Path(img.external_path).exists():
+                if img.external_path and file_exists:
                     # Pending link page (not hashed yet): live data, keep it.
                     pending_paths.add(img.external_path)
                     continue
@@ -860,13 +902,12 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 await session.delete(img)
                 removed += 1
                 continue
-            src = resolve_blob_path(blob, img.external_path)
-            if not src.exists():
+            if not file_exists:
                 logger.warning(
                     "[rescan_gallery] gallery_id=%d image_id=%d missing: %s",
                     gallery_id,
                     img.id,
-                    str(src),
+                    str(resolve_blob_path(blob, img.external_path)),
                 )
                 await decrement_ref_count(blob.sha256, session)
                 removed_blob_sha256s.append(blob.sha256)
@@ -874,7 +915,6 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 removed += 1
                 continue
             known_sha256s.add(blob.sha256)
-            has_thumb = _has_thumb_160(blob)
             if not has_thumb:
                 missing_thumb = True
                 if img is cover_image:
@@ -915,10 +955,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             max_page = max((img.page_num for img in surviving_images), default=0)
 
             try:
-                dir_files = sorted(
-                    [f for f in gallery_dir.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_MEDIA_EXTS],
-                    key=lambda f: f.name,
-                )
+                dir_files = sorted(await asyncio.to_thread(_list_media_files, gallery_dir), key=lambda f: f.name)
             except OSError as exc:
                 logger.warning("[rescan_gallery] gallery_id=%d failed to read dir: %s", gallery_id, exc)
                 dir_files = []
@@ -1095,10 +1132,7 @@ async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
                 continue
 
             # Walk the directory tree recursively; os.walk is efficient for deep trees
-            for dirpath, dirnames, filenames in os.walk(str(lib_dir)):
-                # Skip hidden directories in-place so os.walk won't descend into them
-                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-
+            for dirpath, filenames in await asyncio.to_thread(_walk_library_tree, str(lib_dir)):
                 current = Path(dirpath)
                 # Skip the library root itself — only subfolders are gallery candidates
                 if current == lib_dir:
@@ -1187,12 +1221,8 @@ async def reconcile_library_path_job(
     new_real = os.path.realpath(new_path)
     destination = Path(new_real)
     try:
-        destination_stat = destination.stat()
-        media_files = sorted(
-            entry
-            for entry in destination.iterdir()
-            if entry.is_file() and entry.suffix.lower() in _SUPPORTED_MEDIA_EXTS
-        )
+        destination_stat, listed_media = await asyncio.to_thread(_stat_and_list_media, destination)
+        media_files = sorted(listed_media)
     except OSError:
         return {"status": "stale", "reason": "destination_unavailable", "new_path": new_real}
     if destination_device is not None and destination_stat.st_dev != destination_device:
@@ -1381,7 +1411,7 @@ async def move_library_path_job(
                         "new_path": new_real,
                     }
 
-                filenames = [entry.name for entry in destination.iterdir() if entry.is_file()]
+                filenames = await asyncio.to_thread(_list_file_names, destination)
                 if _media_count(filenames) == 0:
                     return {"status": "ignored", "reason": "no_media", "new_path": new_real}
                 # The old path may be a stop along the way: an earlier rename of
@@ -1557,7 +1587,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str, watcher_origin: bool = Fa
         current = Path(real_dir)
         if current.is_dir():
             try:
-                filenames = [p.name for p in current.iterdir() if p.is_file()]
+                filenames = await asyncio.to_thread(_list_file_names, current)
             except OSError:
                 filenames = []
             if _media_count(filenames) > 0:
@@ -1645,8 +1675,7 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
                 except ValueError as exc:
                     logger.warning("[rescan_path] skipping discovery for invalid pattern %s: %s", spec.path, exc)
                 else:
-                    for dirpath, dirnames, filenames in os.walk(str(lib_dir)):
-                        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                    for dirpath, filenames in await asyncio.to_thread(_walk_library_tree, str(lib_dir)):
                         current = Path(dirpath)
                         if current == lib_dir or _media_count(filenames) == 0:
                             continue

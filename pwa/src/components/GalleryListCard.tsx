@@ -115,9 +115,10 @@ export function GalleryListCard({
       : []),
   ]
 
-  // Up to 5 tags shown inline, rest truncated
-  const visibleTags = gallery.tags_array.slice(0, 5)
+  // Four half-width chips always fit in two rows, which keeps the card's height fixed.
+  const visibleTags = gallery.tags_array.slice(0, 4)
   const extraTagCount = gallery.tags_array.length - visibleTags.length
+  const isDownloading = gallery.download_status === 'downloading' && !selectMode
 
   return (
     <>
@@ -128,7 +129,7 @@ export function GalleryListCard({
         onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
         {...longPressHandlers}
         className={`
-          relative flex gap-3 p-3 select-none [-webkit-touch-callout:none]
+          relative flex h-[calc(7.03125rem+55px)] gap-3 p-3 select-none [-webkit-touch-callout:none]
           bg-vault-card rounded-lg overflow-hidden
           transition-all duration-150 cursor-pointer
           hover:bg-vault-card-hover hover:border-vault-accent
@@ -185,17 +186,19 @@ export function GalleryListCard({
 
           {/* Tags summary */}
           {visibleTags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-0.5">
-              {visibleTags.map((tag) => (
-                <span
-                  key={tag}
-                  className="px-1.5 py-0.5 rounded text-[10px] bg-vault-input text-vault-text-muted border border-vault-border truncate max-w-[120px]"
-                >
-                  {tag}
-                </span>
-              ))}
+            <div className="flex items-end gap-1 mt-0.5">
+              <div className="flex flex-1 flex-wrap gap-1 min-w-0">
+                {visibleTags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-vault-input text-vault-text-muted border border-vault-border truncate max-w-[min(120px,calc(50%-0.125rem))]"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
               {extraTagCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded text-[10px] text-vault-text-muted">
+                <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] text-vault-text-muted">
                   +{extraTagCount}
                 </span>
               )}
@@ -203,24 +206,26 @@ export function GalleryListCard({
           )}
 
           {/* Bottom meta row */}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-auto pt-1">
+          <div className="flex items-center gap-x-2 mt-auto pt-1">
             {/* Source badge */}
             <span
-              className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-medium ${sourceStyle.className}`}
+              className={`min-w-0 truncate px-1.5 py-0.5 rounded border text-[10px] font-medium ${sourceStyle.className}`}
             >
               {sourceStyle.label}
             </span>
 
-            {/* Rating */}
-            <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
+            {/* Rating — gives way to the download badge, which would not fit beside it on phones */}
+            {!isDownloading && (
+              <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
+            )}
 
             {/* Pages */}
-            <span className="text-xs text-vault-text-muted ml-auto">{gallery.pages}p</span>
+            <span className="shrink-0 text-xs text-vault-text-muted ml-auto">{gallery.pages}p</span>
 
             {/* Favourite indicator */}
             {gallery.is_favorited && (
               <span
-                className="text-red-400 text-sm leading-none"
+                className="shrink-0 text-red-400 text-sm leading-none"
                 aria-label={t('common.favourited')}
               >
                 ♥
@@ -228,8 +233,8 @@ export function GalleryListCard({
             )}
 
             {/* Downloading indicator */}
-            {gallery.download_status === 'downloading' && !selectMode && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600/90 text-white text-[10px] font-medium">
+            {isDownloading && (
+              <span className="inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600/90 text-white text-[10px] font-medium whitespace-nowrap">
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                 {t('queue.downloading')}
               </span>

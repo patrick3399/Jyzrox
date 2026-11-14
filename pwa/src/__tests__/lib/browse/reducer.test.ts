@@ -126,6 +126,46 @@ describe('browse reducer contracts', () => {
   })
 })
 
+describe('total across pages', () => {
+  it('append_page_without_total_keeps_the_known_total', () => {
+    // Library cursor pages carry no total; only the first (cursor-less) page counts.
+    let state = reducer(createBrowseState<Item, Cursor>('A'), { type: 'REQUEST_STARTED' })
+    state = reducer(state, {
+      type: 'PAGE_SUCCEEDED',
+      identityKey: 'A',
+      generation: state.generation,
+      mode: 'replace',
+      page: { items: [{ id: 1, title: 'one' }], cursor: 'c1', hasMore: true, total: 812 },
+    })
+    expect(state.total).toBe(812)
+
+    state = reducer(state, { type: 'REQUEST_STARTED' })
+    state = reducer(state, {
+      type: 'PAGE_SUCCEEDED',
+      identityKey: 'A',
+      generation: state.generation,
+      mode: 'append',
+      page: { items: [{ id: 2, title: 'two' }], cursor: 'c2', hasMore: true, total: null },
+    })
+
+    expect(state.items).toHaveLength(2)
+    expect(state.total).toBe(812)
+  })
+
+  it('append_page_with_a_total_updates_it', () => {
+    let state = hydrateA()
+    state = reducer(state, { type: 'REQUEST_STARTED' })
+    state = reducer(state, {
+      type: 'PAGE_SUCCEEDED',
+      identityKey: 'A',
+      generation: state.generation,
+      mode: 'append',
+      page: { items: [{ id: 3, title: 'three' }], cursor: 'c3', hasMore: false, total: 3 },
+    })
+    expect(state.total).toBe(3)
+  })
+})
+
 describe('ITEMS_PATCHED', () => {
   const retitle = (id: number, title: string) => (item: Item) =>
     item.id === id ? { ...item, title } : item

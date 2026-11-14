@@ -63,9 +63,7 @@ type BrowseCheckpoint = {
 export type BrowseRestoreInstruction = {
   key: string
   identityKey: string
-  target:
-    | { kind: 'view'; view: BrowseCheckpoint }
-    | { kind: 'top' }
+  target: { kind: 'view'; view: BrowseCheckpoint } | { kind: 'top' }
 }
 
 /**
@@ -94,10 +92,7 @@ export type BrowseSessionResult<Item, Cursor> = {
   loadMore: () => Promise<void>
   refresh: (options?: BrowseRefreshOptions) => Promise<void>
   retry: () => Promise<void>
-  checkpoint: (
-    view: BrowseCheckpoint,
-    retention?: BrowseSnapshotSaveOptions,
-  ) => boolean
+  checkpoint: (view: BrowseCheckpoint, retention?: BrowseSnapshotSaveOptions) => boolean
   updateView: (view: BrowseCheckpoint) => void
   restoreInstruction: BrowseRestoreInstruction | null
   acknowledgeRestore: (key: string) => void
@@ -192,8 +187,9 @@ export function useBrowseSession<Item, Cursor, Identity>({
   const liveViewRef = useRef<BrowseCheckpoint | null>(null)
   const restoreEpochRef = useRef(0)
   const restoreInstructionRef = useRef<BrowseRestoreInstruction | null>(null)
-  const [restoreInstruction, setRestoreInstruction] =
-    useState<BrowseRestoreInstruction | null>(null)
+  const [restoreInstruction, setRestoreInstruction] = useState<BrowseRestoreInstruction | null>(
+    null,
+  )
 
   const publishRestore = useCallback(
     (nextIdentityKey: string, target: BrowseRestoreInstruction['target']): void => {
@@ -288,6 +284,8 @@ export function useBrowseSession<Item, Cursor, Identity>({
           let cursor: Cursor | null = null
           let lastPage: BrowsePageResult<Item, Cursor> | null = null
           let meta: unknown
+          // Later pages may carry no total (Library cursor pages): keep the latest known one.
+          let total: number | null = null
 
           for (let pageIndex = 0; pageIndex < request.targetDepth; pageIndex += 1) {
             const page = await adapterRef.current.fetchPage(
@@ -304,6 +302,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
             }
             pages.push(page.items)
             if (page.meta !== undefined) meta = page.meta
+            if (page.total !== null) total = page.total
             lastPage = page
 
             if (!page.hasMore || page.cursor === null) break
@@ -319,7 +318,7 @@ export function useBrowseSession<Item, Cursor, Identity>({
             pages,
             cursor: lastPage.cursor,
             hasMore: lastPage.hasMore,
-            total: lastPage.total,
+            total,
             meta,
           }
           const currentView = liveViewRef.current
@@ -511,28 +510,31 @@ export function useBrowseSession<Item, Cursor, Identity>({
     await requestPages(request, identityRef.current, current.identityKey)
   }, [requestPages])
 
-  const refresh = useCallback(async (options?: BrowseRefreshOptions): Promise<void> => {
-    if (!readyRef.current) return
-    const current = stateRef.current
-    if (
-      current.terminal ||
-      adapterRef.current.isReplayableIdentity?.(identityRef.current) === false
-    ) {
-      return
-    }
-    inflightRef.current?.abort()
-    inflightRef.current = null
-    requestInFlightRef.current = false
-    await requestPages(
-      {
-        kind: 'refresh',
-        cursor: null,
-        targetDepth: options?.depth === 'first' ? 1 : Math.max(1, current.pages.length),
-      },
-      identityRef.current,
-      current.identityKey,
-    )
-  }, [requestPages])
+  const refresh = useCallback(
+    async (options?: BrowseRefreshOptions): Promise<void> => {
+      if (!readyRef.current) return
+      const current = stateRef.current
+      if (
+        current.terminal ||
+        adapterRef.current.isReplayableIdentity?.(identityRef.current) === false
+      ) {
+        return
+      }
+      inflightRef.current?.abort()
+      inflightRef.current = null
+      requestInFlightRef.current = false
+      await requestPages(
+        {
+          kind: 'refresh',
+          cursor: null,
+          targetDepth: options?.depth === 'first' ? 1 : Math.max(1, current.pages.length),
+        },
+        identityRef.current,
+        current.identityKey,
+      )
+    },
+    [requestPages],
+  )
 
   const retry = useCallback(async (): Promise<void> => {
     if (!readyRef.current) return
@@ -581,7 +583,13 @@ export function useBrowseSession<Item, Cursor, Identity>({
       const generation = ++generationRef.current
       const currentKey = stateRef.current.identityKey
       dispatch({ type: 'REQUEST_STARTED', generation })
-      dispatch({ type: 'PAGE_SUCCEEDED', identityKey: currentKey, generation, mode: 'replace', page })
+      dispatch({
+        type: 'PAGE_SUCCEEDED',
+        identityKey: currentKey,
+        generation,
+        mode: 'replace',
+        page,
+      })
       liveViewRef.current = view
       return storeRef.current.save(
         currentKey,

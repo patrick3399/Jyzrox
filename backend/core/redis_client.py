@@ -346,6 +346,13 @@ async def publish_job_event(event: dict) -> None:
                 new_works=event.get("new_works", 0),
                 job_id=event.get("job_id"),
             )
+        elif event_type_str == "subscription_checking":
+            await emit(
+                EventType.SUBSCRIPTION_CHECKING,
+                actor_user_id=user_id,
+                resource_type="subscription",
+                resource_id=event.get("sub_id"),
+            )
         else:
             # Unknown type — publish directly to old channel as fallback
             await get_redis().publish("download:events", json.dumps(event))

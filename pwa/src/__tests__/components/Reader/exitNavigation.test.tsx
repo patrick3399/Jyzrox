@@ -57,7 +57,17 @@ class AutoFireResizeObserver {
     this.callback = callback
   }
   observe(target: Element) {
-    const rect = { width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }
+    const rect = {
+      width: 800,
+      height: 600,
+      top: 0,
+      left: 0,
+      right: 800,
+      bottom: 600,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    }
     this.callback(
       [{ target, contentRect: rect } as unknown as ResizeObserverEntry],
       this as unknown as ResizeObserver,
@@ -73,7 +83,17 @@ beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, value: 600 })
   Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, value: 800 })
   HTMLElement.prototype.getBoundingClientRect = () =>
-    ({ width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect
+    ({
+      width: 800,
+      height: 600,
+      top: 0,
+      left: 0,
+      right: 800,
+      bottom: 600,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    }) as DOMRect
 })
 
 function makeGalleryImages(count: number): GalleryImage[] {
@@ -113,7 +133,11 @@ afterEach(() => {
   delete (window.history as unknown as { length?: number }).length
 })
 
-function renderReader(props: { backHref: string; images?: GalleryImage[]; onHideImage?: (page: number) => Promise<void> }) {
+function renderReader(props: {
+  backHref: string
+  images?: GalleryImage[]
+  onHideImage?: (page: number) => Promise<void>
+}) {
   const images = props.images ?? makeGalleryImages(5)
   return render(
     <Reader
@@ -257,7 +281,14 @@ describe('a mount without backHref', () => {
   it('does not type-check for Reader or ReaderFallbackScreen', () => {
     const mounts = [
       // @ts-expect-error backHref is required
-      <Reader key="reader" source="local" sourceId="1" downloadStatus="complete" images={[]} totalPages={0} />,
+      <Reader
+        key="reader"
+        source="local"
+        sourceId="1"
+        downloadStatus="complete"
+        images={[]}
+        totalPages={0}
+      />,
       // @ts-expect-error backHref is required
       <ReaderFallbackScreen key="fallback">
         <p>waiting</p>

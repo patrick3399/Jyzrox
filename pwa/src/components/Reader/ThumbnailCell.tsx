@@ -79,13 +79,15 @@ export function ThumbnailCell({
     thumbSrc = image.thumbUrl || (image.mediaType !== 'video' ? image.url : null)
   }
 
+  const label = image.position ?? image.pageNum
+
   return (
     <button
       onClick={() => onSelect(image.pageNum)}
       className={`relative block h-full w-full overflow-hidden rounded ${
         isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
       }`}
-      title={`Page ${image.pageNum}`}
+      title={`Page ${label}`}
     >
       {spriteStyle ? (
         <div style={spriteStyle} />
@@ -98,11 +100,11 @@ export function ThumbnailCell({
         />
       ) : (
         <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
-          <span className="text-[11px] text-gray-500">{image.pageNum}</span>
+          <span className="text-[11px] text-gray-500">{label}</span>
         </div>
       )}
       <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[10px] text-white leading-tight py-px">
-        {image.pageNum}
+        {label}
       </span>
     </button>
   )

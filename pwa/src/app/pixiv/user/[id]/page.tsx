@@ -100,7 +100,10 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
           </span>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity duration-200" />
-        <Button variant="primary" size="sm" className="absolute bottom-2 right-2 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 text-xs"
+        <Button
+          variant="primary"
+          size="sm"
+          className="absolute bottom-2 right-2 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 text-xs"
           onClick={handleDownload}
           disabled={downloading}
         >
@@ -142,7 +145,8 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
   const [collectionLoading, setCollectionLoading] = useState(false)
   const { data: collection, mutate: mutateCollection } = useSWR(
     validId ? `/api/pixiv/user/${userId}/collection` : null,
-    (_, { signal }: { signal?: AbortSignal } = {}) => api.pixiv.getUserCollection(userId, { signal }),
+    (_, { signal }: { signal?: AbortSignal } = {}) =>
+      api.pixiv.getUserCollection(userId, { signal }),
     { refreshInterval: (data) => (data?.job_id ? 3000 : 0) },
   )
 
@@ -353,7 +357,10 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
                 <p className="text-sm text-vault-text-secondary">@{user.account}</p>
               </div>
               <div className="flex items-center gap-2 ml-auto shrink-0">
-                <Button variant={isFollowing ? 'secondary' : 'primary'} size="sm" className={isFollowing ? 'hover:bg-red-500/10 hover:text-red-400' : ''}
+                <Button
+                  variant={isFollowing ? 'secondary' : 'primary'}
+                  size="sm"
+                  className={isFollowing ? 'hover:bg-red-500/10 hover:text-red-400' : ''}
                   onClick={handleToggleFollow}
                   disabled={followLoading}
                 >
@@ -396,7 +403,9 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
               <p className="text-sm text-vault-text leading-relaxed">{user.comment}</p>
             )}
             <div className="flex flex-wrap gap-2 pt-2 border-t border-vault-border">
-              <Button variant="primary" size="sm"
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => handleCollectionSync(false)}
                 disabled={collectionLoading || Boolean(collection?.job_id)}
               >
@@ -414,7 +423,9 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
                   >
                     {t('pixiv.collectionOpen')}
                   </Link>
-                  <Button variant="secondary" size="sm"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => handleCollectionSync(true)}
                     disabled={collectionLoading || Boolean(collection.job_id)}
                   >
@@ -422,7 +433,9 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
                   </Button>
                 </>
               )}
-              <Button variant="secondary" size="sm"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={handleToggleSubscription}
                 disabled={collectionLoading}
               >
@@ -433,7 +446,8 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
               {collection && collection.work_count > 0 && (
                 <span className="self-center text-xs text-vault-text-secondary">
                   {t('pixiv.collectionWorks', { count: String(collection.work_count) })}
-                  {collection.missing_count > 0 && ` · ${t('pixiv.collectionMissing', { count: String(collection.missing_count) })}`}
+                  {collection.missing_count > 0 &&
+                    ` · ${t('pixiv.collectionMissing', { count: String(collection.missing_count) })}`}
                 </span>
               )}
             </div>
@@ -447,7 +461,9 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
           onClick={() => handleTabChange('works')}
           aria-current={activeTab === 'works' ? 'page' : undefined}
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'works' ? 'bg-vault-accent text-white' : 'text-vault-text-secondary hover:text-vault-text'
+            activeTab === 'works'
+              ? 'bg-vault-accent text-white'
+              : 'text-vault-text-secondary hover:text-vault-text'
           }`}
         >
           {t('pixiv.userWorks')}
@@ -456,7 +472,9 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
           onClick={() => handleTabChange('bookmarks')}
           aria-current={activeTab === 'bookmarks' ? 'page' : undefined}
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'bookmarks' ? 'bg-vault-accent text-white' : 'text-vault-text-secondary hover:text-vault-text'
+            activeTab === 'bookmarks'
+              ? 'bg-vault-accent text-white'
+              : 'text-vault-text-secondary hover:text-vault-text'
           }`}
         >
           {t('pixiv.userBookmarks')}
@@ -494,7 +512,10 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
 
             {hasMoreWorks && (
               <div className="flex justify-center pt-2">
-                <Button variant="secondary" size="md" className="px-6"
+                <Button
+                  variant="secondary"
+                  size="md"
+                  className="px-6"
                   onClick={() => setSize(size + 1)}
                   disabled={worksLoading}
                 >
@@ -524,7 +545,10 @@ function UserProfilePageInner({ params }: { params: Promise<{ id: string }> }) {
               </div>
               {hasMoreBookmarks && (
                 <div className="flex justify-center pt-2">
-                  <Button variant="secondary" size="md" className="px-6"
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    className="px-6"
                     onClick={() => setBookmarksSize(bookmarksSize + 1)}
                     disabled={bookmarksLoading}
                   >

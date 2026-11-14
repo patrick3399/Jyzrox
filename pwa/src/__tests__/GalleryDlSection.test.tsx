@@ -33,7 +33,14 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/lib/api', () => ({
-  api: { galleryDl: { getVersion: () => mockGetVersion(), upgrade: vi.fn(), upgradeToMaster: () => mockUpgradeToMaster(), rollback: vi.fn() } },
+  api: {
+    galleryDl: {
+      getVersion: () => mockGetVersion(),
+      upgrade: vi.fn(),
+      upgradeToMaster: () => mockUpgradeToMaster(),
+      rollback: vi.fn(),
+    },
+  },
 }))
 
 vi.mock('@/lib/ws', () => ({
@@ -64,9 +71,7 @@ describe('GalleryDlSection — upgrade failure indication', () => {
     }
     rerender(<GalleryDlSection />)
 
-    await waitFor(() =>
-      expect(screen.getByText(/galleryDlLastFailed.*boom/)).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByText(/galleryDlLastFailed.*boom/)).toBeInTheDocument())
     expect(toast.error).toHaveBeenCalledTimes(1)
   })
 

@@ -25,7 +25,7 @@ from services.cas import (
 )
 from services.gallery_categories import resolve_category
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
-from services.link_sync import sync_link_gallery
+from services.link_sync import SETTLE_NS, LinkSyncResult, sync_link_gallery
 from services.source_identity import SourceFileChangedError, hash_file_with_identity
 from services.tag_helpers import (
     rebuild_gallery_tags_array,
@@ -40,6 +40,10 @@ from worker.constants import (
 from worker.helpers import _sha256, _validate_image_magic
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
+
+# About 10 seconds of waiting, which holds an ingest slot. A folder this is not
+# enough for stays `failed` until the next scan imports it again.
+_LINK_IMPORT_ATTEMPTS = 6
 
 
 def _subscription_artist_id(source: str, source_id: str, artist_id: str | None, source_url: str | None) -> str | None:
@@ -84,6 +88,44 @@ def _disambiguate_library_filenames(paths: list[Path]) -> list[str]:
     return names
 
 
+def _read_first_metadata(gallery_path: Path) -> dict:
+    """Return the first readable .json file's content under the gallery, or {}."""
+    for meta_file in sorted(gallery_path.rglob("*.json")):
+        try:
+            return json.loads(meta_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
+            continue
+    return {}
+
+
+def _collect_top_level_media_files(src_path: Path) -> tuple[list[Path], int]:
+    """Like _collect_media_files but only looks at direct children of src_path."""
+    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
+    files_validated: list[Path] = []
+    skipped = 0
+    for f in files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
+            files_validated.append(f)
+        else:
+            skipped += 1
+    return files_validated, skipped
+
+
+def _collect_media_files(gallery_path: Path) -> tuple[list[Path], int]:
+    """Return the gallery's valid media files and the count rejected by the magic check."""
+    media_files_raw = [f for f in gallery_path.rglob("*") if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
+    # Validate magic bytes for images; pass video files through without check
+    media_files: list[Path] = []
+    skipped = 0
+    for f in media_files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
+            media_files.append(f)
+        else:
+            skipped += 1
+    return media_files, skipped
+
+
 async def import_job(
     ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None, source_url: str | None = None
 ) -> dict:
@@ -98,14 +140,8 @@ async def import_job(
         return {"status": "failed", "error": f"not a directory: {path}"}
 
     # Read gallery-dl metadata (any .json file, they all have gallery info)
-    metadata: dict = {}
-    for meta_file in sorted(gallery_path.rglob("*.json")):
-        try:
-            metadata = json.loads(meta_file.read_text(encoding="utf-8"))
-            break
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-            logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
-            continue
+    # rglob + read hit NFS; run in a thread to keep the worker loop free.
+    metadata: dict = await asyncio.to_thread(_read_first_metadata, gallery_path)
 
     # Extract source from Category (gallery-dl uses "category" for the extractor name)
     raw_source = metadata.get("category")
@@ -132,15 +168,9 @@ async def import_job(
             break
 
     tags = _normalize_tags(_extract_tags(gallery_path, metadata), source)
-    media_files_raw = [f for f in gallery_path.rglob("*") if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
-    # Validate magic bytes for images; pass video files through without check
-    media_files = []
-    skipped = 0
-    for f in media_files_raw:
-        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
-            media_files.append(f)
-        else:
-            skipped += 1
+    # Listing and magic-checking every file blocks for seconds on a large
+    # gallery; run it in a thread so other jobs on this worker keep moving.
+    media_files, skipped = await asyncio.to_thread(_collect_media_files, gallery_path)
     media_files.sort(key=_natural_sort_key)
     if skipped:
         logger.warning("[import] %s: skipped %d file(s) with invalid magic bytes", gallery_path.name, skipped)
@@ -366,7 +396,7 @@ async def import_job(
     # download directory as before.
     if not hash_failures:
         try:
-            _shutil.rmtree(str(gallery_path), ignore_errors=True)
+            await asyncio.to_thread(_shutil.rmtree, str(gallery_path), ignore_errors=True)
         except Exception as exc:
             logger.warning("[import] failed to remove temp dir %s: %s", gallery_path, exc)
 
@@ -486,6 +516,21 @@ def _build_gallery(
     }
 
 
+async def _sync_new_link_gallery(gallery_id: int, redis) -> LinkSyncResult:
+    """Run the first sync, waiting out the states that say nothing about the folder.
+
+    A folder copied moments ago has only unsettled files, and a sweep may hold
+    the sync lock. Neither means the folder has no media.
+    """
+    for attempt in range(1, _LINK_IMPORT_ATTEMPTS + 1):
+        result = await sync_link_gallery(gallery_id, redis=redis, force=True)
+        temporary = result.status == "busy" or (result.status == "synced" and result.unsettled and not result.pages)
+        if not temporary or attempt == _LINK_IMPORT_ATTEMPTS:
+            break
+        await asyncio.sleep(SETTLE_NS / 1_000_000_000)
+    return result
+
+
 async def _link_import(ctx: dict, src_path: Path, gallery_id: int) -> dict:
     """Link mode: register the folder's files as pages now, hash them in the background (ADR 0015)."""
     r = ctx["redis"]
@@ -502,9 +547,12 @@ async def _link_import(ctx: dict, src_path: Path, gallery_id: int) -> dict:
             gallery.source_path = os.path.realpath(src_path)
             await session.commit()
 
-    result = await sync_link_gallery(gallery_id, redis=r, force=True)
+    result = await _sync_new_link_gallery(gallery_id, r)
     if result.status not in ("synced", "unchanged") or not result.pages:
-        error = "no supported files found" if result.status in ("synced", "unchanged") else result.status
+        if result.status not in ("synced", "unchanged"):
+            error = result.status
+        else:
+            error = "files are still being written" if result.unsettled else "no supported files found"
         async with AsyncSessionLocal() as session:
             gallery = await session.get(Gallery, gallery_id)
             if gallery is not None and gallery.deleted_at is None and gallery.download_status == "importing":
@@ -536,15 +584,9 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     if mode == "link":
         return await _link_import(ctx, src_path, gallery_id)
 
-    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
-    # Validate magic bytes for image files; pass video files through without magic check
-    files_validated = []
-    skipped_magic = 0
-    for f in files_raw:
-        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
-            files_validated.append(f)
-        else:
-            skipped_magic += 1
+    # Validate magic bytes for image files; pass video files through without magic check.
+    # The listing and header reads hit NFS, so they run in a thread.
+    files_validated, skipped_magic = await asyncio.to_thread(_collect_top_level_media_files, src_path)
     if skipped_magic:
         logger.warning(
             "[local_import] gallery_id=%d: skipped %d file(s) with invalid magic bytes", gallery_id, skipped_magic

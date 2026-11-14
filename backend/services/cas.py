@@ -248,6 +248,15 @@ def thumb_srcset(sha256: str) -> str:
     return ", ".join(f"{thumb_url(sha256, size)} {size}w" for size in THUMBNAIL_SIZES)
 
 
+def _copy_then_promote(src: Path, tmp: Path, dest: Path) -> None:
+    """Copy src to tmp then atomically replace dest; sync, run in a thread (BE-T5: copy2)."""
+    try:
+        shutil.copy2(str(src), str(tmp))
+        os.replace(str(tmp), str(dest))
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 async def store_blob(
     file_path: Path,
     sha256: str,
@@ -333,12 +342,9 @@ async def store_blob(
             except OSError:
                 # Cross-device link: copy to a temp file and atomically promote
                 # so concurrent readers never observe a partially written blob.
+                # The copy can be multi-GB on NFS: run it off the event loop.
                 tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
-                try:
-                    shutil.copy2(str(file_path), str(tmp))
-                    os.replace(str(tmp), str(dest))
-                finally:
-                    tmp.unlink(missing_ok=True)
+                await asyncio.to_thread(_copy_then_promote, file_path, tmp, dest)
 
     return blob
 

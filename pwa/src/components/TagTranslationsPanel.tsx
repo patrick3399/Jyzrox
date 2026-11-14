@@ -157,7 +157,9 @@ export default function TagTranslationsPanel({ isAdmin }: TagTranslationsPanelPr
                         type="text"
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSave(item.namespace, item.name)}
+                        onKeyDown={(e) =>
+                          e.key === 'Enter' && handleSave(item.namespace, item.name)
+                        }
                         className="p-1.5 w-full bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text"
                         autoFocus
                       />
@@ -227,8 +229,8 @@ export default function TagTranslationsPanel({ isAdmin }: TagTranslationsPanelPr
             <ChevronLeft size={14} /> {t('tags.prev')}
           </Button>
           <span className="text-sm text-vault-text-secondary">
-            {page + 1} / {totalPages} (
-            {t('tags.translationsBrowseTotal', { total: String(total) })})
+            {page + 1} / {totalPages} ({t('tags.translationsBrowseTotal', { total: String(total) })}
+            )
           </span>
           <Button
             variant="secondary"

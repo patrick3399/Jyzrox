@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from PIL import Image as PILImage
 from sqlalchemy import text
 
@@ -24,8 +25,82 @@ from sqlalchemy import text
 # ---------------------------------------------------------------------------
 
 
+class TestBrowseFilesystem:
+    """GET /api/import/browse-fs."""
+
+    async def test_browse_fs_lists_directory_off_the_event_loop(self, client, tmp_path, monkeypatch):
+        """iterdir plus is_dir per entry hit NFS; they must not run on the API event loop thread."""
+        import os
+        import threading
+        import types
+
+        (tmp_path / "b_dir").mkdir()
+        (tmp_path / "a_dir").mkdir()
+        (tmp_path / "file.txt").write_text("x")
+
+        # pytest tmp dirs live under /tmp, which the endpoint blocklists. Fake only the
+        # blocklist comparison: the endpoint's own realpath(str) call, seen through its
+        # module-level `os`. Path.resolve and the real listing keep using the real os.
+        real_path_mod = os.path
+
+        def _realpath(p, *args, **kwargs):
+            if isinstance(p, str) and p == str(tmp_path) and not args and not kwargs:
+                return "/mnt/fake"
+            return real_path_mod.realpath(p, *args, **kwargs)
+
+        fake_path = types.SimpleNamespace(**{k: getattr(real_path_mod, k) for k in dir(real_path_mod)})
+        fake_path.realpath = _realpath
+        fake_os = types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os)})
+        fake_os.path = fake_path
+        monkeypatch.setattr("routers.import_router.os", fake_os)
+
+        iterdir_threads: list[int] = []
+        real_iterdir = Path.iterdir
+
+        def _iterdir(self):
+            iterdir_threads.append(threading.get_ident())
+            return real_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", _iterdir)
+        resp = await client.get("/api/import/browse-fs", params={"path": str(tmp_path)})
+
+        assert resp.status_code == 200, resp.text
+        assert [e["name"] for e in resp.json()["entries"]] == ["a_dir", "b_dir"]
+        assert iterdir_threads and threading.get_ident() not in iterdir_threads
+
+
 class TestBatchScan:
     """POST /api/import/batch/scan — scan root_dir using a pattern."""
+
+    async def test_scan_walks_directory_tree_off_the_event_loop(self, client, mock_redis):
+        """os.walk on a large NFS library must not run on the API event loop thread."""
+        import threading
+
+        walk_threads: list[int] = []
+
+        def _walk(_root):
+            walk_threads.append(threading.get_ident())
+            return iter([("/mnt/test_lib/root/gallery1", [], ["1.jpg"])])
+
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/download_temp"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("os.sep", "/"),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("os.walk", side_effect=_walk),
+        ):
+            resp = await client.post(
+                "/api/import/batch/scan",
+                json={"root_dir": "/mnt/test_lib/root", "pattern": "{title}"},
+            )
+
+        assert resp.status_code == 200
+        assert [m["title"] for m in resp.json()["matches"]] == ["gallery1"]
+        assert walk_threads and threading.get_ident() not in walk_threads
 
     async def test_scan_with_title_pattern(self, client, mock_redis):
         """Pattern {title} should match all immediate subdirs that contain media."""
@@ -858,6 +933,13 @@ def _to_thread_stub(fixed_hash: str):
             path = Path(args[0])
             # Real stat, so the commit-boundary re-check sees an unchanged file.
             return fixed_hash, SourceFileIdentity._from_stat(path, path.stat())
+        if fn in (
+            _importer._collect_media_files,
+            _importer._collect_top_level_media_files,
+            _importer._read_first_metadata,
+        ):
+            # Directory listing and metadata read also run in a thread; let them touch the real files.
+            return fn(*args, **kwargs)
         return fixed_hash
 
     return _fake
@@ -1625,6 +1707,10 @@ class TestRescanCancel:
 # ---------------------------------------------------------------------------
 
 
+_MONITOR_STATUS_PAYLOADS = [None, json.dumps({"running": True, "paths": ["/mnt/library"]}).encode()]
+_MONITOR_STATUS_IDS = ["no_status", "with_status"]
+
+
 class TestMonitorStatus:
     """GET /api/import/monitor/status — file watcher status."""
 
@@ -1649,6 +1735,40 @@ class TestMonitorStatus:
         data = resp.json()
         assert data["running"] is True
         assert "/mnt/library" in data["watched_paths"]
+
+    @staticmethod
+    async def _get_enabled(client, mock_redis, *, status, stored, setting):
+        """Call the endpoint with the given watcher:status, watcher:enabled and startup default."""
+        values = {"watcher:status": status, "watcher:enabled": stored}
+        mock_redis.get = AsyncMock(side_effect=values.get)
+        with (
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_router.settings", MagicMock(library_monitor_enabled=setting)),
+        ):
+            resp = await client.get("/api/import/monitor/status")
+        assert resp.status_code == 200
+        return resp.json()["enabled"]
+
+    @pytest.mark.parametrize("status", _MONITOR_STATUS_PAYLOADS, ids=_MONITOR_STATUS_IDS)
+    @pytest.mark.parametrize("stored", [b"0", "0"], ids=["bytes", "str"])
+    async def test_monitor_status_admin_turned_off_is_disabled_when_setting_is_on(
+        self, client, mock_redis, status, stored
+    ):
+        """The admin's stored choice wins over the startup default, on both return paths."""
+        assert await self._get_enabled(client, mock_redis, status=status, stored=stored, setting=True) is False
+
+    @pytest.mark.parametrize("status", _MONITOR_STATUS_PAYLOADS, ids=_MONITOR_STATUS_IDS)
+    async def test_monitor_status_admin_turned_on_is_enabled_when_setting_is_off(self, client, mock_redis, status):
+        """A stored "1" means enabled even if the startup default says otherwise."""
+        assert await self._get_enabled(client, mock_redis, status=status, stored=b"1", setting=False) is True
+
+    @pytest.mark.parametrize("status", _MONITOR_STATUS_PAYLOADS, ids=_MONITOR_STATUS_IDS)
+    @pytest.mark.parametrize("setting", [True, False])
+    async def test_monitor_status_without_stored_choice_falls_back_to_setting(
+        self, client, mock_redis, status, setting
+    ):
+        """Before anything has written watcher:enabled, the startup default applies."""
+        assert await self._get_enabled(client, mock_redis, status=status, stored=None, setting=setting) is setting
 
     async def test_monitor_status_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
@@ -1735,6 +1855,55 @@ class TestLibraries:
                 json={"path": "/nonexistent/path/that/does/not/exist"},
             )
         assert resp.status_code == 400
+
+    @staticmethod
+    def _library_session():
+        session = AsyncMock()
+        factory = MagicMock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        return factory
+
+    async def test_add_library_tells_the_running_watcher(self, client, mock_redis, tmp_path):
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"1")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
+
+        assert resp.status_code == 200
+        app.state.enqueue.assert_any_call("toggle_watcher_job", enabled=True)
+
+    async def test_remove_library_tells_the_running_watcher(self, client, mock_redis):
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"1")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.delete("/api/import/libraries/1")
+
+        assert resp.status_code == 200
+        app.state.enqueue.assert_any_call("toggle_watcher_job", enabled=True)
+
+    async def test_add_library_does_not_start_a_watcher_the_admin_turned_off(self, client, mock_redis, tmp_path):
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"0")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
+
+        assert resp.status_code == 200
+        app.state.enqueue.assert_not_called()
+
+    async def test_add_library_survives_a_failed_watcher_refresh(self, client, mock_redis, tmp_path):
+        """The row is committed by then, and the watcher re-reads its paths at the next worker start."""
+        from main import app
+
+        mock_redis.get = AsyncMock(return_value=b"1")
+        app.state.enqueue.side_effect = RuntimeError("queue down")
+        with patch("routers.import_router.async_session", self._library_session()):
+            resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
+
+        assert resp.status_code == 200
 
 
 class TestImportConflicts:

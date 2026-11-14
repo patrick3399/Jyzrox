@@ -9,9 +9,8 @@ type FollowedArtistsParams = { source?: string; limit?: number; offset?: number 
 type FollowedArtistsResponse = { artists: FollowedArtist[]; total: number }
 
 export function useFollowedArtists(params: FollowedArtistsParams = {}) {
-  return useSWR(
-    ['followed-artists', JSON.stringify(params)],
-    () => api.artists.listFollowed(params),
+  return useSWR(['followed-artists', JSON.stringify(params)], () =>
+    api.artists.listFollowed(params),
   )
 }
 
@@ -31,7 +30,8 @@ export function useInfiniteFollowedArtists(params: Omit<FollowedArtistsParams, '
 
   const artists = useMemo(() => (data ? data.flatMap((page) => page.artists) : []), [data])
   const total = data?.[0]?.total
-  const isLoadingMore = isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
+  const isLoadingMore =
+    isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
   const isEmpty = data?.[0]?.artists.length === 0
   const lastPage = data?.[data.length - 1]
   const isReachingEnd = isEmpty || (lastPage !== undefined && lastPage.artists.length < limit)
@@ -53,8 +53,20 @@ export function useInfiniteFollowedArtists(params: Omit<FollowedArtistsParams, '
 export function useFollowArtist() {
   return useSWRMutation(
     'followed-artists',
-    (_key: unknown, { arg }: { arg: { source: string; artist_id: string; artist_name?: string; artist_avatar?: string; auto_download?: boolean } }) =>
-      api.artists.follow(arg),
+    (
+      _key: unknown,
+      {
+        arg,
+      }: {
+        arg: {
+          source: string
+          artist_id: string
+          artist_name?: string
+          artist_avatar?: string
+          auto_download?: boolean
+        }
+      },
+    ) => api.artists.follow(arg),
   )
 }
 
@@ -69,14 +81,13 @@ export function useUnfollowArtist() {
 export function usePatchFollow() {
   return useSWRMutation(
     'followed-artists',
-    (_key: unknown, { arg }: { arg: { artistId: string; data: { auto_download?: boolean }; source?: string } }) =>
-      api.artists.patchFollow(arg.artistId, arg.data, arg.source),
+    (
+      _key: unknown,
+      { arg }: { arg: { artistId: string; data: { auto_download?: boolean }; source?: string } },
+    ) => api.artists.patchFollow(arg.artistId, arg.data, arg.source),
   )
 }
 
 export function useCheckArtistUpdates() {
-  return useSWRMutation(
-    'followed-artists',
-    () => api.artists.checkUpdates(),
-  )
+  return useSWRMutation('followed-artists', () => api.artists.checkUpdates())
 }

@@ -70,6 +70,22 @@ describe('tag click → local library search', () => {
 
     expect(pushedQuery()).toBe('"long hair"')
   })
+
+  it('test_galleryTagSection_chipPadding_belongsToTheButton_soTheEdgeIsTappable', () => {
+    render(
+      <GalleryTagSection
+        source="local"
+        tags={['artist:someone']}
+        tagData={[]}
+        onUpdateTag={() => {}}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'someone' })
+    expect(button).toHaveClass('px-2', 'py-1.5')
+    // Padding on the wrapping chip is a dead zone: it looks tappable but is not.
+    expect(button.parentElement).not.toHaveClass('px-2')
+  })
 })
 
 // Regression: the popover closed on a document-level Escape, but the key event

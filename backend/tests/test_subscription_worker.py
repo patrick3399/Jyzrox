@@ -11,6 +11,7 @@ Covers:
 import os
 import sys
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # Ensure backend is on the path
@@ -190,6 +191,7 @@ class TestEnqueueForSubscription:
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription._current_paused_at", AsyncMock(return_value=None)),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
 
@@ -600,6 +602,7 @@ class TestDuplicateGuardIncludesPaused:
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription._current_paused_at", AsyncMock(return_value=None)),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
 
@@ -796,3 +799,79 @@ class TestDiscoveredWorksDispatch:
 
         assert result["status"] == "failed"
         session.commit.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Durable subscription pause gate + checking state (ADR 0030)
+# ---------------------------------------------------------------------------
+
+
+def _gate_patches(paused_at, publish):
+    return (
+        patch("worker.subscription.acquire_lock", AsyncMock(return_value="tok")),
+        patch("worker.subscription.release_lock", AsyncMock()),
+        patch("worker.subscription._current_paused_at", AsyncMock(return_value=paused_at)),
+        patch("worker.subscription._enqueue_discovered_works", AsyncMock(return_value={"status": "ok"})),
+        patch("core.redis_client.get_redis", return_value=AsyncMock()),
+        patch("core.redis_client.publish_job_event", publish),
+        patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
+        patch(
+            "services.download_policy.get_credential_policy",
+            new_callable=AsyncMock,
+            return_value=MagicMock(missing_required=False),
+        ),
+        patch("plugins.registry.plugin_registry.get_subscriber", return_value=MagicMock()),
+    )
+
+
+async def test_enqueue_for_subscription_skips_paused_subscription_even_when_manual():
+    from contextlib import ExitStack
+
+    from worker.subscription import _enqueue_for_subscription
+
+    sub = _make_sub(sub_id=7, user_id=1, source="fanbox")
+    publish = AsyncMock()
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in _gate_patches(datetime.now(UTC), publish)]
+        out = await _enqueue_for_subscription({"redis": object()}, sub, manual=True)
+    assert out == {"status": "skipped", "reason": "paused"}
+    mocks[3].assert_not_awaited()  # discovery never ran
+    publish.assert_not_awaited()  # and no "checking" announcement
+
+
+async def test_enqueue_for_subscription_publishes_checking_after_taking_lock():
+    from contextlib import ExitStack
+
+    from worker.subscription import _enqueue_for_subscription
+
+    sub = _make_sub(sub_id=7, user_id=1, source="fanbox")
+    publish = AsyncMock()
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in _gate_patches(None, publish)]
+        await _enqueue_for_subscription({"redis": object()}, sub, manual=True)
+    first = publish.await_args_list[0].args[0]
+    assert first == {"type": "subscription_checking", "sub_id": 7, "user_id": 1}
+    mocks[3].assert_awaited_once()
+
+
+async def _aiter(items):
+    for item in items:
+        yield item
+
+
+async def test_worker_startup_clears_stale_subscription_check_locks():
+    from worker import clear_subscription_check_locks
+
+    redis = AsyncMock()
+    redis.scan_iter = MagicMock(return_value=_aiter([b"subscription:check_lock:1", b"subscription:check_lock:2"]))
+    assert await clear_subscription_check_locks(redis) == 2
+    redis.delete.assert_awaited_once_with(b"subscription:check_lock:1", b"subscription:check_lock:2")
+
+
+async def test_worker_startup_clear_check_locks_with_no_locks_does_not_call_delete():
+    from worker import clear_subscription_check_locks
+
+    redis = AsyncMock()
+    redis.scan_iter = MagicMock(return_value=_aiter([]))
+    assert await clear_subscription_check_locks(redis) == 0
+    redis.delete.assert_not_awaited()

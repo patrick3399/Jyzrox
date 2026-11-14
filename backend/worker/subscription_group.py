@@ -10,6 +10,7 @@ from sqlalchemy import case, select, update
 import core.queue
 from core.database import AsyncSessionLocal
 from db.models import Subscription, SubscriptionGroup
+from services.subscription_pause import resume_due_rate_limited
 from worker.constants import (
     GROUP_JOB_TIMEOUT,
     GROUP_MAX_DURATION,
@@ -55,6 +56,13 @@ async def subscription_scheduler(ctx: dict) -> dict:
     pool = ctx.get("redis")
     if not pool:
         return {"status": "failed", "error": "no redis pool"}
+
+    try:
+        resumed = await resume_due_rate_limited()
+        if resumed:
+            logger.info("[subscription-scheduler] auto-resumed %d rate-limited subscription(s)", resumed)
+    except Exception as exc:
+        logger.error("[subscription-scheduler] auto-resume failed: %s", exc)
 
     dispatched = 0
     async with AsyncSessionLocal() as session:

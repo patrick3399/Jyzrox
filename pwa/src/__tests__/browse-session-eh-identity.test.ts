@@ -39,7 +39,10 @@ describe('E-Hentai browse-session canonical identity', () => {
   it.each(['-1', '1.5', '2048', 'Infinity', 'not-a-number'])(
     'normalizes illegal advanced-search mask %s to the default',
     (adv) => {
-      const malformed = { ...initialState, ...parseUrlToIdentity(new URLSearchParams(`q=x&adv=${adv}`)) }
+      const malformed = {
+        ...initialState,
+        ...parseUrlToIdentity(new URLSearchParams(`q=x&adv=${adv}`)),
+      }
       const canonical = { ...initialState, ...parseUrlToIdentity(new URLSearchParams('q=x')) }
 
       expect(queryKey(malformed)).toBe(queryKey(canonical))
@@ -73,9 +76,7 @@ describe('E-Hentai browse-session canonical identity', () => {
     })
 
     expect(queryKey(polluted)).toBe(queryKey(canonical))
-    expect(identityToUrlParams(polluted).toString()).toBe(
-      identityToUrlParams(canonical).toString(),
-    )
+    expect(identityToUrlParams(polluted).toString()).toBe(identityToUrlParams(canonical).toString())
   })
 
   it('favorites ignores search-only, toplist, and panel-only fields when round-tripped', () => {
@@ -166,8 +167,6 @@ describe('E-Hentai browse-session retention contract', () => {
     }
 
     const store = JSON.parse(raw ?? '{}') as { snaps?: { queryKey: string }[] }
-    expect(store.snaps?.map((snapshot) => snapshot.queryKey)).toEqual(
-      [...keys].reverse(),
-    )
+    expect(store.snaps?.map((snapshot) => snapshot.queryKey)).toEqual([...keys].reverse())
   })
 })

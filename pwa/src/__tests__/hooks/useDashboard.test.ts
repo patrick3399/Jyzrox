@@ -17,19 +17,14 @@ import { renderHook } from '@testing-library/react'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
-const {
-  mockGetDashboard,
-  mockWsConnected,
-  mockLastJobUpdate,
-  mockLastEvent,
-  mockUseSWR,
-} = vi.hoisted(() => ({
-  mockGetDashboard: vi.fn(),
-  mockWsConnected: vi.fn(() => ({ connected: false })),
-  mockLastJobUpdate: vi.fn(() => ({ lastJobUpdate: null, lastSubCheck: null })),
-  mockLastEvent: vi.fn(() => ({ lastEvent: null })),
-  mockUseSWR: vi.fn(),
-}))
+const { mockGetDashboard, mockWsConnected, mockLastJobUpdate, mockLastEvent, mockUseSWR } =
+  vi.hoisted(() => ({
+    mockGetDashboard: vi.fn(),
+    mockWsConnected: vi.fn(() => ({ connected: false })),
+    mockLastJobUpdate: vi.fn(() => ({ lastJobUpdate: null, lastSubCheck: null })),
+    mockLastEvent: vi.fn(() => ({ lastEvent: null })),
+    mockUseSWR: vi.fn(),
+  }))
 
 // ── Module mocks ──────────────────────────────────────────────────────
 

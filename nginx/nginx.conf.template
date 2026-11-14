@@ -45,6 +45,32 @@ http {
     limit_req_zone $binary_remote_addr zone=download_zone:10m rate=2r/s;
     limit_req_zone $binary_remote_addr zone=opds_zone:10m rate=10r/s;
 
+    # Access log (ADR 0031). ~98% of lines were GETs for thumbnails and UI
+    # polling; keep writes, 4xx/5xx and requests slower than 1 s. Set
+    # NGINX_ACCESS_LOG_READS=1 and recreate nginx to log reads too.
+    map $request_method $jyzrox_write {
+        GET     0;
+        HEAD    0;
+        OPTIONS 0;
+        default 1;
+    }
+    map $status $jyzrox_error {
+        ~^[45]  1;
+        default 0;
+    }
+    map $request_time $jyzrox_slow {
+        ~^0\.   0;
+        default 1;
+    }
+    map "$jyzrox_write$jyzrox_error$jyzrox_slow" $jyzrox_loggable {
+        000     ${NGINX_ACCESS_LOG_READS};
+        default 1;
+    }
+    log_format jyzrox '$remote_addr - $remote_user [$time_iso8601] "$request" '
+                      '$status $body_bytes_sent $request_time '
+                      'rid=$upstream_http_x_request_id "$http_referer" "$http_user_agent"';
+    access_log /var/log/nginx/access.log jyzrox if=$jyzrox_loggable;
+
     # Nginx proxy cache for EH thumbnail CDN images
     proxy_cache_path /var/cache/nginx/thumb_cache levels=1:2 keys_zone=thumb_cache:10m
                      max_size=512m inactive=7d use_temp_path=off;

@@ -43,6 +43,73 @@ export interface Gallery {
   source_path?: string | null
   deleted_at?: string | null
   metadata_updated_at?: string | null
+  media_stats?: GalleryMediaStats
+}
+
+export type TrashReason = 'user' | 'merged' | 'source_missing'
+
+/** Reason filter values accepted by the trash endpoints ("unknown" = no recorded reason). */
+export type TrashReasonFilter = TrashReason | 'unknown'
+export type TrashSort = 'deleted_at' | 'title' | 'pages' | 'size'
+export type TrashSortDirection = 'asc' | 'desc'
+
+/** Filter params shared by GET /trash, GET /trash/summary and POST /trash/empty. */
+export interface TrashFilters {
+  q?: string
+  source?: string
+  reason?: TrashReasonFilter
+}
+
+/** Response of GET /api/library/trash/summary. */
+export interface TrashSummary {
+  count: number
+  logical_bytes: number
+  reclaimable_bytes: number
+  next_expiry_at: string | null
+  sources: string[]
+  purge: { done: number; total: number } | null
+}
+
+/** Response of POST /trash/empty and /trash/purge (202 queued, or 200 ok with total 0). */
+export interface TrashPurgeQueued {
+  status: 'queued' | 'ok'
+  total: number
+}
+
+/** Item of GET /api/library/trash. */
+export interface TrashGallery extends Gallery {
+  deleted_at: string
+  /** null = trashed before the reason column existed. */
+  deleted_reason: TrashReason | null
+  deleted_by: { id: number; username: string } | null
+  merged_into: { source: string; source_id: string; title: string | null } | null
+  cover_thumb: string | null
+}
+
+export interface TrashPreviewImage {
+  id: number
+  page_num: number
+  thumb_path: string | null
+  thumb_srcset: string | null
+  media_type: string
+  pending: boolean
+}
+
+/** Response of GET /api/library/trash/{gallery_id}/preview. */
+export interface TrashPreview {
+  gallery: TrashGallery
+  media: { total_size: number; counts: { image: number; gif: number; video: number } }
+  images: TrashPreviewImage[]
+  images_total: number
+  page: number
+}
+
+/** Size and per-type counts over the pages the Reader shows (detail endpoint only). */
+export interface GalleryMediaStats {
+  total_size: number
+  image_count: number
+  gif_count: number
+  video_count: number
 }
 
 export interface GallerySyncResult {
@@ -238,10 +305,7 @@ export interface EhImageMap {
  * `repair` change what the user can do with a job (a repair is never discarded).
  */
 export type DownloadJobMode =
-  | 'download'
-  | 'subscription_initial'
-  | 'subscription_incremental'
-  | 'repair'
+  'download' | 'subscription_initial' | 'subscription_incremental' | 'repair'
 
 export interface DownloadJob {
   id: string
@@ -897,6 +961,20 @@ export interface MediaPolicy {
   include_videos: boolean
 }
 
+export type SubscriptionPauseReason = 'manual' | 'rate_limited' | 'auth'
+
+export interface SubscriptionRun {
+  total: number
+  queued: number
+  running: number
+  paused: number
+  done: number
+  stopped: number
+  failed: number
+  partial: number
+  cancelled: number
+}
+
 export interface Subscription {
   id: number
   name: string | null
@@ -915,6 +993,10 @@ export interface Subscription {
   created_at: string | null
   last_job_id: string | null
   group_id: number | null
+  paused_at?: string | null
+  paused_reason?: SubscriptionPauseReason | null
+  paused_until?: string | null
+  checking?: boolean
   download_options?: Record<string, unknown>
   gallery_id?: number | null
   gallery_source?: string | null
@@ -1253,6 +1335,12 @@ export interface QueueOverview {
   active: number
   scheduled: number
   workers: SaqWorker[]
+}
+
+export interface LibraryFacets {
+  sources: { value: string; label: string; count: number }[]
+  categories: { name: string; count: number }[]
+  uncategorized: number
 }
 
 export interface GalleryCategoryDef {

@@ -195,7 +195,7 @@ async def commit_and_push(repo: str | Path, rel_path: str, message: str) -> dict
 
 
 async def log_file(repo: str | Path, rel_path: str, limit: int = 50) -> list[dict]:
-    code, out, err = await _git(repo, "log", f"-{limit}", "--pretty=format:%H%x1f%cI%x1f%s", "--", rel_path)
+    code, out, err = await _git(repo, "log", "--follow", f"-{limit}", "--pretty=format:%H%x1f%cI%x1f%s", "--", rel_path)
     if code != 0:
         raise NovelGitError(err)
     rows = []

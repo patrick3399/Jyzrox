@@ -115,10 +115,9 @@ describe('useScrollReveal', () => {
     // Without rebase() the jump is read as the user scrolling down and hides
     // the bar the moment the lock releases.
     const refs = makeRefs()
-    const { result, rerender } = renderHook(
-      ({ locked }) => useScrollReveal({ ...refs, locked }),
-      { initialProps: { locked: false } },
-    )
+    const { result, rerender } = renderHook(({ locked }) => useScrollReveal({ ...refs, locked }), {
+      initialProps: { locked: false },
+    })
     scrollTo(300)
     scrollTo(280)
     expect(result.current.hidden).toBe(false)
@@ -140,10 +139,9 @@ describe('useScrollReveal', () => {
   it('test_without_rebase_the_same_downward_jump_hides_the_block_once_unlocked', () => {
     // Control for the test above: pins that the jump alone is what hides it.
     const refs = makeRefs()
-    const { result, rerender } = renderHook(
-      ({ locked }) => useScrollReveal({ ...refs, locked }),
-      { initialProps: { locked: true } },
-    )
+    const { result, rerender } = renderHook(({ locked }) => useScrollReveal({ ...refs, locked }), {
+      initialProps: { locked: true },
+    })
     scrollTo(300)
     scrollTo(5000)
     rerender({ locked: false })

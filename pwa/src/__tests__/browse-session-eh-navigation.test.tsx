@@ -180,9 +180,7 @@ describe('E-Hentai browse-session navigation checkpoint', () => {
     })
 
     expect(
-      setItem.mock.calls.filter(([key]) =>
-        String(key).startsWith('browse_session_v1:'),
-      ),
+      setItem.mock.calls.filter(([key]) => String(key).startsWith('browse_session_v1:')),
     ).toHaveLength(0)
     expect(setItem.mock.calls.filter(([key]) => key === 'eh_browse_snapshot')).toHaveLength(0)
     setItem.mockRestore()

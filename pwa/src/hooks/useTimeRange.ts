@@ -29,7 +29,8 @@ export function useTimeRange(params: UseTimeRangeParams = {}) {
 export function useTimelinePercentiles(params: UseTimeRangeParams = {}) {
   const { data } = useSWR<TimelinePercentilesResponse>(
     ['library/images/timeline_percentiles', params],
-    (_: unknown, { signal }: SwrOpts = {}) => api.library.imageTimelinePercentiles(params, { signal }),
+    (_: unknown, { signal }: SwrOpts = {}) =>
+      api.library.imageTimelinePercentiles(params, { signal }),
     { revalidateOnFocus: false, dedupingInterval: 300_000 },
   )
 

@@ -40,6 +40,7 @@ class EventType(StrEnum):
     SUBSCRIPTION_CREATED = "subscription.created"
     SUBSCRIPTION_DELETED = "subscription.deleted"
     SUBSCRIPTION_CHECKED = "subscription.checked"
+    SUBSCRIPTION_CHECKING = "subscription.checking"
     SUBSCRIPTION_FAILING = "subscription.failing"
     SUBSCRIPTION_GROUP_UPDATED = "subscription_group.updated"
     SUBSCRIPTION_GROUP_COMPLETED = "subscription_group.completed"
@@ -66,6 +67,7 @@ class EventType(StrEnum):
 
     # System maintenance
     TRASH_CLEANED = "trash.cleaned"
+    TRASH_PURGE_PROGRESS = "trash.purge_progress"
     RESCAN_COMPLETED = "rescan.completed"
     RETRY_PROCESSED = "retry.processed"
     EHTAG_SYNC_COMPLETED = "ehtag.sync_completed"

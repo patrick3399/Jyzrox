@@ -68,7 +68,9 @@ export function useNavigation() {
       .map((href) => PAGE_REGISTRY.find((p) => p.href === href))
       .filter(
         (p): p is PageDef =>
-          p != null && hasRole(profile?.role, p.minRole ?? 'viewer') && passesFeatureFlag(p, features),
+          p != null &&
+          hasRole(profile?.role, p.minRole ?? 'viewer') &&
+          passesFeatureFlag(p, features),
       )
   }, [sidebarConfig.order, profile?.role, features])
 

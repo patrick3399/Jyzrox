@@ -257,10 +257,7 @@ function computeFCats(selectedCats: readonly string[]): number | undefined {
   return ALL_CATS_MASK ^ mask
 }
 
-export function buildParamsFromIdentity(
-  identity: EhCanonicalIdentity,
-  cursor: Cursor,
-): FetchPlan {
+export function buildParamsFromIdentity(identity: EhCanonicalIdentity, cursor: Cursor): FetchPlan {
   const nextGid = cursor?.kind === 'gid' ? cursor.nextGid : undefined
   switch (identity.surface) {
     case 'favorites':

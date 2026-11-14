@@ -16,15 +16,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
-const { mockList, mockCreate, mockUpdate, mockDelete, mockCheck, mockBackfill, mockJobs } = vi.hoisted(() => ({
-  mockList: vi.fn(),
-  mockCreate: vi.fn(),
-  mockUpdate: vi.fn(),
-  mockDelete: vi.fn(),
-  mockCheck: vi.fn(),
-  mockBackfill: vi.fn(),
-  mockJobs: vi.fn(),
-}))
+const { mockList, mockCreate, mockUpdate, mockDelete, mockCheck, mockBackfill, mockJobs } =
+  vi.hoisted(() => ({
+    mockList: vi.fn(),
+    mockCreate: vi.fn(),
+    mockUpdate: vi.fn(),
+    mockDelete: vi.fn(),
+    mockCheck: vi.fn(),
+    mockBackfill: vi.fn(),
+    mockJobs: vi.fn(),
+  }))
 
 // ── api mock ─────────────────────────────────────────────────────────
 

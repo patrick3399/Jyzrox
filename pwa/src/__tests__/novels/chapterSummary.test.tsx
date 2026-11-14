@@ -24,7 +24,10 @@ const h = vi.hoisted(() => ({
     { path: '作品A/第02章.md', name: '第02章', chars: 20, summary: null, mtime: 0 },
   ],
   lintFiles: [
-    { path: '作品A/第01章.md', issues: [{ rule: 'dialogue_colon_outside_bold', line: 3, text: 'x' }] },
+    {
+      path: '作品A/第01章.md',
+      issues: [{ rule: 'dialogue_colon_outside_bold', line: 3, text: 'x' }],
+    },
     { path: '作品A/第02章.md', issues: [] },
   ],
   head: 'headsha' as string,
@@ -36,7 +39,8 @@ const h = vi.hoisted(() => ({
 vi.mock('swr', () => ({
   default: (key: unknown) => {
     const k = key as unknown[] | null
-    if (k?.[0] === 'novel-lint-work') return { data: { files: h.lintFiles, total: 1 }, isLoading: false }
+    if (k?.[0] === 'novel-lint-work')
+      return { data: { files: h.lintFiles, total: 1 }, isLoading: false }
     return {
       data: { chapters: h.chapters, categories: { extra: 0, draft: 0, reference: 0, scrap: 0 } },
       isLoading: false,

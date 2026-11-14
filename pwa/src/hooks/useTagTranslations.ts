@@ -20,7 +20,9 @@ import { useEffect, useState } from 'react'
  */
 export function useTagTranslations(tags: string[]) {
   const { locale } = useLocale()
-  const [preference, setPreference] = useState<TagTranslationPreference>(getTagTranslationPreference)
+  const [preference, setPreference] = useState<TagTranslationPreference>(
+    getTagTranslationPreference,
+  )
   const language = resolveTagTranslationLanguage(preference, locale)
 
   useEffect(() => {

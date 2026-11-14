@@ -34,7 +34,9 @@ describe('MarkdownView entity linking', () => {
         entityHrefFor={(n) => `/novels/note/${n}`}
       />,
     )
-    const nameLinks = Array.from(container.querySelectorAll('a')).filter((a) => a.textContent === '張三')
+    const nameLinks = Array.from(container.querySelectorAll('a')).filter(
+      (a) => a.textContent === '張三',
+    )
     expect(nameLinks).toHaveLength(1)
   })
 

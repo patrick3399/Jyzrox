@@ -28,11 +28,20 @@ interface AnchoredMenuProps {
 }
 
 export function AnchoredMenu({ open, onOpenChange, x, y, ariaLabel, items }: AnchoredMenuProps) {
-  const anchor = useMemo(() => ({ getBoundingClientRect: () => DOMRect.fromRect({ x, y, width: 0, height: 0 }) }), [x, y])
+  const anchor = useMemo(
+    () => ({ getBoundingClientRect: () => DOMRect.fromRect({ x, y, width: 0, height: 0 }) }),
+    [x, y],
+  )
   return (
     <Menu.Root open={open} onOpenChange={overlayOpenChange(onOpenChange)}>
       <Menu.Portal>
-        <Menu.Positioner anchor={anchor} side="bottom" align="start" collisionPadding={8} className="z-[110]">
+        <Menu.Positioner
+          anchor={anchor}
+          side="bottom"
+          align="start"
+          collisionPadding={8}
+          className="z-[110]"
+        >
           {/* Right-clicking inside an open context menu must not open the browser's native menu on top of it. */}
           <Menu.Popup
             aria-label={ariaLabel}

@@ -35,7 +35,24 @@ describe('Library overlays load on demand', () => {
     expect(staticallyImports(page, '@/components/library/LibraryViewMenu')).toBe(false)
     expect(staticallyImports(page, '@/components/ui/popover')).toBe(false)
     // The only route to the menu is the dynamic import inside the controls.
-    expect(controls).toMatch(/dynamic\(\s*\(\) => import\('@\/components\/library\/LibraryViewMenu'\)/)
+    expect(controls).toMatch(
+      /dynamic\(\s*\(\)\s*=>\s*import\('@\/components\/library\/LibraryViewMenu'\)/,
+    )
+  })
+
+  it('test_library_page_and_facet_button_do_not_statically_import_filter_sheet_or_facet_popover', () => {
+    const page = read('app/library/page.tsx')
+    expect(staticallyImports(page, '@/components/library/LibraryFilterSheet')).toBe(false)
+    expect(staticallyImports(page, '@/components/library/LibraryFacetPopover')).toBe(false)
+    const button = read('components/library/LibraryFacetButton.tsx')
+    expect(staticallyImports(button, '@/components/library/LibraryFacetPopover')).toBe(false)
+    expect(staticallyImports(button, '@/components/ui/popover')).toBe(false)
+    expect(page).toMatch(
+      /dynamic\(\s*\(\)\s*=>\s*import\('@\/components\/library\/LibraryFilterSheet'\)/,
+    )
+    expect(button).toMatch(
+      /dynamic\(\s*\(\)\s*=>\s*import\('@\/components\/library\/LibraryFacetPopover'\)/,
+    )
   })
 
   it('test_context_menu_renders_nothing_until_first_opened_then_shows_menu', async () => {

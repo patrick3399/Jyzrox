@@ -66,24 +66,28 @@ const RULES: InvalidationRule[] = [
   },
   {
     // import.* / gallery.* — library listings + this gallery's detail/images cache.
-    matchesEvent: (eventType) => eventType.startsWith('import.') || eventType.startsWith('gallery.'),
+    matchesEvent: (eventType) =>
+      eventType.startsWith('import.') || eventType.startsWith('gallery.'),
     keyFilter: (key) =>
-      keyHasPrefix(key, 'library/') || keyHasPrefix(key, 'gallery/') || keyHasPrefix(key, 'dashboard/recent'),
+      keyHasPrefix(key, 'library/') ||
+      keyHasPrefix(key, 'gallery/') ||
+      keyHasPrefix(key, 'dashboard/recent'),
   },
   {
     // subscription.* / subscription_group.* — excludes subscription.checked,
     // which already has a dedicated `lastSubCheck` context consumed
     // directly by app/subscriptions/page.tsx.
-    matchesEvent: (eventType) => eventType.startsWith('subscription') && eventType !== 'subscription.checked',
-    keyFilter: (key) => keyHasPrefix(key, 'subscriptions') || keyHasPrefix(key, 'subscription-groups'),
+    matchesEvent: (eventType) =>
+      eventType.startsWith('subscription') && eventType !== 'subscription.checked',
+    keyFilter: (key) =>
+      keyHasPrefix(key, 'subscriptions') || keyHasPrefix(key, 'subscription-groups'),
   },
   {
     // collection.* — collections list + the open collection's gallery members
     // (keyed under 'collections' and 'collection'). Emitted by
     // routers/collections.py on create/rename/reorder/membership changes.
     matchesEvent: (eventType) => eventType.startsWith('collection.'),
-    keyFilter: (key) =>
-      keyHasPrefix(key, 'collections') || keyHasPrefix(key, 'collection'),
+    keyFilter: (key) => keyHasPrefix(key, 'collections') || keyHasPrefix(key, 'collection'),
   },
   {
     // dataset.* — dataset list + the open dataset's members/captions (keyed
@@ -101,6 +105,15 @@ const RULES: InvalidationRule[] = [
       keyHasPrefix(key, 'tag') ||
       keyHasPrefix(key, 'library/gallery') ||
       keyHasPrefix(key, 'gallery/'),
+  },
+  {
+    // trash.* — trash list + summary (keyed ['trash-list', ...] / ['trash-summary', ...]),
+    // and the nav badge count. Includes trash.purge_progress / trash.cleaned.
+    matchesEvent: (eventType) => eventType.startsWith('trash.'),
+    keyFilter: (key) =>
+      keyHasPrefix(key, 'trash-list') ||
+      keyHasPrefix(key, 'trash-summary') ||
+      keyHasPrefix(key, 'nav-counts/trash'),
   },
 ]
 

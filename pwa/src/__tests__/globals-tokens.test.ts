@@ -10,7 +10,14 @@ function block(selector: string): string {
   return css.slice(start, css.indexOf('}', start))
 }
 
-const THEMED = ['--color-danger', '--color-danger-hover', '--color-success', '--color-warning', '--color-overlay', '--shadow-popup']
+const THEMED = [
+  '--color-danger',
+  '--color-danger-hover',
+  '--color-success',
+  '--color-warning',
+  '--color-overlay',
+  '--shadow-popup',
+]
 
 describe('globals.css design tokens', () => {
   it.each([':root', '.dark', '.amoled'])('%s defines every themed token', (selector) => {
@@ -25,13 +32,17 @@ describe('globals.css design tokens', () => {
   })
 
   it('defines the three motion durations and the two easings', () => {
-    for (const token of ['--motion-fast:', '--motion-base:', '--motion-slow:']) expect(block(':root')).toContain(token)
-    for (const token of ['--ease-vault-out:', '--ease-vault-in-out:']) expect(block('@theme inline')).toContain(token)
+    for (const token of ['--motion-fast:', '--motion-base:', '--motion-slow:'])
+      expect(block(':root')).toContain(token)
+    for (const token of ['--ease-vault-out:', '--ease-vault-in-out:'])
+      expect(block('@theme inline')).toContain(token)
   })
 
   it('keeps colour tokens in hex form (pwa/CLAUDE.md)', () => {
     for (const selector of [':root', '.dark', '.amoled']) {
-      for (const match of block(selector).matchAll(/--color-(?:danger|success|warning|overlay)[\w-]*:\s*([^;]+);/g)) {
+      for (const match of block(selector).matchAll(
+        /--color-(?:danger|success|warning|overlay)[\w-]*:\s*([^;]+);/g,
+      )) {
         expect(match[1].trim()).toMatch(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i)
       }
     }

@@ -1606,7 +1606,7 @@ class TestPauseResumeJobBranches:
     async def test_pause_terminal_job_returns_409(self, member_client, db_session, mock_redis):
         """Pausing a done job should return 409."""
         job_id = await _insert_job(db_session, status="done", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.download_pause.get_redis", return_value=mock_redis):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "pause"},
@@ -1616,7 +1616,7 @@ class TestPauseResumeJobBranches:
     async def test_pause_cancelled_job_returns_409(self, member_client, db_session, mock_redis):
         """Pausing a cancelled job should return 409."""
         job_id = await _insert_job(db_session, status="cancelled", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.download_pause.get_redis", return_value=mock_redis):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "pause"},
@@ -1626,7 +1626,7 @@ class TestPauseResumeJobBranches:
     async def test_resume_terminal_job_returns_409(self, member_client, db_session, mock_redis):
         """Resuming a failed job should return 409."""
         job_id = await _insert_job(db_session, status="failed", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.download_pause.get_redis", return_value=mock_redis):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1636,7 +1636,7 @@ class TestPauseResumeJobBranches:
     async def test_pause_already_paused_returns_current_status(self, member_client, db_session, mock_redis):
         """Pausing an already-paused job is a no-op that returns current status."""
         job_id = await _insert_job(db_session, status="paused", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.download_pause.get_redis", return_value=mock_redis):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "pause"},
@@ -1649,7 +1649,7 @@ class TestPauseResumeJobBranches:
     async def test_resume_already_running_returns_current_status(self, member_client, db_session, mock_redis):
         """Resuming a running job is a no-op that returns current status."""
         job_id = await _insert_job(db_session, status="running", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.download_pause.get_redis", return_value=mock_redis):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1661,7 +1661,7 @@ class TestPauseResumeJobBranches:
     async def test_pause_running_job_transitions_to_paused(self, member_client, db_session, mock_redis):
         """Pausing a running job should set status to paused and write Redis key."""
         job_id = await _insert_job(db_session, status="running", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.download_pause.get_redis", return_value=mock_redis):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "pause"},
@@ -1678,7 +1678,7 @@ class TestPauseResumeJobBranches:
         mock_queue = MagicMock()
         mock_queue.job = AsyncMock(return_value=mock_saq_job)
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("services.download_pause.get_redis", return_value=mock_redis),
             patch("core.queue.get_queue", return_value=mock_queue),
         ):
             resp = await member_client.patch(
@@ -1698,9 +1698,9 @@ class TestPauseResumeJobBranches:
         mock_enqueue = AsyncMock()
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("services.download_pause.get_redis", return_value=mock_redis),
             patch("core.queue.get_queue", return_value=mock_queue),
-            patch("routers.download.enqueue_download_job", mock_enqueue),
+            patch("services.download_pause.enqueue_download_job", mock_enqueue),
         ):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
@@ -1728,9 +1728,9 @@ class TestPauseResumeJobBranches:
         mock_queue.job = AsyncMock(return_value=None)  # None = job cleared from SAQ/Redis
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("services.download_pause.get_redis", return_value=mock_redis),
             patch("core.queue.get_queue", return_value=mock_queue),
-            patch("routers.download.enqueue_download_job", new_callable=AsyncMock),
+            patch("services.download_pause.enqueue_download_job", new_callable=AsyncMock),
         ):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
@@ -1753,7 +1753,7 @@ class TestPauseResumeJobBranches:
         mock_queue.job = AsyncMock(return_value=mock_saq_job)
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("services.download_pause.get_redis", return_value=mock_redis),
             patch("core.queue.get_queue", return_value=mock_queue),
         ):
             resp = await member_client.patch(
@@ -1770,7 +1770,7 @@ class TestPauseResumeJobBranches:
         """Member cannot pause/resume another user's job."""
         job_id = await _insert_job(db_session, status="running", user_id=99)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.download_pause.get_redis", return_value=mock_redis):
             async with make_client(user_id=2, role="member") as ac:
                 resp = await ac.patch(
                     f"/api/download/jobs/{job_id}",
@@ -2306,8 +2306,8 @@ class TestRequeueRestampsAdmissionKey:
         )
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
-            patch("routers.download.enqueue_download_job", new_callable=AsyncMock),
+            patch("services.download_pause.get_redis", return_value=mock_redis),
+            patch("services.download_pause.enqueue_download_job", new_callable=AsyncMock),
             patch(
                 "core.site_config.site_config_service.get_effective_download_params",
                 AsyncMock(return_value=DownloadParams(spread_personas=True)),

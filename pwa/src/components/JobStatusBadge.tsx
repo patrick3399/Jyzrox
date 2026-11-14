@@ -9,7 +9,10 @@ interface JobStatusBadgeProps {
 
 type Tone = NonNullable<ComponentProps<typeof Badge>['tone']>
 
-const statusConfig: Record<DownloadJob['status'], { labelKey: string; tone: Tone; className?: string }> = {
+const statusConfig: Record<
+  DownloadJob['status'],
+  { labelKey: string; tone: Tone; className?: string }
+> = {
   queued: { labelKey: 'admin.queue.queued', tone: 'neutral' },
   running: { labelKey: 'settings.tasks.statusRunning', tone: 'accent', className: 'animate-pulse' },
   done: { labelKey: 'admin.queue.completed', tone: 'success' },

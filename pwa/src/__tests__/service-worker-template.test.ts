@@ -61,15 +61,17 @@ describe('service worker request safety', () => {
   })
 
   it('clears user content caches on SW_CLEAR_USER_CACHES message', () => {
-    // Regression (BR-003): media/page caches (72h TTL) survived logout, so a
-    // logged-out device could still read previously cached private media.
+    // Regression (BR-003): cached pages/media survived logout, so a logged-out
+    // device could still read previously cached private content. Media is no
+    // longer stored, but a device that never re-activated may still hold the
+    // legacy media cache, so logout deletes it by name too.
     const handler = source.indexOf("event.data?.type === 'SW_CLEAR_USER_CACHES'")
     expect(handler).toBeGreaterThan(-1)
 
-    const mediaDelete = source.indexOf('caches.delete(MEDIA_CACHE_NAME)', handler)
     const pageDelete = source.indexOf('caches.delete(PAGE_CACHE_NAME)', handler)
-    expect(mediaDelete).toBeGreaterThan(handler)
+    const legacyMediaDelete = source.indexOf('caches.delete(LEGACY_MEDIA_CACHE_NAME)', handler)
     expect(pageDelete).toBeGreaterThan(handler)
+    expect(legacyMediaDelete).toBeGreaterThan(handler)
   })
 
   it('revalidates path-addressed media, whose URL can change or be revoked', () => {
@@ -84,59 +86,34 @@ describe('service worker request safety', () => {
     ).toBeGreaterThan(mediaBranch)
   })
 
-  it('keeps content-addressed media off the CacheStorage hot path but still revalidation-free', () => {
-    // iOS cold-start latency fix: gating every immutable image on
-    // caches.open(MEDIA_CACHE_NAME) + cache.match() cost seconds per thumbnail
-    // on iOS standalone (same CacheStorage pathology as the app-shell stall).
-    // Content-addressed media is now answered by a plain fetch() — served from
-    // the browser's immutable HTTP cache, off the CacheStorage hot path — with
-    // CacheStorage populated in the background for offline / logout-clear.
-    // Behavioral coverage is in service-worker-media-cache.test.ts; this pins
-    // the source structure.
+  it('leaves content-addressed media to the browser without forcing revalidation', () => {
+    // Content-addressed media is answered by the browser's immutable HTTP
+    // cache; the worker returns before respondWith. Behavioral coverage is in
+    // service-worker-media-cache.test.ts; this pins the routing order.
     expect(source).toMatch(/const CONTENT_ADDRESSED_MEDIA = .*cas\|thumbs\|image/)
-
-    // The content-addressed branch is routed by pathname and runs before the
-    // generic path-addressed /media/ branch.
-    const caBranch = source.indexOf('CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname)')
-    const pathBranch = source.indexOf("event.request.url.includes('/media/')")
-    expect(caBranch).toBeGreaterThan(-1)
-    expect(caBranch).toBeLessThan(pathBranch)
-
-    // Regression (91af972): must NOT force revalidation. The content-addressed
-    // branch uses a plain fetch(), and cache.match() only appears afterwards as
-    // the offline fallback — never gating the online response.
-    const branchBody = source.slice(caBranch, pathBranch)
-    const network = branchBody.indexOf('fetch(event.request)')
-    const fallbackMatch = branchBody.indexOf('cache.match(event.request)')
-    expect(network).toBeGreaterThan(-1)
-    expect(branchBody).not.toContain("fetch(event.request, { cache: 'no-cache' })")
-    expect(fallbackMatch).toBeGreaterThan(network)
-  })
-
-  it('never walks the full media cache to enforce its storage budget', () => {
-    // Regression (91af972): enforceMediaCacheLimit() ran on every media
-    // response. Normal writes must first use StorageManager.estimate(), and
-    // the background write must extend the worker lifetime without blocking
-    // respondWith.
-    const sweep = source.indexOf('function maybeEnforceMediaCacheLimit')
-    const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
-
-    expect(sweep).toBeGreaterThan(-1)
-    expect(source.slice(sweep)).toContain('navigator.storage?.estimate?.()')
-    expect(source.slice(sweep)).toContain('caches.delete(MEDIA_CACHE_NAME)')
-    expect(source.indexOf('maybeEnforceMediaCacheLimit', mediaBranch)).toBeGreaterThan(mediaBranch)
-    expect(source).not.toContain('await cache.keys()')
-    expect(source).not.toContain('await cache.put(event.request, stamped)')
-    expect(source.indexOf('event.waitUntil(mediaResponse', mediaBranch)).toBeGreaterThan(
-      mediaBranch,
+    const caBypass = source.indexOf(
+      'if (CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname)) return;',
     )
+    const pathBranch = source.indexOf("event.request.url.includes('/media/')")
+    expect(caBypass).toBeGreaterThan(-1)
+    expect(caBypass).toBeLessThan(pathBranch)
   })
 
-  it('rotates the legacy oversized media cache on activation', () => {
-    expect(source).toContain("const MEDIA_CACHE_NAME = 'jyzrox-media-v2'")
+  it('never stores media in CacheStorage', () => {
+    // Regression: a worker-managed media cache duplicated the HTTP cache and
+    // its budget/TTL enforcement was lost on every worker restart. The only
+    // caches the worker writes are the static shell and the page cache.
+    const opened = [...source.matchAll(/caches\.open\((\w+)\)/g)].map((m) => m[1])
+    expect(new Set(opened)).toEqual(new Set(['CACHE_NAME', 'PAGE_CACHE_NAME']))
+    expect(source).not.toContain('navigator.storage')
+  })
+
+  it('drops the legacy media cache on activation', () => {
     const activate = source.indexOf("self.addEventListener('activate'")
     expect(activate).toBeGreaterThan(-1)
-    expect(source.slice(activate)).toContain('key !== MEDIA_CACHE_NAME')
+    expect(source.slice(activate)).toContain(
+      'keys.filter((key) => key !== CACHE_NAME && key !== PAGE_CACHE_NAME)',
+    )
   })
 
   it('keeps immutable build assets off the service-worker startup hot path', () => {

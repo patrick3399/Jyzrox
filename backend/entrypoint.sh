@@ -12,7 +12,7 @@ PUID="${PUID:-1042}"
 PGID="${PGID:-1042}"
 
 # Adjust appuser UID/GID if PUID/PGID request a different identity.
-if [ "$(id -u appuser)" != "$PUID" ] || [ "$(id -g appgroup)" != "$PGID" ]; then
+if [ "$(id -u appuser)" != "$PUID" ] || [ "$(id -g appuser)" != "$PGID" ]; then
     groupmod -g "$PGID" appgroup
     usermod  -u "$PUID" -g "$PGID" appuser
     # Image files were baked as 1042:1042; re-own them so the new UID can read /app.
@@ -25,6 +25,9 @@ for dir in /data/download_temp /data/thumbs /data/training /data/avatars /data/c
     mkdir -p "$dir" 2>/dev/null || true
     chown "$PUID:$PGID" "$dir" 2>/dev/null || true
 done
+
+# gallery-dl config bind mount: a fresh clone leaves it owned by the host user.
+chown -R "$PUID:$PGID" /home/appuser/.config/gallery-dl 2>/dev/null || true
 
 # Novel module: own the working clone.
 mkdir -p /data/novel 2>/dev/null || true

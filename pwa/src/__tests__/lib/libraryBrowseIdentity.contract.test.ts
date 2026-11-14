@@ -4,6 +4,7 @@ import {
   invalidateLegacyLibraryScroll,
   isLibraryBrowseCursor,
   isSearchGalleryItem,
+  LIBRARY_BROWSE_SCHEMA_VERSION,
   libraryBrowseIdentityKey,
 } from '@/lib/browse/library'
 
@@ -21,13 +22,15 @@ describe('Library browse-session canonical identity contract', () => {
       nameOnlyTags: [],
       excludeTags: ['language:en', 'language:ja'],
       title: 're zero',
-      source: 'pixiv',
+      sources: ['pixiv'],
+      excludeSources: [],
       rating: 4,
       favorited: true,
       readingList: true,
       collection: 5,
       artistId: 'pixiv:123',
-      category: 'manga',
+      categories: ['manga'],
+      excludeCategories: [],
       importMode: 'link',
       sort: 'rating',
     })
@@ -44,6 +47,18 @@ describe('Library browse-session canonical identity contract', () => {
     expect(libraryBrowseIdentityKey(canonical.replace('sort:rating', 'sort:pages'))).not.toBe(
       libraryBrowseIdentityKey(canonical),
     )
+  })
+
+  it('identity_key_ignores_facet_selection_order', () => {
+    const a = 'category:B category:A -source:z -source:y source:pixiv'
+    const b = 'source:pixiv -source:y category:A -source:z category:B category:A'
+    expect(libraryBrowseIdentityKey(a)).toBe(libraryBrowseIdentityKey(b))
+    expect(libraryBrowseIdentityKey('category:A')).not.toBe(libraryBrowseIdentityKey('-category:A'))
+    expect(canonicalLibraryBrowseIdentity(a).categories).toEqual(['A', 'B'])
+  })
+
+  it('schema_version_is_bumped_so_v1_snapshots_are_dropped', () => {
+    expect(LIBRARY_BROWSE_SCHEMA_VERSION).toBe(2)
   })
 
   it('uses the effective default sort when the URL omits sort', () => {

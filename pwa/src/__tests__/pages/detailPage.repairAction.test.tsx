@@ -84,7 +84,9 @@ import GalleryDetailPage from '@/app/library/[source]/[sourceId]/page'
 
 describe('gallery detail repair action', () => {
   beforeEach(() => {
-    h.galleryAction.mockReset().mockResolvedValue({ kind: 'repair', job_id: 'job-9', status: 'queued' })
+    h.galleryAction
+      .mockReset()
+      .mockResolvedValue({ kind: 'repair', job_id: 'job-9', status: 'queued' })
     h.excluded = []
     h.gallery = {
       id: 7,

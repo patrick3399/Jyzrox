@@ -475,7 +475,9 @@ describe('apiFetch — HTTP status codes', () => {
       makeResponse({
         status: 403,
         ok: false,
-        jsonBody: { detail: { code: 'eh_access_denied', message: 'ExHentai access denied (Sad Panda)' } },
+        jsonBody: {
+          detail: { code: 'eh_access_denied', message: 'ExHentai access denied (Sad Panda)' },
+        },
       }),
     )
 

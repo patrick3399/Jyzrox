@@ -17,6 +17,7 @@ import {
   estimateArtistRowHeight,
   estimateGalleryThumbRowHeight,
   estimateHistoryRowHeight,
+  estimateLibraryListRowHeight,
   gridCardWidth,
   rootFontSize,
 } from '@/lib/gridRowHeight'
@@ -207,6 +208,19 @@ describe('estimateHistoryRowHeight', () => {
       estimateHistoryRowHeight({ colCount: 8, containerWidth: 1160, gap: 12 }),
       262.417,
     )
+  })
+})
+
+describe('estimateLibraryListRowHeight', () => {
+  it('reserves the tallest card at the default root font size', () => {
+    // 7.03125rem of text and padding plus 55px of tag and badge lines and borders.
+    expect(estimateLibraryListRowHeight()).toBe(168)
+  })
+
+  it('scales the rem terms when the root font size is raised to 130%', () => {
+    document.documentElement.style.fontSize = '20.8px'
+
+    expect(estimateLibraryListRowHeight()).toBe(202)
   })
 })
 

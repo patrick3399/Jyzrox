@@ -2,7 +2,7 @@
 
 import pytest
 
-from services.novel_format import check_text, fix_text, variant_for
+from services.novel_format import check_text, fix_text
 
 _GOOD = (
     "第1章：開場\n\n### 第一幕：抵達\n\n**地點：** 城門\n**時間：** 黃昏\n\n**張三：**「我來了。」\n\n（第1章 完）\n"
@@ -26,7 +26,6 @@ def test_empty_file_is_a_placeholder_not_a_violation():
 @pytest.mark.parametrize(
     ("line", "rule"),
     [
-        ("## 第3章：標題", "chapter_title_has_hash"),
         ("### 第3章 第一幕：抵達", "act_title_has_chapter_number"),
         ("#### 第一幕：抵達", "act_title_wrong_level"),
         ("**第一幕：抵達**", "act_title_bold_instead_of_heading"),
@@ -51,17 +50,6 @@ def test_missing_chapter_end_marker_reported_for_main_text_only():
     # A draft/reference file never carries the marker — reporting it would be
     # permanent noise.
     assert "missing_chapter_end_marker" not in _rules(no_marker, category="draft")
-
-
-def test_nordkale_rule_only_fires_for_that_variant():
-    content = "第1章：開場\n\n> **【裏側視角】**\n> 內心。\n\n（第1章 完）\n"
-    assert "inner_view_inside_blockquote" not in _rules(content)
-    assert "inner_view_inside_blockquote" in _rules(content, variant="nordkale")
-
-
-def test_variant_is_derived_from_the_work_folder():
-    assert variant_for("挪德卡萊 - 最後的月之容器/第01章.md") == "nordkale"
-    assert variant_for("流螢 - 熔火之繭/第01章.md") == "default"
 
 
 def test_frontmatter_is_not_linted_and_line_numbers_stay_real():
@@ -133,13 +121,14 @@ def test_fix_leaves_frontmatter_untouched():
     assert changes == ["metadata_colon_outside_bold"]
 
 
-def test_fix_moves_the_nordkale_heading_out_of_the_blockquote():
-    content = "第1章\n\n> **【裏側視角】**\n> 內心。\n\n（第1章 完）\n"
-    fixed, changes = fix_text(content, variant="nordkale")
+def test_fix_moves_the_inner_view_heading_out_of_the_blockquote_in_any_work():
+    """The rule used to run only for one work (matched by folder name); two
+    other works use the same heading."""
+    content = "第1章：開場\n\n> **【裏側視角】**\n> 內心。\n\n（第1章 完）\n"
+    assert "inner_view_inside_blockquote" in _rules(content)
+    fixed, changes = fix_text(content)
     assert "inner_view_inside_blockquote" in changes
     assert "**【裏側視角】**\n\n> 內心。" in fixed
-    # Without the variant the line is left alone.
-    assert fix_text(content)[1] == []
 
 
 def test_fix_never_invents_a_chapter_end_marker():
@@ -217,3 +206,100 @@ def test_a_longer_closing_run_still_closes_the_fence():
     assert "act_title_wrong_level" in changes
     assert "### 第二幕：真的" in fixed
     assert "#### 範例" in fixed
+
+
+# ── Corpus fit (2026-11-05) ────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("first", "rule", "fixed_first"),
+    [
+        ("### 第一章：開場", "chapter_title_has_hash", "第一章：開場"),
+        ("# 第12章：開場", "chapter_title_has_hash", "第12章：開場"),
+        ("**第一章：開場**", "chapter_title_bold", "第一章：開場"),
+    ],
+)
+def test_decorated_chapter_titles_are_reported_and_fixed(first, rule, fixed_first):
+    """The old rule only knew Arabic numerals, so `### 第一章：…` and
+    `**第一章：…**` passed the lint in 43 real chapters."""
+    content = f"{first}\n\n正文。\n\n（第1章 完）\n"
+    assert _rules(content) == [rule]
+    fixed, changes = fix_text(content)
+    assert changes == [rule]
+    assert fixed.splitlines()[0] == fixed_first
+    assert check_text(fixed) == []
+
+
+@pytest.mark.parametrize("first", ["### 【序】", "**第一部分**", "她推開門。"])
+def test_main_chapter_without_a_chapter_title_is_reported(first):
+    content = f"{first}\n\n正文。\n\n（第1章 完）\n"
+    assert _rules(content) == ["chapter_title_missing"]
+    assert fix_text(content)[1] == []  # only the author can write the title
+
+
+def test_chapter_title_rule_applies_to_main_text_only():
+    content = "她推開門。\n"
+    assert "chapter_title_missing" not in _rules(content, category="draft")
+
+
+def test_bare_chapter_title_without_a_subtitle_is_accepted():
+    assert "chapter_title_missing" not in _rules("第1章\n\n正文。\n\n（第1章 完）\n")
+
+
+def test_chapter_title_is_found_after_frontmatter_and_blank_lines():
+    content = "---\nsummary: s\n---\n\n\n第1章：開場\n\n（第1章 完）\n"
+    assert check_text(content) == []
+
+
+def test_chapter_headings_inside_a_chapter_are_left_alone():
+    """One real chapter is divided into `### 第一章：…` sections; rewriting
+    every such heading would flatten that structure. Only the first prose line
+    is the chapter title."""
+    content = "第1章：開場\n\n### 第一章：上\n\n正文。\n\n### 第二章：下\n\n（第1章 完）\n"
+    assert check_text(content) == []
+    assert fix_text(content) == (content, [])
+
+
+def test_act_title_with_a_chinese_numeral_chapter_number_is_fixed():
+    """`### 第六章 第二幕：…` slipped through: the rule only knew `第6章`."""
+    content = "第6章：開場\n\n### 第六章 第二幕：抵達\n\n（第6章 完）\n"
+    assert _rules(content) == ["act_title_has_chapter_number"]
+    fixed, changes = fix_text(content)
+    assert changes == ["act_title_has_chapter_number"]
+    assert "### 第二幕：抵達" in fixed
+
+
+def test_act_end_marker_naming_the_chapter_is_not_an_act_title():
+    """Real chapters close each act with `（第六章 第四幕 完）`; matching the
+    chapter-plus-act shape anywhere in a line reported every one of them."""
+    content = "第6章：開場\n\n### 第一幕：抵達\n\n正文。\n\n（第六章 第一幕 完）\n\n（第6章 完）\n"
+    assert check_text(content) == []
+
+
+def test_bracketed_bold_act_title_becomes_a_heading():
+    """80 act titles in one real work were `**【第一幕：…】**`, so the reader
+    found no acts and the lint reported nothing."""
+    content = "第1章：開場\n\n**【第一幕：抵達】**\n\n**【終幕:夜】**\n\n（第1章 完）\n"
+    assert _rules(content).count("act_title_bracket_bold") == 2
+    fixed, changes = fix_text(content)
+    assert changes == ["act_title_bracket_bold"]
+    assert "### 第一幕：抵達" in fixed and "### 終幕：夜" in fixed
+    assert check_text(fixed) == []
+
+
+def test_fixing_an_act_title_keeps_the_blank_line_after_it():
+    """The act-title fixes ended in `\\s*$`, which under MULTILINE also ate
+    the following blank line — one real chapter lost three lines."""
+    content = "第1章：開場\n\n**第一幕：抵達**\n\n正文。\n\n**【第二幕：夜】**\n\n正文。\n\n（第1章 完）\n"
+    fixed, _ = fix_text(content)
+    assert fixed == "第1章：開場\n\n### 第一幕：抵達\n\n正文。\n\n### 第二幕：夜\n\n正文。\n\n（第1章 完）\n"
+
+
+def test_bom_is_reported_and_removed():
+    """A BOM hid the first line from every anchored rule and made a summary
+    insert leave the BOM in the middle of the file."""
+    content = "﻿第1章：開場\n\n（第1章 完）\n"
+    assert _rules(content) == ["bom"]
+    fixed, changes = fix_text(content)
+    assert changes == ["bom"]
+    assert fixed == content[1:]

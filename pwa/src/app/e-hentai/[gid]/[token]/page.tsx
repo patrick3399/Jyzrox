@@ -1,15 +1,7 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import {
-  Suspense,
-  useState,
-  useMemo,
-  useCallback,
-  useRef,
-  useEffect,
-  useLayoutEffect,
-} from 'react'
+import { Suspense, useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useEhGallery, useEhGalleryPreviews, useEhGalleryComments } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
@@ -226,9 +218,9 @@ function formatDate(unix: number) {
 export default function EhGalleryDetailPage() {
   return (
     <PageContainer>
-    <Suspense>
-      <EhGalleryDetail />
-    </Suspense>
+      <Suspense>
+        <EhGalleryDetail />
+      </Suspense>
     </PageContainer>
   )
 }
@@ -322,15 +314,7 @@ function EhGalleryDetail() {
       showComments,
       showAllComments,
     })
-  }, [
-    extraPreviews,
-    hasMore,
-    infiniteScroll,
-    invalidId,
-    showAllComments,
-    showComments,
-    viewKey,
-  ])
+  }, [extraPreviews, hasMore, infiniteScroll, invalidId, showAllComments, showComments, viewKey])
 
   // Close fav picker on outside click
   useEffect(() => {
@@ -595,7 +579,10 @@ function EhGalleryDetail() {
           <div className="text-center">
             <p className="text-red-400 text-lg font-semibold">{t('library.failedToLoad')}</p>
             <p className="text-sm text-vault-text-muted mt-1">{galleryError.message}</p>
-            <Button variant="secondary" size="md" className="mt-4"
+            <Button
+              variant="secondary"
+              size="md"
+              className="mt-4"
               onClick={() => smartBack(router, '/e-hentai')}
             >
               {t('reader.goBack')}
@@ -710,14 +697,10 @@ function EhGalleryDetail() {
 
             {/* Action buttons */}
             <div className="flex flex-wrap gap-3 pt-1">
-              <Button variant="primary" size="md" className="px-6"
-                onClick={() => handleRead(1)}
-              >
+              <Button variant="primary" size="md" className="px-6" onClick={() => handleRead(1)}>
                 {t('browse.read')}
               </Button>
-              <Button variant="primary" size="md" className="px-6"
-                onClick={handleDownload}
-              >
+              <Button variant="primary" size="md" className="px-6" onClick={handleDownload}>
                 {t('browse.download')}
               </Button>
               <a
@@ -885,7 +868,10 @@ function EhGalleryDetail() {
         {/* ── Comments ── */}
         <div className="space-y-3">
           {!showComments ? (
-            <Button variant="secondary" size="md" className="w-full"
+            <Button
+              variant="secondary"
+              size="md"
+              className="w-full"
               onClick={() => setShowComments(true)}
             >
               {t('browse.showComments')}
@@ -948,7 +934,10 @@ function EhGalleryDetail() {
                     ))}
                   </div>
                   {!showAllComments && comments.length > 3 && (
-                    <Button variant="secondary" size="md" className="w-full"
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      className="w-full"
                       onClick={() => setShowAllComments(true)}
                     >
                       {t('browse.showAllComments', { count: String(comments.length) })}
@@ -968,7 +957,10 @@ function EhGalleryDetail() {
             </h2>
             <PreviewGrid thumbs={previewThumbs} onRead={handleRead} />
             {gallery.pages > previewThumbs.length && hasMore && !infiniteScroll && (
-              <Button variant="secondary" size="md" className="w-full"
+              <Button
+                variant="secondary"
+                size="md"
+                className="w-full"
                 onClick={loadMorePreviews}
                 disabled={loadingMore}
               >

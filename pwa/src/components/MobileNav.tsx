@@ -63,8 +63,16 @@ function MobileNavContent({
   downloadStats?: { running: number; finished: number }
 }) {
   const pathname = usePathname()
-  const { profile, logout, groupedLinks, resolveHref, handleNavClick, cycleTheme, ThemeIcon, themeLabel } =
-    useNavigation()
+  const {
+    profile,
+    logout,
+    groupedLinks,
+    resolveHref,
+    handleNavClick,
+    cycleTheme,
+    ThemeIcon,
+    themeLabel,
+  } = useNavigation()
   const navCounts = useNavCounts(true)
 
   return (

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from core.database import AsyncSessionLocal
 from core.queue import get_queue
 from core.queue_config import JOB_QUEUE_ROUTING, QUEUE_INTERACTIVE
-from db.models import DownloadJob
+from db.models import DownloadJob, Subscription
 from services.download_admission import next_admission_ticket
 from services.egress_persona import resolve_admission_key
 from worker.constants import DISK_LOW_KEY
@@ -196,6 +196,11 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                     # A stopped job is finished by the user's choice; re-running it
                     # would fetch again what they chose to keep as it is.
                     DownloadJob.stop_requested_at.is_(None),
+                    # A paused subscription keeps its failed jobs until it is resumed (ADR 0030).
+                    DownloadJob.subscription_id.is_(None)
+                    | ~DownloadJob.subscription_id.in_(
+                        select(Subscription.id).where(Subscription.paused_at.is_not(None))
+                    ),
                 )
                 .where(
                     (DownloadJob.next_retry_at == None) | (DownloadJob.next_retry_at <= now)  # noqa: E711

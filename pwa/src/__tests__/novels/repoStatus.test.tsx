@@ -7,13 +7,18 @@ vi.mock('@/lib/i18n', () => ({
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
-const h = vi.hoisted(() => ({ status: { head: 'abc', ahead: 2, behind: 0, clean: true, locked: false }, role: 'viewer' as string }))
+const h = vi.hoisted(() => ({
+  status: { head: 'abc', ahead: 2, behind: 0, clean: true, locked: false },
+  role: 'viewer' as string,
+}))
 
 vi.mock('swr', () => ({
   default: () => ({ data: h.status, mutate: vi.fn() }),
 }))
 vi.mock('@/hooks/useProfile', () => ({ useProfile: () => ({ data: { role: h.role } }) }))
-vi.mock('@/lib/api', () => ({ api: { novels: { status: vi.fn(), sync: vi.fn(), reset: vi.fn() } } }))
+vi.mock('@/lib/api', () => ({
+  api: { novels: { status: vi.fn(), sync: vi.fn(), reset: vi.fn() } },
+}))
 
 import { RepoStatusBar } from '@/components/novels/RepoStatusBar'
 

@@ -33,7 +33,11 @@ vi.mock('@/lib/ws', () => ({
   useWsEvents: mockUseWsEvents,
 }))
 
-import { resolveInvalidationFilter, extractEventPayload, WsInvalidationBridge } from '@/lib/wsInvalidation'
+import {
+  resolveInvalidationFilter,
+  extractEventPayload,
+  WsInvalidationBridge,
+} from '@/lib/wsInvalidation'
 
 beforeEach(() => {
   vi.clearAllMocks()

@@ -22,7 +22,16 @@ describe('AnchoredMenu', () => {
   it('runs the selected entry once and closes', () => {
     const onSelect = vi.fn()
     const onOpenChange = vi.fn()
-    render(<AnchoredMenu open onOpenChange={onOpenChange} x={10} y={10} ariaLabel="m" items={[{ id: 'a', label: 'Open', onSelect }]} />)
+    render(
+      <AnchoredMenu
+        open
+        onOpenChange={onOpenChange}
+        x={10}
+        y={10}
+        ariaLabel="m"
+        items={[{ id: 'a', label: 'Open', onSelect }]}
+      />,
+    )
     fireEvent.click(screen.getByRole('menuitem', { name: 'Open' }))
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onOpenChange).toHaveBeenCalledWith(false)
@@ -30,14 +39,32 @@ describe('AnchoredMenu', () => {
 
   it('does not run a disabled entry', () => {
     const onSelect = vi.fn()
-    render(<AnchoredMenu open onOpenChange={() => {}} x={0} y={0} ariaLabel="m" items={[{ id: 'a', label: 'Nope', disabled: true, onSelect }]} />)
+    render(
+      <AnchoredMenu
+        open
+        onOpenChange={() => {}}
+        x={0}
+        y={0}
+        ariaLabel="m"
+        items={[{ id: 'a', label: 'Nope', disabled: true, onSelect }]}
+      />,
+    )
     fireEvent.click(screen.getByRole('menuitem', { name: 'Nope' }))
     expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('claims Escape (FE-T25)', () => {
     const onOpenChange = vi.fn()
-    render(<AnchoredMenu open onOpenChange={onOpenChange} x={0} y={0} ariaLabel="m" items={[{ id: 'a', label: 'A', onSelect: () => {} }]} />)
+    render(
+      <AnchoredMenu
+        open
+        onOpenChange={onOpenChange}
+        x={0}
+        y={0}
+        ariaLabel="m"
+        items={[{ id: 'a', label: 'A', onSelect: () => {} }]}
+      />,
+    )
     const event = pressEscape()
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(event.defaultPrevented).toBe(true)
@@ -45,7 +72,16 @@ describe('AnchoredMenu', () => {
   })
 
   it('test_anchored_menu_right_click_inside_does_not_open_native_menu', () => {
-    render(<AnchoredMenu open onOpenChange={() => {}} x={0} y={0} ariaLabel="m" items={[{ id: 'a', label: 'A', onSelect: () => {} }]} />)
+    render(
+      <AnchoredMenu
+        open
+        onOpenChange={() => {}}
+        x={0}
+        y={0}
+        ariaLabel="m"
+        items={[{ id: 'a', label: 'A', onSelect: () => {} }]}
+      />,
+    )
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
     act(() => {
       screen.getByRole('menu').dispatchEvent(event)
@@ -59,7 +95,11 @@ describe('Popover', () => {
     const anchor = document.createElement('button')
     document.body.appendChild(anchor)
     const onOpenChange = vi.fn()
-    render(<Popover open onOpenChange={onOpenChange} anchor={anchor} ariaLabel="p"><p>content</p></Popover>)
+    render(
+      <Popover open onOpenChange={onOpenChange} anchor={anchor} ariaLabel="p">
+        <p>content</p>
+      </Popover>,
+    )
     expect(screen.getByText('content')).toBeTruthy()
     const event = pressEscape()
     expect(onOpenChange).toHaveBeenCalledWith(false)

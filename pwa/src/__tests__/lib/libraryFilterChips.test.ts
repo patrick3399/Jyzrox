@@ -29,6 +29,18 @@ describe('libraryFilterChips', () => {
     expect(result[0].label).toContain('SRC<local:link>')
   })
 
+  it('libraryFilterChips_groups_multi_select_into_one_chip', () => {
+    const include = chips('category:A category:B source:pixiv source:ehentai')
+    expect(include.map((c) => c.key)).toEqual(['source', 'category'])
+    expect(include[1].label).toBe('library.filterCategory: A library.facetOr B')
+    expect(include[0].label).toBe('library.source: SRC<pixiv> library.facetOr SRC<ehentai>')
+    const exclude = chips('-category:A -category:__uncategorized__ -source:local:link')
+    expect(exclude[0].label).toBe('library.source: library.facetNotPrefix SRC<local:link>')
+    expect(exclude[1].label).toBe(
+      'library.filterCategory: library.facetNotPrefix A, library.categoryUncategorized',
+    )
+  })
+
   it('test_source_without_import_mode_uses_plain_source', () => {
     expect(chips('source:pixiv')[0].label).toContain('SRC<pixiv>')
   })

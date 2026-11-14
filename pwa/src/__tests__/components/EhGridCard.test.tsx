@@ -51,7 +51,11 @@ describe('EH GridCard rating', () => {
 
   it('test_grid_card_rating_keeps_one_decimal_instead_of_rounding_to_whole_stars', () => {
     render(
-      <GridCard gallery={{ ...gallery, rating: 3.5 }} onClick={vi.fn()} onUploaderClick={vi.fn()} />,
+      <GridCard
+        gallery={{ ...gallery, rating: 3.5 }}
+        onClick={vi.fn()}
+        onUploaderClick={vi.fn()}
+      />,
     )
 
     expect(screen.getByText('★3.5')).toBeInTheDocument()

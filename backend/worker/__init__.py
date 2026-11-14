@@ -10,10 +10,12 @@ import logging
 import os
 import uuid
 from datetime import UTC
+from pathlib import Path
 
 from saq import CronJob
 
 from core.config import get_monitored_library_paths, settings
+from core.logging_setup import configure_logging
 from core.redis_client import close_redis
 from core.scheduled_task_catalog import CATALOG
 from core.watcher import LibraryWatcher
@@ -53,7 +55,6 @@ from worker.liveness import (
     record_memory_sample,
     start_run_marker,
 )
-from worker.log_redaction import install_log_redaction
 from worker.memory import after_process_hook
 from worker.novel_index import novel_index_job
 from worker.novel_sync import novel_sync_job
@@ -80,13 +81,9 @@ from worker.subscription_group import (
 )
 from worker.thumbhash_backfill import thumbhash_backfill_job
 from worker.thumbnail import cover_thumbnail_job, thumbnail_job
-from worker.trash import trash_gc_job
+from worker.trash import trash_gc_job, trash_purge_job
 
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-install_log_redaction()
+configure_logging()
 logger = logging.getLogger("worker")
 
 
@@ -378,6 +375,14 @@ async def _settle_orphan_downloading_galleries() -> int:
     return settled
 
 
+async def clear_subscription_check_locks(redis) -> int:
+    """One worker runs checks; locks left by a killed check would block it for 30 min."""
+    keys = [k async for k in redis.scan_iter(match="subscription:check_lock:*")]
+    if keys:
+        await redis.delete(*keys)
+    return len(keys)
+
+
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
     # Fail fast if the DB is not migrated to this image's schema head (e.g. a
@@ -461,6 +466,8 @@ async def startup(ctx: dict) -> None:
         await r.delete(*pid_keys)
     # NOTE: do NOT delete download:pause:* — paused jobs are preserved
 
+    await clear_subscription_check_locks(r)
+
     running_strategy = ((await r.get("setting:recovery_running")) or b"auto_retry").decode()
     paused_strategy = ((await r.get("setting:recovery_paused")) or b"keep_paused").decode()
     if running_strategy not in ("auto_retry", "mark_failed"):
@@ -482,7 +489,7 @@ async def startup(ctx: dict) -> None:
     from sqlalchemy import func, select, update
 
     from core.database import AsyncSessionLocal
-    from db.models import DownloadJob, Gallery
+    from db.models import DownloadJob, Gallery, Subscription
 
     async with AsyncSessionLocal() as session:
         # Recovery: running → queued (re-enqueue, not fail)
@@ -579,12 +586,21 @@ async def startup(ctx: dict) -> None:
         # Without this, resume after restart thinks the coroutine is alive and sets status
         # to "running" without re-enqueueing — leaving the job stuck forever.
         paused_jobs = (await session.execute(select(DownloadJob).where(DownloadJob.status == "paused"))).scalars().all()
+        paused_sub_ids = set(
+            (await session.execute(select(Subscription.id).where(Subscription.paused_at.is_not(None)))).scalars().all()
+        )
         if paused_jobs:
             for job in paused_jobs:
                 job.admission_token = None
                 if await _finish_stop_requested(r, job):
                     await r.delete(f"download:pause:{job.id}")
                     recovery_counts["stop_finalized"] += 1
+                    continue
+                job_sub_paused = job.subscription_id is not None and job.subscription_id in paused_sub_ids
+                if job_sub_paused:
+                    # Resume re-enqueues token-less paused rows, so nothing is queued now.
+                    logger.info("kept paused: subscription %d is paused", job.subscription_id)
+                    recovery_counts["paused_kept"] += 1
                     continue
                 if paused_strategy == "keep_paused":
                     job_key = compute_job_key(job.id, job.retry_count)
@@ -707,20 +723,7 @@ async def startup(ctx: dict) -> None:
         watcher_should_start = watcher_enabled_raw not in (b"0", "0")
 
     if watcher_should_start:
-        paths = await get_monitored_library_paths()
-        loop = asyncio.get_running_loop()
-
-        def enqueue_sync(job_name: str, *args):
-            import core.queue
-
-            kwargs = _watcher_job_kwargs(job_name, args)
-            asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
-
-        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
-        await r.set(
-            "watcher:status",
-            json.dumps({"running": True, "paths": paths}),
-        )
+        await _start_library_watcher(r, await get_monitored_library_paths())
 
     # Jobs that were marked run_at_startup=True in the old config.
     import core.queue as _q
@@ -766,6 +769,20 @@ async def shutdown(ctx: dict) -> None:
 # ── Toggle Watcher ────────────────────────────────────────────────────
 
 
+async def _start_library_watcher(r, paths: list[str]) -> None:
+    """(Re)start the watcher on ``paths`` and publish whether it actually runs."""
+    loop = asyncio.get_running_loop()
+
+    def enqueue_sync(job_name: str, *args):
+        import core.queue
+
+        kwargs = _watcher_job_kwargs(job_name, args)
+        asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
+
+    _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
+    await r.set("watcher:status", json.dumps({"running": _watcher.is_running, "paths": paths}))
+
+
 async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
     """Start or stop the file system watcher on behalf of the API.
 
@@ -779,26 +796,20 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
     """
     r = ctx["redis"]
     if enabled:
-        if _watcher.is_running:
-            logger.info("[toggle_watcher] Already running — no-op")
-            return {"status": "already_running"}
-
         paths = await get_monitored_library_paths()
         if not paths:
             logger.warning("[toggle_watcher] No library paths configured — cannot start watcher")
+            _watcher.stop()
             await r.set("watcher:status", json.dumps({"running": False, "paths": []}))
             return {"status": "no_paths"}
 
-        loop = asyncio.get_running_loop()
+        # The API also enqueues this when a library is added or removed, so
+        # "running" alone does not mean the watcher is on the right paths.
+        if _watcher.is_running and set(_watcher.watched_paths) == {p for p in paths if Path(p).is_dir()}:
+            logger.info("[toggle_watcher] Already running — no-op")
+            return {"status": "already_running"}
 
-        def enqueue_sync(job_name: str, *args):
-            import core.queue
-
-            kwargs = _watcher_job_kwargs(job_name, args)
-            asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
-
-        _watcher.start(paths, enqueue_sync, settings.watcher_debounce_seconds)
-        await r.set("watcher:status", json.dumps({"running": True, "paths": paths}))
+        await _start_library_watcher(r, paths)
         logger.info("[toggle_watcher] Started, watching %d path(s)", len(paths))
         return {"status": "started", "paths": paths}
     else:
@@ -1220,6 +1231,7 @@ def _build_cron_jobs() -> list[CronJob]:
         "subscription_scheduler": subscription_scheduler,
         "rate_limit_schedule_job": rate_limit_schedule_job,
         "trash_gc_job": trash_gc_job,
+        "trash_purge_job": trash_purge_job,
         "log_cleanup_job": log_cleanup_job,
         "disk_monitor_job": disk_monitor_job,
         "memory_monitor_job": memory_monitor_job,
@@ -1299,6 +1311,7 @@ def build_workers() -> tuple:
             rate_limit_schedule_job,
             retry_failed_downloads_job,
             trash_gc_job,
+            trash_purge_job,
             ehtag_sync_job,
             log_cleanup_job,
             database_backup_job,
@@ -1392,6 +1405,7 @@ __all__ = [
     "thumbhash_backfill_job",
     "retry_failed_downloads_job",
     "trash_gc_job",
+    "trash_purge_job",
     "ehtag_sync_job",
     "log_cleanup_job",
     "database_backup_job",

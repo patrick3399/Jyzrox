@@ -80,8 +80,8 @@ function bankedAnchor() {
       snapshot: { anchor: { itemId: number | null; offset: number; scrollY: number } | null }
     }>
   }
-  return store.entries.find((entry) => entry.identityKey.includes('"surface":"favorites"'))?.snapshot
-    .anchor
+  return store.entries.find((entry) => entry.identityKey.includes('"surface":"favorites"'))
+    ?.snapshot.anchor
 }
 
 beforeEach(() => {

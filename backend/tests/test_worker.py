@@ -462,22 +462,88 @@ class TestToggleWatcherJob:
         assert result["status"] == "no_paths"
         mock_watcher.start.assert_not_called()
 
-    async def test_already_running_no_op(self):
-        """toggle_watcher_job(enabled=True) when watcher is already running must return already_running."""
+    async def test_already_running_no_op(self, tmp_path):
+        """toggle_watcher_job(enabled=True) with the same paths must not restart the watcher."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
         mock_redis = AsyncMock()
 
         mock_watcher = MagicMock()
         mock_watcher.is_running = True
+        mock_watcher.watched_paths = [str(tmp_path)]
 
-        with patch("worker._watcher", mock_watcher):
+        with (
+            patch("worker.get_monitored_library_paths", new=AsyncMock(return_value=[str(tmp_path)])),
+            patch("worker._watcher", mock_watcher),
+        ):
             from worker import toggle_watcher_job
 
             ctx = {"redis": mock_redis}
             result = await toggle_watcher_job(ctx, enabled=True)
 
         assert result["status"] == "already_running"
+        mock_watcher.start.assert_not_called()
+
+    async def test_running_watcher_picks_up_library_added_after_it_started(self, tmp_path):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        old, new = tmp_path / "old", tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        mock_redis = AsyncMock()
+
+        mock_watcher = MagicMock()
+        mock_watcher.is_running = True
+        mock_watcher.watched_paths = [str(old)]
+
+        with (
+            patch("worker.get_monitored_library_paths", new=AsyncMock(return_value=[str(old), str(new)])),
+            patch("worker._watcher", mock_watcher),
+        ):
+            from worker import toggle_watcher_job
+
+            result = await toggle_watcher_job({"redis": mock_redis}, enabled=True)
+
+        assert result["status"] == "started"
+        assert mock_watcher.start.call_args.args[0] == [str(old), str(new)]
+
+    async def test_removing_the_last_library_stops_a_running_watcher(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_redis = AsyncMock()
+
+        mock_watcher = MagicMock()
+        mock_watcher.is_running = True
+        mock_watcher.watched_paths = ["/lib/removed"]
+
+        with (
+            patch("worker.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+            patch("worker._watcher", mock_watcher),
+        ):
+            from worker import toggle_watcher_job
+
+            result = await toggle_watcher_job({"redis": mock_redis}, enabled=True)
+
+        assert result["status"] == "no_paths"
+        mock_watcher.stop.assert_called_once()
+
+    async def test_watcher_without_valid_paths_is_not_reported_as_running(self):
+        import json
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_redis = AsyncMock()
+
+        mock_watcher = MagicMock()
+        mock_watcher.is_running = False
+
+        with patch("worker._watcher", mock_watcher):
+            from worker import _start_library_watcher
+
+            await _start_library_watcher(mock_redis, ["/lib/does-not-exist"])
+
+        key, payload = mock_redis.set.await_args.args
+        assert key == "watcher:status"
+        assert json.loads(payload) == {"running": False, "paths": ["/lib/does-not-exist"]}
 
 
 # ---------------------------------------------------------------------------

@@ -5,12 +5,20 @@ import { Badge } from '@/components/ui/badge'
 
 describe('Button', () => {
   it('defaults to type="button" so it never submits a surrounding form', () => {
-    render(<form onSubmit={vi.fn()}><Button>Go</Button></form>)
+    render(
+      <form onSubmit={vi.fn()}>
+        <Button>Go</Button>
+      </form>,
+    )
     expect(screen.getByRole('button', { name: 'Go' }).getAttribute('type')).toBe('button')
   })
 
   it('applies variant and size classes', () => {
-    render(<Button variant="danger" size="sm">Del</Button>)
+    render(
+      <Button variant="danger" size="sm">
+        Del
+      </Button>,
+    )
     const cls = screen.getByRole('button').className
     expect(cls).toContain('bg-vault-danger')
     expect(cls).toContain('h-8')
@@ -18,7 +26,11 @@ describe('Button', () => {
 
   it('lets a caller className override a variant class', () => {
     expect(buttonVariants({ variant: 'primary' })).toContain('rounded-lg')
-    render(<Button variant="primary" className="rounded-full">R</Button>)
+    render(
+      <Button variant="primary" className="rounded-full">
+        R
+      </Button>,
+    )
     const cls = screen.getByRole('button').className
     expect(cls).toContain('rounded-full')
     expect(cls).not.toContain('rounded-lg')

@@ -20,7 +20,10 @@ describe('UI preference migration', () => {
   it('collects existing device-only appearance and navigation values', () => {
     localStorage.setItem('theme', 'amoled')
     localStorage.setItem(ACCENT_KEY, '#112233')
-    localStorage.setItem('bottom_tab_config', JSON.stringify(['/e-hentai', '/pixiv', '/library', '/queue']))
+    localStorage.setItem(
+      'bottom_tab_config',
+      JSON.stringify(['/e-hentai', '/pixiv', '/library', '/queue']),
+    )
     localStorage.setItem(GRID_DENSITY_KEY, 'compact')
     localStorage.setItem(GRID_COLUMNS_KEY, '9')
     localStorage.setItem(FONT_SCALE_KEY, '1.125')
@@ -37,7 +40,10 @@ describe('UI preference migration', () => {
 
   it('applies the server document authoritatively and clears stale managed values', () => {
     localStorage.setItem(ACCENT_KEY, '#ff0000')
-    localStorage.setItem(CUSTOM_THEME_KEY, JSON.stringify({ bg: '#000000', card: '#111111', text: '#ffffff' }))
+    localStorage.setItem(
+      CUSTOM_THEME_KEY,
+      JSON.stringify({ bg: '#000000', card: '#111111', text: '#ffffff' }),
+    )
     localStorage.setItem('sidebar_nav_order', JSON.stringify({ order: ['/old'], hidden: [] }))
     const setTheme = vi.fn()
 

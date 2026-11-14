@@ -20,7 +20,12 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, replace }),
   useSearchParams: () => {
     useSyncExternalStore(
-      (listener) => { paramListeners.add(listener); return () => { paramListeners.delete(listener) } },
+      (listener) => {
+        paramListeners.add(listener)
+        return () => {
+          paramListeners.delete(listener)
+        }
+      },
       () => currentParams,
       () => currentParams,
     )
@@ -65,7 +70,9 @@ vi.mock('@/lib/api', () => ({
 }))
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-vi.mock('@/components/Skeleton', () => ({ SkeletonGrid: () => <div data-testid="skeleton-grid" /> }))
+vi.mock('@/components/Skeleton', () => ({
+  SkeletonGrid: () => <div data-testid="skeleton-grid" />,
+}))
 
 const mutate = vi.fn()
 let swrResponses: Record<string, Record<string, unknown>> = {}
@@ -281,7 +288,9 @@ describe('ExplorerWorkbench', () => {
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
-    expect(screen.getByRole('main').className).toContain('h-[calc(100dvh-7rem-var(--sab)-var(--sat)/2)]')
+    expect(screen.getByRole('main').className).toContain(
+      'h-[calc(100dvh-7rem-var(--sab)-var(--sat)/2)]',
+    )
     const contentPane = document.querySelector('[data-explorer-content-pane]')
     expect(contentPane?.className).toContain('h-full')
     expect(contentPane?.parentElement?.className).toContain('overflow-hidden')
@@ -345,7 +354,13 @@ describe('ExplorerWorkbench', () => {
     await (call.fetcher as (key: unknown) => Promise<unknown>)(call.key)
     expect(api.explorer.galleryImages).toHaveBeenCalledWith(
       1,
-      expect.objectContaining({ visibility: 'active', media: 'all', sort: 'page', direction: 'asc', offset: 0 }),
+      expect.objectContaining({
+        visibility: 'active',
+        media: 'all',
+        sort: 'page',
+        direction: 'asc',
+        offset: 0,
+      }),
     )
   })
 
@@ -359,14 +374,21 @@ describe('ExplorerWorkbench', () => {
 
     const menu = await screen.findByRole('menu')
     expect(within(menu).getByRole('menuitem', { name: 'explorer.hideImages' })).toBeEnabled()
-    expect(within(menu).getByRole('menuitem', { name: 'explorer.purgeImages' })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(menu).getByRole('menuitem', { name: 'explorer.purgeImages' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
     // Right-click on an unselected tile selects it first.
     expect(imageTiles()[0].getAttribute('aria-pressed')).toBe('true')
   })
 
   it('hides the selected images with the batch hide API', async () => {
     showGalleryImages()
-    vi.mocked(api.library.hideImagesBatch).mockResolvedValue({ status: 'ok', hidden: 2, remaining_pages: 0 })
+    vi.mocked(api.library.hideImagesBatch).mockResolvedValue({
+      status: 'ok',
+      hidden: 2,
+      remaining_pages: 0,
+    })
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
@@ -374,20 +396,28 @@ describe('ExplorerWorkbench', () => {
     fireEvent.click(imageTiles()[1], { ctrlKey: true })
     fireEvent.click(screen.getByTestId('action-hide'))
 
-    await waitFor(() => expect(api.library.hideImagesBatch).toHaveBeenCalledWith('local', 'one', [11, 12]))
+    await waitFor(() =>
+      expect(api.library.hideImagesBatch).toHaveBeenCalledWith('local', 'one', [11, 12]),
+    )
     await waitFor(() => expect(mutate).toHaveBeenCalled())
   })
 
   it('hides an image from the context menu', async () => {
     showGalleryImages()
-    vi.mocked(api.library.hideImagesBatch).mockResolvedValue({ status: 'ok', hidden: 1, remaining_pages: 1 })
+    vi.mocked(api.library.hideImagesBatch).mockResolvedValue({
+      status: 'ok',
+      hidden: 1,
+      remaining_pages: 1,
+    })
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
     fireEvent.contextMenu(imageTiles()[1])
     fireEvent.click(await screen.findByRole('menuitem', { name: 'explorer.hideImages' }))
 
-    await waitFor(() => expect(api.library.hideImagesBatch).toHaveBeenCalledWith('local', 'one', [12]))
+    await waitFor(() =>
+      expect(api.library.hideImagesBatch).toHaveBeenCalledWith('local', 'one', [12]),
+    )
   })
 
   it('keeps Purge disabled when the selection includes an active image', async () => {
@@ -407,7 +437,9 @@ describe('ExplorerWorkbench', () => {
     showGalleryImages()
     vi.mocked(api.explorer.purgeImages)
       .mockResolvedValueOnce(purgeResult() as never)
-      .mockResolvedValueOnce(purgeResult({ dry_run: false, purged: 1, purgeable: 1, blobs_deleted: 1 }) as never)
+      .mockResolvedValueOnce(
+        purgeResult({ dry_run: false, purged: 1, purgeable: 1, blobs_deleted: 1 }) as never,
+      )
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
@@ -418,18 +450,26 @@ describe('ExplorerWorkbench', () => {
     await waitFor(() => expect(screen.getByTestId('purge-purgeable').textContent).toBe('1'))
     expect(screen.getByTestId('purge-reclaim').textContent).toBe('700 B')
     expect(api.explorer.purgeImages).toHaveBeenCalledTimes(1)
-    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(1, 1, { image_ids: [13], dry_run: true })
+    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(1, 1, {
+      image_ids: [13],
+      dry_run: true,
+    })
 
     fireEvent.click(screen.getByTestId('purge-confirm'))
     await waitFor(() => expect(api.explorer.purgeImages).toHaveBeenCalledTimes(2))
-    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(2, 1, { image_ids: [13], dry_run: false })
+    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(2, 1, {
+      image_ids: [13],
+      dry_run: false,
+    })
     await waitFor(() => expect(screen.queryByTestId('purge-dialog')).toBeNull())
     expect(mutate).toHaveBeenCalled()
   })
 
   it('does not enable the purge confirmation when the dry run finds nothing purgeable', async () => {
     showGalleryImages()
-    vi.mocked(api.explorer.purgeImages).mockResolvedValue(purgeResult({ purgeable: 0, skipped_external: 1 }) as never)
+    vi.mocked(api.explorer.purgeImages).mockResolvedValue(
+      purgeResult({ purgeable: 0, skipped_external: 1 }) as never,
+    )
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
@@ -452,9 +492,17 @@ describe('ExplorerWorkbench', () => {
     fireEvent.click(screen.getByTestId('empty-hidden'))
 
     await waitFor(() => expect(screen.getByTestId('purge-purgeable').textContent).toBe('4'))
-    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(1, 1, { all_hidden: true, dry_run: true })
+    expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(1, 1, {
+      all_hidden: true,
+      dry_run: true,
+    })
     fireEvent.click(screen.getByTestId('purge-confirm'))
-    await waitFor(() => expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(2, 1, { all_hidden: true, dry_run: false }))
+    await waitFor(() =>
+      expect(api.explorer.purgeImages).toHaveBeenNthCalledWith(2, 1, {
+        all_hidden: true,
+        dry_run: false,
+      }),
+    )
   })
 
   it('offers no hide or purge controls to a read-only collaborator', async () => {
@@ -517,7 +565,10 @@ describe('ExplorerWorkbench', () => {
     })
     const last = swrCalls.findLast((entry) => entry.name === 'explorer-gallery-images')!
     await (last.fetcher as (key: unknown) => Promise<unknown>)(last.key)
-    expect(api.explorer.galleryImages).toHaveBeenCalledWith(1, expect.objectContaining({ sort: 'size', direction: 'desc' }))
+    expect(api.explorer.galleryImages).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ sort: 'size', direction: 'desc' }),
+    )
   })
 
   it('renders the empty inspector without requesting metadata history', async () => {
@@ -568,7 +619,9 @@ describe('ExplorerWorkbench', () => {
     const localCards = screen.getAllByText('Local')
 
     fireEvent.click(localCards[localCards.length - 1])
-    await waitFor(() => expect(commit).toHaveBeenCalledWith(expect.stringContaining('kind=source'), 'push'))
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(expect.stringContaining('kind=source'), 'push'),
+    )
     expect(screen.queryByText('explorer.selectedCount')).toBeNull()
   })
 
@@ -584,7 +637,10 @@ describe('ExplorerWorkbench', () => {
 
     fireEvent.click(screen.getByLabelText('explorer.toggleSelection'))
     expect(screen.getByText('explorer.selectedCount')).toBeDefined()
-    expect(commit).not.toHaveBeenCalledWith(expect.stringContaining('kind=source'), expect.anything())
+    expect(commit).not.toHaveBeenCalledWith(
+      expect.stringContaining('kind=source'),
+      expect.anything(),
+    )
   })
 
   it('supports Gallery multi-selection from the item icon in mobile list view', async () => {
@@ -601,7 +657,10 @@ describe('ExplorerWorkbench', () => {
 
     fireEvent.click(screen.getAllByLabelText('explorer.toggleSelection')[0])
     expect(screen.getByText('explorer.selectedCount')).toBeDefined()
-    expect(commit).not.toHaveBeenCalledWith(expect.stringContaining('kind=gallery'), expect.anything())
+    expect(commit).not.toHaveBeenCalledWith(
+      expect.stringContaining('kind=gallery'),
+      expect.anything(),
+    )
   })
 
   it('persists the column layout per device', async () => {
@@ -633,15 +692,23 @@ describe('ExplorerWorkbench', () => {
     currentParams = 'kind=source&id=local&label=Local'
     swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    vi.mocked(api.explorer.createSelection).mockResolvedValue({ selection_token: 'token-old', count: 500, expires_in: 1800 })
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({
+      selection_token: 'token-old',
+      count: 500,
+      expires_in: 1800,
+    })
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
     fireEvent.click(screen.getByText('explorer.selectAllResults'))
     await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
 
-    fireEvent.change(screen.getByPlaceholderText('explorer.searchPlaceholder'), { target: { value: 'needle' } })
-    await waitFor(() => expect(commit).toHaveBeenCalledWith(expect.stringContaining('q=needle'), 'replace'))
+    fireEvent.change(screen.getByPlaceholderText('explorer.searchPlaceholder'), {
+      target: { value: 'needle' },
+    })
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(expect.stringContaining('q=needle'), 'replace'),
+    )
 
     await waitFor(() => expect(screen.queryByText('explorer.selectedCount')).toBeNull())
     fireEvent.keyDown(window, { key: 'Delete' })
@@ -651,14 +718,20 @@ describe('ExplorerWorkbench', () => {
   it('a sort change keeps the query-wide selection (same result set)', async () => {
     currentParams = 'kind=source&id=local&label=Local'
     swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
-    vi.mocked(api.explorer.createSelection).mockResolvedValue({ selection_token: 'token-1', count: 2, expires_in: 1800 })
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({
+      selection_token: 'token-1',
+      count: 2,
+      expires_in: 1800,
+    })
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
     fireEvent.click(screen.getByText('explorer.selectAllResults'))
     await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
     fireEvent.change(screen.getByLabelText('explorer.sortBy'), { target: { value: 'title' } })
-    await waitFor(() => expect(commit).toHaveBeenCalledWith(expect.stringContaining('sort=title'), 'replace'))
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(expect.stringContaining('sort=title'), 'replace'),
+    )
     expect(screen.getByText('explorer.selectedCount')).toBeDefined()
   })
 
@@ -722,7 +795,9 @@ describe('ExplorerWorkbench', () => {
     await waitFor(() => expect(api.explorer.createSelection).toHaveBeenCalled())
     await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
     fireEvent.keyDown(window, { key: 'F2' })
-    await waitFor(() => expect(screen.getByRole('dialog', { name: 'explorer.editMetadata' })).toBeDefined())
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: 'explorer.editMetadata' })).toBeDefined(),
+    )
   })
 
   it('moves focus within the navigation pane with ArrowDown', async () => {
@@ -748,7 +823,9 @@ describe('ExplorerWorkbench', () => {
     sectionButton.focus()
 
     fireEvent.keyDown(sectionButton, { key: 'ArrowRight' })
-    await waitFor(() => expect(document.activeElement).toBe(within(items!).getAllByRole('button')[0]))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(items!).getAllByRole('button')[0]),
+    )
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
     expect(document.activeElement).toBe(sectionButton)
   })
@@ -761,9 +838,15 @@ describe('ExplorerWorkbench', () => {
     navigationButton.focus()
 
     fireEvent.keyDown(navigationButton, { key: 'F6' })
-    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-explorer-item][tabindex="0"]')))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        document.querySelector('[data-explorer-item][tabindex="0"]'),
+      ),
+    )
     fireEvent.keyDown(document.activeElement!, { key: 'F6' })
-    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-explorer-inspector]')))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.querySelector('[data-explorer-inspector]')),
+    )
     fireEvent.keyDown(document.activeElement!, { key: 'F6' })
     expect(document.activeElement?.closest('[data-explorer-navigation]')).toBe(navigation)
   })
@@ -794,7 +877,9 @@ describe('ExplorerWorkbench', () => {
     fireEvent.keyDown(window, { key: ' ' })
     await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
     fireEvent.keyDown(window, { key: 'Delete' })
-    await waitFor(() => expect(api.explorer.deleteSelection).toHaveBeenCalledWith({ gallery_ids: [1] }))
+    await waitFor(() =>
+      expect(api.explorer.deleteSelection).toHaveBeenCalledWith({ gallery_ids: [1] }),
+    )
   })
 
   it('returns to the Workbench root with Backspace', async () => {
@@ -831,10 +916,23 @@ describe('ExplorerWorkbench', () => {
 
   async function openMetadataForTwoGalleries(categories: [string | null, string | null]) {
     currentParams = 'kind=source&id=local&label=Local'
-    swrResponses['explorer-roots'] = { data: categoryRoots, error: undefined, isLoading: false, mutate }
-    swrResponses['gallery-categories'] = { data: categoryRegistry, error: undefined, isLoading: false, mutate }
+    swrResponses['explorer-roots'] = {
+      data: categoryRoots,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
+    swrResponses['gallery-categories'] = {
+      data: categoryRegistry,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
     swrResponses['explorer-query'] = {
-      data: { ...galleries, items: galleries.items.map((item, index) => ({ ...item, category: categories[index] })) },
+      data: {
+        ...galleries,
+        items: galleries.items.map((item, index) => ({ ...item, category: categories[index] })),
+      },
       error: undefined,
       isLoading: false,
       mutate,
@@ -849,7 +947,12 @@ describe('ExplorerWorkbench', () => {
   }
 
   it('renders the Categories section with counts and the Uncategorized entry from roots', async () => {
-    swrResponses['explorer-roots'] = { data: categoryRoots, error: undefined, isLoading: false, mutate }
+    swrResponses['explorer-roots'] = {
+      data: categoryRoots,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
@@ -858,11 +961,18 @@ describe('ExplorerWorkbench', () => {
     const uncategorized = within(tree).getByText('explorer.uncategorized').closest('button')!
     expect(within(uncategorized).getByText('3')).toBeDefined()
     expect(within(tree).getByText('Cosplay').closest('button')!.textContent).toContain('5')
-    expect(within(tree).getByText('Legacy').closest('button')!.getAttribute('title')).toBe('explorer.unregisteredCategory')
+    expect(within(tree).getByText('Legacy').closest('button')!.getAttribute('title')).toBe(
+      'explorer.unregisteredCategory',
+    )
   })
 
   it('clicking Uncategorized queries node_kind category with the __uncategorized__ sentinel', async () => {
-    swrResponses['explorer-roots'] = { data: categoryRoots, error: undefined, isLoading: false, mutate }
+    swrResponses['explorer-roots'] = {
+      data: categoryRoots,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     const view = render(<ExplorerPage />)
 
@@ -879,7 +989,10 @@ describe('ExplorerWorkbench', () => {
     swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
     render(<ExplorerPage />)
     const last = swrCalls.findLast((entry) => entry.name === 'explorer-query' && entry.key)!
-    expect(JSON.parse((last.key as string[])[1])).toMatchObject({ node_kind: 'category', node_id: '__uncategorized__' })
+    expect(JSON.parse((last.key as string[])[1])).toMatchObject({
+      node_kind: 'category',
+      node_id: '__uncategorized__',
+    })
   })
 
   const facetGalleries = {
@@ -889,21 +1002,39 @@ describe('ExplorerWorkbench', () => {
 
   async function renderSourceWithFacets() {
     currentParams = 'kind=source&id=local&label=Local'
-    swrResponses['gallery-categories'] = { data: categoryRegistry, error: undefined, isLoading: false, mutate }
-    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    swrResponses['gallery-categories'] = {
+      data: categoryRegistry,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
+    swrResponses['explorer-query'] = {
+      data: facetGalleries,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
   }
 
   it('choosing Uncategorized in a source node sends category and facets in the query and writes cat to the URL', async () => {
     await renderSourceWithFacets()
-    fireEvent.change(screen.getByTestId('category-filter'), { target: { value: '__uncategorized__' } })
+    fireEvent.change(screen.getByTestId('category-filter'), {
+      target: { value: '__uncategorized__' },
+    })
 
     await waitFor(() => {
       const last = swrCalls.findLast((entry) => entry.name === 'explorer-query')!
-      expect(JSON.parse((last.key as string[])[1])).toMatchObject({ category: '__uncategorized__', facets: true, offset: 0 })
+      expect(JSON.parse((last.key as string[])[1])).toMatchObject({
+        category: '__uncategorized__',
+        facets: true,
+        offset: 0,
+      })
     })
-    await waitFor(() => expect(commit.mock.calls.at(-1)?.[0] as string).toContain('cat=__uncategorized__'))
+    await waitFor(() =>
+      expect(commit.mock.calls.at(-1)?.[0] as string).toContain('cat=__uncategorized__'),
+    )
     expect(commit.mock.calls.at(-1)?.[1]).toBe('replace')
   })
 
@@ -921,7 +1052,12 @@ describe('ExplorerWorkbench', () => {
 
   it('restores the category filter from the cat URL param on load', async () => {
     currentParams = 'kind=source&id=local&label=Local&cat=Cosplay'
-    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    swrResponses['explorer-query'] = {
+      data: facetGalleries,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
     expect((screen.getByTestId('category-filter') as HTMLSelectElement).value).toBe('Cosplay')
@@ -931,7 +1067,12 @@ describe('ExplorerWorkbench', () => {
 
   it('hides the category filter in a category node', async () => {
     currentParams = 'kind=category&id=Cosplay&label=Cosplay'
-    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+    swrResponses['explorer-query'] = {
+      data: facetGalleries,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
     expect(screen.getByLabelText('explorer.sortBy')).toBeDefined()
@@ -940,18 +1081,34 @@ describe('ExplorerWorkbench', () => {
 
   it('query-wide select-all passes the active category to createSelection', async () => {
     currentParams = 'kind=source&id=local&label=Local&cat=Cosplay'
-    swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
-    vi.mocked(api.explorer.createSelection).mockResolvedValue({ selection_token: 'token-1', count: 2, expires_in: 1800 })
+    swrResponses['explorer-query'] = {
+      data: facetGalleries,
+      error: undefined,
+      isLoading: false,
+      mutate,
+    }
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({
+      selection_token: 'token-1',
+      count: 2,
+      expires_in: 1800,
+    })
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
     fireEvent.click(screen.getByText('explorer.selectAllResults'))
     await waitFor(() => expect(api.explorer.createSelection).toHaveBeenCalled())
-    expect(vi.mocked(api.explorer.createSelection).mock.calls[0][0]).toMatchObject({ category: 'Cosplay' })
+    expect(vi.mocked(api.explorer.createSelection).mock.calls[0][0]).toMatchObject({
+      category: 'Cosplay',
+    })
   })
 
   it('metadata dialog category is a select of registry names and submits mode set with the chosen value', async () => {
-    vi.mocked(api.explorer.bulkMetadata).mockResolvedValue({ operation_id: 'op', status: 'done', selection_count: 2, changed_fields: 2 })
+    vi.mocked(api.explorer.bulkMetadata).mockResolvedValue({
+      operation_id: 'op',
+      status: 'done',
+      selection_count: 2,
+      changed_fields: 2,
+    })
     const dialog = await openMetadataForTwoGalleries(['Manga', 'Manga'])
     const select = within(dialog).getByLabelText('category') as HTMLSelectElement
     expect(select.tagName).toBe('SELECT')
@@ -963,7 +1120,10 @@ describe('ExplorerWorkbench', () => {
     fireEvent.click(within(dialog).getByText('common.save'))
 
     await waitFor(() => expect(api.explorer.bulkMetadata).toHaveBeenCalled())
-    expect(vi.mocked(api.explorer.bulkMetadata).mock.calls[0][0].fields.category).toEqual({ mode: 'set', value: 'Cosplay' })
+    expect(vi.mocked(api.explorer.bulkMetadata).mock.calls[0][0].fields.category).toEqual({
+      mode: 'set',
+      value: 'Cosplay',
+    })
   })
 
   it('metadata dialog cannot submit an empty category with mode set when the selection has mixed categories', async () => {
@@ -989,8 +1149,18 @@ describe('ExplorerWorkbench', () => {
     function showSourceList(params: string) {
       currentParams = params
       swrResponses['explorer-roots'] = { data: roots, error: undefined, isLoading: false, mutate }
-      swrResponses['gallery-categories'] = { data: categoryRegistry, error: undefined, isLoading: false, mutate }
-      swrResponses['explorer-query'] = { data: facetGalleries, error: undefined, isLoading: false, mutate }
+      swrResponses['gallery-categories'] = {
+        data: categoryRegistry,
+        error: undefined,
+        isLoading: false,
+        mutate,
+      }
+      swrResponses['explorer-query'] = {
+        data: facetGalleries,
+        error: undefined,
+        isLoading: false,
+        mutate,
+      }
     }
 
     async function renderExplorer() {
@@ -1036,7 +1206,12 @@ describe('ExplorerWorkbench', () => {
       const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
       swrResponses['explorer-roots'] = { data: roots, error: undefined, isLoading: false, mutate }
       currentParams = `${GALLERY_PARAMS}&cat=__uncategorized__&sort=title&dir=asc`
-      swrResponses['explorer-gallery-images'] = { data: galleryImages(), error: undefined, isLoading: false, mutate }
+      swrResponses['explorer-gallery-images'] = {
+        data: galleryImages(),
+        error: undefined,
+        isLoading: false,
+        mutate,
+      }
       await renderExplorer()
 
       fireEvent.click(screen.getByText('explorer.backToRoot'))
@@ -1080,8 +1255,12 @@ describe('ExplorerWorkbench', () => {
       expect(lastCommit()[1]).toBe('replace')
       fireEvent.click(screen.getByLabelText('explorer.listView'))
       expect(lastCommit()[1]).toBe('replace')
-      fireEvent.change(screen.getByPlaceholderText('explorer.searchPlaceholder'), { target: { value: 'abc' } })
-      await waitFor(() => expect(new URLSearchParams(lastCommit()[0].split('?')[1]).get('q')).toBe('abc'))
+      fireEvent.change(screen.getByPlaceholderText('explorer.searchPlaceholder'), {
+        target: { value: 'abc' },
+      })
+      await waitFor(() =>
+        expect(new URLSearchParams(lastCommit()[0].split('?')[1]).get('q')).toBe('abc'),
+      )
       expect(lastCommit()[1]).toBe('replace')
       expect(commit.mock.calls.every(([, mode]) => mode === 'replace')).toBe(true)
       expect(replace).not.toHaveBeenCalled()
@@ -1142,7 +1321,11 @@ describe('ExplorerWorkbench', () => {
     it('explorer_stale_cat_param_does_not_filter_a_category_node', async () => {
       showSourceList('kind=category&id=Cosplay&label=Cosplay&cat=Manga')
       await renderExplorer()
-      expect(lastQuerySpec()).toMatchObject({ node_kind: 'category', node_id: 'Cosplay', category: null })
+      expect(lastQuerySpec()).toMatchObject({
+        node_kind: 'category',
+        node_id: 'Cosplay',
+        category: null,
+      })
     })
 
     it('explorer_sort_and_direction_persist_in_url_across_reload', async () => {
@@ -1171,17 +1354,28 @@ describe('ExplorerWorkbench', () => {
 
     it('explorer_image_pane_filters_restore_from_url_after_reader_round_trip', async () => {
       swrResponses['explorer-roots'] = { data: roots, error: undefined, isLoading: false, mutate }
-      swrResponses['explorer-gallery-images'] = { data: galleryImages(), error: undefined, isLoading: false, mutate }
+      swrResponses['explorer-gallery-images'] = {
+        data: galleryImages(),
+        error: undefined,
+        isLoading: false,
+        mutate,
+      }
       currentParams = `${GALLERY_PARAMS}&ivis=hidden&imedia=video&isort=size&idir=desc&ioffset=200`
       await renderExplorer()
 
-      expect((screen.getByLabelText('explorer.filterVisibility') as HTMLSelectElement).value).toBe('hidden')
-      expect((screen.getByLabelText('explorer.filterMedia') as HTMLSelectElement).value).toBe('video')
+      expect((screen.getByLabelText('explorer.filterVisibility') as HTMLSelectElement).value).toBe(
+        'hidden',
+      )
+      expect((screen.getByLabelText('explorer.filterMedia') as HTMLSelectElement).value).toBe(
+        'video',
+      )
       const call = swrCalls.findLast((entry) => entry.name === 'explorer-gallery-images')!
       expect((call.key as unknown[]).slice(2)).toEqual(['hidden', 'video', 'size', 'desc', 200])
 
       // A filter change replaces the entry the Reader will return to; defaults leave the URL.
-      fireEvent.change(screen.getByLabelText('explorer.filterVisibility'), { target: { value: 'active' } })
+      fireEvent.change(screen.getByLabelText('explorer.filterVisibility'), {
+        target: { value: 'active' },
+      })
       expect(lastCommit()[1]).toBe('replace')
       const params = new URLSearchParams(currentParams)
       expect(params.has('ivis')).toBe(false)
@@ -1196,8 +1390,12 @@ describe('ExplorerWorkbench', () => {
       beforeEach(() => {
         Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
           configurable: true,
-          get() { return scrollTops.get(this) ?? 0 },
-          set(value: number) { scrollTops.set(this, value) },
+          get() {
+            return scrollTops.get(this) ?? 0
+          },
+          set(value: number) {
+            scrollTops.set(this, value)
+          },
         })
       })
 
@@ -1211,7 +1409,9 @@ describe('ExplorerWorkbench', () => {
         showSourceList(FILTERED_SOURCE)
         await renderExplorer()
 
-        const container = document.querySelector<HTMLElement>('[data-explorer-content-pane] .overflow-y-auto')!
+        const container = document.querySelector<HTMLElement>(
+          '[data-explorer-content-pane] .overflow-y-auto',
+        )!
         expect(container.scrollTop).toBe(480)
       })
 
@@ -1219,18 +1419,25 @@ describe('ExplorerWorkbench', () => {
         showSourceList(FILTERED_SOURCE)
         await renderExplorer()
         const listUrl = `/explorer?${new URLSearchParams(FILTERED_SOURCE).toString()}`
-        const container = document.querySelector<HTMLElement>('[data-explorer-content-pane] .overflow-y-auto')!
+        const container = document.querySelector<HTMLElement>(
+          '[data-explorer-content-pane] .overflow-y-auto',
+        )!
         container.scrollTop = 321
 
         fireEvent.doubleClick(screen.getByText('Gallery One'))
-        const saved = JSON.parse(sessionStorage.getItem('explorer:scroll') ?? '[]') as Array<[string, number]>
+        const saved = JSON.parse(sessionStorage.getItem('explorer:scroll') ?? '[]') as Array<
+          [string, number]
+        >
         expect(saved).toContainEqual([listUrl, 321])
       })
 
       it('explorer_scroll_entries_are_capped_to_the_most_recent_thirty', async () => {
         const { saveScroll } = await import('@/hooks/explorerHistory')
-        for (let index = 1; index <= 45; index += 1) saveScroll(`/explorer?offset=${index}`, 10 * index)
-        const saved = JSON.parse(sessionStorage.getItem('explorer:scroll') ?? '[]') as Array<[string, number]>
+        for (let index = 1; index <= 45; index += 1)
+          saveScroll(`/explorer?offset=${index}`, 10 * index)
+        const saved = JSON.parse(sessionStorage.getItem('explorer:scroll') ?? '[]') as Array<
+          [string, number]
+        >
         expect(saved).toHaveLength(30)
         expect(saved[0][0]).toBe('/explorer?offset=16')
       })

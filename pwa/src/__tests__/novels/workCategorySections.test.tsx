@@ -9,7 +9,15 @@ vi.mock('next/navigation', () => ({
 const listWorkFiles = vi.fn().mockResolvedValue({
   files: [{ path: '作品A/Old/01.md', name: '01', chars: 10, mtime: 0, category: 'scrap' }],
 })
-vi.mock('@/lib/api', () => ({ api: { novels: { get listWorkFiles() { return listWorkFiles } } } }))
+vi.mock('@/lib/api', () => ({
+  api: {
+    novels: {
+      get listWorkFiles() {
+        return listWorkFiles
+      },
+    },
+  },
+}))
 
 describe('WorkCategorySection', () => {
   it('renders nothing when the category is empty', () => {

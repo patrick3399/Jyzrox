@@ -568,13 +568,13 @@ async def test_outline_endpoint_reports_where_an_outline_goes_when_absent(viewer
     r = await viewer_client.get("/api/novels/works/作品A/outline")
     assert r.status_code == 200
     body = r.json()
-    assert body == {"path": None, "canonical_path": "作品A/參考/大綱.md", "nodes": []}
+    assert body == {"path": None, "canonical_path": "作品A/Setting/大綱.md", "nodes": []}
 
 
 async def test_outline_endpoint_links_nodes_to_existing_chapters(member_client, novel_repo):
     """A node whose chapter exists links to it; the rest is the unwritten plan."""
-    (novel_repo["work"] / "作品A" / "參考").mkdir(parents=True)
-    (novel_repo["work"] / "作品A" / "參考" / "大綱.md").write_text(
+    (novel_repo["work"] / "作品A" / "Setting").mkdir(parents=True)
+    (novel_repo["work"] / "作品A" / "Setting" / "大綱.md").write_text(
         "### 第1章：開場\n**項目狀態：** 已寫\n\n*   **第一幕：抵達**\n\n### 第2章：未寫\n構想中。\n",
         encoding="utf-8",
     )
@@ -585,7 +585,7 @@ async def test_outline_endpoint_links_nodes_to_existing_chapters(member_client, 
     r = await member_client.get("/api/novels/works/作品A/outline")
     assert r.status_code == 200
     body = r.json()
-    assert body["path"] == "作品A/參考/大綱.md"
+    assert body["path"] == "作品A/Setting/大綱.md"
     assert [n["chapter_no"] for n in body["nodes"]] == [1, 2]
     assert body["nodes"][0]["chapter_path"] == "作品A/01.md"
     assert [b["title"] for b in body["nodes"][0]["beats"]] == ["第一幕：抵達"]
@@ -614,7 +614,7 @@ async def test_reset_allowed_for_admin(admin_client, novel_repo):
 def _make_indexed_repo(root):
     w = root / "作品A"
     (w / "Setting").mkdir(parents=True)
-    (w / "Setting" / "角色-張三.md").write_text(
+    (w / "Setting" / "設定-張三.md").write_text(
         "---\ntype: character\naliases: [小三]\ntags: [第一卷]\n---\n# 張三\n設定", encoding="utf-8"
     )
     (w / "01.md").write_text("張三與小三在此。", encoding="utf-8")
@@ -663,8 +663,17 @@ async def test_notes_filter_by_type_excludes_nonmatching(viewer_client, seed_ind
     assert r.json()["notes"] == []
 
 
+async def test_notes_carry_the_derived_aliases(viewer_client, seed_index):
+    """The reader links entity names from this list; without the server-derived
+    aliases it only had titles, which never appear in the prose."""
+    r = await viewer_client.get("/api/novels/notes")
+    assert r.status_code == 200
+    (note,) = r.json()["notes"]
+    assert note["aliases"] == ["張三", "小三"]
+
+
 async def test_appearances_ordered_by_chapter(viewer_client, seed_index):
-    r = await viewer_client.get("/api/novels/notes/appearances", params={"path": "作品A/Setting/角色-張三.md"})
+    r = await viewer_client.get("/api/novels/notes/appearances", params={"path": "作品A/Setting/設定-張三.md"})
     assert r.status_code == 200
     aps = r.json()["appearances"]
     chapters = [a["chapter_path"] for a in aps]

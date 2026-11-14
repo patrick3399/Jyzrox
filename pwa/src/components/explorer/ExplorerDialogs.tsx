@@ -41,7 +41,15 @@ export function Modal({
   )
 }
 
-const METADATA_FIELDS = ['title', 'title_jpn', 'category', 'language', 'artist_id', 'uploader', 'visibility'] as const
+const METADATA_FIELDS = [
+  'title',
+  'title_jpn',
+  'category',
+  'language',
+  'artist_id',
+  'uploader',
+  'visibility',
+] as const
 
 export function MetadataDialog({
   selection,
@@ -59,31 +67,44 @@ export function MetadataDialog({
   const [saving, setSaving] = useState(false)
   const { data: categoryRegistry } = useCategoryRegistry()
   const categoryNames = useMemo(
-    () => [...(categoryRegistry?.categories ?? [])].sort((a, b) => a.sort_order - b.sort_order).map((item) => item.name),
+    () =>
+      [...(categoryRegistry?.categories ?? [])]
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((item) => item.name),
     [categoryRegistry],
   )
   const commonValues = useMemo(
-    () => Object.fromEntries(
-      METADATA_FIELDS.map((field) => [
-        field,
-        selection.length > 0 && selection.every((item) => String(item[field] ?? '') === String(selection[0][field] ?? ''))
-          ? String(selection[0][field] ?? '')
-          : '',
-      ]),
-    ),
+    () =>
+      Object.fromEntries(
+        METADATA_FIELDS.map((field) => [
+          field,
+          selection.length > 0 &&
+          selection.every((item) => String(item[field] ?? '') === String(selection[0][field] ?? ''))
+            ? String(selection[0][field] ?? '')
+            : '',
+        ]),
+      ),
     [selection],
   )
 
-  const categoryMixed = selection.length > 0 && !selection.every((item) => (item.category ?? '') === (selection[0].category ?? ''))
-  const categoryValue = values.category ?? (categoryNames.includes(commonValues.category) ? commonValues.category : '')
-  const categoryInvalid = (modes.category || 'keep') === 'set' && !categoryNames.includes(categoryValue)
+  const categoryMixed =
+    selection.length > 0 &&
+    !selection.every((item) => (item.category ?? '') === (selection[0].category ?? ''))
+  const categoryValue =
+    values.category ?? (categoryNames.includes(commonValues.category) ? commonValues.category : '')
+  const categoryInvalid =
+    (modes.category || 'keep') === 'set' && !categoryNames.includes(categoryValue)
 
   const submit = async () => {
     if (categoryInvalid) return
     const fields: Record<string, { mode: 'set' | 'clear'; value?: string }> = {}
     for (const field of METADATA_FIELDS) {
       const mode = modes[field] || 'keep'
-      if (mode === 'set') fields[field] = { mode, value: field === 'category' ? categoryValue : values[field] ?? commonValues[field] }
+      if (mode === 'set')
+        fields[field] = {
+          mode,
+          value: field === 'category' ? categoryValue : (values[field] ?? commonValues[field]),
+        }
       if (mode === 'clear') fields[field] = { mode }
     }
     if (Object.keys(fields).length === 0) return
@@ -107,11 +128,17 @@ export function MetadataDialog({
   }
 
   return (
-    <Modal title={t('explorer.editMetadata')} onClose={onClose}
+    <Modal
+      title={t('explorer.editMetadata')}
+      onClose={onClose}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button variant="primary" disabled={saving || categoryInvalid} onClick={submit}>{saving ? t('common.loading') : t('common.save')}</Button>
+          <Button variant="ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="primary" disabled={saving || categoryInvalid} onClick={submit}>
+            {saving ? t('common.loading') : t('common.save')}
+          </Button>
         </>
       }
     >
@@ -124,7 +151,12 @@ export function MetadataDialog({
               <select
                 aria-label={`${field} mode`}
                 value={modes[field] || 'keep'}
-                onChange={(event) => setModes((current) => ({ ...current, [field]: event.target.value as 'keep' | 'set' | 'clear' }))}
+                onChange={(event) =>
+                  setModes((current) => ({
+                    ...current,
+                    [field]: event.target.value as 'keep' | 'set' | 'clear',
+                  }))
+                }
                 className="rounded-md border border-vault-border bg-vault-bg px-2 py-2 text-sm text-vault-text"
               >
                 <option value="keep">{t('explorer.keep')}</option>
@@ -136,23 +168,34 @@ export function MetadataDialog({
                   aria-label={field}
                   disabled={(modes[field] || 'keep') !== 'set'}
                   value={values[field] || common || 'public'}
-                  onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
+                  onChange={(event) =>
+                    setValues((current) => ({ ...current, [field]: event.target.value }))
+                  }
                   className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text disabled:opacity-50"
                 >
-                  <option value="public">{t('explorer.visibilityPublic')}</option><option value="private">{t('explorer.visibilityPrivate')}</option>
+                  <option value="public">{t('explorer.visibilityPublic')}</option>
+                  <option value="private">{t('explorer.visibilityPrivate')}</option>
                 </select>
               ) : field === 'category' ? (
                 <select
                   aria-label={field}
                   disabled={(modes[field] || 'keep') !== 'set'}
                   value={categoryValue}
-                  onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
+                  onChange={(event) =>
+                    setValues((current) => ({ ...current, [field]: event.target.value }))
+                  }
                   className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text disabled:opacity-50"
                 >
                   {!categoryNames.includes(categoryValue) && (
-                    <option value="" disabled>{categoryMixed ? t('explorer.mixedValues') : t('explorer.chooseCategory')}</option>
+                    <option value="" disabled>
+                      {categoryMixed ? t('explorer.mixedValues') : t('explorer.chooseCategory')}
+                    </option>
                   )}
-                  {categoryNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                  {categoryNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
                 </select>
               ) : (
                 <input
@@ -160,7 +203,9 @@ export function MetadataDialog({
                   disabled={(modes[field] || 'keep') !== 'set'}
                   defaultValue={common}
                   placeholder={common ? undefined : t('explorer.mixedValues')}
-                  onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
+                  onChange={(event) =>
+                    setValues((current) => ({ ...current, [field]: event.target.value }))
+                  }
                   className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text disabled:opacity-50"
                 />
               )}
@@ -172,29 +217,50 @@ export function MetadataDialog({
   )
 }
 
-export function MergeDialog({ selection, onClose, onDone }: { selection: ExplorerGalleryItem[]; onClose: () => void; onDone: () => void }) {
+export function MergeDialog({
+  selection,
+  onClose,
+  onDone,
+}: {
+  selection: ExplorerGalleryItem[]
+  onClose: () => void
+  onDone: () => void
+}) {
   const [targetId, setTargetId] = useState(selection[0]?.id ?? 0)
-  const [preview, setPreview] = useState<Awaited<ReturnType<typeof api.explorer.mergePreview>> | null>(null)
+  const [preview, setPreview] = useState<Awaited<
+    ReturnType<typeof api.explorer.mergePreview>
+  > | null>(null)
   const [scalarSources, setScalarSources] = useState<Record<string, number>>({})
   const [working, setWorking] = useState(false)
 
   useEffect(() => {
     let active = true
     setPreview(null)
-    api.explorer.mergePreview({ gallery_ids: selection.map((item) => item.id), target_id: targetId })
+    api.explorer
+      .mergePreview({ gallery_ids: selection.map((item) => item.id), target_id: targetId })
       .then((value) => {
         if (!active) return
         setPreview(value)
-        setScalarSources(Object.fromEntries(Object.keys(value.scalar_conflicts).map((field) => [field, targetId])))
+        setScalarSources(
+          Object.fromEntries(Object.keys(value.scalar_conflicts).map((field) => [field, targetId])),
+        )
       })
-      .catch((error) => toast.error(error instanceof Error ? error.message : t('common.errorOccurred')))
-    return () => { active = false }
+      .catch((error) =>
+        toast.error(error instanceof Error ? error.message : t('common.errorOccurred')),
+      )
+    return () => {
+      active = false
+    }
   }, [selection, targetId])
 
   const merge = async () => {
     setWorking(true)
     try {
-      await api.explorer.merge({ gallery_ids: selection.map((item) => item.id), target_id: targetId, scalar_sources: scalarSources })
+      await api.explorer.merge({
+        gallery_ids: selection.map((item) => item.id),
+        target_id: targetId,
+        scalar_sources: scalarSources,
+      })
       toast.success(t('explorer.mergeComplete'))
       onDone()
       onClose()
@@ -206,42 +272,92 @@ export function MergeDialog({ selection, onClose, onDone }: { selection: Explore
   }
 
   return (
-    <Modal title={t('explorer.mergeGalleries')} onClose={onClose}
+    <Modal
+      title={t('explorer.mergeGalleries')}
+      onClose={onClose}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button variant="danger" disabled={!preview || working} onClick={merge}>{working ? t('common.loading') : t('explorer.mergeGalleries')}</Button>
+          <Button variant="ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="danger" disabled={!preview || working} onClick={merge}>
+            {working ? t('common.loading') : t('explorer.mergeGalleries')}
+          </Button>
         </>
       }
     >
       <div className="space-y-5 p-5">
-        <label className="block text-sm text-vault-text">{t('explorer.mergeTarget')}
-          <select value={targetId} onChange={(event) => setTargetId(Number(event.target.value))} className="mt-2 w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2">
-            {selection.map((item) => <option key={item.id} value={item.id}>{galleryName(item)}</option>)}
+        <label className="block text-sm text-vault-text">
+          {t('explorer.mergeTarget')}
+          <select
+            value={targetId}
+            onChange={(event) => setTargetId(Number(event.target.value))}
+            className="mt-2 w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2"
+          >
+            {selection.map((item) => (
+              <option key={item.id} value={item.id}>
+                {galleryName(item)}
+              </option>
+            ))}
           </select>
         </label>
         {preview ? (
           <>
             <div className="grid grid-cols-3 gap-3 rounded-lg border border-vault-border p-4 text-center">
-              <div><p className="text-xl font-semibold text-vault-text">{preview.images.add}</p><p className="text-xs text-vault-text-muted">{t('explorer.imagesAdded')}</p></div>
-              <div><p className="text-xl font-semibold text-vault-text">{preview.images.exact_sha_skipped}</p><p className="text-xs text-vault-text-muted">{t('explorer.exactSkipped')}</p></div>
-              <div><p className="text-xl font-semibold text-vault-text">{preview.images.similar_kept_for_review}</p><p className="text-xs text-vault-text-muted">{t('explorer.similarReview')}</p></div>
+              <div>
+                <p className="text-xl font-semibold text-vault-text">{preview.images.add}</p>
+                <p className="text-xs text-vault-text-muted">{t('explorer.imagesAdded')}</p>
+              </div>
+              <div>
+                <p className="text-xl font-semibold text-vault-text">
+                  {preview.images.exact_sha_skipped}
+                </p>
+                <p className="text-xs text-vault-text-muted">{t('explorer.exactSkipped')}</p>
+              </div>
+              <div>
+                <p className="text-xl font-semibold text-vault-text">
+                  {preview.images.similar_kept_for_review}
+                </p>
+                <p className="text-xs text-vault-text-muted">{t('explorer.similarReview')}</p>
+              </div>
             </div>
             {Object.entries(preview.scalar_conflicts).length > 0 && (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-vault-text">{t('explorer.resolveConflicts')}</p>
+                <p className="text-sm font-medium text-vault-text">
+                  {t('explorer.resolveConflicts')}
+                </p>
                 {Object.entries(preview.scalar_conflicts).map(([field, choices]) => (
-                  <label key={field} className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-3 text-sm text-vault-text-muted">
+                  <label
+                    key={field}
+                    className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-3 text-sm text-vault-text-muted"
+                  >
                     <span>{field}</span>
-                    <select value={scalarSources[field] || targetId} onChange={(event) => setScalarSources((current) => ({ ...current, [field]: Number(event.target.value) }))} className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-vault-text">
-                      {choices.map((choice) => <option key={choice.gallery_id} value={choice.gallery_id}>{String(choice.value ?? '—')}</option>)}
+                    <select
+                      value={scalarSources[field] || targetId}
+                      onChange={(event) =>
+                        setScalarSources((current) => ({
+                          ...current,
+                          [field]: Number(event.target.value),
+                        }))
+                      }
+                      className="rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-vault-text"
+                    >
+                      {choices.map((choice) => (
+                        <option key={choice.gallery_id} value={choice.gallery_id}>
+                          {String(choice.value ?? '—')}
+                        </option>
+                      ))}
                     </select>
                   </label>
                 ))}
               </div>
             )}
           </>
-        ) : <div className="flex justify-center p-6"><Loader2 className="animate-spin" /></div>}
+        ) : (
+          <div className="flex justify-center p-6">
+            <Loader2 className="animate-spin" />
+          </div>
+        )}
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
           {t('explorer.merge404Warning')}
         </div>
@@ -265,17 +381,31 @@ export function OrganizeDialog({
   const [tagsValue, setTagsValue] = useState('')
   const [collectionId, setCollectionId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
-  const { data: collectionData } = useSWR(kind === 'collections' ? 'explorer-action-collections' : null, api.collections.list)
+  const { data: collectionData } = useSWR(
+    kind === 'collections' ? 'explorer-action-collections' : null,
+    api.collections.list,
+  )
 
   const submit = async () => {
     setSaving(true)
     try {
       if (kind === 'tags') {
-        const tags = tagsValue.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean)
-        await api.explorer.bulkAction({ ...selectionBody, action: operation === 'add' ? 'add_tags' : 'remove_tags', tags })
+        const tags = tagsValue
+          .split(/[\n,]+/)
+          .map((value) => value.trim())
+          .filter(Boolean)
+        await api.explorer.bulkAction({
+          ...selectionBody,
+          action: operation === 'add' ? 'add_tags' : 'remove_tags',
+          tags,
+        })
       } else {
         if (collectionId === null) return
-        await api.explorer.bulkAction({ ...selectionBody, action: operation === 'add' ? 'add_collection' : 'remove_collection', collection_id: collectionId })
+        await api.explorer.bulkAction({
+          ...selectionBody,
+          action: operation === 'add' ? 'add_collection' : 'remove_collection',
+          collection_id: collectionId,
+        })
       }
       toast.success(t('explorer.bulkActionComplete'))
       onDone()
@@ -288,25 +418,57 @@ export function OrganizeDialog({
   }
 
   return (
-    <Modal title={kind === 'tags' ? t('explorer.manageTags') : t('explorer.manageCollections')} onClose={onClose}
+    <Modal
+      title={kind === 'tags' ? t('explorer.manageTags') : t('explorer.manageCollections')}
+      onClose={onClose}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button variant="primary" disabled={saving} onClick={submit}>{saving ? t('common.loading') : t('common.save')}</Button>
+          <Button variant="ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="primary" disabled={saving} onClick={submit}>
+            {saving ? t('common.loading') : t('common.save')}
+          </Button>
         </>
       }
     >
       <div className="space-y-4 p-5">
         <div className="flex rounded-md border border-vault-border p-1">
-          <button type="button" onClick={() => setOperation('add')} className={`flex-1 rounded px-3 py-2 text-sm ${operation === 'add' ? 'bg-vault-accent text-white' : 'text-vault-text-muted'}`}>{t('explorer.add')}</button>
-          <button type="button" onClick={() => setOperation('remove')} className={`flex-1 rounded px-3 py-2 text-sm ${operation === 'remove' ? 'bg-vault-accent text-white' : 'text-vault-text-muted'}`}>{t('explorer.remove')}</button>
+          <button
+            type="button"
+            onClick={() => setOperation('add')}
+            className={`flex-1 rounded px-3 py-2 text-sm ${operation === 'add' ? 'bg-vault-accent text-white' : 'text-vault-text-muted'}`}
+          >
+            {t('explorer.add')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOperation('remove')}
+            className={`flex-1 rounded px-3 py-2 text-sm ${operation === 'remove' ? 'bg-vault-accent text-white' : 'text-vault-text-muted'}`}
+          >
+            {t('explorer.remove')}
+          </button>
         </div>
         {kind === 'tags' ? (
-          <textarea value={tagsValue} onChange={(event) => setTagsValue(event.target.value)} placeholder="artist:name, language:english" rows={5} className="w-full rounded-md border border-vault-border bg-vault-bg p-3 text-sm text-vault-text" />
+          <textarea
+            value={tagsValue}
+            onChange={(event) => setTagsValue(event.target.value)}
+            placeholder="artist:name, language:english"
+            rows={5}
+            className="w-full rounded-md border border-vault-border bg-vault-bg p-3 text-sm text-vault-text"
+          />
         ) : (
-          <select value={collectionId ?? ''} onChange={(event) => setCollectionId(Number(event.target.value))} className="w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text">
+          <select
+            value={collectionId ?? ''}
+            onChange={(event) => setCollectionId(Number(event.target.value))}
+            className="w-full rounded-md border border-vault-border bg-vault-bg px-3 py-2 text-sm text-vault-text"
+          >
             <option value="">{t('explorer.chooseCollection')}</option>
-            {(collectionData?.collections || []).map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
+            {(collectionData?.collections || []).map((collection) => (
+              <option key={collection.id} value={collection.id}>
+                {collection.name}
+              </option>
+            ))}
           </select>
         )}
       </div>

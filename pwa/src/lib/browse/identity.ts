@@ -7,12 +7,7 @@ export type BrowseIdentityNormalizer<Identity extends BrowseSurfaceIdentity> = (
 ) => unknown
 
 type CanonicalValue =
-  | null
-  | boolean
-  | number
-  | string
-  | CanonicalValue[]
-  | { [key: string]: CanonicalValue }
+  null | boolean | number | string | CanonicalValue[] | { [key: string]: CanonicalValue }
 
 function canonicalize(value: unknown): CanonicalValue {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value

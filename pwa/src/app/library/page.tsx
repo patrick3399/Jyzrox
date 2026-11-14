@@ -3,7 +3,7 @@
 import { useState, useCallback, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { BookOpen, X, Bookmark, BookmarkCheck, HelpCircle } from 'lucide-react'
-import { useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
+import { useLibraryFacets } from '@/hooks/useLibraryFacets'
 import { useCategoryRegistry } from '@/hooks/useCategoryRegistry'
 import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
@@ -12,12 +12,17 @@ import { useCollections } from '@/hooks/useCollections'
 import { useAddDatasetMembers, useDatasets } from '@/hooks/useDatasets'
 import { useProfile } from '@/hooks/useProfile'
 import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
+import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { LibrarySearchBar } from '@/components/library/LibrarySearchBar'
 import { LibraryViewControls } from '@/components/library/LibraryViewControls'
 import { LibraryFilterChips } from '@/components/library/LibraryFilterChips'
+import { LibrarySyntaxHelpLines } from '@/components/library/LibrarySyntaxHelp'
+import { LibraryFacetButton } from '@/components/library/LibraryFacetButton'
+import type { FacetOption } from '@/components/library/LibraryFacetList'
+import { facetSelection } from '@/lib/queryParser'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { t, formatNumber } from '@/lib/i18n'
@@ -27,6 +32,7 @@ import { galleryHref } from '@/lib/galleryRoutes'
 import type { SearchGalleryItem } from '@/lib/api'
 import { decideAnchorRestore, restoreAnchorOffset, type BrowseAnchor } from '@/lib/browse/anchor'
 import type { BrowseLayoutSnapshot } from '@/lib/browse/snapshotStore'
+import { estimateLibraryListRowHeight } from '@/lib/gridRowHeight'
 import {
   estimateLibraryGridRowHeight,
   getLibraryGridGap,
@@ -48,6 +54,12 @@ import dynamic from 'next/dynamic'
 const Dialog = dynamic(() => import('@/components/ui/dialog').then((module) => module.Dialog), {
   ssr: false,
 })
+// The phone filter sheet is a Dialog too; it loads the first time it opens.
+const LibraryFilterSheet = dynamic(
+  () =>
+    import('@/components/library/LibraryFilterSheet').then((module) => module.LibraryFilterSheet),
+  { ssr: false },
+)
 const AddToCollectionMenu = dynamic(
   () =>
     import('@/components/library/AddToCollectionMenu').then((module) => module.AddToCollectionMenu),
@@ -114,6 +126,7 @@ function LibraryContent() {
     inputValue,
     parsed,
     setFilter,
+    setFacet,
     commitSearch,
     clearSearch,
     clearFilters,
@@ -124,9 +137,8 @@ function LibraryContent() {
     setSelectedIds,
   } = useUnifiedSearch()
 
-  const { data: categoriesData } = useGalleryCategories()
+  const { data: facets } = useLibraryFacets()
   const { data: categoryRegistry } = useCategoryRegistry()
-  const { data: sourcesData } = useLibrarySources()
 
   const [colCount, setColCount] = useState(4)
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
@@ -134,7 +146,14 @@ function LibraryContent() {
   const batchTagInputRef = useRef<HTMLInputElement>(null)
   const batchTagOpened = useOpenedOnce(batchTagMode !== null)
   const [batchTagList, setBatchTagList] = useState<string[]>([])
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  // Phones and tablets filter through a bottom sheet; desktop keeps the filter
+  // panel expanded (the `lg:` classes give the first paint) and the whole block
+  // slides away with the scroll instead.
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false)
+  const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY)
+  const filterSheetShown = filterSheetOpen && !isDesktop
+  const filterSheetOpened = useOpenedOnce(filterSheetShown)
+  const [facetMenuOpen, setFacetMenuOpen] = useState(false)
   // Search block: sticky, slides away on scroll down and back on scroll up.
   const [searchFocused, setSearchFocused] = useState(false)
   const searchSentinelRef = useRef<HTMLDivElement>(null)
@@ -149,7 +168,12 @@ function LibraryContent() {
   } = useScrollReveal({
     sentinelRef: searchSentinelRef,
     blockRef: searchBlockRef,
-    locked: searchFocused || filterPanelOpen || viewMenuOpen || layoutSwitch !== undefined,
+    locked:
+      searchFocused ||
+      filterSheetShown ||
+      facetMenuOpen ||
+      viewMenuOpen ||
+      layoutSwitch !== undefined,
   })
   const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
   const displayPreferences = useDisplayPreferences()
@@ -189,13 +213,6 @@ function LibraryContent() {
   // Derive sort from parsed filters (default 'added_at')
   const sortValue = parsed.sort ?? 'added_at'
 
-  // Derive combined source filter for the dropdown (source + import_mode → "local:link")
-  const combinedSource = parsed.source
-    ? parsed.importMode
-      ? `${parsed.source}:${parsed.importMode}`
-      : parsed.source
-    : ''
-
   const sourceDisplayLabel = (value: string, fallback: string) =>
     value === 'local:link'
       ? t('explorer.externalFolders')
@@ -203,11 +220,44 @@ function LibraryContent() {
         ? t('explorer.jyzroxImport')
         : fallback
 
+  const sourceOptions = useMemo<FacetOption[]>(
+    () =>
+      (facets?.sources ?? []).map((opt) => ({
+        value: opt.value,
+        label:
+          opt.value === 'local:link'
+            ? t('explorer.externalFolders')
+            : opt.value === 'local:copy'
+              ? t('explorer.jyzroxImport')
+              : opt.label,
+        count: opt.count,
+      })),
+    [facets],
+  )
+  const categoryOptions = useMemo<FacetOption[]>(
+    () => [
+      {
+        value: '__uncategorized__',
+        label: t('library.categoryUncategorized'),
+        count: facets?.uncategorized ?? 0,
+      },
+      ...(facets?.categories ?? []).map((cat) => ({
+        value: cat.name,
+        label: cat.name,
+        count: cat.count,
+        colorKey: cat.name,
+      })),
+    ],
+    [facets],
+  )
+  const sourceSelection = facetSelection(parsed, 'source')
+  const categorySelection = facetSelection(parsed, 'category')
+
   const filterChips = libraryFilterChips(parsed, {
     sourceLabel: (combined) =>
       sourceDisplayLabel(
         combined,
-        sourcesData?.find((opt) => opt.value === combined)?.label ?? combined,
+        facets?.sources.find((opt) => opt.value === combined)?.label ?? combined,
       ),
     collectionName: (id) => collectionsData?.collections.find((c) => c.id === id)?.name,
     sortLabel: (value) => SORT_OPTIONS.find((opt) => opt.value === value)?.label() ?? value,
@@ -275,7 +325,9 @@ function LibraryContent() {
   // could land on a different card.
   const layoutSwitchIndex = useMemo(
     () =>
-      layoutSwitch ? displayGalleries.findIndex((gallery) => gallery.id === layoutSwitch.itemId) : -1,
+      layoutSwitch
+        ? displayGalleries.findIndex((gallery) => gallery.id === layoutSwitch.itemId)
+        : -1,
     [displayGalleries, layoutSwitch],
   )
   const layoutSwitchRequest = useMemo(
@@ -765,8 +817,8 @@ function LibraryContent() {
           onClear={clearSearch}
           onCancel={clearSearch}
           activeFilterCount={filterChips.length}
-          filtersOpen={filterPanelOpen}
-          onToggleFilters={() => setFilterPanelOpen((v) => !v)}
+          filtersOpen={filterSheetShown}
+          onToggleFilters={() => setFilterSheetOpen((v) => !v)}
           favorited={parsed.favorited}
           onToggleFavorited={() => setFilter('favorited', parsed.favorited ? null : 'true')}
           readingList={parsed.readingList}
@@ -784,17 +836,31 @@ function LibraryContent() {
           }
         />
 
-        {/* Collapsible filter panel — CSS transition via grid-rows */}
+        {/* Desktop filter panel; below lg the filter button opens the sheet instead. */}
         <div
           id="library-filter-panel"
-          inert={!filterPanelOpen}
-          className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
-            filterPanelOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-          }`}
+          inert={!isDesktop}
+          className={`hidden lg:grid lg:grid-rows-[1fr] ${isDesktop ? 'grid-rows-[1fr]' : ''}`}
         >
           <div className="overflow-hidden">
             <div className="mt-2 bg-vault-card border border-vault-border rounded-lg p-4">
               <div className="flex flex-wrap gap-4 items-center">
+                <LibraryFacetButton
+                  label={t('library.filterCategory')}
+                  options={categoryOptions}
+                  selection={categorySelection}
+                  onChange={(selection) => setFacet('category', selection)}
+                  categoryDefs={categoryRegistry?.categories}
+                  onOpenChange={setFacetMenuOpen}
+                />
+                <LibraryFacetButton
+                  label={t('library.source')}
+                  options={sourceOptions}
+                  selection={sourceSelection}
+                  onChange={(selection) => setFacet('source', selection)}
+                  onOpenChange={setFacetMenuOpen}
+                />
+
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-vault-text-muted uppercase tracking-wide">
                     {t('library.minRating')}
@@ -814,62 +880,6 @@ function LibraryContent() {
                     ))}
                   </select>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                    {t('library.source')}
-                  </label>
-                  <select
-                    value={combinedSource}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      if (!val) {
-                        setFilter('source', null)
-                        setFilter('import', null)
-                      } else {
-                        const colonIdx = val.indexOf(':')
-                        if (colonIdx !== -1) {
-                          setFilter('source', val.slice(0, colonIdx))
-                          setFilter('import', val.slice(colonIdx + 1))
-                        } else {
-                          setFilter('source', val)
-                          setFilter('import', null)
-                        }
-                      }
-                    }}
-                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
-                  >
-                    <option value="">{t('library.allSources')}</option>
-                    {(sourcesData ?? []).map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {sourceDisplayLabel(opt.value, opt.label)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {categoriesData && (
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-vault-text-muted uppercase tracking-wide">
-                      {t('library.filterCategory')}
-                    </label>
-                    <select
-                      value={parsed.category ?? ''}
-                      onChange={(e) => {
-                        setFilter('category', e.target.value || null)
-                      }}
-                      className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
-                    >
-                      <option value="">{t('library.allCategories')}</option>
-                      <option value="__uncategorized__">
-                        {t('library.categoryUncategorized')}
-                      </option>
-                      {categoriesData.categories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
 
                 {collectionsData && collectionsData.collections.length > 0 && (
                   <div className="flex items-center gap-2">
@@ -928,26 +938,36 @@ function LibraryContent() {
                 </button>
               </div>
 
-              {syntaxHelpOpen && (
-                <div className="mt-4 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
-                  <p>character:rem — {t('library.syntaxTagSearch')}</p>
-                  <p>rem — {t('library.syntaxNameOnly')}</p>
-                  <p>-general:sketch — {t('library.syntaxExclude')}</p>
-                  <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
-                  <p>source:ehentai — {t('library.syntaxSource')}</p>
-                  <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
-                  <p>favorited:true — {t('library.syntaxFavorited')}</p>
-                  <p>sort:rating — {t('library.syntaxSort')}</p>
-                  <p>collection:5 — {t('library.syntaxCollection')}</p>
-                  <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
-                  <p>category:doujinshi — {t('library.syntaxCategory')}</p>
-                  <p>import:link — {t('library.syntaxImportMode')}</p>
-                  <p>rl:true — {t('library.syntaxReadingList')}</p>
-                </div>
-              )}
+              {syntaxHelpOpen && <LibrarySyntaxHelpLines />}
             </div>
           </div>
         </div>
+
+        {filterSheetOpened && (
+          <LibraryFilterSheet
+            open={filterSheetShown}
+            onOpenChange={setFilterSheetOpen}
+            categoryOptions={categoryOptions}
+            sourceOptions={sourceOptions}
+            categorySelection={categorySelection}
+            sourceSelection={sourceSelection}
+            onFacetChange={setFacet}
+            categoryDefs={categoryRegistry?.categories}
+            rating={parsed.rating}
+            onRatingChange={(value) => setFilter('rating', value)}
+            collection={parsed.collection}
+            collections={(collectionsData?.collections ?? []).map((c) => ({
+              value: c.id,
+              label: `${c.name} (${c.gallery_count})`,
+            }))}
+            onCollectionChange={(value) => setFilter('collection', value)}
+            sort={sortValue}
+            sortOptions={SORT_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label() }))}
+            onSortChange={(value) => setFilter('sort', value)}
+            onReset={clearFilters}
+            total={total}
+          />
+        )}
 
         <LibraryFilterChips
           chips={filterChips}
@@ -979,7 +999,9 @@ function LibraryContent() {
           getItemKey={(gallery) => gallery.id}
           columns={viewMode === 'list' ? { base: 1 } : gridColumns}
           gap={viewMode === 'list' ? 8 : getLibraryGridGap(gridDensity)}
-          estimateHeight={viewMode === 'list' ? 150 : estimateLibraryGridRowHeight}
+          estimateHeight={
+            viewMode === 'list' ? estimateLibraryListRowHeight : estimateLibraryGridRowHeight
+          }
           measureRows={false}
           overscan={viewMode === 'list' ? 8 : 6}
           focusedIndex={focusedIndex}

@@ -9,7 +9,6 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from saq.job import TERMINAL_STATUSES as SAQ_TERMINAL_STATUSES
 from sqlalchemy import delete, desc, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +29,7 @@ from services.download_mode import (
     find_subscription_for_url,
     stop_discards,
 )
+from services.download_pause import PauseConflict, pause_job, resume_job
 from services.download_policy import get_credential_policy, normalize_download_options
 from services.download_presenter import serialize_download_job
 from services.download_stop import StopNotAllowed, request_stop
@@ -502,67 +502,14 @@ async def pause_resume_job(
         locale = parse_accept_language(request.headers.get("accept-language"))
         raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
 
-    redis = get_redis()
-    pause_key = f"download:pause:{job_id}"
-    terminal_statuses = {"done", "failed", "cancelled", "partial"}
-    if body.action == "pause":
-        if job.status in terminal_statuses:
-            raise HTTPException(status_code=409, detail=f"Job already {job.status}")
-        if job.status == "paused":
-            # Already in the desired state — no-op, return current status
-            return {"status": job.status}
-        # job.status == "running" — valid transition
-        await redis.set(pause_key, b"1", ex=86400)  # 24h TTL as safety net
-        job.status = "paused"
-        await db.commit()
-        return {"status": job.status}
-    else:  # resume
-        if job.status in terminal_statuses:
-            raise HTTPException(status_code=409, detail=f"Job already {job.status}")
-        if job.status == "running":
-            # Already in the desired state — no-op, return current status
-            return {"status": job.status}
-        # job.status == "paused" or "queued" — valid transition
-        await redis.delete(pause_key)
-
-        # A token proves that a live execution owns this job. Token-less paused
-        # rows need a fresh transport delivery and FIFO ticket; this is not a
-        # failed business attempt and must not consume retry_count.
-        if job.admission_token is not None:
-            job.status = "running"
-            await db.commit()
-            return {"status": job.status}
-
-        # Compatibility for a pre-admission coroutine during a rolling
-        # upgrade. Migrated/new rows always have a ticket; only a legacy row
-        # without one may trust the old SAQ active state.
-        if job.admission_ticket is None:
-            legacy_key = compute_job_key(job.id, job.retry_count)
-            legacy_saq_job = await core.queue.get_queue().job(legacy_key)
-            if legacy_saq_job is not None and legacy_saq_job.status not in SAQ_TERMINAL_STATUSES:
-                job.status = "running"
-                await db.commit()
-                return {"status": job.status}
-
-        # Legacy rows may still have an active SAQ coroutine but no token. It
-        # cannot safely resume under the fenced admission contract, so enqueue
-        # a fresh uniquely keyed attempt.
-        # SAQ exposes job state via queue.job(key); a None return means the job
-        # has been cleared from Redis (e.g. TTL expired or never enqueued).
-        new_saq_key = f"dispatch:{job.id}:{uuid.uuid4()}"
-        try:
-            await enqueue_download_job(job, new_saq_key)
-        except Exception:
-            raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
-
-        job.admission_ticket = await next_admission_ticket(db)
-        job.admission_key = await resolve_admission_key(job.source, job.url, subscription_id=job.subscription_id)
-        job.admission_token = None
-        job.status = "queued"
-        job.error = None
-        job.finished_at = None
-        await db.commit()
-        return {"status": "queued", "restarted": True}
+    try:
+        if body.action == "pause":
+            return await pause_job(db, job)
+        return await resume_job(db, job)
+    except PauseConflict as exc:
+        raise HTTPException(status_code=409, detail=exc.detail)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
 
 
 @router.delete("/jobs/{job_id}")

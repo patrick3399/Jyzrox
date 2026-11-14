@@ -34,6 +34,7 @@ def _make_session(scalars_return=None):
 
     scalars_mock = MagicMock()
     scalars_mock.all.return_value = scalars_return
+    scalars_mock.__iter__.side_effect = lambda: iter(scalars_return)
     execute_result = MagicMock()
     execute_result.scalars.return_value = scalars_mock
     session.execute = AsyncMock(return_value=execute_result)
@@ -65,7 +66,7 @@ class TestTrashGcJobEmitsEvent:
         with (
             patch("services.settings_store.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("worker.trash.hard_delete_galleries", new_callable=AsyncMock, return_value=delete_result),
+            patch("worker.trash.hard_delete_in_chunks", new_callable=AsyncMock, return_value=delete_result),
             patch("core.events.emit", mock_emit),
         ):
             result = await trash_gc_job({})
@@ -107,7 +108,7 @@ class TestTrashGcJobEmitsEvent:
         with (
             patch("services.settings_store.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("worker.trash.hard_delete_galleries", new_callable=AsyncMock, return_value=delete_result),
+            patch("worker.trash.hard_delete_in_chunks", new_callable=AsyncMock, return_value=delete_result),
             patch("core.events.emit", side_effect=RuntimeError("Redis down")),
         ):
             result = await trash_gc_job({})

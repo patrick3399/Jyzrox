@@ -323,6 +323,113 @@ class TestImportJob:
         assert result["status"] == "failed"
         assert "no media files found" in result["error"]
 
+    async def test_media_file_walk_runs_off_the_event_loop(self, tmp_path, monkeypatch):
+        """rglob over a large gallery stats every file; it must not run on the worker event loop thread."""
+        import threading
+
+        from worker.importer import import_job
+
+        gallery_dir = tmp_path / "gallery"
+        gallery_dir.mkdir()
+        (gallery_dir / "001.txt").write_text("not media")
+
+        rglob_threads: list[int] = []
+        real_rglob = Path.rglob
+
+        def _rglob(self, pattern, **kwargs):
+            if pattern == "*":
+                rglob_threads.append(threading.get_ident())
+            return real_rglob(self, pattern, **kwargs)
+
+        monkeypatch.setattr(Path, "rglob", _rglob)
+        await import_job(_make_ctx(), path=str(gallery_dir))
+
+        assert rglob_threads and threading.get_ident() not in rglob_threads
+
+    async def test_metadata_scan_and_rmtree_run_off_the_event_loop(self, tmp_path, monkeypatch):
+        """Metadata rglob/read_text and the staging rmtree hit NFS; they must not run on the worker loop thread."""
+        import threading
+
+        from worker.importer import import_job
+
+        gallery_dir = _create_test_gallery(tmp_path, metadata={"category": "ehentai", "title": "T", "gid": 999})
+
+        json_glob_threads: list[int] = []
+        read_text_threads: list[int] = []
+        rmtree_threads: list[int] = []
+        real_rglob = Path.rglob
+        real_read_text = Path.read_text
+
+        def _rglob(self, pattern, **kwargs):
+            if pattern == "*.json":
+                json_glob_threads.append(threading.get_ident())
+            return real_rglob(self, pattern, **kwargs)
+
+        def _read_text(self, *args, **kwargs):
+            if self.name == "metadata.json":
+                read_text_threads.append(threading.get_ident())
+            return real_read_text(self, *args, **kwargs)
+
+        def _rmtree(*args, **kwargs):
+            rmtree_threads.append(threading.get_ident())
+
+        monkeypatch.setattr(Path, "rglob", _rglob)
+        monkeypatch.setattr(Path, "read_text", _read_text)
+
+        mock_session = _make_mock_session()
+        mock_blob = MagicMock()
+        mock_blob.sha256 = "deadbeef" * 8
+        _site_cfg = MagicMock(source_id="ehentai", source_id_fields=("gid",), category="gallery")
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(mock_session)),
+            patch("worker.importer.store_blob", AsyncMock(return_value=mock_blob)),
+            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.helpers._sha256", return_value="aa" * 32),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer._normalize_tags", side_effect=lambda t, s: t),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
+            patch("plugins.registry.plugin_registry.get_parser", return_value=None),
+            patch("plugins.builtin.gallery_dl._metadata._extract_artist", return_value=None),
+            patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
+            patch("worker.importer.upsert_tag_translations", AsyncMock()),
+            patch("shutil.rmtree", side_effect=_rmtree),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await import_job(_make_ctx(), path=str(gallery_dir), user_id=1)
+
+        assert result["status"] == "done"
+        assert json_glob_threads and threading.get_ident() not in json_glob_threads
+        assert read_text_threads and threading.get_ident() not in read_text_threads
+        assert rmtree_threads and threading.get_ident() not in rmtree_threads
+
+    async def test_local_import_media_listing_runs_off_the_event_loop(self, tmp_path, monkeypatch):
+        """local_import_job's iterdir + magic-byte pass hits NFS; it must not run on the worker loop thread."""
+        import threading
+
+        from worker.importer import local_import_job
+
+        gallery_dir = tmp_path / "src"
+        gallery_dir.mkdir()
+        (gallery_dir / "001.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+
+        iterdir_threads: list[int] = []
+        real_iterdir = Path.iterdir
+
+        def _iterdir(self):
+            iterdir_threads.append(threading.get_ident())
+            return real_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", _iterdir)
+        # Gallery lookup fails right after the listing; that is enough to exercise it.
+        session = _make_mock_session()
+        session.get = AsyncMock(return_value=None)
+        with patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(session)):
+            result = await local_import_job(_make_ctx(), source_dir=str(gallery_dir), mode="copy", gallery_id=1)
+
+        assert result == {"status": "failed", "error": "gallery not found"}
+        assert iterdir_threads and threading.get_ident() not in iterdir_threads
+
     async def test_file_path_instead_of_directory_returns_failed(self, tmp_path):
         """Passing a file path (not a directory) must return status=failed."""
         from worker.importer import import_job

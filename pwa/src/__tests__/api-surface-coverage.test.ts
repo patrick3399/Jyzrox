@@ -31,10 +31,10 @@ const ALLOWED_UNUSED: Set<string> = new Set([
   'settings.setGenericCookie',
 
   // TODO: wire these to UI — backend ready, frontend pending
-  'settings.ehLogin',             // credentials page: username/password login
-  'settings.checkEhCookies',      // credentials page: cookie validation button
-  'tags.batchImportTranslations',  // admin: bulk tag translation import
-  'import_.rescanGallery',         // library detail: per-gallery rescan button
+  'settings.ehLogin', // credentials page: username/password login
+  'settings.checkEhCookies', // credentials page: cookie validation button
+  'tags.batchImportTranslations', // admin: bulk tag translation import
+  'import_.rescanGallery', // library detail: per-gallery rescan button
 ])
 
 // ── Source file scanner ───────────────────────────────────────────────
@@ -105,8 +105,8 @@ describe('API surface coverage', () => {
       // - namespace.method (destructured or aliased)
       // - .method( after a variable holding the namespace
       const patterns = [
-        `${m.namespace}.${m.method}`,  // e.g. "library.getGalleries"
-        `.${m.method}(`,               // e.g. ".getGalleries("
+        `${m.namespace}.${m.method}`, // e.g. "library.getGalleries"
+        `.${m.method}(`, // e.g. ".getGalleries("
       ]
 
       const found = patterns.some((p) => sourceContent.includes(p))

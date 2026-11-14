@@ -73,7 +73,10 @@ describe('queue stop / discard actions', () => {
     h.cancel.mockReset()
     h.enqueue.mockReset()
     h.check.mockReset().mockResolvedValue({ status: 'queued' })
-    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
   })
 
   it('stop button calls stopJob and shows stopping state', async () => {
@@ -102,7 +105,10 @@ describe('queue stop / discard actions', () => {
 
   it('stopping a subscription job asks for confirmation and does not stop when declined', async () => {
     serve(job({ mode: 'subscription_incremental', subscription_id: 4 }))
-    vi.stubGlobal('confirm', vi.fn(() => false))
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => false),
+    )
     await renderQueue()
 
     fireEvent.click(screen.getByTestId('job-stop'))
@@ -130,7 +136,10 @@ describe('queue stop / discard actions', () => {
 
   it('discard is offered for a manual download job and asks for confirmation first', async () => {
     serve(job())
-    vi.stubGlobal('confirm', vi.fn(() => false))
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => false),
+    )
     await renderQueue()
 
     fireEvent.click(screen.getByTestId('job-discard'))

@@ -192,3 +192,187 @@ async def test_creator_discovery_applies_policy_but_advances_all_post_boundary(m
 
     assert [work.source_id for work in works] == ["free"]
     assert latest_id == "paid"
+
+
+# --- Fanbox API wrapped-body shapes (seen live 2026-11-07) ---------------------
+# paginateCreator now returns {"pageUrls": [...]}, listCreator {"posts": [...]}
+# and post.info {"post": {...}}.  The bare-list parser silently found nothing,
+# so subscriptions were recorded as up_to_date with no boundary.
+
+
+class _WrappedDiscoveryClient(_DiscoveryClient):
+    async def get(self, url, **kwargs):
+        if "paginateCreator" in url:
+            return _Response(payload={"body": {"pageUrls": ["https://api.fanbox.cc/post.listCreator?page=1"]}})
+        return _Response(
+            payload={
+                "body": {
+                    "posts": [
+                        {
+                            "id": "paid",
+                            "title": "Paid",
+                            "feeRequired": 500,
+                            "publishedDatetime": "2026-11-03T12:08:00+09:00",
+                            "cover": {"type": "cover_image", "url": "https://cdn.test/paid-cover.jpeg"},
+                        },
+                        {
+                            "id": "free",
+                            "title": "Free",
+                            "feeRequired": 0,
+                            "publishedDatetime": "2026-11-01T16:05:06+09:00",
+                        },
+                    ]
+                }
+            }
+        )
+
+
+class _UnknownShapeDiscoveryClient(_DiscoveryClient):
+    async def get(self, url, **kwargs):
+        return _Response(payload={"body": {"somethingElse": []}})
+
+
+@pytest.mark.asyncio
+async def test_creator_discovery_reads_wrapped_page_urls_and_posts(monkeypatch):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _WrappedDiscoveryClient)
+    monkeypatch.setattr("plugins.builtin.fanbox.source.get_typed_download_delay", AsyncMock(return_value=0))
+    works, latest_id = await FanboxSourcePlugin().discover_posts(
+        "https://www.fanbox.cc/@artist",
+        None,
+        FanboxDownloadPolicy(content="paid_only"),
+        "session",
+    )
+
+    assert [work.source_id for work in works] == ["paid"]
+    assert works[0].thumbnail_url == "https://cdn.test/paid-cover.jpeg"
+    assert latest_id == "paid"
+
+
+@pytest.mark.asyncio
+async def test_creator_discovery_unknown_body_shape_raises_instead_of_reporting_up_to_date(monkeypatch):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _UnknownShapeDiscoveryClient)
+    monkeypatch.setattr("plugins.builtin.fanbox.source.get_typed_download_delay", AsyncMock(return_value=0))
+
+    with pytest.raises(ValueError, match="pageUrls"):
+        await FanboxSourcePlugin().discover_posts(
+            "https://www.fanbox.cc/@artist", None, FanboxDownloadPolicy(), "session"
+        )
+
+
+def _post_info_client(post: dict):
+    class _PostInfoClient(_Client):
+        async def get(self, url, **kwargs):
+            if "post.info" in url:
+                return _Response(payload={"body": {"post": post}})
+            return _Response()
+
+    return _PostInfoClient
+
+
+@pytest.mark.asyncio
+async def test_download_reads_post_from_wrapped_post_info_body(monkeypatch, tmp_path: Path):
+    post = {
+        "id": "42",
+        "title": "Paid post",
+        "feeRequired": 500,
+        "isRestricted": False,
+        "creatorId": "artist",
+        "publishedDatetime": "2026-11-03T12:08:00+09:00",
+        "coverImageUrl": None,
+        "body": {"text": "", "images": [{"originalUrl": "https://cdn.test/42.png"}]},
+    }
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _post_info_client(post))
+    monkeypatch.setattr("plugins.builtin.fanbox.source.get_typed_download_delay", AsyncMock(return_value=0))
+
+    result = await FanboxSourcePlugin().download(
+        "https://www.fanbox.cc/@artist/posts/42",
+        tmp_path,
+        options={"fanbox": {"content": "paid_only"}},
+    )
+
+    assert (result.status, result.downloaded, result.total) == ("done", 1, 1)
+    assert json.loads((tmp_path / "42_p0001.png.json").read_text())["fee_required"] == 500
+
+
+@pytest.mark.asyncio
+async def test_restricted_post_with_null_body_is_skipped_not_saved_as_cover_only(monkeypatch, tmp_path: Path):
+    post = {
+        "id": "42",
+        "title": "Locked",
+        "feeRequired": 500,
+        "isRestricted": True,
+        "creatorId": "artist",
+        "coverImageUrl": "https://cdn.test/cover.jpeg",
+        "body": None,
+    }
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _post_info_client(post))
+    callback = AsyncMock()
+    options = {"fanbox": {"content": "accessible"}, "diagnostic_ctx": {}}
+
+    result = await FanboxSourcePlugin().download(
+        "https://www.fanbox.cc/@artist/posts/42", tmp_path, on_file=callback, options=options
+    )
+
+    assert (result.status, result.downloaded, result.total) == ("done", 0, 0)
+    assert options["diagnostic_ctx"]["source_summary"]["skipped_inaccessible"] == 1
+    assert not list(tmp_path.iterdir())
+    callback.assert_not_awaited()
+
+
+def _status_client(status_code, *, content_type="application/json", retry_after=None, on="post.info"):
+    class _C(_Client):
+        async def get(self, url, **kwargs):
+            if on in url:
+                headers = {"content-type": content_type}
+                if retry_after:
+                    headers["retry-after"] = str(retry_after)
+                return _Response(status_code=status_code, payload={}, headers=headers)
+            return _Response(
+                payload={
+                    "body": {
+                        "post": {
+                            "id": "42",
+                            "feeRequired": 0,
+                            "isRestricted": False,
+                            "body": {"images": [{"originalUrl": "https://cdn.test/1.png"}]},
+                        }
+                    }
+                }
+            )
+
+    return _C
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [429, 503])
+async def test_fanbox_post_info_throttled_returns_rate_limited_halt(monkeypatch, tmp_path, code):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(code, retry_after=120))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt, r.retry_after) == ("failed", "rate_limited", 120)
+
+
+@pytest.mark.asyncio
+async def test_fanbox_403_html_challenge_is_rate_limited_but_403_json_stays_inaccessible(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(403, content_type="text/html")
+    )
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert r.halt == "rate_limited"
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(403))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt) == ("done", None)
+
+
+@pytest.mark.asyncio
+async def test_fanbox_401_returns_auth_halt_instead_of_done_with_zero_files(monkeypatch, tmp_path):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(401))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt) == ("failed", "auth")
+
+
+@pytest.mark.asyncio
+async def test_fanbox_media_429_stops_the_post_and_returns_rate_limited_halt(monkeypatch, tmp_path):
+    monkeypatch.setattr("plugins.builtin.fanbox.source.httpx.AsyncClient", _status_client(429, on="cdn.test"))
+    monkeypatch.setattr("plugins.builtin.fanbox.source.get_typed_download_delay", AsyncMock(return_value=0))
+    r = await FanboxSourcePlugin().download("https://www.fanbox.cc/@a/posts/42", tmp_path, options={})
+    assert (r.status, r.halt) == ("failed", "rate_limited")

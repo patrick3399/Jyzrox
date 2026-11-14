@@ -14,7 +14,7 @@ import {
 import { SubscriptionCard, timeAgo } from './SubscriptionCard'
 import { t } from '@/lib/i18n'
 import { Button } from '@/components/ui/button'
-import type { DownloadJob, Subscription, SubscriptionGroup } from '@/lib/types'
+import type { DownloadJob, Subscription, SubscriptionGroup, SubscriptionRun } from '@/lib/types'
 
 function groupStatusBadge(status: string) {
   if (status === 'running') {
@@ -43,6 +43,7 @@ export function GroupCard({
   group,
   subs,
   jobsData,
+  run: runsData,
   groups,
   onEdit,
   onRun,
@@ -65,6 +66,8 @@ export function GroupCard({
   group: SubscriptionGroup | null // null = ungrouped section, or a site section when title is set
   subs: Subscription[]
   jobsData: Record<number, DownloadJob>
+  /** Run summary of each subscription, keyed by subscription id. */
+  run?: Record<number, SubscriptionRun>
   groups: SubscriptionGroup[]
   onEdit: (group: SubscriptionGroup) => void
   onRun: (group: SubscriptionGroup) => void
@@ -213,6 +216,7 @@ export function GroupCard({
                 key={sub.id}
                 sub={sub}
                 latestJob={jobsData[sub.id] ?? null}
+                run={runsData?.[sub.id] ?? null}
                 groups={groups}
                 onToggle={onToggleSub}
                 onCheck={onCheckSub}

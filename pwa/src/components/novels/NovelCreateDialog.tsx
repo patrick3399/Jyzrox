@@ -43,6 +43,11 @@ export function NovelCreateDialog({
       setError(t('novels.nameInvalid'))
       return
     }
+    const subdirChoice = mode === 'chapter' ? category : ''
+    if (!subdirChoice && !/^\d+(-\d+)?$/.test(chap)) {
+      setError(t('novels.chapterNameNumeric'))
+      return
+    }
     setError(null)
     setSaving(true)
     const subdir = mode === 'chapter' ? category || undefined : undefined

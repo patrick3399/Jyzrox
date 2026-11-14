@@ -63,10 +63,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <p className="text-sm text-vault-text-secondary max-w-md text-center">
               {this.state.error?.message || 'An unexpected error occurred'}
             </p>
-            <Button
-              variant="primary"
-              onClick={this.reset}
-            >
+            <Button variant="primary" onClick={this.reset}>
               {t('common.retry')}
             </Button>
           </div>

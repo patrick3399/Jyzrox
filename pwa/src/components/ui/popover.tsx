@@ -19,11 +19,27 @@ interface PopoverProps {
   className?: string
 }
 
-export function Popover({ open, onOpenChange, anchor, children, side = 'bottom', align = 'start', ariaLabel, className }: PopoverProps) {
+export function Popover({
+  open,
+  onOpenChange,
+  anchor,
+  children,
+  side = 'bottom',
+  align = 'start',
+  ariaLabel,
+  className,
+}: PopoverProps) {
   return (
     <BasePopover.Root open={open} onOpenChange={overlayOpenChange(onOpenChange)}>
       <BasePopover.Portal>
-        <BasePopover.Positioner anchor={anchor} side={side} align={align} sideOffset={4} collisionPadding={8} className="z-[110]">
+        <BasePopover.Positioner
+          anchor={anchor}
+          side={side}
+          align={align}
+          sideOffset={4}
+          collisionPadding={8}
+          className="z-[110]"
+        >
           <BasePopover.Popup aria-label={ariaLabel} className={cn(floatingPopupClass, className)}>
             {children}
           </BasePopover.Popup>

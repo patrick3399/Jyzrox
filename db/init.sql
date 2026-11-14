@@ -528,6 +528,11 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source, source_id);
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS group_id INT REFERENCES subscription_groups(id) ON DELETE SET NULL;
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS download_options JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paused_reason TEXT;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paused_until TIMESTAMPTZ;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS halt_count SMALLINT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_subscriptions_paused_until ON subscriptions(paused_until) WHERE paused_reason = 'rate_limited';
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_subscriptions_group ON subscriptions(group_id);
 
@@ -766,6 +771,16 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_job_id UUID REFERENCES d
 -- Soft delete support
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_galleries_deleted_at ON galleries (deleted_at) WHERE deleted_at IS NOT NULL;
+
+-- Mirrors migration 0039: why / by whom / into what a gallery was trashed.
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_reason TEXT;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS merged_into_gallery_id BIGINT REFERENCES galleries(id) ON DELETE SET NULL;
+DO $$ BEGIN
+    ALTER TABLE galleries ADD CONSTRAINT chk_galleries_deleted_reason
+        CHECK (deleted_reason IS NULL OR deleted_reason IN ('user', 'merged', 'source_missing'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ── User Image Favorites ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_image_favorites (

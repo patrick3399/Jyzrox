@@ -44,7 +44,17 @@ class AutoFireResizeObserver {
     this.callback = callback
   }
   observe(target: Element) {
-    const rect = { width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} }
+    const rect = {
+      width: 800,
+      height: 600,
+      top: 0,
+      left: 0,
+      right: 800,
+      bottom: 600,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    }
     this.callback(
       [{ target, contentRect: rect } as unknown as ResizeObserverEntry],
       this as unknown as ResizeObserver,
@@ -206,7 +216,9 @@ describe('Reader single-page neighbour retention', () => {
 
   it('never retains a video page as a hidden neighbour', () => {
     renderLocalReader(
-      makeGalleryImages(20, { 2: { media_type: 'video', filename: '2.mp4', file_path: '/data/test/2.mp4' } }),
+      makeGalleryImages(20, {
+        2: { media_type: 'video', filename: '2.mp4', file_path: '/data/test/2.mp4' },
+      }),
     )
     finishLoading(1)
     turn('ArrowRight')
@@ -234,7 +246,11 @@ describe('Reader single-page neighbour retention', () => {
   })
 
   it('in proxy mode does not mount the next page from the prefetcher report', () => {
-    const images = makeGalleryImages(20).map((img) => ({ ...img, file_path: null, thumb_path: null }))
+    const images = makeGalleryImages(20).map((img) => ({
+      ...img,
+      file_path: null,
+      thumb_path: null,
+    }))
     render(
       <Reader
         source="ehentai"
@@ -253,7 +269,11 @@ describe('Reader single-page neighbour retention', () => {
   })
 
   it('in proxy mode still keeps the previous page mounted after turning forward', () => {
-    const images = makeGalleryImages(20).map((img) => ({ ...img, file_path: null, thumb_path: null }))
+    const images = makeGalleryImages(20).map((img) => ({
+      ...img,
+      file_path: null,
+      thumb_path: null,
+    }))
     render(
       <Reader
         source="ehentai"

@@ -144,6 +144,10 @@ class DownloadResult(BaseModel):
     error: str | None = None
     unsupported_urls: list[str] = []
     error_urls: list[str] = []
+    # Set when the source itself is throttling or rejecting our login, so the
+    # whole subscription should pause instead of failing this one job.
+    halt: Literal["rate_limited", "auth"] | None = None
+    retry_after: int | None = None
 
 
 class SearchResult(BaseModel):

@@ -51,6 +51,7 @@ export function useCreateSubscription() {
           auto_download?: boolean
           group_id?: number | null
           download_options?: Record<string, unknown>
+          reject_duplicate?: boolean
         }
       },
     ) => api.subscriptions.create(arg),
@@ -97,6 +98,18 @@ export function useCheckSubscription() {
 export function useStopSubscription() {
   return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
     api.subscriptions.stop(arg),
+  )
+}
+
+export function usePauseSubscription() {
+  return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
+    api.subscriptions.pause(arg),
+  )
+}
+
+export function useResumeSubscription() {
+  return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
+    api.subscriptions.resume(arg),
   )
 }
 

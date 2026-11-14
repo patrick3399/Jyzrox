@@ -14,7 +14,9 @@ from typing import cast as typing_cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from redis.exceptions import RedisError
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, exists, func, not_, or_, select, tuple_
 from sqlalchemy import case as sql_case
 from sqlalchemy import delete as sa_delete
@@ -22,13 +24,13 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.sql import column as sql_column
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
-from sqlalchemy.sql.elements import ColumnElement
 
-from core.auth import gallery_access_filter, require_auth, require_role
+import core.queue
+from core.auth import gallery_access_filter, has_gallery_write_access, require_auth, require_role
 from core.database import get_db
 from core.gallery_helpers import (
     build_cover_map,
@@ -52,6 +54,7 @@ from db.models import (
     ReadEvent,
     ReadProgress,
     Tag,
+    User,
     UserFavorite,
     UserImageFavorite,
     UserRating,
@@ -67,15 +70,22 @@ from services.cas import (
 )
 from services.cas import thumb_srcset as cas_thumb_srcset
 from services.cas import thumb_url as cas_thumb_url
+from services.explorer_query import ExplorerQuerySpec, build_explorer_gallery_query
 from services.gallery_lifecycle import (
     hard_delete_galleries as _hard_delete_galleries,
 )
 from services.gallery_lifecycle import (
     invalidate_sources_cache as _invalidate_sources_cache,
 )
+from services.gallery_lifecycle import (
+    mark_trashed,
+    restore_galleries,
+    trash_scope,
+)
 from services.library_sidecar import SIDECAR_FILENAME
 from services.link_sync import LinkSyncResult, sync_link_gallery
 from services.media_formats import media_type_for_extension
+from services.settings_store import get_int_setting as _get_int_setting
 from services.settings_store import get_toggle as _get_toggle
 from services.site_catalog import get_site_config as _get_gdl_site_config
 
@@ -101,15 +111,7 @@ def _artist_display_name(artist_id: str | None, uploader: str | None) -> str:
 
 def _trash_filter(auth: dict):
     """Return WHERE clause for trash visibility: soft-deleted galleries the user can see."""
-    filters: list[ColumnElement[bool]] = [Gallery.deleted_at.is_not(None)]
-    if auth.get("role") != "admin":
-        filters.append(
-            or_(
-                Gallery.created_by_user_id == auth["user_id"],
-                Gallery.created_by_user_id.is_(None),
-            )
-        )
-    return and_(*filters)
+    return trash_scope(auth)
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -219,6 +221,12 @@ async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -
     )
 
 
+def _source_label(src: str) -> str:
+    """Display label for a non-local source (site name when known, else the raw id)."""
+    cfg = _get_gdl_site_config(src)
+    return cfg.name if cfg.source_id == src else src
+
+
 _SOURCES_CACHE_KEY = "library:sources"
 _SOURCES_CACHE_TTL = 300  # 5 minutes
 
@@ -263,9 +271,7 @@ async def list_gallery_sources(
             if not modes:
                 sources.append({"value": "local", "label": "local"})
         else:
-            cfg = _get_gdl_site_config(src)
-            label = cfg.name if cfg.source_id == src else src
-            sources.append({"value": src, "label": label})
+            sources.append({"value": src, "label": _source_label(src)})
 
     await r.set(_SOURCES_CACHE_KEY, json.dumps(sources), ex=_SOURCES_CACHE_TTL)
     return sources
@@ -284,6 +290,58 @@ async def list_gallery_categories(
         .order_by(Gallery.category)
     )
     return {"categories": [r[0] for r in result.all()]}
+
+
+@router.get("/galleries/facets")
+async def get_gallery_facets(
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-user counts for the Library Source / Category multi-select filters.
+
+    Both queries apply gallery_access_filter (also excludes soft-deleted), so a
+    viewer never sees counts for galleries they cannot open. Not cached: the
+    result differs per user and the GROUP BYs are cheap.
+    """
+    access = gallery_access_filter(auth)
+    count_col = func.count(Gallery.id)
+
+    source_rows = (
+        await db.execute(
+            select(Gallery.source, Gallery.import_mode, count_col)
+            .where(access, Gallery.source.is_not(None))
+            .group_by(Gallery.source, Gallery.import_mode)
+        )
+    ).all()
+
+    merged: dict[str, dict] = {}
+    for src, mode, cnt in source_rows:
+        if src == "local":
+            value = f"local:{mode}" if mode else "local"
+            label = value
+        else:
+            value, label = src, _source_label(src)
+        entry = merged.setdefault(value, {"value": value, "label": label, "count": 0})
+        entry["count"] += cnt
+    sources = sorted(merged.values(), key=lambda e: (-e["count"], e["label"]))
+
+    category_rows = (
+        await db.execute(
+            select(Gallery.category, count_col)
+            .where(access, Gallery.category.is_not(None), Gallery.category != "")
+            .group_by(Gallery.category)
+        )
+    ).all()
+    categories = sorted(
+        ({"name": name, "count": cnt} for name, cnt in category_rows),
+        key=lambda e: (-e["count"], e["name"]),
+    )
+
+    uncategorized = (
+        await db.execute(select(count_col).where(access, or_(Gallery.category.is_(None), Gallery.category == "")))
+    ).scalar_one()
+
+    return {"sources": sources, "categories": categories, "uncategorized": uncategorized}
 
 
 @router.get("/galleries")
@@ -1466,9 +1524,7 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
         if not galleries:
             return {"status": "ok", "affected": 0, "deleted_dirs": 0, "skipped": len(skip_ids)}
 
-    now = datetime.now(UTC)
-    for g in galleries:
-        g.deleted_at = now
+    mark_trashed(galleries, reason="user", actor_user_id=auth["user_id"])
     await db.commit()
     await _invalidate_sources_cache()
     return {"status": "ok", "affected": len(galleries), "deleted_dirs": 0}
@@ -1488,32 +1544,96 @@ async def trash_count(
     return {"count": count}
 
 
+def _trash_item(g: Gallery, cover_thumb: str | None, users: dict[int, str], merged: dict[int, Gallery]) -> dict:
+    """Serialize a trashed gallery with why/who/into-what it was trashed."""
+    data = _g(g, cover_thumb=cover_thumb)
+    data["deleted_at"] = g.deleted_at.isoformat() if g.deleted_at else None
+    data["deleted_reason"] = g.deleted_reason
+    uid = g.deleted_by_user_id
+    data["deleted_by"] = {"id": uid, "username": users[uid]} if uid is not None and uid in users else None
+    target = merged.get(g.merged_into_gallery_id) if g.merged_into_gallery_id is not None else None
+    data["merged_into"] = (
+        {"source": target.source, "source_id": target.source_id, "title": target.title} if target else None
+    )
+    return data
+
+
+TrashSort = Literal["deleted_at", "title", "pages", "size"]
+TrashDirection = Literal["asc", "desc"]
+TrashReasonFilter = Literal["user", "merged", "source_missing", "unknown"]
+
+
+def _trash_query(
+    auth: dict,
+    q: str | None = None,
+    source: str | None = None,
+    reason: str | None = None,
+    sort: str = "deleted_at",
+    direction: str = "desc",
+):
+    """Filtered/sorted select of trashed galleries in the caller's trash scope."""
+    stmt = build_explorer_gallery_query(
+        ExplorerQuerySpec(node_kind="trash", query=q or "", sort=sort, direction=direction), auth
+    )
+    if source:
+        stmt = stmt.where(Gallery.source == source)
+    if reason == "unknown":
+        stmt = stmt.where(Gallery.deleted_reason.is_(None))
+    elif reason:
+        stmt = stmt.where(Gallery.deleted_reason == reason)
+    return stmt
+
+
 @router.get("/trash")
 async def list_trash(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, max_length=500),
+    source: str | None = Query(default=None, max_length=100),
+    reason: TrashReasonFilter | None = None,
+    sort: TrashSort = "deleted_at",
+    direction: TrashDirection = "desc",
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """List soft-deleted galleries (trash)."""
-    trash_cond = _trash_filter(auth)
+    """List soft-deleted galleries (trash), optionally filtered and sorted."""
+    stmt = _trash_query(auth, q, source, reason, sort, direction)
 
-    count_result = await db.execute(select(func.count()).select_from(Gallery).where(trash_cond))
-    total = count_result.scalar_one()
+    total = (await db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar_one()
 
-    rows = (
-        (
-            await db.execute(
-                select(Gallery).where(trash_cond).order_by(desc(Gallery.deleted_at)).limit(limit).offset(offset)
+    rows = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+
+    cover_map = await _build_cover_map(db, [g.id for g in rows], {g.id: g.source for g in rows})
+
+    user_ids = {g.deleted_by_user_id for g in rows if g.deleted_by_user_id is not None}
+    users: dict[int, str] = {}
+    if user_ids:
+        users = {
+            uid: name
+            for uid, name in (await db.execute(select(User.id, User.username).where(User.id.in_(user_ids)))).all()
+        }
+
+    target_ids = {g.merged_into_gallery_id for g in rows if g.merged_into_gallery_id is not None}
+    merged: dict[int, Gallery] = {}
+    if target_ids:
+        targets = (
+            (
+                await db.execute(
+                    select(Gallery).where(
+                        Gallery.id.in_(target_ids),
+                        Gallery.deleted_at.is_(None),
+                        gallery_access_filter(auth),
+                    )
+                )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
+        merged = {t.id: t for t in targets}
 
     return {
         "total": total,
-        "galleries": [_g(g) for g in rows],
+        "galleries": [_trash_item(g, cover_map.get(g.id), users, merged) for g in rows],
     }
 
 
@@ -1538,8 +1658,7 @@ async def restore_gallery(
     if not g:
         raise HTTPException(status_code=404, detail="Gallery not found in trash")
     _check_write_access(auth, g)
-    g.deleted_at = None
-    await db.commit()
+    await restore_galleries(db, [g])
     from core.events import EventType, emit_safe
 
     await emit_safe(
@@ -1573,21 +1692,301 @@ async def permanent_delete_gallery(
     return {"status": "ok", **result}
 
 
-@router.post("/trash/empty")
+def _purge_guard_key(user_id: int) -> str:
+    return f"trash:purge:{user_id}"
+
+
+async def _queue_purge(auth: dict, ids: list[int]) -> JSONResponse:
+    """Take the per-user purge guard and enqueue ``trash_purge_job`` for ``ids``."""
+    if not ids:
+        return JSONResponse({"status": "ok", "total": 0}, status_code=200)
+    key = _purge_guard_key(auth["user_id"])
+    try:
+        acquired = await get_redis().set(key, json.dumps({"done": 0, "total": len(ids)}), nx=True, ex=300)
+    except RedisError, RuntimeError:
+        logger.error("Trash purge guard unavailable", exc_info=True)
+        raise HTTPException(status_code=503, detail="Purge service unavailable")
+    if not acquired:
+        raise HTTPException(status_code=409, detail="A purge is already running")
+    try:
+        # No _job_id: completed SAQ jobs keep their key for a TTL and would dedupe a later purge.
+        await core.queue.enqueue("trash_purge_job", user_id=auth["user_id"], role=auth["role"], gallery_ids=ids)
+    except Exception:
+        logger.error("Failed to enqueue trash_purge_job", exc_info=True)
+        try:
+            await get_redis().delete(key)
+        except RedisError:
+            logger.warning("Could not release purge guard after enqueue failure", exc_info=True)
+        raise HTTPException(status_code=503, detail="Could not queue purge")
+    return JSONResponse({"status": "queued", "total": len(ids)}, status_code=202)
+
+
+@router.post("/trash/empty", status_code=202)
 async def empty_trash(
+    q: str | None = Query(default=None, max_length=500),
+    source: str | None = Query(default=None, max_length=100),
+    reason: TrashReasonFilter | None = None,
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Permanently delete all galleries in trash."""
-    trash_cond = _trash_filter(auth)
+    """Queue permanent deletion of the trashed galleries matching the filter."""
+    stmt = _trash_query(auth, q, source, reason).with_only_columns(Gallery.id).order_by(None)
+    ids = sorted((await db.execute(stmt)).scalars().all())
+    return await _queue_purge(auth, ids)
 
-    galleries = (await db.execute(select(Gallery).where(trash_cond))).scalars().all()
 
-    if not galleries:
-        return {"status": "ok", "affected": 0}
+@router.get("/trash/summary")
+async def trash_summary(
+    q: str | None = Query(default=None, max_length=500),
+    source: str | None = Query(default=None, max_length=100),
+    reason: TrashReasonFilter | None = None,
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Count, sizes, next expiry, sources and running-purge progress for the filtered trash."""
+    id_stmt = _trash_query(auth, q, source, reason).with_only_columns(Gallery.id).order_by(None)
+    filtered_ids = id_stmt.scalar_subquery()
 
-    result = await _hard_delete_galleries(db, list(galleries))
-    return {"status": "ok", **result}
+    count, oldest = (
+        await db.execute(
+            select(func.count(), func.min(Gallery.deleted_at)).where(Gallery.id.in_(id_stmt.scalar_subquery()))
+        )
+    ).one()
+
+    logical_bytes = (
+        await db.execute(
+            select(func.coalesce(func.sum(Blob.file_size), 0))
+            .select_from(Image)
+            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .where(Image.gallery_id.in_(filtered_ids), Image.visibility == "active")
+        )
+    ).scalar_one()
+
+    # Reclaimable: CAS blobs referenced by the filtered set and by no image outside it.
+    inside = aliased(Image)
+    outside = aliased(Image)
+    reclaimable_bytes = (
+        await db.execute(
+            select(func.coalesce(func.sum(Blob.file_size), 0)).where(
+                Blob.storage == "cas",
+                exists().where(inside.blob_sha256 == Blob.sha256, inside.gallery_id.in_(id_stmt.scalar_subquery())),
+                ~exists().where(
+                    outside.blob_sha256 == Blob.sha256,
+                    outside.gallery_id.not_in(id_stmt.scalar_subquery()),
+                ),
+            )
+        )
+    ).scalar_one()
+
+    next_expiry_at = None
+    if count and oldest is not None:
+        retention_days = await _get_int_setting("setting:trash_retention_days", 30)
+        if retention_days < 1:
+            retention_days = 30
+        next_expiry_at = (oldest + timedelta(days=retention_days)).isoformat()
+
+    sources = sorted(
+        s for s in (await db.execute(select(Gallery.source).where(_trash_filter(auth)).distinct())).scalars() if s
+    )
+
+    purge = None
+    try:
+        raw = await get_redis().get(_purge_guard_key(auth["user_id"]))
+        if raw is not None:
+            data = json.loads(raw)
+            purge = {"done": int(data["done"]), "total": int(data["total"])}
+    except Exception:
+        purge = None
+
+    return {
+        "count": count,
+        "logical_bytes": int(logical_bytes),
+        "reclaimable_bytes": int(reclaimable_bytes),
+        "next_expiry_at": next_expiry_at,
+        "sources": sources,
+        "purge": purge,
+    }
+
+
+class TrashRestoreBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gallery_ids: list[int] | None = Field(default=None, min_length=1, max_length=500)
+    all: bool = False
+    q: str | None = None
+    source: str | None = None
+    reason: TrashReasonFilter | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_selector(self) -> TrashRestoreBody:
+        if (self.gallery_ids is not None) == bool(self.all):
+            raise ValueError("Provide exactly one of gallery_ids or all=true")
+        if not self.all and (self.q or self.source or self.reason):
+            raise ValueError("q, source and reason require all=true")
+        return self
+
+
+class TrashPurgeBody(BaseModel):
+    gallery_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+@router.post("/trash/restore")
+async def restore_trash(
+    body: TrashRestoreBody,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore many trashed galleries (or all in scope). Out-of-scope ids are ignored."""
+    if body.gallery_ids is not None:
+        stmt = select(Gallery).where(_trash_filter(auth), Gallery.id.in_(body.gallery_ids))
+    else:
+        stmt = _trash_query(auth, body.q, body.source, body.reason, "deleted_at", "desc")
+    galleries = list((await db.execute(stmt)).scalars().all())
+    ids = sorted(g.id for g in galleries)
+    affected = await restore_galleries(db, galleries)
+    if affected:
+        from core.events import EventType, emit_safe
+
+        await emit_safe(
+            EventType.GALLERY_BATCH_UPDATED,
+            actor_user_id=auth["user_id"],
+            resource_type="gallery",
+            action="restore",
+            gallery_ids=ids,
+        )
+    return {"status": "ok", "affected": affected}
+
+
+@router.post("/trash/purge", status_code=202)
+async def purge_trash(
+    body: TrashPurgeBody,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue permanent deletion of the selected trashed galleries. Out-of-scope ids are ignored."""
+    ids = sorted(
+        (await db.execute(select(Gallery.id).where(_trash_filter(auth), Gallery.id.in_(body.gallery_ids)))).scalars()
+    )
+    return await _queue_purge(auth, ids)
+
+
+@router.get("/trash/{gallery_id}/preview")
+async def preview_trash(
+    gallery_id: int,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=60, ge=1, le=120),
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only preview of a trashed gallery: metadata, media stats, paged thumbnails (no file URLs)."""
+    g = (await db.execute(select(Gallery).where(Gallery.id == gallery_id, _trash_filter(auth)))).scalar_one_or_none()
+    if g is None:
+        raise HTTPException(status_code=404, detail="Gallery not found in trash")
+
+    cover_map = await _build_cover_map(db, [g.id], {g.id: g.source})
+    users: dict[int, str] = {}
+    if g.deleted_by_user_id is not None:
+        name = (await db.execute(select(User.username).where(User.id == g.deleted_by_user_id))).scalar_one_or_none()
+        if name is not None:
+            users[g.deleted_by_user_id] = name
+    merged: dict[int, Gallery] = {}
+    if g.merged_into_gallery_id is not None:
+        target = (
+            await db.execute(
+                select(Gallery).where(
+                    Gallery.id == g.merged_into_gallery_id,
+                    Gallery.deleted_at.is_(None),
+                    gallery_access_filter(auth),
+                )
+            )
+        ).scalar_one_or_none()
+        if target is not None:
+            merged[target.id] = target
+
+    stats = await _gallery_media_stats(db, g.id)
+
+    page_order = (
+        desc(Image.page_num) if get_display_config(g.source or "").image_order == "desc" else asc(Image.page_num)
+    )
+    excluded_sq = (
+        select(ExcludedBlob.blob_sha256)
+        .where(ExcludedBlob.gallery_id == g.id)
+        .correlate(Image)
+        .where(ExcludedBlob.blob_sha256 == Image.blob_sha256)
+    )
+    visible = (Image.gallery_id == g.id, Image.visibility == "active", ~exists(excluded_sq))
+    images_total = (await db.execute(select(func.count()).select_from(Image).where(*visible))).scalar_one()
+    images = (
+        (
+            await db.execute(
+                select(Image)
+                .where(*visible)
+                .order_by(page_order)
+                .offset((page - 1) * limit)
+                .limit(limit)
+                .options(selectinload(Image.blob))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    thumbs = await existing_base_thumbs(img.blob_sha256 for img in images)
+    return {
+        "gallery": _trash_item(g, cover_map.get(g.id), users, merged),
+        "media": {
+            "total_size": stats["total_size"],
+            "counts": {"image": stats["image_count"], "gif": stats["gif_count"], "video": stats["video_count"]},
+        },
+        "images": [
+            {
+                "id": img.id,
+                "page_num": img.page_num,
+                **_thumb_fields(img.blob, thumbs),
+                "media_type": _media_type(img),
+                "pending": _is_pending(img),
+            }
+            for img in images
+        ],
+        "images_total": images_total,
+        "page": page,
+    }
+
+
+async def _gallery_media_stats(db: AsyncSession, gallery_id: int) -> dict:
+    """Total size and per-type counts over the pages the Reader would show."""
+    excluded_sq = (
+        select(ExcludedBlob.blob_sha256)
+        .where(ExcludedBlob.gallery_id == gallery_id)
+        .correlate(Image)
+        .where(ExcludedBlob.blob_sha256 == Image.blob_sha256)
+    )
+    visible = (Image.gallery_id == gallery_id) & (Image.visibility == "active") & ~exists(excluded_sq)
+    rows = (
+        await db.execute(
+            select(Blob.media_type, func.count(), func.coalesce(func.sum(Blob.file_size), 0))
+            .select_from(Image)
+            .join(Blob, Blob.sha256 == Image.blob_sha256)
+            .where(visible)
+            .group_by(Blob.media_type)
+        )
+    ).all()
+    counts = {"image": 0, "gif": 0, "video": 0}
+    total_size = 0
+    for media_type, count, size in rows:
+        counts[media_type if media_type in counts else "image"] += count
+        total_size += int(size)
+    # Link-mode pages not hashed yet have no blob: classify by name, size by stat.
+    pending = (await db.execute(select(Image).where(visible).where(Image.blob_sha256.is_(None)))).scalars().all()
+    for img in pending:
+        kind = _pending_media_type(img)
+        counts[kind if kind in counts else "image"] += 1
+        total_size += int(img.source_size or 0)
+    return {
+        "total_size": total_size,
+        "image_count": counts["image"],
+        "gif_count": counts["gif"],
+        "video_count": counts["video"],
+    }
 
 
 @router.get("/galleries/{source}/{source_id}")
@@ -1601,6 +2000,7 @@ async def get_gallery(
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
     data = _g(g, cover_thumb=cover_thumb, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
+    data["media_stats"] = await _gallery_media_stats(db, g.id)
     if g.source == "pixiv" and str(g.source_id).startswith("user:"):
         items = (
             (
@@ -1969,7 +2369,7 @@ async def delete_gallery(
         await _invalidate_sources_cache()
         return {"status": "ok", **result}
 
-    g.deleted_at = datetime.now(UTC)
+    mark_trashed([g], reason="user", actor_user_id=auth["user_id"])
     await db.commit()
     await _invalidate_sources_cache()
     from core.events import EventType, emit_safe
@@ -2678,11 +3078,18 @@ async def restore_excluded_blob(
 async def check_gallery_update(
     source: str,
     source_id: str,
-    auth: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Auto-check and update gallery metadata from source."""
+    """Auto-check and update gallery metadata from source.
+
+    Applying source metadata rewrites title/tags and records change history, so
+    this is a mutation: visibility alone is not enough (read-only collaborators
+    can see the gallery), the caller needs gallery write access.
+    """
     g = await _get_or_404_by_source(db, source, source_id, auth)
+    if not await has_gallery_write_access(db, g.id, g.created_by_user_id, auth):
+        raise HTTPException(status_code=403, detail="Gallery write access is required")
 
     from plugins.registry import plugin_registry
 

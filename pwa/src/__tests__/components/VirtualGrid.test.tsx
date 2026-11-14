@@ -91,11 +91,7 @@ describe('VirtualGrid onColCountChange', () => {
 
   it('test_virtualGrid_disables_native_scroll_anchoring_during_upward_row_recycling', () => {
     const { container } = render(
-      <VirtualGrid
-        items={[1, 2, 3]}
-        columns={{ base: 1 }}
-        renderItem={(n) => <span>{n}</span>}
-      />,
+      <VirtualGrid items={[1, 2, 3]} columns={{ base: 1 }} renderItem={(n) => <span>{n}</span>} />,
     )
 
     expect(container.firstElementChild).toHaveStyle({ overflowAnchor: 'none' })

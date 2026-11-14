@@ -4051,29 +4051,40 @@ class TestTrashEndpoints:
         resp = await unauthed_client.post("/api/library/galleries/local/any/permanent-delete")
         assert resp.status_code == 401
 
-    async def test_empty_trash_with_galleries_removes_all(self, client, db_session):
-        """Empty trash should remove all soft-deleted galleries."""
+    async def test_empty_trash_with_galleries_queues_purge_job(self, client, db_session, mock_redis):
+        """Empty trash snapshots all trashed ids and enqueues the purge job (202), deleting nothing inline."""
+        from unittest.mock import AsyncMock, patch
+
+        ids = []
         for i in range(3):
-            await self._soft_delete_gallery(db_session, "local", f"trash_empty_{i:02d}", title=f"Trash {i}")
+            ids.append(await self._soft_delete_gallery(db_session, "local", f"trash_empty_{i:02d}", title=f"Trash {i}"))
 
         resp = await client.get("/api/library/trash/count")
         assert resp.json()["count"] == 3
 
-        resp = await client.post("/api/library/trash/empty")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "ok"
-        assert data["affected"] == 3
+        enqueue = AsyncMock()
+        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+            resp = await client.post("/api/library/trash/empty")
+        assert resp.status_code == 202
+        assert resp.json() == {"status": "queued", "total": 3}
+        enqueue.assert_awaited_once()
+        assert enqueue.await_args.args[0] == "trash_purge_job"
+        assert sorted(enqueue.await_args.kwargs["gallery_ids"]) == sorted(ids)
 
-        # Trash should now be empty
+        # Rows are untouched until the worker runs
         resp = await client.get("/api/library/trash/count")
-        assert resp.json()["count"] == 0
+        assert resp.json()["count"] == 3
 
-    async def test_empty_trash_when_already_empty_returns_zero_affected(self, client):
-        """Empty trash when no galleries are in trash should return affected=0."""
-        resp = await client.post("/api/library/trash/empty")
+    async def test_empty_trash_when_already_empty_returns_zero_total(self, client, mock_redis):
+        """Empty trash when no galleries are in trash returns 200 total=0 without enqueueing."""
+        from unittest.mock import AsyncMock, patch
+
+        enqueue = AsyncMock()
+        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+            resp = await client.post("/api/library/trash/empty")
         assert resp.status_code == 200
-        assert resp.json()["affected"] == 0
+        assert resp.json() == {"status": "ok", "total": 0}
+        enqueue.assert_not_awaited()
 
     async def test_empty_trash_requires_auth(self, unauthed_client):
         """Unauthenticated empty-trash should return 401."""
@@ -4276,6 +4287,108 @@ class TestCheckGalleryUpdate:
         assert resp.status_code == 200
         assert resp.json() == {"status": "error", "reason": "invalid_metadata"}
 
+    # -- write access: check-update applies source metadata, so it is a mutation --
+
+    @staticmethod
+    def _remote_eh_client():
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get_gallery_metadata(self, gid, token):
+                return {
+                    "title": "REMOTE TITLE",
+                    "title_jpn": None,
+                    "category": "manga",
+                    "uploader": "remote_uploader",
+                    "pages": 20,
+                    "rating": 4.0,
+                    "tags": ["female:remote_tag"],
+                }
+
+        async def _make_client():
+            return _Client()
+
+        return _make_client
+
+    async def _eh_gallery(self, db_session, source_id: str, owner: int | None, visibility: str) -> int:
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'adm', 'x', 'admin')")
+        )
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (60, 'u60', 'x', 'member')")
+        )
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (61, 'u61', 'x', 'viewer')")
+        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id=source_id, title="LOCAL TITLE")
+        await db_session.execute(
+            text("UPDATE galleries SET created_by_user_id = :o, visibility = :v, source_url = :u WHERE id = :g"),
+            {"o": owner, "v": visibility, "u": f"https://e-hentai.org/g/{source_id}/abcdef1234/", "g": gid},
+        )
+        await db_session.commit()
+        return gid
+
+    async def _metadata_state(self, db_session, gid: int) -> tuple[str, int, int]:
+        db_session.expire_all()
+        title = (await db_session.execute(text("SELECT title FROM galleries WHERE id = :g"), {"g": gid})).scalar_one()
+        changes = (
+            await db_session.execute(
+                text("SELECT count(*) FROM gallery_metadata_changes WHERE gallery_id = :g"), {"g": gid}
+            )
+        ).scalar_one()
+        tags = (
+            await db_session.execute(text("SELECT count(*) FROM gallery_tags WHERE gallery_id = :g"), {"g": gid})
+        ).scalar_one()
+        return title, changes, tags
+
+    async def test_check_update_readonly_collaborator_gets_403_and_metadata_unchanged(self, make_client, db_session):
+        """A can_edit=false collaborator can see the gallery but must not refresh its metadata."""
+        gid = await self._eh_gallery(db_session, "880001", owner=1, visibility="private")
+        await db_session.execute(
+            text("INSERT INTO gallery_permissions (gallery_id, user_id, can_edit) VALUES (:g, 60, :e)"),
+            {"g": gid, "e": False},
+        )
+        await db_session.commit()
+
+        with patch("plugins.builtin.ehentai.browse._make_client", self._remote_eh_client()):
+            async with make_client(user_id=60, role="member") as ac:
+                resp = await ac.post("/api/library/galleries/ehentai/880001/check-update")
+
+        assert resp.status_code == 403
+        assert await self._metadata_state(db_session, gid) == ("LOCAL TITLE", 0, 0)
+
+    async def test_check_update_viewer_on_unowned_gallery_gets_403_and_metadata_unchanged(
+        self, make_client, db_session
+    ):
+        """Unowned galleries pass the per-gallery write check, so the viewer role gate must stop the refresh."""
+        gid = await self._eh_gallery(db_session, "880002", owner=None, visibility="public")
+
+        with patch("plugins.builtin.ehentai.browse._make_client", self._remote_eh_client()):
+            async with make_client(user_id=61, role="viewer") as ac:
+                resp = await ac.post("/api/library/galleries/ehentai/880002/check-update")
+
+        assert resp.status_code == 403
+        assert await self._metadata_state(db_session, gid) == ("LOCAL TITLE", 0, 0)
+
+    async def test_check_update_owner_member_refreshes_metadata(self, make_client, db_session):
+        """The owning member keeps the ability to refresh metadata from the source."""
+        gid = await self._eh_gallery(db_session, "880003", owner=60, visibility="private")
+
+        with patch("plugins.builtin.ehentai.browse._make_client", self._remote_eh_client()):
+            async with make_client(user_id=60, role="member") as ac:
+                resp = await ac.post("/api/library/galleries/ehentai/880003/check-update")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "updated"
+        title, changes, tags = await self._metadata_state(db_session, gid)
+        assert title == "REMOTE TITLE"
+        assert changes > 0
+        assert tags == 1
+
 
 # ---------------------------------------------------------------------------
 # Regression: edge case #101 — search ILIKE must escape % and _ wildcards
@@ -4450,3 +4563,48 @@ class TestListGalleryFilesHidesSidecar:
         filenames = [f["filename"] for f in resp.json()["files"]]
         assert "001.jpg" in filenames
         assert "info.json" not in filenames
+
+
+# ---------------------------------------------------------------------------
+# Gallery detail media stats
+# ---------------------------------------------------------------------------
+
+
+class TestGalleryMediaStats:
+    """GET /api/library/galleries/{source}/{source_id} → media_stats"""
+
+    async def _add(self, db_session, gid, page_num, media_type, size, visibility="active"):
+        sha = f"ms_{gid}_{page_num}"
+        await db_session.execute(
+            text("INSERT INTO blobs (sha256, file_size, extension, media_type) VALUES (:s, :sz, 'x', :mt)"),
+            {"s": sha, "sz": size, "mt": media_type},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, visibility) "
+                "VALUES (:g, :p, 'f', :s, :v)"
+            ),
+            {"g": gid, "p": page_num, "s": sha, "v": visibility},
+        )
+        await db_session.commit()
+
+    async def test_media_stats_sums_size_and_counts_each_media_type(self, client, db_session):
+        gid = await _insert_gallery(db_session, source="local", source_id="ms_mix", title="Mixed", pages=4)
+        await self._add(db_session, gid, 1, "image", 1000)
+        await self._add(db_session, gid, 2, "image", 2000)
+        await self._add(db_session, gid, 3, "gif", 500)
+        await self._add(db_session, gid, 4, "video", 10000)
+
+        stats = (await client.get("/api/library/galleries/local/ms_mix")).json()["media_stats"]
+
+        assert stats == {"total_size": 13500, "image_count": 2, "gif_count": 1, "video_count": 1}
+
+    async def test_media_stats_excludes_hidden_images(self, client, db_session):
+        gid = await _insert_gallery(db_session, source="local", source_id="ms_hidden", title="Hidden", pages=2)
+        await self._add(db_session, gid, 1, "image", 1000)
+        await self._add(db_session, gid, 2, "video", 9000, visibility="hidden")
+
+        stats = (await client.get("/api/library/galleries/local/ms_hidden")).json()["media_stats"]
+
+        assert stats["total_size"] == 1000
+        assert stats["video_count"] == 0

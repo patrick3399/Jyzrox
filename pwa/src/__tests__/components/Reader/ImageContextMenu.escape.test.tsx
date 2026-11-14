@@ -16,12 +16,7 @@ vi.mock('@/lib/i18n', () => ({ t: (key: string) => key }))
 
 function renderMenu(onClose: () => void) {
   return render(
-    <ImageContextMenu
-      open
-      onClose={onClose}
-      position={{ x: 10, y: 10 }}
-      imageUrl="/media/a.jpg"
-    />,
+    <ImageContextMenu open onClose={onClose} position={{ x: 10, y: 10 }} imageUrl="/media/a.jpg" />,
   )
 }
 

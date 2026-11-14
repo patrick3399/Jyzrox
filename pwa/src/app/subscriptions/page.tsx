@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import {
   Rss,
@@ -20,6 +20,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { Button } from '@/components/ui/button'
 import { useWsJobs, useWsConnection } from '@/lib/ws'
 import { pollingRefreshInterval } from '@/lib/wsPolling'
+import { createRequestCoalescer } from '@/lib/requestCoalescer'
 import {
   useAllSubscriptions,
   useCreateSubscription,
@@ -52,6 +53,7 @@ import type {
   Subscription,
   SubscriptionGroup,
   DownloadJob,
+  SubscriptionRun,
   JobListParams,
   MediaPolicy,
 } from '@/lib/types'
@@ -67,11 +69,23 @@ import {
   writeSubscriptionView,
   type SubscriptionView,
 } from '@/components/subscriptions/sourceGrouping'
+import {
+  duplicateSubscriptionHint,
+  type DuplicateSubscriptionHint,
+} from '@/components/subscriptions/duplicateSubscription'
+import { useOpenedOnce } from '@/hooks/useOpenedOnce'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 
 const GroupModal = dynamic(
   () => import('@/components/subscriptions/GroupModal').then((module) => module.GroupModal),
+  { ssr: false },
+)
+const DuplicateSubscriptionDialog = dynamic(
+  () =>
+    import('@/components/subscriptions/DuplicateSubscriptionDialog').then(
+      (module) => module.DuplicateSubscriptionDialog,
+    ),
   { ssr: false },
 )
 
@@ -117,7 +131,7 @@ export default function SubscriptionsPage() {
     [data?.subscriptions],
   )
 
-  const { data: jobsData, mutate: mutateJobs } = useSWR(
+  const { data: jobsAndRuns, mutate: mutateJobs } = useSWR(
     subIds.length > 0 ? ['sub-jobs', ...subIds] : null,
     async () => {
       // One request for all subscriptions: a per-subscription fan-out tripped
@@ -127,12 +141,33 @@ export default function SubscriptionsPage() {
       for (const [subId, job] of Object.entries(res.jobs)) {
         results[Number(subId)] = job
       }
-      return results
+      const runs: Record<number, SubscriptionRun> = {}
+      for (const [subId, run] of Object.entries(res.runs ?? {})) {
+        runs[Number(subId)] = run
+      }
+      return { jobs: results, runs }
     },
     // Event-driven while connected (lastSubCheck/lastJobUpdate effects below +
     // wsInvalidation.tsx); poll as a fallback when WS is down.
     { refreshInterval: pollingRefreshInterval(connected, 5000) },
   )
+
+  const jobsData = jobsAndRuns?.jobs
+  const jobsRef = useRef(jobsData)
+  useEffect(() => {
+    jobsRef.current = jobsData
+  }, [jobsData])
+  const runsData = useMemo(() => jobsAndRuns?.runs ?? {}, [jobsAndRuns?.runs])
+
+  // Job updates that are not the representative job still change the run totals.
+  const refetchCoalescer = useMemo(
+    () =>
+      createRequestCoalescer(async () => {
+        await mutateJobs()
+      }, 3000),
+    [mutateJobs],
+  )
+  useEffect(() => () => refetchCoalescer.cancel(), [refetchCoalescer])
 
   useEffect(() => {
     if (lastSubCheck) {
@@ -147,7 +182,7 @@ export default function SubscriptionsPage() {
     mutateJobs(
       (prev) => {
         if (!prev) return prev
-        const updated = { ...prev }
+        const updated = { ...prev.jobs }
         for (const [subIdStr, job] of Object.entries(updated)) {
           if (job.id === lastJobUpdate.job_id) {
             updated[Number(subIdStr)] = {
@@ -161,14 +196,17 @@ export default function SubscriptionsPage() {
             break
           }
         }
-        return updated
+        return { ...prev, jobs: updated }
       },
       { revalidate: false },
     )
-    if (['done', 'failed', 'partial', 'cancelled'].includes(lastJobUpdate.status)) {
-      mutateJobs()
-    }
-  }, [lastJobUpdate, mutateJobs])
+    // Run totals only change server-side: refetch (coalesced) when the update is not a
+    // plain progress tick of the representative job.
+    const isRepresentative = Object.values(jobsRef.current ?? {}).some(
+      (job) => job.id === lastJobUpdate.job_id,
+    )
+    if (!isRepresentative || lastJobUpdate.status !== 'running') refetchCoalescer.trigger()
+  }, [lastJobUpdate, mutateJobs, refetchCoalescer])
 
   // Search
   const [searchInput, setSearchInput] = useState('')
@@ -272,6 +310,8 @@ export default function SubscriptionsPage() {
   const [fanboxSubscriptionFeeMin, setFanboxSubscriptionFeeMin] = useState('')
   const [fanboxSubscriptionFeeMax, setFanboxSubscriptionFeeMax] = useState('')
   const [mediaPolicy, setMediaPolicy] = useState<MediaPolicy>(DEFAULT_MEDIA_POLICY)
+  const [duplicateHint, setDuplicateHint] = useState<DuplicateSubscriptionHint | null>(null)
+  const duplicateDialogOpened = useOpenedOnce(duplicateHint !== null)
   const [debouncedAddUrl, setDebouncedAddUrl] = useState('')
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedAddUrl(url), 300)
@@ -296,7 +336,7 @@ export default function SubscriptionsPage() {
   const [editingGroup, setEditingGroup] = useState<SubscriptionGroup | null>(null)
 
   // Handlers — subscriptions
-  const handleAdd = async () => {
+  const handleAdd = async ({ overwrite = false }: { overwrite?: boolean } = {}) => {
     if (!url.trim()) return
     const fanboxOptions: Record<string, unknown> = url.includes('fanbox.cc')
       ? {
@@ -318,7 +358,9 @@ export default function SubscriptionsPage() {
         cron_expr: cronExpr,
         group_id: selectedGroupId,
         ...(Object.keys(downloadOptions).length > 0 ? { download_options: downloadOptions } : {}),
+        ...(overwrite ? {} : { reject_duplicate: true }),
       })
+      setDuplicateHint(null)
       if (result?.duplicate) {
         toast.info(t('subscriptions.duplicateUpdated'))
       } else {
@@ -326,7 +368,7 @@ export default function SubscriptionsPage() {
       }
       setUrl('')
       setName('')
-      setAutoDownload(true)
+      setAutoDownload(false)
       setCronExpr(DEFAULT_SUBSCRIPTION_CRON)
       setSelectedGroupId(null)
       setFanboxSubscriptionContent('accessible')
@@ -336,6 +378,12 @@ export default function SubscriptionsPage() {
       setShowAdd(false)
       mutate()
     } catch (err) {
+      const hint = duplicateSubscriptionHint(err)
+      if (hint) {
+        setDuplicateHint(hint)
+        return
+      }
+      setDuplicateHint(null)
       toast.error(err instanceof Error ? err.message : t('subscriptions.addFailed'))
     }
   }
@@ -786,7 +834,7 @@ export default function SubscriptionsPage() {
               ))}
             </div>
           </div>
-          <Button variant="primary" onClick={handleAdd} disabled={creating || !url.trim()}>
+          <Button variant="primary" onClick={() => handleAdd()} disabled={creating || !url.trim()}>
             {creating ? t('subscriptions.adding') : t('subscriptions.add')}
           </Button>
         </div>
@@ -993,6 +1041,7 @@ export default function SubscriptionsPage() {
               showSubGroup
               subs={section.subs}
               jobsData={cardJobs}
+              run={runsData}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}
@@ -1025,6 +1074,7 @@ export default function SubscriptionsPage() {
                 group={group}
                 subs={groupedSubs.byGroup[group.id] ?? []}
                 jobsData={cardJobs}
+                run={runsData}
                 groups={groups}
                 onEdit={openEditGroup}
                 onRun={handleGroupRun}
@@ -1050,6 +1100,7 @@ export default function SubscriptionsPage() {
               group={null}
               subs={groupedSubs.ungrouped}
               jobsData={cardJobs}
+              run={runsData}
               groups={groups}
               onEdit={openEditGroup}
               onRun={handleGroupRun}
@@ -1080,6 +1131,16 @@ export default function SubscriptionsPage() {
             setEditingGroup(null)
           }}
           onSave={handleGroupSave}
+        />
+      )}
+
+      {/* Overwrite confirmation for a URL that already has a subscription */}
+      {duplicateDialogOpened && (
+        <DuplicateSubscriptionDialog
+          hint={duplicateHint}
+          busy={creating}
+          onCancel={() => setDuplicateHint(null)}
+          onConfirm={() => handleAdd({ overwrite: true })}
         />
       )}
     </PageContainer>

@@ -30,7 +30,7 @@ import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
-import { t, formatDate } from '@/lib/i18n'
+import { t, formatDate, formatBytes } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
 import {
   Heart,
@@ -39,7 +39,6 @@ import {
   X,
   Share2,
   History,
-  Star,
   FolderHeart,
   MoreHorizontal,
   ChevronDown,
@@ -53,6 +52,7 @@ import { VirtualGrid } from '@/components/VirtualGrid'
 import { estimateGalleryThumbRowHeight } from '@/lib/gridRowHeight'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { Button } from '@/components/ui/button'
+import { Dialog } from '@/components/ui/dialog'
 
 const DOWNLOAD_REFRESH_INTERVAL_MS = 3000
 
@@ -261,6 +261,10 @@ function GalleryDetailPageInner() {
   // Auto-check gallery metadata update (once per page visit)
   useEffect(() => {
     if (!gallery || !featureSettings || updateCheckedRef.current) return
+    // Applying source metadata is a write (member + gallery write access on the
+    // backend). Viewers would only get a 403; wait for the profile instead of
+    // latching the ref so a member's check still runs once it loads.
+    if (!canEdit) return
     // Only EH and Pixiv galleries support metadata check
     if (!['ehentai', 'pixiv'].includes(gallery.source)) {
       updateCheckedRef.current = true
@@ -316,7 +320,7 @@ function GalleryDetailPageInner() {
         setIsCheckingUpdate(false)
         updateCheckedRef.current = true
       })
-  }, [gallery, featureSettings, mutateGallery])
+  }, [gallery, featureSettings, mutateGallery, canEdit])
 
   // "Update" (outdated) and "repair" go through the gallery action endpoint: the
   // server knows whether this gallery belongs to a subscription (an update is
@@ -392,7 +396,8 @@ function GalleryDetailPageInner() {
     collectionMenuOpen ||
     imageMenu !== null ||
     similarImageId !== null ||
-    saucenaoImageId !== null
+    saucenaoImageId !== null ||
+    showExcluded
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const action = detailHotkey(e)
@@ -708,12 +713,17 @@ function GalleryDetailPageInner() {
     }
   }
 
+  // Restoring the last entry closes the list for good, so a later exclusion
+  // does not pop it open again on its own.
+  const excludedCount = hiddenImages.length + excludedBlobs.length
+  if (showExcluded && excludedCount === 0) setShowExcluded(false)
+
   // Fetch excluded blobs
   const fetchExcluded = useCallback(async () => {
     if (!source || !sourceId) return
     try {
       const res = await api.library.listExcluded(source, sourceId)
-      setExcludedBlobs(res.excluded)
+      setExcludedBlobs(res.excluded ?? [])
     } catch {
       setExcludedBlobs([])
     }
@@ -723,7 +733,7 @@ function GalleryDetailPageInner() {
     if (!source || !sourceId) return
     try {
       const res = await api.library.listHidden(source, sourceId)
-      setHiddenImages(res.images)
+      setHiddenImages(res.images ?? [])
     } catch {
       setHiddenImages([])
     }
@@ -968,7 +978,7 @@ function GalleryDetailPageInner() {
       <div className="bg-vault-card border border-vault-border rounded-xl p-4 md:p-5 mb-5">
         <div className="grid grid-cols-[5rem_minmax(0,1fr)] md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 md:gap-x-5 gap-y-3">
           {/* Thumbnail preview from first image */}
-          <div className="md:row-span-3">
+          <div className="md:row-span-4">
             {images[0]?.thumb_path ? (
               <AppImage
                 src={images[0].thumb_path}
@@ -987,7 +997,7 @@ function GalleryDetailPageInner() {
             )}
           </div>
 
-          {/* Title, artist, rating */}
+          {/* Title, artist */}
           <div className="min-w-0">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1.5 md:gap-2">
               {editingTitle ? (
@@ -1101,24 +1111,31 @@ function GalleryDetailPageInner() {
             {gallery.artist_id && artistDisplayName && (
               <Link
                 href={artistPageHref(gallery.artist_id)}
-                className="mt-1 block truncate text-sm text-vault-text-secondary hover:text-vault-accent hover:underline transition-colors"
+                className="block truncate py-2.5 md:mt-1 md:py-0 text-sm text-vault-text-secondary hover:text-vault-accent hover:underline transition-colors"
               >
                 {artistDisplayName}
               </Link>
             )}
-            <div className="mt-2 flex items-center gap-2">
-              <span className="hidden md:inline text-sm text-vault-text-muted">
-                {t('library.metaRating')}
-              </span>
-              <RatingStars
-                rating={gallery.my_rating ?? 0}
-                readonly={isUpdating || !canEdit}
-                onChange={handleRatingChange}
-              />
-              <span className="text-xs md:text-sm text-vault-text-secondary">
-                {(gallery.my_rating ?? 0).toFixed(1)}
-              </span>
-            </div>
+          </div>
+
+          {/* Rating — a full-width row on phones, where five tappable stars outgrow the title column */}
+          <div
+            className={`col-span-2 md:col-span-1 md:col-start-2 -my-1 md:my-0 flex items-center gap-2 ${
+              canEdit ? '-ml-2.5 md:ml-0' : ''
+            }`}
+          >
+            <span className="hidden md:inline text-sm text-vault-text-muted">
+              {t('library.metaRating')}
+            </span>
+            <RatingStars
+              rating={gallery.my_rating ?? 0}
+              readonly={!canEdit}
+              disabled={isUpdating}
+              onChange={handleRatingChange}
+            />
+            <span className="text-xs md:text-sm text-vault-text-secondary">
+              {(gallery.my_rating ?? 0).toFixed(1)}
+            </span>
           </div>
 
           {/* Action row — labels collapse to icons on phones */}
@@ -1139,14 +1156,11 @@ function GalleryDetailPageInner() {
                 title={favoriteLabel}
                 className={`${ACTION_BUTTON_CLASS} ${
                   gallery.is_favorited
-                    ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
-                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
+                    ? 'bg-red-900/40 border-red-600 text-red-400 hover:bg-red-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-red-600 hover:text-red-400'
                 }`}
               >
-                <Star
-                  size={16}
-                  className={`md:hidden ${gallery.is_favorited ? 'fill-current' : ''}`}
-                />
+                <Heart size={16} className={gallery.is_favorited ? 'fill-current' : undefined} />
                 <span className="hidden md:inline">{favoriteLabel}</span>
               </button>
             )}
@@ -1192,25 +1206,10 @@ function GalleryDetailPageInner() {
             )}
           </div>
 
-          {/* Secondary metadata — always shown from md, behind a toggle on phones */}
+          {/* Metadata — all shown from md; phones keep pages and category beside the
+              toggle, and the rest behind it. */}
           <div className="col-span-2 md:col-span-1 md:col-start-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={() => setInfoOpen((open) => !open)}
-              aria-expanded={infoOpen}
-              className="h-auto gap-1 px-1 py-1 text-xs md:hidden hover:bg-transparent"
-            >
-              <ChevronDown
-                size={14}
-                className={`transition-transform ${infoOpen ? 'rotate-180' : ''}`}
-              />
-              {infoOpen ? t('library.lessInfo') : t('library.moreInfo')}
-            </Button>
-            <div
-              className={`${infoOpen ? 'grid' : 'hidden'} md:grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mt-2 md:mt-0`}
-            >
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm md:grid md:grid-cols-3 md:items-start">
               {[
                 { labelKey: 'library.metaSource', value: gallery.source },
                 { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
@@ -1236,21 +1235,67 @@ function GalleryDetailPageInner() {
                       },
                     ]
                   : []),
+                ...(gallery.media_stats && gallery.media_stats.total_size > 0
+                  ? [
+                      {
+                        labelKey: 'library.metaSize',
+                        value: formatBytes(gallery.media_stats.total_size),
+                      },
+                    ]
+                  : []),
+                ...(gallery.media_stats &&
+                (gallery.media_stats.gif_count > 0 || gallery.media_stats.video_count > 0)
+                  ? [
+                      {
+                        labelKey: 'library.metaMedia',
+                        value: [
+                          t('library.mediaImages', {
+                            count: String(gallery.media_stats.image_count),
+                          }),
+                          ...(gallery.media_stats.gif_count > 0
+                            ? [
+                                t('library.mediaGifs', {
+                                  count: String(gallery.media_stats.gif_count),
+                                }),
+                              ]
+                            : []),
+                          ...(gallery.media_stats.video_count > 0
+                            ? [
+                                t('library.mediaVideos', {
+                                  count: String(gallery.media_stats.video_count),
+                                }),
+                              ]
+                            : []),
+                        ].join(' · '),
+                      },
+                    ]
+                  : []),
                 { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
               ].map(({ labelKey, value }) => (
-                <div key={labelKey} className="min-w-0 truncate">
+                <div
+                  key={labelKey}
+                  className={`min-w-0 truncate md:order-none md:block ${
+                    labelKey === 'library.metaPages'
+                      ? 'order-1 shrink-0'
+                      : `order-4 ${
+                          labelKey === 'library.metaMedia'
+                            ? 'basis-full'
+                            : 'basis-[calc(50%-0.5rem)]'
+                        } ${infoOpen ? '' : 'hidden'}`
+                  }`}
+                >
                   <span className="text-vault-text-muted">{t(labelKey)}: </span>
                   <span className="text-vault-text">{value}</span>
                 </div>
               ))}
               {/* Category — inline select for members */}
-              <div className="col-span-2 md:col-span-1">
+              <div className="order-2 min-w-0 md:order-none">
                 <span className="text-vault-text-muted">{t('library.metaCategory')}: </span>
                 {canEdit ? (
                   <select
                     value={gallery.category ?? ''}
                     onChange={(e) => handleCategoryChange(e.target.value)}
-                    className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
+                    className="h-9 md:h-auto max-w-full bg-vault-input border border-vault-border rounded px-1 md:py-0.5 text-vault-text text-sm focus:outline-none"
                   >
                     <option value="">{t('library.categoryUncategorized')}</option>
                     {categoryOptions.map((cat) => (
@@ -1264,12 +1309,26 @@ function GalleryDetailPageInner() {
                     {gallery.category || t('library.categoryUncategorized')}
                   </span>
                 )}
-                {canEdit && gallery.source === 'local' && (
-                  <p className="mt-1 text-xs text-vault-text-muted">
-                    {t('categories.localFolderNote')}
-                  </p>
-                )}
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => setInfoOpen((open) => !open)}
+                aria-expanded={infoOpen}
+                className="order-3 ml-auto h-9 gap-1 px-1 text-xs md:hidden hover:bg-transparent"
+              >
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform ${infoOpen ? 'rotate-180' : ''}`}
+                />
+                {infoOpen ? t('library.lessInfo') : t('library.moreInfo')}
+              </Button>
+              {canEdit && gallery.source === 'local' && (
+                <p className="order-3 w-full md:order-none md:col-span-3 text-xs text-vault-text-muted">
+                  {t('categories.localFolderNote')}
+                </p>
+              )}
             </div>
             {versionsOpen && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
@@ -1359,103 +1418,43 @@ function GalleryDetailPageInner() {
 
       {/* Image Thumbnails */}
       <div className="bg-vault-card border border-vault-border rounded-xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+        <div className="flex min-h-7 items-center justify-between gap-3 mb-3">
+          <h2 className="min-w-0 text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
             {t('library.images')} ({pageCount}
             {gallery.source_pages && gallery.source_pages > pageCount
               ? `/${gallery.source_pages}`
               : ''}{' '}
             {t('library.metaPages')})
           </h2>
-          <div className="flex items-center gap-2">
-            {selectMode ? (
-              <>
+          {/* Select-mode actions live in the fixed bar below, so the header
+              keeps one height (the grid's scrollMargin is only re-read on
+              resize) and never has to fit five buttons on a phone. */}
+          {!selectMode && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canEdit && images.length > 0 && (
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={async () => {
-                    const ids = [...selectedIds].slice(0, 6)
-                    if (!ids.length) return
-                    try {
-                      const result = await api.saucenao.batch(ids, true, 80)
-                      const applied = result.results.filter((item) => item.source_applied).length
-                      toast.success(t('library.sourceLookupComplete', { count: applied }))
-                      await mutateGallery()
-                    } catch (error) {
-                      toast.error(error instanceof Error ? error.message : String(error))
-                    }
-                  }}
-                  disabled={selectedIds.size === 0 || selectedIds.size > 6}
-                  title={t('library.sourceLookupLimit')}
+                  onClick={() => setSelectMode(true)}
                   className="h-auto py-1 text-xs"
                 >
-                  {t('library.findSources', { count: selectedIds.size })}
+                  {t('library.selectImages')}
                 </Button>
+              )}
+              {canEdit && (hiddenImages.length > 0 || excludedBlobs.length > 0) && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleHideSelected}
-                  disabled={selectedIds.size === 0 || isHiding}
-                  className="h-auto py-1 text-xs border border-red-700/50 bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-400"
+                  onClick={() => setShowExcluded(true)}
+                  className="h-auto py-1 text-xs border border-yellow-700/50 bg-yellow-900/30 text-yellow-400 hover:bg-yellow-900/50 hover:text-yellow-400"
                 >
-                  {isHiding
-                    ? t('library.hidingImages')
-                    : t('library.hideSelected', { count: selectedIds.size })}
+                  {t('library.showExcluded', {
+                    count: hiddenImages.length + excludedBlobs.length,
+                  })}
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={selectAllLoaded}
-                  className="h-auto py-1 text-xs"
-                >
-                  {t('library.selectAll')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={invertSelection}
-                  className="h-auto py-1 text-xs"
-                >
-                  {t('library.invertSelection')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={exitSelectMode}
-                  className="h-auto py-1 text-xs"
-                >
-                  {t('library.cancelSelect')}
-                </Button>
-              </>
-            ) : (
-              <>
-                {canEdit && images.length > 0 && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setSelectMode(true)}
-                    className="h-auto py-1 text-xs"
-                  >
-                    {t('library.selectImages')}
-                  </Button>
-                )}
-                {canEdit && (hiddenImages.length > 0 || excludedBlobs.length > 0) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowExcluded(!showExcluded)}
-                    className="h-auto py-1 text-xs border border-yellow-700/50 bg-yellow-900/30 text-yellow-400 hover:bg-yellow-900/50 hover:text-yellow-400"
-                  >
-                    {showExcluded
-                      ? t('library.hideExcluded')
-                      : t('library.showExcluded', {
-                          count: hiddenImages.length + excludedBlobs.length,
-                        })}
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
 
         {imagesLoading && (
@@ -1609,80 +1608,149 @@ function GalleryDetailPageInner() {
             )}
           </>
         )}
-
-        {/* Hidden and excluded images panel */}
-        {showExcluded && (hiddenImages.length > 0 || excludedBlobs.length > 0) && (
-          <div className="mt-4 pt-4 border-t border-vault-border">
-            <h3 className="text-sm font-semibold text-yellow-400 mb-3">
-              {t('library.excludedImages')} ({hiddenImages.length + excludedBlobs.length})
-            </h3>
-            <div className="space-y-2">
-              {hiddenImages.map((image) => (
-                <div
-                  key={image.id}
-                  className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
-                >
-                  <div className="flex items-center gap-3 min-w-0 mr-3">
-                    {image.thumb_path && (
-                      <AppImage
-                        src={image.thumb_path}
-                        alt=""
-                        className="h-12 w-9 object-cover rounded border border-vault-border"
-                        sizes="36px"
-                      />
-                    )}
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs text-vault-text-muted truncate">
-                        {image.filename || `Page ${image.source_position ?? image.page_num}`}
-                      </span>
-                      {image.hidden_at && (
-                        <span className="text-[10px] text-vault-text-muted">
-                          {formatDate(image.hidden_at)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRestoreImage(image.id)}
-                    disabled={restoringImageId === image.id}
-                    className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
-                  >
-                    {restoringImageId === image.id ? '...' : t('library.restoreHidden')}
-                  </Button>
-                </div>
-              ))}
-              {excludedBlobs.map((blob) => (
-                <div
-                  key={blob.blob_sha256}
-                  className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
-                >
-                  <div className="flex flex-col min-w-0 mr-3">
-                    <span className="text-xs text-vault-text-muted font-mono truncate">
-                      {blob.blob_sha256.slice(0, 16)}...
-                    </span>
-                    {blob.excluded_at && (
-                      <span className="text-[10px] text-vault-text-muted">
-                        {formatDate(blob.excluded_at)}
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRestore(blob.blob_sha256)}
-                    disabled={restoringHash === blob.blob_sha256}
-                    className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
-                  >
-                    {restoringHash === blob.blob_sha256 ? '...' : t('library.restoreExcluded')}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
+
+      {selectMode && (
+        <>
+          {/* Keeps the last thumbnail row scrollable above the fixed bar. */}
+          <div aria-hidden className="h-28 lg:h-16" />
+          <div
+            data-testid="image-select-bar"
+            className="fixed bottom-[calc(4rem+var(--sab))] lg:bottom-0 left-0 right-0 z-50 bg-vault-card border-t border-vault-border p-3 flex flex-wrap items-center justify-end gap-2"
+          >
+            <span className="mr-auto text-sm text-vault-text font-medium">
+              {t('library.selectedCount', { count: String(selectedIds.size) })}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={async () => {
+                const ids = [...selectedIds].slice(0, 6)
+                if (!ids.length) return
+                try {
+                  const result = await api.saucenao.batch(ids, true, 80)
+                  const applied = result.results.filter((item) => item.source_applied).length
+                  toast.success(t('library.sourceLookupComplete', { count: applied }))
+                  await mutateGallery()
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : String(error))
+                }
+              }}
+              disabled={selectedIds.size === 0 || selectedIds.size > 6}
+              title={t('library.sourceLookupLimit')}
+              className="h-auto py-1 text-xs"
+            >
+              {t('library.findSources', { count: selectedIds.size })}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleHideSelected}
+              disabled={selectedIds.size === 0 || isHiding}
+              className="h-auto py-1 text-xs border border-red-700/50 bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-400"
+            >
+              {isHiding
+                ? t('library.hidingImages')
+                : t('library.hideSelected', { count: selectedIds.size })}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={selectAllLoaded}
+              className="h-auto py-1 text-xs"
+            >
+              {t('library.selectAll')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={invertSelection}
+              className="h-auto py-1 text-xs"
+            >
+              {t('library.invertSelection')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={exitSelectMode}
+              className="h-auto py-1 text-xs"
+            >
+              {t('library.cancelSelect')}
+            </Button>
+          </div>
+        </>
+      )}
+
+      <Dialog
+        open={showExcluded && excludedCount > 0}
+        onOpenChange={setShowExcluded}
+        title={`${t('library.excludedImages')} (${excludedCount})`}
+      >
+        <div data-testid="excluded-list" className="space-y-2">
+          {hiddenImages.map((image) => (
+            <div
+              key={image.id}
+              className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
+            >
+              <div className="flex items-center gap-3 min-w-0 mr-3">
+                {image.thumb_path && (
+                  <AppImage
+                    src={image.thumb_path}
+                    alt=""
+                    className="h-12 w-9 object-cover rounded border border-vault-border"
+                    sizes="36px"
+                  />
+                )}
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs text-vault-text-muted truncate">
+                    {image.filename || `Page ${image.source_position ?? image.page_num}`}
+                  </span>
+                  {image.hidden_at && (
+                    <span className="text-[10px] text-vault-text-muted">
+                      {formatDate(image.hidden_at)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleRestoreImage(image.id)}
+                disabled={restoringImageId === image.id}
+                className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
+              >
+                {restoringImageId === image.id ? '...' : t('library.restoreHidden')}
+              </Button>
+            </div>
+          ))}
+          {excludedBlobs.map((blob) => (
+            <div
+              key={blob.blob_sha256}
+              className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
+            >
+              <div className="flex flex-col min-w-0 mr-3">
+                <span className="text-xs text-vault-text-muted font-mono truncate">
+                  {blob.blob_sha256.slice(0, 16)}...
+                </span>
+                {blob.excluded_at && (
+                  <span className="text-[10px] text-vault-text-muted">
+                    {formatDate(blob.excluded_at)}
+                  </span>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleRestore(blob.blob_sha256)}
+                disabled={restoringHash === blob.blob_sha256}
+                className="h-auto py-1 text-xs shrink-0 border border-green-700/50 bg-green-900/30 text-green-400 hover:bg-green-900/50 hover:text-green-400"
+              >
+                {restoringHash === blob.blob_sha256 ? '...' : t('library.restoreExcluded')}
+              </Button>
+            </div>
+          ))}
+        </div>
+      </Dialog>
 
       {imageMenu?.open && (
         <ImageContextMenu

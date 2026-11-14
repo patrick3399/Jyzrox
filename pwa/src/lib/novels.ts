@@ -1,3 +1,5 @@
+import type { NovelNoteSummary } from '@/lib/api/novels'
+
 /**
  * Repo-relative path for a chapter/canon file, optionally inside a standard
  * canon subfolder (e.g. '草稿'). Shared by api.novels.createFile and callers
@@ -16,4 +18,18 @@ export function novelChapterHref(work: string, chapter: string, path: string): s
 /** URL for an entity card page. `path` is the repo-relative note `.md` path. */
 export function novelNoteHref(path: string): string {
   return `/novels/note/${path.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/** name → note path for one work's entity notes. Names come from the
+ * server-derived `aliases` (canonical `設定-` name + `aliases:` frontmatter);
+ * titles are not names. First note wins a shared name. */
+export function buildEntityIndex(notes: NovelNoteSummary[], work: string): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const n of notes) {
+    if (n.path.split('/')[0] !== work) continue
+    for (const name of n.aliases ?? []) {
+      if (name && !map.has(name)) map.set(name, n.path)
+    }
+  }
+  return map
 }

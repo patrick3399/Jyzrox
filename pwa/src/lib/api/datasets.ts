@@ -1,6 +1,12 @@
 import { apiFetch, qs } from './client'
 
-import type { Dataset, DatasetDetail, DatasetFilterConfig, DatasetFilterReport, DatasetSelection } from '../types'
+import type {
+  Dataset,
+  DatasetDetail,
+  DatasetFilterConfig,
+  DatasetFilterReport,
+  DatasetSelection,
+} from '../types'
 
 // ── AI training datasets ────────────────────────────────────────────
 
@@ -18,10 +24,7 @@ export const datasets = {
       body: JSON.stringify(data),
     }),
 
-  update: (
-    id: number,
-    patch: { name?: string; description?: string | null },
-  ) =>
+  update: (id: number, patch: { name?: string; description?: string | null }) =>
     apiFetch<{ status: string }>(`/api/datasets/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
@@ -71,5 +74,4 @@ export const datasets = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-
 }

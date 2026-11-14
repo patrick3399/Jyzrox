@@ -120,7 +120,9 @@ export default function GeneralSettingsPage() {
             <h3 className="font-medium text-vault-text text-sm mb-3">{t('settings.language')}</h3>
             <select
               value={isAutomatic ? 'auto' : locale}
-              onChange={(e) => changeLocale(e.target.value === 'auto' ? null : (e.target.value as Locale))}
+              onChange={(e) =>
+                changeLocale(e.target.value === 'auto' ? null : (e.target.value as Locale))
+              }
               className="bg-vault-input text-vault-text text-sm rounded-lg px-3 py-2 border border-vault-border focus:outline-none focus:ring-1 focus:ring-vault-accent"
             >
               <option value="auto">{t('settings.languageAutomatic')}</option>
@@ -135,7 +137,9 @@ export default function GeneralSettingsPage() {
 
         <div className="bg-vault-card rounded-xl border border-vault-border overflow-hidden">
           <div className="px-5 py-4">
-            <h3 className="font-medium text-vault-text text-sm mb-1">{t('settings.tagTranslation')}</h3>
+            <h3 className="font-medium text-vault-text text-sm mb-1">
+              {t('settings.tagTranslation')}
+            </h3>
             <p className="text-xs text-vault-text-muted mb-3">{t('settings.tagTranslationDesc')}</p>
             <select
               value={tagTranslationPreference}

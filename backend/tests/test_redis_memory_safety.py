@@ -260,7 +260,7 @@ def _redis_service_block() -> str:
     """
     compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text()
     for block in re.finditer(r"(?m)^  redis:\n(?P<body>(?:(?:    .*)?\n)*)", compose):
-        if "image: redis:8-alpine" in block.group("body"):
+        if "image: valkey/valkey:9-alpine" in block.group("body"):
             return block.group("body")
     raise AssertionError("redis service block not found in docker-compose.yml")
 
@@ -272,11 +272,16 @@ def _redis_command() -> str:
 
 
 def test_compose_redis_uses_non_evicting_policy():
-    assert "image: redis:8-alpine" in _redis_service_block()
+    assert "image: valkey/valkey:9-alpine" in _redis_service_block()
     command = _redis_command()
 
     assert "--maxmemory-policy noeviction" in command
     assert "--maxmemory-policy allkeys-lru" not in command
+
+
+def test_compose_valkey_command_is_not_the_redis_server_symlink_that_keeps_root():
+    """The image entrypoint only drops root when the command is exactly valkey-server."""
+    assert _redis_command().split()[0] == "valkey-server"
 
 
 def test_compose_redis_disables_automatic_rdb_snapshots_but_keeps_aof():

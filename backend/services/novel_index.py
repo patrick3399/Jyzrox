@@ -1,12 +1,12 @@
 """Pure derivation of the novel knowledge index (notes / links / mentions).
 
-Task 2 covers the pure builders (no DB, no git — repo root in, plain records
-out) so parsing stays unit-testable. Task 4 adds async persistence in this same
-module. STAB-003: importable by routers and workers; never imports routers.
+Pure builders (repo root in, plain records out) plus async persistence.
+STAB-003: importable by routers and workers; never imports routers.
 
-Adapted per spec §4.5.8: mention-scan is the primary edge source (the corpus has
-0 wikilinks today); entity names come from Setting/ note titles + optional
-`aliases` frontmatter, tolerant of notes with no structured metadata.
+Entity model (corpus fit 2026-11-05): an entity is a `設定-<name>v<N>.md` note;
+the highest version of a name within a work is the canonical one and the only
+one that collects mentions. `setting*.md` world documents are scanned only for
+explicit `aliases:` frontmatter. Mentions never cross works.
 """
 
 from __future__ import annotations
@@ -18,57 +18,66 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import NovelLink, NovelMention, NovelNote
-from services import novel_fs
+from services import novel_format, novel_fs
 
-# The corpus names Setting notes like `設定-1號-菈烏瑪v1` / `參考-多托雷-阿蕾奇諾`,
-# where the real entity name is embedded between structural affixes. Stripping
-# those yields names that actually appear in prose (§4.5.8 real-repo adaptation).
-_STRUCT_TOKENS = {"設定", "參考", "角色", "地點", "事件", "物品", "概念", "反派", "配角", "主角", "資料", "檔案"}
-_NUMBERED = re.compile(r"^(?:no\.?\d+|\d+號|\d+)$", re.IGNORECASE)
-_VERSION = re.compile(r"v\d+(?:-\d+)?$", re.IGNORECASE)
+# `設定-<name>` with an optional trailing `v<N>` version.
+_SETTING_STEM = re.compile(r"^設定-(?P<name>.+?)(?:v(?P<ver>\d+))?$")
 
 
-def stem_aliases(stem: str) -> list[str]:
-    """Extract entity-name candidates from a note filename stem by dropping
-    structural affixes (type/number prefixes) and trailing version markers."""
+def entity_of(stem: str) -> tuple[str, int] | None:
+    """(entity name, version) of a `設定-` note stem; None for anything else."""
+    m = _SETTING_STEM.match(stem)
+    if not m:
+        return None
+    return m["name"], int(m["ver"] or 0)
+
+
+def _dedupe(names: list[str]) -> list[str]:
     out: list[str] = []
-    for raw in re.split(r"[-_ ]+", stem):
-        tok = _VERSION.sub("", raw).strip()
-        if not tok or tok in _STRUCT_TOKENS or _NUMBERED.match(tok):
-            continue
-        if len(tok) >= 2 and tok not in out:
-            out.append(tok)
+    for n in names:
+        if n and n not in out:
+            out.append(n)
     return out
 
 
-def note_aliases(frontmatter: dict, title: str, stem: str = "") -> list[str]:
-    """Distinct names to scan bodies for: the title, any `aliases` list, and
-    names derived from the filename stem (the primary source for this corpus)."""
-    names: list[str] = [title]
-    raw = frontmatter.get("aliases") or []
-    if isinstance(raw, list):
-        names.extend(str(a).strip() for a in raw if str(a).strip())
-    if stem:
-        names.extend(stem_aliases(stem))
-    seen: list[str] = []
-    for n in names:
-        if n and n not in seen:
-            seen.append(n)
-    return seen
+def _frontmatter_aliases(fm: dict) -> list[str]:
+    raw = fm.get("aliases") or []
+    if not isinstance(raw, list):
+        return []
+    return [str(a).strip() for a in raw if str(a).strip()]
 
 
 def build_note_records(repo_root: str | Path) -> list[dict]:
+    notes = novel_fs.list_notes(repo_root)
+    # Highest version per (work, entity name) is canonical.
+    best: dict[tuple[str, str], tuple[int, str]] = {}
+    for note in notes:
+        ent = entity_of(Path(note["path"]).stem)
+        if ent is None:
+            continue
+        key = (note["work"], ent[0])
+        if key not in best or ent[1] > best[key][0]:
+            best[key] = (ent[1], note["path"])
+    canonical = {path for _, path in best.values()}
+
     recs: list[dict] = []
-    for note in novel_fs.list_notes(repo_root):
+    for note in notes:
         text = novel_fs.read_file(repo_root, note["path"])
         fm, _ = novel_fs.parse_frontmatter(text)
-        stem = Path(note["path"]).stem
+        ent = entity_of(Path(note["path"]).stem)
+        if note["path"] in canonical:
+            aliases = _dedupe([ent[0], *_frontmatter_aliases(fm)]) if ent else []
+        elif ent is None:
+            aliases = _dedupe(_frontmatter_aliases(fm))  # world doc: opt-in only
+        else:
+            aliases = []  # superseded version of an entity
         recs.append(
             {
                 "file_path": note["path"],
+                "work": note["work"],
                 "title": note["title"],
                 "note_type": fm.get("type"),
-                "aliases": note_aliases(fm, note["title"], stem=stem),
+                "aliases": aliases,
                 "frontmatter": fm,
             }
         )
@@ -102,48 +111,61 @@ def build_link_records(repo_root: str | Path) -> list[dict]:
     return out
 
 
-def _chapter_paths(repo_root: str | Path) -> list[str]:
-    paths: list[str] = []
-    for w in novel_fs.list_works(repo_root):
-        paths.extend(c["path"] for c in novel_fs.list_chapters(repo_root, w["name"]))
-    return sorted(paths)
-
-
 def scan_mentions(repo_root: str | Path) -> list[dict]:
-    """Body-text scan: count each entity name/alias per chapter, record first offset.
+    """Body-text scan of main chapters, per work: count each entity's names per
+    chapter and record the first offset.
 
-    One alternation regex over each chapter (corpus ~8 MB; YAGNI on Aho-Corasick).
-    Longest aliases first so overlapping names prefer the longer match.
+    One alternation regex per work (corpus ~2 MB of markdown). Longest aliases
+    first so overlapping names prefer the longer match.
     """
-    notes = build_note_records(repo_root)
-    alias_to_note: dict[str, str] = {}
-    for n in notes:
+    by_work: dict[str, dict[str, str]] = {}
+    for n in build_note_records(repo_root):
         for a in n["aliases"]:
-            alias_to_note.setdefault(a, n["file_path"])
-    if not alias_to_note:
-        return []
-    aliases = sorted(alias_to_note, key=len, reverse=True)
-    pattern = re.compile("|".join(re.escape(a) for a in aliases))
+            by_work.setdefault(n["work"], {}).setdefault(a, n["file_path"])
     out: list[dict] = []
-    for ch in _chapter_paths(repo_root):
-        text = novel_fs.read_file(repo_root, ch)
-        counts: dict[str, int] = {}
-        first: dict[str, int] = {}
-        for m in pattern.finditer(text):
-            note_path = alias_to_note[m.group(0)]
-            counts[note_path] = counts.get(note_path, 0) + 1
-            if note_path not in first:
-                first[note_path] = m.start()
-        for note_path, cnt in counts.items():
-            out.append(
-                {
-                    "note_path": note_path,
-                    "chapter_path": ch,
-                    "mention_count": cnt,
-                    "first_offset": first[note_path],
-                }
-            )
+    for w in novel_fs.list_works(repo_root):
+        alias_to_note = by_work.get(w["name"])
+        if not alias_to_note:
+            continue
+        aliases = sorted(alias_to_note, key=len, reverse=True)
+        pattern = re.compile("|".join(re.escape(a) for a in aliases))
+        for ch in novel_fs.list_chapters(repo_root, w["name"]):
+            text = novel_fs.read_file(repo_root, ch["path"])
+            counts: dict[str, int] = {}
+            first: dict[str, int] = {}
+            for m in pattern.finditer(text):
+                note_path = alias_to_note[m.group(0)]
+                counts[note_path] = counts.get(note_path, 0) + 1
+                first.setdefault(note_path, m.start())
+            for note_path, cnt in counts.items():
+                out.append(
+                    {
+                        "note_path": note_path,
+                        "chapter_path": ch["path"],
+                        "mention_count": cnt,
+                        "first_offset": first[note_path],
+                    }
+                )
     return out
+
+
+def corpus_health(repo_root: str | Path, notes: list[dict], mentions: list[dict]) -> dict:
+    """Drift signals for the operator: files the conventions do not place,
+    chapters failing FORMAT.md, entities nothing mentions."""
+    root = Path(repo_root).resolve()
+    stray: list[str] = []
+    issues = 0
+    for w in novel_fs.list_works(root):
+        for f in sorted((root / w["name"]).glob("*.md")):
+            rel = f.relative_to(root)
+            if novel_fs.classify_path(rel) == "reference" and f.name.lower() != "format.md":
+                stray.append(str(rel))
+        for path in novel_fs.main_chapter_paths(root, w["name"]):
+            if novel_format.check_text(novel_fs.read_file(root, path)):
+                issues += 1
+    mentioned = {m["note_path"] for m in mentions}
+    silent = [n["file_path"] for n in notes if n["aliases"] and n["file_path"] not in mentioned]
+    return {"stray_root_files": stray, "chapters_with_format_issues": issues, "entities_without_mentions": silent}
 
 
 async def reindex_all(session: AsyncSession, repo_root: str | Path) -> dict:
@@ -156,6 +178,7 @@ async def reindex_all(session: AsyncSession, repo_root: str | Path) -> dict:
     notes = build_note_records(repo_root)
     links = build_link_records(repo_root)
     mentions = scan_mentions(repo_root)
+    health = corpus_health(repo_root, notes, mentions)
 
     await session.execute(delete(NovelMention))
     await session.execute(delete(NovelLink))
@@ -183,4 +206,4 @@ async def reindex_all(session: AsyncSession, repo_root: str | Path) -> dict:
             )
         )
     await session.flush()
-    return {"notes": len(notes), "links": len(links), "mentions": len(mentions)}
+    return {"notes": len(notes), "links": len(links), "mentions": len(mentions), "health": health}

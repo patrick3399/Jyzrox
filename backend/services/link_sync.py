@@ -169,6 +169,8 @@ class LinkSyncResult:
     # Pending pages (no blob yet) after the sync.
     pending: int = 0
     pages: int | None = None
+    # Files left out of this pass because they may still be being written.
+    unsettled: int = 0
 
     @property
     def changed(self) -> bool:
@@ -456,7 +458,7 @@ async def _sync_locked(gallery_id: int, *, force: bool) -> LinkSyncResult:
                 _restore_links(link_states)
                 raise
 
-            result.pages, result.pending = pages, pending
+            result.pages, result.pending, result.unsettled = pages, pending, len(plan.unsettled)
             if removed_shas:
                 await cleanup_unreferenced_thumbnails(session, removed_shas)
 

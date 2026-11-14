@@ -3,10 +3,7 @@
 // call sites in *.compiler.test.ts to type-check.
 declare module '@babel/core' {
   const babel: {
-    transformSync(
-      code: string,
-      options?: Record<string, unknown>,
-    ): { code?: string | null } | null
+    transformSync(code: string, options?: Record<string, unknown>): { code?: string | null } | null
   }
   export default babel
 }

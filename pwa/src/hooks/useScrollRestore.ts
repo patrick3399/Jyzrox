@@ -124,9 +124,7 @@ export function useScrollRestore<T = unknown>(
         sessionStorage.setItem(
           key,
           JSON.stringify(
-            pages !== undefined
-              ? { scrollY: window.scrollY, pages }
-              : { scrollY: window.scrollY },
+            pages !== undefined ? { scrollY: window.scrollY, pages } : { scrollY: window.scrollY },
           ),
         )
       })

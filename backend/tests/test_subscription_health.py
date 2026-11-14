@@ -284,6 +284,7 @@ class TestEnqueueBackoffGate:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("worker.subscription._current_paused_at", AsyncMock(return_value=None)),
             patch(
                 "services.subscription_health.should_backoff",
                 new_callable=AsyncMock,

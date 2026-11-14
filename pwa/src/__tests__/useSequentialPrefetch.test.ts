@@ -252,6 +252,14 @@ describe('useSequentialPrefetch', () => {
       ])
     })
 
+    it('should prefetch the next surviving page across a hole in page numbers', () => {
+      const images = makeImages(20).filter((image) => image.pageNum <= 4 || image.pageNum >= 12)
+
+      renderHook(() => useSequentialPrefetch(images, 4, false))
+
+      expect(activeSrcs(instances)).toEqual(['http://proxy/page/12', 'http://proxy/page/13'])
+    })
+
     it('should fire new requests when currentPage advances', async () => {
       const images = makeImages(10)
       let currentPage = 1
@@ -446,7 +454,9 @@ describe('useSequentialPrefetch', () => {
       const images = makeImages(20)
       let currentPage = 1
 
-      const { result, rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+      const { result, rerender } = renderHook(() =>
+        useSequentialPrefetch(images, currentPage, true),
+      )
 
       // Concurrency 4: initial in-flight requests are for pages 2, 3, 4, 5.
       expect(instances).toHaveLength(4)
@@ -485,7 +495,9 @@ describe('useSequentialPrefetch', () => {
       const images = makeImages(20)
       let currentPage = 1
 
-      const { result, rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+      const { result, rerender } = renderHook(() =>
+        useSequentialPrefetch(images, currentPage, true),
+      )
 
       // Page 2's request started under the old epoch, before any page turn.
       const page2Image = instances[0]

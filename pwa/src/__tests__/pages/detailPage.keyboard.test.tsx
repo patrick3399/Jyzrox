@@ -190,7 +190,10 @@ describe('library detail page keyboard shortcuts', () => {
   it.each([
     ['the Read Later button', () => screen.getByRole('button', { name: 'Read Later' })],
     ['the More actions button', () => screen.getByRole('button', { name: 'More actions' })],
-    ['the Add to Collection button', () => screen.getByRole('button', { name: 'Add to Collection' })],
+    [
+      'the Add to Collection button',
+      () => screen.getByRole('button', { name: 'Add to Collection' }),
+    ],
     ['a tag', () => screen.getByRole('button', { name: 'glasses' })],
   ])('Enter or Space on %s does not also open the reader', (_name, target) => {
     render(<GalleryDetailPage />)

@@ -113,10 +113,9 @@ describe('useGalleryEventRefresh', () => {
     const first = vi.fn()
     const second = vi.fn()
     state.lastEvent = null
-    const { rerender } = renderHook(
-      ({ cb }: { cb: () => void }) => useGalleryEventRefresh(7, cb),
-      { initialProps: { cb: first as () => void } },
-    )
+    const { rerender } = renderHook(({ cb }: { cb: () => void }) => useGalleryEventRefresh(7, cb), {
+      initialProps: { cb: first as () => void },
+    })
     state.lastEvent = event('gallery.updated', 7)
     rerender({ cb: first })
     expect(first).toHaveBeenCalledTimes(1)
@@ -130,10 +129,9 @@ describe('useGalleryEventRefresh', () => {
   it('invokes the latest callback, not the one captured when the event arrived', () => {
     const stale = vi.fn()
     const fresh = vi.fn()
-    const { rerender } = renderHook(
-      ({ cb }: { cb: () => void }) => useGalleryEventRefresh(7, cb),
-      { initialProps: { cb: stale as () => void } },
-    )
+    const { rerender } = renderHook(({ cb }: { cb: () => void }) => useGalleryEventRefresh(7, cb), {
+      initialProps: { cb: stale as () => void },
+    })
 
     state.lastEvent = event('gallery.updated', 7)
     rerender({ cb: fresh })

@@ -1,0 +1,5 @@
+# Bulk formatting commits; skip them in git blame.
+# Enable locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style(pwa): apply Prettier to pwa/src
+019ac39ff774b430199558b6e80891ee274c97ad

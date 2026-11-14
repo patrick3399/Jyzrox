@@ -61,10 +61,14 @@ async def _get_postgresql_version() -> str | None:
 
 
 async def _get_redis_version() -> str | None:
-    """Return redis_version from INFO server."""
+    """Return the server version from INFO server.
+
+    Valkey pins redis_version to 7.2.4 for client compatibility, so its real
+    version is in valkey_version.
+    """
     try:
         info = await get_redis().info("server")
-        return info.get("redis_version") or None
+        return info.get("valkey_version") or info.get("redis_version") or None
     except Exception as exc:
         logger.warning("Failed to detect Redis version: %s", exc)
         return None

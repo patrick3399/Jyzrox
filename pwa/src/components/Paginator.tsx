@@ -46,7 +46,6 @@ export default function Paginator({
     setInputValue(String(page + 1))
   }
 
-
   return (
     <div className="flex justify-center items-center gap-2 pt-2">
       <Button

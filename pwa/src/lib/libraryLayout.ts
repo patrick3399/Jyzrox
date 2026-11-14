@@ -72,5 +72,7 @@ export function estimateLibraryGridRowHeight({
 
   // No upper clamp: truncating tall (wide-card) rows would underestimate the
   // real card height and reintroduce the next-row overlap described above.
-  return Math.ceil(Math.max(188, coverHeight + LIBRARY_CARD_INFO_REM * rootFontSize() + LIBRARY_CARD_BORDER_PX))
+  return Math.ceil(
+    Math.max(188, coverHeight + LIBRARY_CARD_INFO_REM * rootFontSize() + LIBRARY_CARD_BORDER_PX),
+  )
 }

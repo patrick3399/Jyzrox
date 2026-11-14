@@ -2,18 +2,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { detailHotkey } from '@/lib/detailHotkeys'
 
 /** Dispatch a real keydown so `event.target` is resolved the way the browser does. */
-function keydownOn(
-  target: EventTarget,
-  key: string,
-  init: KeyboardEventInit = {},
-): KeyboardEvent {
+function keydownOn(target: EventTarget, key: string, init: KeyboardEventInit = {}): KeyboardEvent {
   let captured: KeyboardEvent | null = null
   const listener = (event: Event) => {
     captured = event as KeyboardEvent
   }
   window.addEventListener('keydown', listener)
   try {
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }))
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }),
+    )
   } finally {
     window.removeEventListener('keydown', listener)
   }

@@ -3,7 +3,7 @@ import { canonicalIdentityKey } from './identity'
 import { buildQuery, parseQuery, type ParsedFilters } from '../queryParser'
 
 export const LIBRARY_BROWSE_SOURCE_ID = 'library'
-export const LIBRARY_BROWSE_SCHEMA_VERSION = 1
+export const LIBRARY_BROWSE_SCHEMA_VERSION = 2
 export const LEGACY_LIBRARY_SCROLL_KEY = 'library_scrollY'
 
 export type LibraryBrowseIdentity = ParsedFilters & {
@@ -23,13 +23,15 @@ export function canonicalLibraryBrowseIdentity(rawQuery: string): LibraryBrowseI
     nameOnlyTags: uniqueSorted(parsed.nameOnlyTags),
     excludeTags: uniqueSorted(parsed.excludeTags),
     title: parsed.title,
-    source: parsed.source,
+    sources: uniqueSorted(parsed.sources),
+    excludeSources: uniqueSorted(parsed.excludeSources),
     rating: parsed.rating,
     favorited: parsed.favorited,
     readingList: parsed.readingList,
     collection: parsed.collection,
     artistId: parsed.artistId,
-    category: parsed.category,
+    categories: uniqueSorted(parsed.categories),
+    excludeCategories: uniqueSorted(parsed.excludeCategories),
     importMode: parsed.importMode,
     sort: parsed.sort ?? 'added_at',
   }
@@ -45,13 +47,15 @@ export function libraryBrowseSearchQuery(identity: LibraryBrowseIdentity): strin
     nameOnlyTags: identity.nameOnlyTags,
     excludeTags: identity.excludeTags,
     title: identity.title,
-    source: identity.source,
+    sources: identity.sources,
+    excludeSources: identity.excludeSources,
     rating: identity.rating,
     favorited: identity.favorited,
     readingList: identity.readingList,
     collection: identity.collection,
     artistId: identity.artistId,
-    category: identity.category,
+    categories: identity.categories,
+    excludeCategories: identity.excludeCategories,
     importMode: identity.importMode,
     sort: null,
   })

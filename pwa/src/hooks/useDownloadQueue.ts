@@ -193,8 +193,5 @@ export function useDownloadPreview(url: string) {
 }
 
 export function useDownloadJob(jobId: string | null) {
-  return useSWR(
-    jobId ? ['download/job', jobId] : null,
-    () => api.download.getJob(jobId!),
-  )
+  return useSWR(jobId ? ['download/job', jobId] : null, () => api.download.getJob(jobId!))
 }

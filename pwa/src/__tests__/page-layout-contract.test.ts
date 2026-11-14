@@ -78,11 +78,16 @@ function routeOf(file: string): string {
   return `/${rel}`.replace(/\/$/, '') || '/'
 }
 
-const pages = pageFiles().map((file) => ({ file, route: routeOf(file), src: readFileSync(file, 'utf8') }))
+const pages = pageFiles().map((file) => ({
+  file,
+  route: routeOf(file),
+  src: readFileSync(file, 'utf8'),
+}))
 const kindOf = (route: string): Kind => (route.startsWith('/settings') ? 'settings' : LAYOUT[route])
 
 // LayoutShell already pads the page; a page adding horizontal + vertical page padding doubles it.
-const DOUBLE_PADDING = /className=["'`{][^"'`]*(?:\b(?:px-4|p-4)\b[^"'`]*\b(?:py-6|py-8|md:p-6|md:p-8)\b|\b(?:py-6|py-8)\b[^"'`]*\bpx-4\b)/
+const DOUBLE_PADDING =
+  /className=["'`{][^"'`]*(?:\b(?:px-4|p-4)\b[^"'`]*\b(?:py-6|py-8|md:p-6|md:p-8)\b|\b(?:py-6|py-8)\b[^"'`]*\bpx-4\b)/
 // app/images/page.tsx re-creates the shell padding inside its own fixed full-screen panel.
 const PADDING_ALLOWLIST = new Set(['/images'])
 
@@ -116,10 +121,11 @@ describe('page layout contract', () => {
     },
   )
 
-  it.each(pages.filter((p) => kindOf(p.route) !== 'exempt' && !PADDING_ALLOWLIST.has(p.route)).map((p) => [p.route, p.src]))(
-    '%s does not add its own page padding',
-    (_route, src) => {
-      expect(src).not.toMatch(DOUBLE_PADDING)
-    },
-  )
+  it.each(
+    pages
+      .filter((p) => kindOf(p.route) !== 'exempt' && !PADDING_ALLOWLIST.has(p.route))
+      .map((p) => [p.route, p.src]),
+  )('%s does not add its own page padding', (_route, src) => {
+    expect(src).not.toMatch(DOUBLE_PADDING)
+  })
 })

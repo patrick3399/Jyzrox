@@ -10,9 +10,7 @@ import {
 describe('Pixiv browse identity', () => {
   it('makes search a first-class URL surface with sort, duration, and backend identity', () => {
     const identity = parsePixivIdentity(
-      new URLSearchParams(
-        'tab=search&q=blue+archive&sort=popular_desc&duration=within_last_week',
-      ),
+      new URLSearchParams('tab=search&q=blue+archive&sort=popular_desc&duration=within_last_week'),
       'authenticated',
     )
 

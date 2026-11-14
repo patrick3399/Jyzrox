@@ -429,6 +429,9 @@ _SQLITE_SCHEMA = [
         created_by_user_id INTEGER REFERENCES users(id),
         source_url TEXT,
         deleted_at TIMESTAMP,
+        deleted_reason TEXT,
+        deleted_by_user_id INTEGER,
+        merged_into_gallery_id INTEGER,
         metadata_updated_at TIMESTAMP,
         content_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -791,6 +794,10 @@ _SQLITE_SCHEMA = [
         batch_enqueued INTEGER DEFAULT 0,
         group_id INTEGER,
         last_job_id TEXT,
+        paused_at TIMESTAMP,
+        paused_reason TEXT,
+        paused_until TIMESTAMP,
+        halt_count INTEGER NOT NULL DEFAULT 0,
         UNIQUE (user_id, url)
     )
     """,

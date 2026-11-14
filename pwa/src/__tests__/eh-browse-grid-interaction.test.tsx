@@ -59,7 +59,14 @@ vi.mock('@/components/VirtualGrid', async () => {
                     const above = index < gridConfig.visibleFrom
                     const top = above ? -400 + index * 10 : 120 + index * 10
                     element.getBoundingClientRect = () =>
-                      ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100 }) as DOMRect
+                      ({
+                        top,
+                        bottom: top + 100,
+                        left: 0,
+                        right: 100,
+                        width: 100,
+                        height: 100,
+                      }) as DOMRect
                   }
                   onRegisterElement?.(index, element)
                 }}

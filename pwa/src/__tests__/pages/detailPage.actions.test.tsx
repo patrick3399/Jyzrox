@@ -144,7 +144,7 @@ describe('gallery detail page header actions', () => {
     h.role = 'member'
     render(<GalleryDetailPage />)
 
-    expect(screen.getByRole('button', { name: '☆ Favorite' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Favorite' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Read Later' })).toBeInTheDocument()
     expect(screen.getByRole('combobox')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Select' })).toBeInTheDocument()
@@ -166,7 +166,7 @@ describe('gallery detail page header actions', () => {
     h.role = 'viewer'
     render(<GalleryDetailPage />)
 
-    expect(screen.queryByRole('button', { name: '☆ Favorite' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Favorite' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Read Later' })).not.toBeInTheDocument()
     // Category is shown as text, not as an editable select.
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
@@ -183,9 +183,34 @@ describe('gallery detail page header actions', () => {
     h.role = undefined
     render(<GalleryDetailPage />)
 
-    expect(screen.queryByRole('button', { name: '☆ Favorite' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Favorite' })).not.toBeInTheDocument()
     const sheet = openMoreSheet()
     expect(within(sheet).queryByText('Delete Gallery')).not.toBeInTheDocument()
+  })
+
+  it('uses the same heart as the library cards for the favorite button', () => {
+    h.role = 'member'
+    render(<GalleryDetailPage />)
+
+    const favorite = screen.getByRole('button', { name: 'Favorite' })
+    expect(favorite.querySelector('svg')).toHaveClass('lucide-heart')
+    expect(favorite.textContent).not.toMatch(/[★☆]/)
+  })
+
+  it('keeps pages and category outside the phone More info toggle while it is closed', () => {
+    h.role = 'member'
+    render(<GalleryDetailPage />)
+
+    // jsdom applies no CSS, so visibility is asserted on the toggling class.
+    const pages = screen.getByText('Pages:').parentElement
+    const category = screen.getByRole('combobox').parentElement
+    const source = screen.getByText('Source:').parentElement
+    expect(pages).not.toHaveClass('hidden')
+    expect(category).not.toHaveClass('hidden')
+    expect(source).toHaveClass('hidden')
+
+    fireEvent.click(screen.getByRole('button', { name: 'More info' }))
+    expect(screen.getByText('Source:').parentElement).not.toHaveClass('hidden')
   })
 
   it('closes the More sheet on Escape without also navigating back', () => {

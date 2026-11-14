@@ -35,9 +35,9 @@ function sourceDisplayName(value: string): string {
 export default function ImageBrowserPage() {
   return (
     <PageContainer>
-    <Suspense>
-      <ImageBrowserInner />
-    </Suspense>
+      <Suspense>
+        <ImageBrowserInner />
+      </Suspense>
     </PageContainer>
   )
 }
@@ -46,11 +46,9 @@ function ImageBrowserInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-
   const sourceParam = searchParams.get('source') ?? ''
   const categoryParam = searchParams.get('category') ?? ''
   const favoritedParam = searchParams.get('favorited')
-
 
   const [sourceFilter, setSourceFilter] = useState(sourceParam)
   const [categoryFilter, setCategoryFilter] = useState(categoryParam)

@@ -171,7 +171,9 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
         return {
           items: response.galleries,
           cursor:
-            response.next_gid != null ? ({ kind: 'gid', nextGid: response.next_gid } as Cursor) : null,
+            response.next_gid != null
+              ? ({ kind: 'gid', nextGid: response.next_gid } as Cursor)
+              : null,
           hasMore: response.next_gid != null,
           total: response.total ?? null,
         }
@@ -213,7 +215,8 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
     () => ({
       getItemId: ehentaiBrowseAdapter.getItemKey,
       fetchPage,
-      isReplayableIdentity: (identity: typeof canonicalIdentity) => identity.surface !== 'image-search',
+      isReplayableIdentity: (identity: typeof canonicalIdentity) =>
+        identity.surface !== 'image-search',
       validateItem: isEhGallery,
       validateMeta: isEhFavCategoryMeta,
       validateCursor: isValidEhCursor,
@@ -462,13 +465,13 @@ export function useEhBrowse(scopeInput?: EhBrowseScope) {
         const view = {
           anchor:
             anchor === undefined
-              ? liveView?.anchor ??
+              ? (liveView?.anchor ??
                 current.anchor ??
                 (current.scrollY > 0
                   ? { itemId: null, offset: 0, scrollY: current.scrollY }
-                  : null)
+                  : null))
               : anchor,
-          layout: layout === undefined ? liveView?.layout ?? current.layout : layout,
+          layout: layout === undefined ? (liveView?.layout ?? current.layout) : layout,
         }
         liveViewRef.current = view
         sessionCheckpoint(view, retention)

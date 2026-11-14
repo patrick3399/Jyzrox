@@ -1,32 +1,19 @@
 const CACHE_NAME = 'jyzrox-static-__BUILD_HASH__';
 const OFFLINE_URL = '/offline.html';
-// v2 intentionally rotates away from the legacy cache, which could grow to
-// several GB and make cache.keys() fail before eviction could run.
-const MEDIA_CACHE_NAME = 'jyzrox-media-v2';
 const PAGE_CACHE_NAME = 'jyzrox-pages';
+// Media is no longer copied into CacheStorage (see the fetch handler). This is
+// the store older workers filled — up to an 8 GB default whose budget was lost
+// on every worker restart. Activation deletes it with every other unknown
+// cache; logout deletes it by name in case a device never re-activated.
+const LEGACY_MEDIA_CACHE_NAME = 'jyzrox-media-v2';
 
 // sha256-addressed media: the same URL always denotes the same bytes.
 const CONTENT_ADDRESSED_MEDIA = /^\/media\/(cas|thumbs|image)\//;
 // Video containers the backend stores (services/media_formats.py VIDEO_EXTENSIONS).
 const VIDEO_MEDIA = /\.(mp4|webm|mov)$/i;
-const MEDIA_CACHE_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
-// Responses larger than this are handed straight to the page, never tee'd into
-// CacheStorage. `response.clone()` makes the worker read the full body for the
-// cache write even after the page drops the <img>, so leaving a gallery of
-// ~40 MB originals kept hundreds of MB downloading and buffered in the worker
-// and stalled the next screen on iOS Safari. Normal pages are well under this.
-const MAX_CACHEABLE_MEDIA_BYTES = 8 * 1024 * 1024;
-
-function isCacheableMediaResponse(response) {
-  if (response.status < 200 || response.status >= 300) return false;
-  const length = Number(response.headers.get('Content-Length'));
-  return !(length > MAX_CACHEABLE_MEDIA_BYTES);
-}
 
 // ── Cache Config (overridable via postMessage) ──
 let cacheConfig = {
-  mediaCacheTTLHours: 72,
-  mediaCacheSizeMB: 8192,
   pageCacheTTLHours: 24,
 };
 
@@ -158,11 +145,11 @@ self.addEventListener('message', (event) => {
     event.waitUntil(replayShareQueue());
   }
   if (event.data?.type === 'SW_CLEAR_USER_CACHES') {
-    // Logout: cached media/pages contain private user content and must not
-    // outlive the session (BR-003). The static asset cache is content-neutral
-    // and survives so the login page still hydrates offline.
+    // Logout: cached pages contain private user content and must not outlive
+    // the session (BR-003). The static asset cache is content-neutral and
+    // survives so the login page still hydrates offline.
     event.waitUntil(
-      Promise.all([caches.delete(MEDIA_CACHE_NAME), caches.delete(PAGE_CACHE_NAME)])
+      Promise.all([caches.delete(PAGE_CACHE_NAME), caches.delete(LEGACY_MEDIA_CACHE_NAME)])
     );
   }
 });
@@ -185,29 +172,6 @@ function isExpired(cachedResponse, ttlHours) {
   return age > ttlHours * 3600 * 1000;
 }
 
-// A full CacheStorage walk is expensive and can itself fail once a cache grows
-// into multiple GB. Use the browser's cheap origin estimate instead. If the
-// configured budget is exceeded, reset the content-addressed cache as one
-// background operation; individual image loads never enumerate its entries.
-let lastMediaCacheSweepAt = 0;
-
-async function maybeEnforceMediaCacheLimit() {
-  if (!cacheConfig.mediaCacheSizeMB || cacheConfig.mediaCacheSizeMB <= 0) return;
-  const now = Date.now();
-  if (now - lastMediaCacheSweepAt < MEDIA_CACHE_SWEEP_INTERVAL_MS) return;
-  lastMediaCacheSweepAt = now;
-
-  try {
-    const estimate = await navigator.storage?.estimate?.();
-    const limitBytes = cacheConfig.mediaCacheSizeMB * 1024 * 1024;
-    if (!estimate || !Number.isFinite(estimate.usage) || estimate.usage <= limitBytes) return;
-    await caches.delete(MEDIA_CACHE_NAME);
-  } catch (_) {
-    // Quota enforcement is best-effort; browser origin eviction remains the
-    // final storage bound.
-  }
-}
-
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -222,7 +186,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME && key !== MEDIA_CACHE_NAME && key !== PAGE_CACHE_NAME).map((key) => caches.delete(key))
+        keys.filter((key) => key !== CACHE_NAME && key !== PAGE_CACHE_NAME).map((key) => caches.delete(key))
       );
     }).then(() => {
       // Try to replay any queued share requests that were stored while offline
@@ -299,84 +263,41 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Video is left to the browser's own media stack. Responding here means
-  // `response.clone()` holds the entire body in the worker until the
-  // CacheStorage write completes — a second full copy of a file the <video>
-  // element is already buffering, which is what exhausted memory and killed the
-  // tab while playing a large clip in the Reader. Media elements also stream by
-  // Range, and CacheStorage rejects a 206 anyway, so the copy bought nothing.
-  // Offline playback is therefore not offered; nginx `auth_request` still gates
-  // every byte, so the revocation posture in security-model BR-006 is unchanged.
+  // `response.clone()` holds the entire body in the worker — a second full copy
+  // of a file the <video> element is already buffering, which is what
+  // exhausted memory and killed the tab while playing a large clip in the
+  // Reader. Media elements also stream by Range. Offline playback is therefore
+  // not offered; nginx `auth_request` still gates every byte, so the
+  // revocation posture in security-model BR-006 is unchanged.
   if (VIDEO_MEDIA.test(requestUrl.pathname)) return;
 
-  // Media is split by addressing mode: content-addressed immutable capability
-  // URLs vs. path-addressed revocable media. See each branch below.
-  if (CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname)) {
-    // Content-addressed media (/media/cas|thumbs|image/) are sha256 capability
-    // URLs served with `Cache-Control: private, immutable`. The bytes behind a
-    // URL never change, so the browser's own HTTP cache already answers repeat
-    // views with no network round-trip — even offline while the immutable entry
-    // is fresh. Gating every image on caches.open(MEDIA_CACHE_NAME) +
-    // cache.match() put CacheStorage on the per-image hot path, and on iOS
-    // standalone those calls add seconds of latency to *each* thumbnail (the
-    // same CacheStorage pathology that stalled the app shell and was fixed for
-    // /_next/static/). So respond straight from fetch() — instant from the HTTP
-    // cache — and keep MEDIA_CACHE_NAME populated in the background so the
-    // explicit offline store and the logout-clear revocation path
-    // (security-model BR-006) stay intact without blocking rendering.
-    let backgroundMediaWork = Promise.resolve();
-    const mediaResponse = fetch(event.request)
-      .then((response) => {
-        if (isCacheableMediaResponse(response)) {
-          // Clone in the same tick the network settles, before the page starts
-          // consuming the body; the actual CacheStorage write runs off the hot
-          // path under waitUntil.
-          const stamped = wrapResponseWithTimestamp(response.clone());
-          backgroundMediaWork = caches
-            .open(MEDIA_CACHE_NAME)
-            .then((cache) => cache.put(event.request, stamped))
-            .then(maybeEnforceMediaCacheLimit, () => {});
-        }
-        return response;
-      })
-      .catch(async () => {
-        // Offline (or HTTP cache miss): fall back to the explicit media store.
-        const cache = await caches.open(MEDIA_CACHE_NAME);
-        const cached = await cache.match(event.request);
-        if (cached && cached.status >= 200 && cached.status < 300) {
-          if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
-          await cache.delete(event.request);
-        }
-        return new Response('', { status: 503 });
-      });
-    event.respondWith(mediaResponse);
-    event.waitUntil(mediaResponse.then(() => backgroundMediaWork, () => backgroundMediaWork));
-  } else if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
+  // No media is copied into CacheStorage. The browser HTTP cache already holds
+  // every image it fetched, bounds and evicts it itself, and serves it offline
+  // while fresh. A CacheStorage copy was a second, worker-managed store whose
+  // size budget, TTL and eviction all had to be reimplemented here (and were
+  // lost on every worker restart), and whose writes tee'd every body.
+
+  // Content-addressed media (/media/cas|thumbs|image/) are sha256 capability
+  // URLs served `private, immutable`: the bytes behind a URL never change, so
+  // the browser answers repeat views from its HTTP cache with no round trip.
+  // The worker does not touch them at all — routing them through it only put
+  // CacheStorage on the per-image hot path, which costs seconds per thumbnail
+  // on iOS standalone. No revalidation is forced (the 91af972 network storm).
+  if (CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname)) return;
+
+  if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
     // Path-addressed media (/media/avatars/, /media/libraries/): the same URL
-    // can change content or be revoked per-gallery, so it stays network-first
-    // and revalidates, and a 401/403 is never masked by a previously authorized
-    // copy. Unchanged from the pre-split behavior.
-    let backgroundMediaWork = Promise.resolve();
-    const mediaResponse = caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
-      try {
-        const response = await fetch(event.request, { cache: 'no-cache' });
-        if (isCacheableMediaResponse(response)) {
-          const stamped = wrapResponseWithTimestamp(response.clone());
-          backgroundMediaWork = cache
-            .put(event.request, stamped)
-            .then(maybeEnforceMediaCacheLimit, () => {});
-        }
-        return response;
-      } catch (_) {
-        const cached = await cache.match(event.request);
-        if (cached && cached.status >= 200 && cached.status < 300) {
-          if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
-          await cache.delete(event.request);
-        }
-        return new Response('', { status: 503 });
-      }
-    });
-    event.respondWith(mediaResponse);
-    event.waitUntil(mediaResponse.then(() => backgroundMediaWork, () => backgroundMediaWork));
+    // can change content or be revoked per-gallery, and nginx lets the browser
+    // keep it for a day. Always revalidate, so a 401/403 is never masked by a
+    // previously authorized copy; the HTTP-cached copy is used only when the
+    // network is unreachable.
+    event.respondWith(
+      fetch(event.request, { cache: 'no-cache' }).catch(() =>
+        fetch(event.request.url, { cache: 'only-if-cached', mode: 'same-origin' })
+          .then((cached) => (cached.ok ? cached : new Response('', { status: 503 })))
+          .catch(() => new Response('', { status: 503 }))
+      )
+    );
   } else if (event.request.mode === 'navigate') {
     // Network first for document navigations; fall back to the last rendered
     // page or the static offline document.

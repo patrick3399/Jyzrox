@@ -12,12 +12,24 @@ type Channel = {
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>()
-  get length() { return this.values.size }
-  clear() { this.values.clear() }
-  getItem(key: string) { return this.values.get(key) ?? null }
-  key(index: number) { return [...this.values.keys()][index] ?? null }
-  removeItem(key: string) { this.values.delete(key) }
-  setItem(key: string, value: string) { this.values.set(key, value) }
+  get length() {
+    return this.values.size
+  }
+  clear() {
+    this.values.clear()
+  }
+  getItem(key: string) {
+    return this.values.get(key) ?? null
+  }
+  key(index: number) {
+    return [...this.values.keys()][index] ?? null
+  }
+  removeItem(key: string) {
+    this.values.delete(key)
+  }
+  setItem(key: string, value: string) {
+    this.values.set(key, value)
+  }
   clone(): MemoryStorage {
     const copy = new MemoryStorage()
     for (let index = 0; index < this.length; index += 1) {
@@ -195,12 +207,24 @@ describe('browse tab-scope ownership', () => {
 
   it('falls back safely to one stable in-memory ID when storage and channels are unavailable', async () => {
     const storage = {
-      get length(): number { throw new DOMException('blocked', 'SecurityError') },
-      clear() { throw new DOMException('blocked', 'SecurityError') },
-      getItem() { throw new DOMException('blocked', 'SecurityError') },
-      key() { throw new DOMException('blocked', 'SecurityError') },
-      removeItem() { throw new DOMException('blocked', 'SecurityError') },
-      setItem() { throw new DOMException('blocked', 'SecurityError') },
+      get length(): number {
+        throw new DOMException('blocked', 'SecurityError')
+      },
+      clear() {
+        throw new DOMException('blocked', 'SecurityError')
+      },
+      getItem() {
+        throw new DOMException('blocked', 'SecurityError')
+      },
+      key() {
+        throw new DOMException('blocked', 'SecurityError')
+      },
+      removeItem() {
+        throw new DOMException('blocked', 'SecurityError')
+      },
+      setItem() {
+        throw new DOMException('blocked', 'SecurityError')
+      },
     } satisfies Storage
     const channelFactory = () => {
       throw new DOMException('blocked', 'SecurityError')

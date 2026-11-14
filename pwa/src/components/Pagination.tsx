@@ -59,7 +59,6 @@ export function Pagination({
         : 'bg-vault-card text-vault-text-secondary border border-vault-border hover:border-vault-accent hover:text-vault-text'
     }`
 
-
   const handlePageClick = (p: number) => {
     setDisplayPage(p)
     onChange(p)

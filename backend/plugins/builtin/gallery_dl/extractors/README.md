@@ -91,10 +91,10 @@ JYZROX_SITE = {"domain": "example.com", "name": "Example", "category": "gallery"
 
 
 class ExampleGalleryExtractor(GalleryExtractor):
-    category = "examplesite"                  # becomes the gallery `source`
-    root = "https://example.com"              # items() builds page_url from this
+    category = "examplesite"  # becomes the gallery `source`
+    root = "https://example.com"  # items() builds page_url from this
     pattern = r"(?:https?://)?(?:www\.)?example\.com/g/(\d+)"
-    example = "https://example.com/g/12345"   # --list-extractors reads this
+    example = "https://example.com/g/12345"  # --list-extractors reads this
     directory_fmt = ("{category}", "{gallery_id} {title}")
     filename_fmt = "{num:>03}.{extension}"
     archive_fmt = "gallery={gallery_id}_{num}"
@@ -158,11 +158,11 @@ list, site settings, credentials and metadata parsing all see it:
 
 ```python
 JYZROX_SITE = {
-    "domain": "example.com",       # bare host; a leading "www." is dropped
-    "name": "Example",             # display name
-    "category": "gallery",         # gallery | manga | art | social | booru | filehost | other
+    "domain": "example.com",  # bare host; a leading "www." is dropped
+    "name": "Example",  # display name
+    "category": "gallery",  # gallery | manga | art | social | booru | filehost | other
     "has_tags": True,
-    "title_fields": ("title",),    # dotted metadata paths, first non-empty wins
+    "title_fields": ("title",),  # dotted metadata paths, first non-empty wins
     "artist_fields": ("artist",),
     "source_id_fields": ("gallery_id",),
     "metadata_include": ("studio",),  # extra fields to keep, see below

@@ -185,7 +185,10 @@ export function useWorkbenchKeyboard({
         callbacks.onSelectAll()
         return
       }
-      if ((event.key === '/' && !commandKey && !event.altKey) || (commandKey && event.key.toLowerCase() === 'k')) {
+      if (
+        (event.key === '/' && !commandKey && !event.altKey) ||
+        (commandKey && event.key.toLowerCase() === 'k')
+      ) {
         event.preventDefault()
         callbacks.onFocusSearch()
         return
@@ -270,7 +273,9 @@ export function useWorkbenchKeyboard({
         return
       }
 
-      const isArrow = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+      const isArrow = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(
+        event.key,
+      )
       if (!isArrow || itemCount === 0) return
 
       if (listMode && event.key === 'ArrowLeft') {
@@ -290,26 +295,27 @@ export function useWorkbenchKeyboard({
       const previous = focusedIndex ?? 0
       let next = focusedIndex === null ? (event.key === 'End' ? itemCount - 1 : 0) : previous
       const columns = Math.max(1, columnCount)
-      if (focusedIndex !== null) switch (event.key) {
-        case 'ArrowLeft':
-          next = Math.max(0, previous - 1)
-          break
-        case 'ArrowRight':
-          next = Math.min(itemCount - 1, previous + 1)
-          break
-        case 'ArrowUp':
-          next = Math.max(0, previous - columns)
-          break
-        case 'ArrowDown':
-          next = Math.min(itemCount - 1, previous + columns)
-          break
-        case 'Home':
-          next = 0
-          break
-        case 'End':
-          next = itemCount - 1
-          break
-      }
+      if (focusedIndex !== null)
+        switch (event.key) {
+          case 'ArrowLeft':
+            next = Math.max(0, previous - 1)
+            break
+          case 'ArrowRight':
+            next = Math.min(itemCount - 1, previous + 1)
+            break
+          case 'ArrowUp':
+            next = Math.max(0, previous - columns)
+            break
+          case 'ArrowDown':
+            next = Math.min(itemCount - 1, previous + columns)
+            break
+          case 'Home':
+            next = 0
+            break
+          case 'End':
+            next = itemCount - 1
+            break
+        }
       setFocusedIndex(next)
       if (event.shiftKey) callbacks.onExtendSelection(previous, next)
     }

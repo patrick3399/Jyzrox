@@ -1,4 +1,4 @@
-"""Keeps credentials out of worker logs.
+"""Keeps credentials out of api and worker logs.
 
 SAQ logs ``repr(queue)`` at startup, and redis-py's connection repr carries
 ``password=<value>``, so the Redis password used to land in ``docker compose

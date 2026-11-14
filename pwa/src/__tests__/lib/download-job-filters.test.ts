@@ -156,7 +156,9 @@ describe('withActiveSubscriptionJobs', () => {
   })
 
   it('adds an active job for a subscription with no fetched latest job', () => {
-    const merged = withActiveSubscriptionJobs({}, [full('new', 'queued', '2026-10-02T00:00:00Z', 7)])
+    const merged = withActiveSubscriptionJobs({}, [
+      full('new', 'queued', '2026-10-02T00:00:00Z', 7),
+    ])
     expect(merged[7].id).toBe('new')
   })
 

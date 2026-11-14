@@ -189,16 +189,18 @@ async def search_galleries(
     Supports cursor-based pagination (cursor=) for deep pages without COUNT(*)/OFFSET cost.
     When cursor is absent, falls back to OFFSET-based pagination (page-based, max page 500).
     """
-    tokens = _tokenize_query(q)[:20]
+    tokens = _tokenize_query(q)[:50]
     include_tags: list[str] = []
     exclude_tags: list[str] = []
     text_queries: list[str] = []
-    source_filter: str | None = None
+    source_includes: list[str] = []
+    source_excludes: list[str] = []
+    category_includes: list[str] = []
+    category_excludes: list[str] = []
     rating_filter: int | None = None
     favorited_filter: bool | None = None
     collection_filter: int | None = None
     artist_id_filter: str | None = None
-    category_filter: str | None = None
     import_filter: str | None = None
     rl_filter: bool | None = None
 
@@ -206,7 +208,14 @@ async def search_galleries(
         if t.startswith("title:"):
             text_queries.append(_token_value(t, "title:"))
         elif t.startswith("source:"):
-            source_filter = _token_value(t, "source:")
+            if v := _token_value(t, "source:"):
+                source_includes.append(v)
+        elif t.startswith("-source:"):
+            if v := _token_value(t, "-source:"):
+                source_excludes.append(v)
+        elif t.startswith("-category:"):
+            if v := _token_value(t, "-category:"):
+                category_excludes.append(v)
         elif t.startswith("rating:"):
             val = _token_value(t, "rating:").lstrip(">=<")
             try:
@@ -225,7 +234,8 @@ async def search_galleries(
         elif t.startswith("artist_id:"):
             artist_id_filter = _token_value(t, "artist_id:")
         elif t.startswith("category:"):
-            category_filter = _token_value(t, "category:")
+            if v := _token_value(t, "category:"):
+                category_includes.append(v)
         elif t.startswith("import:"):
             import_filter = _token_value(t, "import:")
         elif t.startswith("rl:"):
@@ -242,8 +252,23 @@ async def search_galleries(
     if text_queries:
         filters.append(_text_match((Gallery.title, Gallery.title_jpn), text_queries[0]))
 
-    if source_filter:
-        filters.append(Gallery.source == source_filter)
+    def _source_clause(value: str):
+        # "local:link" -> source='local' AND import_mode='link'
+        src, sep, mode = value.partition(":")
+        if sep and mode:
+            return and_(Gallery.source == src, Gallery.import_mode == mode)
+        return Gallery.source == src
+
+    def _category_clause(value: str):
+        if value == "__uncategorized__":
+            return or_(Gallery.category.is_(None), Gallery.category == "")
+        return Gallery.category == value
+
+    if source_includes:
+        filters.append(or_(*(_source_clause(v) for v in source_includes)))
+    for v in source_excludes:
+        # coalesce: NULL columns (e.g. import_mode) must not drop the row
+        filters.append(~func.coalesce(_source_clause(v), False))
 
     if exclude_tags:
         filters.append(~Gallery.tags_array.overlap(exclude_tags))
@@ -258,11 +283,10 @@ async def search_galleries(
     if artist_id_filter is not None:
         filters.append(Gallery.artist_id == artist_id_filter)
 
-    if category_filter is not None:
-        if category_filter == "__uncategorized__":
-            filters.append(or_(Gallery.category.is_(None), Gallery.category == ""))
-        else:
-            filters.append(Gallery.category == category_filter)
+    if category_includes:
+        filters.append(or_(*(_category_clause(v) for v in category_includes)))
+    for v in category_excludes:
+        filters.append(~func.coalesce(_category_clause(v), False))
 
     if import_filter is not None:
         filters.append(Gallery.import_mode == import_filter)

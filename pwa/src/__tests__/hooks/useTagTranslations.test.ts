@@ -49,7 +49,10 @@ vi.mock('react', async () => {
   const actual = await vi.importActual<typeof import('react')>('react')
   return {
     ...actual,
-    useState: <T,>(initial: T | (() => T)) => [typeof initial === 'function' ? (initial as () => T)() : initial, vi.fn()],
+    useState: <T>(initial: T | (() => T)) => [
+      typeof initial === 'function' ? (initial as () => T)() : initial,
+      vi.fn(),
+    ],
     useEffect: vi.fn(),
   }
 })

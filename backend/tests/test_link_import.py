@@ -57,6 +57,85 @@ async def test_link_import_folder_without_media_marks_gallery_failed(
     enqueue.assert_not_awaited()
 
 
+async def test_link_import_files_just_copied_are_registered_instead_of_failing_the_gallery(
+    db_session,
+    db_session_factory,
+    mock_redis,
+    layout,  # noqa: F811
+):
+    from worker.importer import local_import_job
+
+    root, source, library = layout
+    _write(source / "001.jpg", b"one", age_s=0)
+    gallery_id = await _gallery(db_session, source, root, status="importing")
+
+    async def wait_for_files_to_settle(_seconds):
+        _write(source / "001.jpg", b"one")
+
+    with (
+        _env(db_session_factory, library),
+        patch("worker.importer.AsyncSessionLocal", db_session_factory),
+        patch("worker.importer.asyncio.sleep", side_effect=wait_for_files_to_settle) as sleep,
+    ):
+        result = await local_import_job({"redis": mock_redis}, str(source), "link", gallery_id)
+
+    assert result == {"status": "done", "processed": 1, "import_failures": []}
+    sleep.assert_awaited_once()
+    status, pages = (
+        await db_session.execute(text("SELECT download_status, pages FROM galleries WHERE id=:g"), {"g": gallery_id})
+    ).one()
+    assert (status, pages) == ("importing", 1)
+
+
+async def test_link_import_files_never_settling_reports_them_as_still_being_written(
+    db_session,
+    db_session_factory,
+    mock_redis,
+    layout,  # noqa: F811
+):
+    from worker.importer import local_import_job
+
+    root, source, library = layout
+    _write(source / "001.jpg", b"one", age_s=0)
+    gallery_id = await _gallery(db_session, source, root, status="importing")
+
+    async def file_keeps_changing(_seconds):
+        _write(source / "001.jpg", b"more", age_s=0)
+
+    with (
+        _env(db_session_factory, library),
+        patch("worker.importer.AsyncSessionLocal", db_session_factory),
+        patch("worker.importer.asyncio.sleep", side_effect=file_keeps_changing) as sleep,
+    ):
+        result = await local_import_job({"redis": mock_redis}, str(source), "link", gallery_id)
+
+    assert result == {"status": "failed", "error": "files are still being written"}
+    assert 0 < sleep.await_count < 10, "the wait must be bounded: it holds an ingest slot"
+
+
+async def test_link_import_sync_lock_held_by_another_pass_is_retried(
+    db_session,
+    db_session_factory,
+    mock_redis,
+    layout,  # noqa: F811
+):
+    from worker.importer import local_import_job
+
+    root, source, library = layout
+    _write(source / "001.jpg", b"one")
+    gallery_id = await _gallery(db_session, source, root, status="importing")
+    mock_redis.set = AsyncMock(side_effect=[None, True])
+
+    with (
+        _env(db_session_factory, library),
+        patch("worker.importer.AsyncSessionLocal", db_session_factory),
+        patch("worker.importer.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await local_import_job({"redis": mock_redis}, str(source), "link", gallery_id)
+
+    assert result == {"status": "done", "processed": 1, "import_failures": []}
+
+
 async def test_link_import_trashed_gallery_is_skipped(
     db_session,
     db_session_factory,

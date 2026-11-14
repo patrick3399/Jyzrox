@@ -31,7 +31,11 @@ export function DisplayPreferencesSection() {
 
         <div className="space-y-2">
           <p className="text-xs text-vault-text-muted">{t('settings.gridDensityDesc')}</p>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t('settings.gridDensity')}>
+          <div
+            className="grid grid-cols-3 gap-2"
+            role="radiogroup"
+            aria-label={t('settings.gridDensity')}
+          >
             {DENSITIES.map((density) => (
               <button
                 key={density}
@@ -52,7 +56,9 @@ export function DisplayPreferencesSection() {
         </div>
 
         <label className="block space-y-2">
-          <span className="text-xs font-medium text-vault-text-secondary">{t('settings.gridColumns')}</span>
+          <span className="text-xs font-medium text-vault-text-secondary">
+            {t('settings.gridColumns')}
+          </span>
           <select
             value={preferences.gallery_grid_columns}
             onChange={(event) => update({ gallery_grid_columns: Number(event.target.value) })}
@@ -65,12 +71,18 @@ export function DisplayPreferencesSection() {
               </option>
             ))}
           </select>
-          <span className="block text-xs text-vault-text-muted">{t('settings.gridColumnsDesc')}</span>
+          <span className="block text-xs text-vault-text-muted">
+            {t('settings.gridColumnsDesc')}
+          </span>
         </label>
 
         <div className="space-y-2">
           <p className="text-xs font-medium text-vault-text-secondary">{t('settings.fontScale')}</p>
-          <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label={t('settings.fontScale')}>
+          <div
+            className="grid grid-cols-4 gap-2"
+            role="radiogroup"
+            aria-label={t('settings.fontScale')}
+          >
             {FONT_SCALES.map((scale) => (
               <button
                 key={scale}

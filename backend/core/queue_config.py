@@ -38,6 +38,7 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_COVER, QUE
 # move_library_path_job      interactive       70       preserves gallery identity
 # reconcile_library_path_job interactive       70       pairs cross-root events
 # download_job (subscription) interactive       65       via subscription_id
+# trash_purge_job             interactive       70       user-triggered
 # dedup_scan_job              interactive       60
 # dedup_tier1/2/3_job         interactive       55
 # subscription_scheduler      interactive       50       cron, must be on-time

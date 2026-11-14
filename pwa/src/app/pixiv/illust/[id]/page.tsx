@@ -209,13 +209,23 @@ function IllustDetailPageInner({ params }: { params: Promise<{ id: string }> }) 
 
           {/* Actions */}
           <div className="flex gap-2">
-            <Button variant="primary" size="md" className="flex-1"
+            <Button
+              variant="primary"
+              size="md"
+              className="flex-1"
               onClick={handleDownload}
               disabled={downloading}
             >
               {downloading ? t('pixiv.downloading') : t('pixiv.download')}
             </Button>
-            <Button variant="secondary" size="icon" className={isBookmarked ? 'border-yellow-500/50 bg-yellow-500/20 text-yellow-400 hover:bg-red-500/10 hover:text-red-400' : ''}
+            <Button
+              variant="secondary"
+              size="icon"
+              className={
+                isBookmarked
+                  ? 'border-yellow-500/50 bg-yellow-500/20 text-yellow-400 hover:bg-red-500/10 hover:text-red-400'
+                  : ''
+              }
               onClick={handleBookmark}
               disabled={bookmarking}
               title={bookmarkLabel}

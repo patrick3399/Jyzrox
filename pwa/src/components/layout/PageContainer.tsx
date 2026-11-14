@@ -18,7 +18,10 @@ export function PageContainer({
   children: ReactNode
 }) {
   return (
-    <div data-page-variant={variant} className={cn(variant === 'secondary' && 'mx-auto w-full max-w-5xl', className) || undefined}>
+    <div
+      data-page-variant={variant}
+      className={cn(variant === 'secondary' && 'mx-auto w-full max-w-5xl', className) || undefined}
+    >
       {children}
     </div>
   )

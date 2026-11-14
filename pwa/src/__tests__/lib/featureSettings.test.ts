@@ -28,11 +28,9 @@ describe('feature settings cache', () => {
     await setFeatureAndSyncCache('novel_enabled', true)
 
     expect(mocks.setFeature).toHaveBeenCalledWith('novel_enabled', true)
-    expect(mocks.mutate).toHaveBeenCalledWith(
-      FEATURE_SETTINGS_SWR_KEY,
-      expect.any(Function),
-      { revalidate: false },
-    )
+    expect(mocks.mutate).toHaveBeenCalledWith(FEATURE_SETTINGS_SWR_KEY, expect.any(Function), {
+      revalidate: false,
+    })
 
     const updater = mocks.mutate.mock.calls[0][1]
     expect(updater({ novel_enabled: false, trash_enabled: true })).toEqual({

@@ -187,6 +187,19 @@ describe('library gallery detail thumbnail grid uses fixed width-derived row hei
   })
 })
 
+describe('library list view uses a row height that fits its card', () => {
+  const source = read('src/app/library/page.tsx')
+
+  it('passes measureRows={false} and the list estimator instead of a numeric estimate', () => {
+    const grid = singleGrid(source)
+
+    expect(grid.get('measureRows')).toBe('false')
+    expect(grid.get('estimateHeight')).toContain("viewMode === 'list'")
+    expect(grid.get('estimateHeight')).toContain('estimateLibraryListRowHeight')
+    expect(grid.get('estimateHeight')).not.toMatch(/\?\s*\d+/)
+  })
+})
+
 describe('JustifiedGrid rows keep their exact computed heights', () => {
   const source = read('src/components/JustifiedGrid.tsx')
 

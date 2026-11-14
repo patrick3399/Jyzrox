@@ -37,10 +37,9 @@ describe('useProgressSave', () => {
   })
 
   it('flushes the latest page with keepalive when the PWA is hidden', async () => {
-    const { rerender } = renderHook(
-      ({ page }) => useProgressSave('pixiv', '146240089', page),
-      { initialProps: { page: 11 } },
-    )
+    const { rerender } = renderHook(({ page }) => useProgressSave('pixiv', '146240089', page), {
+      initialProps: { page: 11 },
+    })
     rerender({ page: 12 })
 
     Object.defineProperty(document, 'visibilityState', {

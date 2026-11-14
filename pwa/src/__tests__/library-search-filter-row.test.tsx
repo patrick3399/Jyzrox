@@ -2,20 +2,22 @@
  * Library header + one-row search/filter bar.
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const emptyParsed = {
   tags: [],
   nameOnlyTags: [],
   excludeTags: [],
   title: null,
-  source: null,
+  sources: [],
+  excludeSources: [],
   rating: null,
   favorited: false,
   readingList: false,
   collection: null,
   artistId: null,
-  category: null,
+  categories: [],
+  excludeCategories: [],
   importMode: null,
   sort: null,
 } as Record<string, unknown>
@@ -76,6 +78,9 @@ vi.mock('@/hooks/useLibraryBrowseSession', () => ({
 }))
 vi.mock('@/hooks/useProfile', () => ({
   useProfile: () => ({ data: { username: 'member', role: 'member' } }),
+}))
+vi.mock('@/hooks/useLibraryFacets', () => ({
+  useLibraryFacets: () => ({ data: { sources: [], categories: [], uncategorized: 0 } }),
 }))
 vi.mock('@/hooks/useGalleries', () => ({
   useGalleryCategories: () => ({ data: { categories: [] } }),
@@ -160,7 +165,7 @@ describe('Library filter chips', () => {
   it('test_filter_badge_counts_active_filters_except_the_toggles', () => {
     search.parsed = {
       ...emptyParsed,
-      source: 'pixiv',
+      sources: ['pixiv'],
       rating: 4,
       favorited: true,
       readingList: true,
@@ -180,9 +185,9 @@ describe('Library filter chips', () => {
   })
 
   it('test_chip_remove_clears_only_that_filter', () => {
-    search.parsed = { ...emptyParsed, source: 'local', importMode: 'link', rating: 4 }
+    search.parsed = { ...emptyParsed, sources: ['local:link'], rating: 4 }
     render(<LibraryPage />)
-    expect(removeButtons()).toHaveLength(2) // source+import pair is one chip
+    expect(removeButtons()).toHaveLength(2)
 
     const sourceRemove = removeButtons()[0] // source precedes rating in chip order
     fireEvent.click(sourceRemove)
@@ -200,7 +205,7 @@ describe('Library filter chips', () => {
     expect(screen.queryByText('library.clearAllFilters')).toBeNull()
     view.unmount()
 
-    search.parsed = { ...emptyParsed, source: 'pixiv', rating: 4 }
+    search.parsed = { ...emptyParsed, sources: ['pixiv'], rating: 4 }
     render(<LibraryPage />)
     fireEvent.click(screen.getByText('library.clearAllFilters'))
     expect(search.clearFilters).toHaveBeenCalledTimes(1)
@@ -277,7 +282,9 @@ describe('Library favorite and reading-list toggles', () => {
   it('test_filter_panel_no_longer_holds_the_favorite_and_reading_list_checkboxes', () => {
     const { container } = render(<LibraryPage />)
 
-    expect(container.querySelectorAll('#library-filter-panel input[type="checkbox"]')).toHaveLength(0)
+    expect(container.querySelectorAll('#library-filter-panel input[type="checkbox"]')).toHaveLength(
+      0,
+    )
   })
 })
 
@@ -372,38 +379,35 @@ describe('Library search focus behaviour', () => {
 })
 
 describe('Library filter panel', () => {
-  it('test_filter_button_expands_the_inline_panel_instead_of_opening_a_dialog', () => {
+  it('library_page_mobile_filter_button_opens_sheet_not_panel', async () => {
     const { container } = render(<LibraryPage />)
     const button = screen.getByRole('button', { name: 'library.filters' })
     const panel = container.querySelector('#library-filter-panel')
 
     expect(panel).not.toBeNull()
-    expect(button).toHaveAttribute('aria-controls', 'library-filter-panel')
     expect(button).toHaveAttribute('aria-expanded', 'false')
-    // Collapsed: the controls stay in the DOM but out of the tab order.
-    expect(panel).toHaveAttribute('inert')
-
-    fireEvent.click(button)
-
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(button).toHaveAttribute('aria-expanded', 'true')
-    expect(panel).not.toHaveAttribute('inert')
-    expect(panel?.querySelectorAll('select').length).toBeGreaterThan(0)
+    // Not a phone control: the desktop panel stays inert and hidden below lg.
+    expect(panel).toHaveAttribute('inert')
+    expect(panel?.className).toMatch(/(^|\s)hidden(\s|$)/)
 
     fireEvent.click(button)
 
-    expect(button).toHaveAttribute('aria-expanded', 'false')
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('library.filterCategory')).toBeInTheDocument()
+    expect(button).toHaveAttribute('aria-expanded', 'true')
     expect(panel).toHaveAttribute('inert')
   })
 
   it('test_syntax_help_stays_hidden_until_its_toggle_in_the_panel_is_pressed', () => {
     render(<LibraryPage />)
-    fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
     expect(screen.queryByText(/library\.syntaxTagSearch/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /library\.syntaxHelp/ }))
 
     expect(screen.getByText(/library\.syntaxTagSearch/)).toBeInTheDocument()
+    expect(screen.getByText(/library\.syntaxMultiFacet/)).toBeInTheDocument()
+    expect(screen.getByText(/library\.syntaxExcludeFacet/)).toBeInTheDocument()
   })
 })
 
@@ -419,5 +423,91 @@ describe('Library search block scroll reveal', () => {
     // At the top of the page nothing is slid away.
     expect(block).not.toHaveAttribute('data-scroll-hidden')
     expect(block.style.transform).toBe('')
+  })
+})
+
+describe('Library filter panel on desktop', () => {
+  function mockViewport(desktop: boolean) {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: desktop && query === '(min-width: 64rem)',
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    )
+  }
+
+  function scrollPage(sentinel: HTMLElement, y: number) {
+    // The sentinel moves up exactly as far as the page scrolls.
+    sentinel.getBoundingClientRect = () => ({ top: 100 - y, bottom: 100 - y }) as DOMRect
+    Object.defineProperty(window, 'scrollY', { value: y, configurable: true })
+    act(() => {
+      window.dispatchEvent(new Event('scroll'))
+    })
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0)
+      return 0
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('test_desktop_viewport_shows_the_filter_panel_expanded_without_a_toggle', () => {
+    mockViewport(true)
+    const { container } = render(<LibraryPage />)
+    const panel = container.querySelector('#library-filter-panel') as HTMLElement
+
+    expect(panel).not.toHaveAttribute('inert')
+    expect(panel.className).toMatch(/(^|\s)grid-rows-\[1fr\](\s|$)/)
+    // First paint (before matchMedia is read) already expands it at lg.
+    expect(panel.className).toMatch(/(^|\s)lg:grid-rows-\[1fr\](\s|$)/)
+    expect(panel.querySelectorAll('select').length).toBeGreaterThan(0)
+    // Category / Source are facet buttons, not selects, and come first.
+    const facetButtons = within(panel).getAllByRole('button', { expanded: false })
+    expect(facetButtons[0]).toHaveTextContent('library.filterCategory')
+    expect(facetButtons[1]).toHaveTextContent('library.source')
+    expect(screen.getByRole('button', { name: 'library.filters' }).className).toMatch(
+      /(^|\s)lg:hidden(\s|$)/,
+    )
+  })
+
+  it('test_desktop_expanded_panel_does_not_pin_the_block_so_scrolling_down_hides_it', () => {
+    mockViewport(true)
+    render(<LibraryPage />)
+    const block = screen.getByTestId('library-search-block')
+    const sentinel = block.previousElementSibling as HTMLElement
+
+    scrollPage(sentinel, 400)
+    scrollPage(sentinel, 800)
+    expect(block).toHaveAttribute('data-scroll-hidden')
+
+    scrollPage(sentinel, 760)
+    expect(block).not.toHaveAttribute('data-scroll-hidden')
+  })
+
+  it('test_phone_viewport_keeps_panel_inert_and_an_open_sheet_pins_the_block', async () => {
+    mockViewport(false)
+    const { container } = render(<LibraryPage />)
+    const panel = container.querySelector('#library-filter-panel') as HTMLElement
+    const block = screen.getByTestId('library-search-block')
+    const sentinel = block.previousElementSibling as HTMLElement
+
+    expect(panel).toHaveAttribute('inert')
+    fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
+    await screen.findByRole('dialog')
+    expect(panel).toHaveAttribute('inert')
+
+    scrollPage(sentinel, 400)
+    scrollPage(sentinel, 800)
+    expect(block).not.toHaveAttribute('data-scroll-hidden')
   })
 })

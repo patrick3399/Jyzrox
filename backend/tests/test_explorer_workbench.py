@@ -256,6 +256,86 @@ async def test_physical_tree_lists_raw_media_without_exposing_host_paths(client,
     assert preview.content.startswith(b"\xff\xd8\xff")
 
 
+async def test_physical_entries_lists_and_stats_folder_off_the_event_loop(client, db_session, tmp_path, monkeypatch):
+    """Listing, per-entry stat and the has_children probe hit NFS; none may run on the API event loop thread."""
+    import threading
+    from pathlib import Path
+
+    root = tmp_path / "library"
+    folder = root / "Gallery"
+    (folder / "Sub").mkdir(parents=True)
+    (folder / "Sub" / "inner.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+    (folder / "cover.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+    await db_session.execute(
+        text(
+            "INSERT INTO library_paths (id, path, label, pattern, import_mode, enabled, monitor) "
+            "VALUES (14, :path, 'Test library', '{title}', 'link', 1, 0)"
+        ),
+        {"path": str(root)},
+    )
+    await db_session.commit()
+
+    iterdir_threads: list[int] = []
+    stat_threads: list[int] = []
+    real_iterdir = Path.iterdir
+    real_stat = Path.stat
+
+    def _iterdir(self):
+        iterdir_threads.append(threading.get_ident())
+        return real_iterdir(self)
+
+    def _stat(self, *args, **kwargs):
+        if self.name in {"Sub", "cover.jpg"}:
+            stat_threads.append(threading.get_ident())
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "iterdir", _iterdir)
+    monkeypatch.setattr(Path, "stat", _stat)
+    with patch("routers.explorer._enqueue_folder_stats", AsyncMock(return_value=None)):
+        resp = await client.get("/api/explorer/physical/14/entries", params={"path": "Gallery"})
+
+    assert resp.status_code == 200, resp.text
+    entries = resp.json()["entries"]
+    assert [(e["kind"], e["name"]) for e in entries] == [("folder", "Sub"), ("media", "cover.jpg")]
+    assert entries[0]["has_children"] is True
+    # Outer listing plus the has_children probe of "Sub".
+    assert len(iterdir_threads) >= 2 and threading.get_ident() not in iterdir_threads
+    assert stat_threads and threading.get_ident() not in stat_threads
+
+
+async def test_physical_import_lists_folder_off_the_event_loop(client, db_session, tmp_path, monkeypatch):
+    """Checking a folder for media stats every entry; it must not run on the API event loop thread."""
+    import threading
+    from pathlib import Path
+
+    root = tmp_path / "library"
+    folder = root / "Gallery"
+    folder.mkdir(parents=True)
+    (folder / "cover.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+    await db_session.execute(
+        text(
+            "INSERT INTO library_paths (id, path, label, pattern, import_mode, enabled, monitor) "
+            "VALUES (13, :path, 'Test library', '{title}', 'link', 1, 0)"
+        ),
+        {"path": str(root)},
+    )
+    await db_session.commit()
+
+    iterdir_threads: list[int] = []
+    real_iterdir = Path.iterdir
+
+    def _iterdir(self):
+        iterdir_threads.append(threading.get_ident())
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", _iterdir)
+    with patch("core.queue.enqueue", AsyncMock(return_value=None)):
+        resp = await client.post("/api/explorer/physical/13/import", params={"path": "Gallery"})
+
+    assert resp.status_code == 200, resp.text
+    assert iterdir_threads and threading.get_ident() not in iterdir_threads
+
+
 async def test_physical_tree_rejects_traversal_and_symlink_escape(client, db_session, tmp_path):
     root = tmp_path / "library"
     root.mkdir()

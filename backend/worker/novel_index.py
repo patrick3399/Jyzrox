@@ -37,6 +37,9 @@ async def novel_index_job(ctx: dict, force: bool = False) -> None:
             stats = await reindex_all(session, settings.novel_repo_path)
             await session.commit()
         logger.info("[novel-index] reindexed: %s", stats)
+        health = stats.get("health") or {}
+        if health.get("stray_root_files") or health.get("entities_without_mentions"):
+            logger.warning("[novel-index] corpus drift: %s", health)
         await _cron_record(ctx, TASK_ID, "ok")
     except Exception as exc:  # noqa: BLE001 — cron job must never crash the worker
         logger.warning("[novel-index] failed: %s", exc)

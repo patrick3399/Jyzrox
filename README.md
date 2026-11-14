@@ -53,7 +53,7 @@ readable, self-hosted library.
 | --- | --- |
 | Backend | FastAPI + SQLAlchemy (asyncpg) + SAQ |
 | Frontend | Next.js 16 App Router (PWA) |
-| Database | PostgreSQL 18 + Redis 8 |
+| Database | PostgreSQL 18 + Valkey 9 |
 | Proxy | Nginx |
 | Downloads | Plugin system + gallery-dl fallback |
 
@@ -92,7 +92,7 @@ successful backups by default. The admin API can list and delete backup files;
 restore remains an operator action using `scripts/restore.sh`.
 
 The legacy `scripts/backup.sh` script is still available for manual operator
-backups that also copy Redis RDB files and optionally encrypt the output.
+backups that also copy Valkey RDB files and optionally encrypt the output.
 
 ### gallery-dl runtime
 

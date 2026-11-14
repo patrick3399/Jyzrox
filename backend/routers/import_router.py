@@ -1,7 +1,9 @@
 """Gallery import handling (Link and Copy modes)."""
 
+import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
@@ -35,6 +37,8 @@ from services.gallery_categories import load_category_map, resolve_with_map
 from services.image_magic import validate_image_magic
 from services.media_formats import IMAGE_EXTENSIONS as _SUPPORTED_IMAGE_EXTS
 from services.media_formats import MEDIA_EXTENSIONS as _SUPPORTED_EXTS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["import"])
 
@@ -180,6 +184,18 @@ def _build_pattern_regex(pattern: str) -> re.Pattern:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _walk_media_dirs(real_root: str) -> list[tuple[str, list[str]]]:
+    """Return (directory, media filenames) for every non-hidden directory holding media."""
+    found: list[tuple[str, list[str]]] = []
+    for dirpath, dirnames, filenames in os.walk(real_root):
+        # Skip hidden directories
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        media_files = [f for f in filenames if Path(f).suffix.lower() in _SUPPORTED_EXTS]
+        if media_files:
+            found.append((dirpath, media_files))
+    return found
+
+
 @router.post("/batch/scan")
 async def batch_scan(
     req: BatchScanRequest,
@@ -194,14 +210,9 @@ async def batch_scan(
     matches = []
     unmatched = []
 
-    for dirpath, dirnames, filenames in os.walk(real_root):
-        # Skip hidden directories
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-
-        media_files = [f for f in filenames if Path(f).suffix.lower() in _SUPPORTED_EXTS]
-        if not media_files:
-            continue
-
+    # The walk stats every directory under the root; on a large NFS library
+    # that takes seconds, so it runs in a thread instead of on the event loop.
+    for dirpath, media_files in await asyncio.to_thread(_walk_media_dirs, real_root):
         abs_path = dirpath
         try:
             rel_path = os.path.relpath(abs_path, real_root)
@@ -509,17 +520,20 @@ async def browse_filesystem(path: str = "/mnt", _: dict = Depends(_member)):
     if not target.is_dir():
         raise HTTPException(status_code=404, detail="Directory not found")
 
-    entries = []
+    def _list_subdirs() -> list[dict[str, str]]:
+        found = []
+        for item in sorted(target.iterdir(), key=lambda x: x.name):
+            if item.name.startswith("."):
+                continue
+            if item.is_dir():
+                found.append({"name": item.name, "type": "dir"})
+        return found
+
+    # Listing and is_dir per entry hit NFS; keep them off the event loop.
     try:
-        items = sorted(target.iterdir(), key=lambda x: x.name)
+        entries = await asyncio.to_thread(_list_subdirs)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to list: {exc}") from exc
-
-    for item in items:
-        if item.name.startswith("."):
-            continue
-        if item.is_dir():
-            entries.append({"name": item.name, "type": "dir"})
 
     # Build parent path for navigation
     parent = str(target.parent) if str(target) != "/" else None
@@ -717,6 +731,25 @@ class AddLibraryRequest(BaseModel):
     import_mode: str = DEFAULT_IMPORT_MODE
 
 
+async def _watcher_enabled() -> bool:
+    """Return the admin's stored watcher choice, or the startup default if none is stored."""
+    raw = await get_redis().get("watcher:enabled")
+    return settings.library_monitor_enabled if raw is None else raw not in (b"0", "0")
+
+
+async def _refresh_watcher_paths() -> None:
+    """Have the worker re-read its monitored paths, unless the admin turned the watcher off.
+
+    Best-effort: the library row is already committed, and the worker reads the
+    paths again whenever it starts.
+    """
+    try:
+        if await _watcher_enabled():
+            await core.queue.enqueue("toggle_watcher_job", enabled=True)
+    except Exception as exc:
+        logger.warning("Could not refresh the library watcher: %s", exc)
+
+
 @router.post("/libraries")
 async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
     """Add a new library path."""
@@ -753,6 +786,8 @@ async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
         await session.execute(stmt)
         await session.commit()
 
+    await _refresh_watcher_paths()
+
     return {
         "status": "added",
         "path": real_path,
@@ -771,6 +806,8 @@ async def remove_library(library_id: int, _: dict = Depends(_admin)):
             raise HTTPException(status_code=404, detail="Library path not found")
         await session.delete(lp)
         await session.commit()
+
+    await _refresh_watcher_paths()
     return {"status": "removed"}
 
 
@@ -781,16 +818,17 @@ async def remove_library(library_id: int, _: dict = Depends(_admin)):
 async def monitor_status(_: dict = Depends(_member)):
     """Return file watcher status (sourced from Redis, set by the worker process)."""
     r = get_redis()
+    enabled = await _watcher_enabled()
     data = await r.get("watcher:status")
     if not data:
         return {
-            "enabled": settings.library_monitor_enabled,
+            "enabled": enabled,
             "running": False,
             "watched_paths": [],
         }
     parsed = json.loads(data)
     return {
-        "enabled": settings.library_monitor_enabled,
+        "enabled": enabled,
         "running": parsed.get("running", False),
         "watched_paths": parsed.get("paths", []),
     }

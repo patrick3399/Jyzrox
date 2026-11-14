@@ -169,9 +169,7 @@ describe('TagHealthPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'tags.health.setAlias' }))
 
-    await waitFor(() =>
-      expect(mockCreateAlias).toHaveBeenCalledWith('general', 'blue-hair', 2),
-    )
+    await waitFor(() => expect(mockCreateAlias).toHaveBeenCalledWith('general', 'blue-hair', 2))
   })
 
   it('break-link button on a cycle edge calls deleteImplication', async () => {

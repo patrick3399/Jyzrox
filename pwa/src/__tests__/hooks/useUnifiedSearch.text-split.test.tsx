@@ -62,7 +62,7 @@ describe('useUnifiedSearch text/filter split', () => {
 
     expect(result.current.rawQuery).toBe('rem source:pixiv')
     expect(result.current.inputValue).toBe('rem')
-    expect(result.current.parsed.source).toBe('pixiv')
+    expect(result.current.parsed.sources).toEqual(['pixiv'])
   })
 
   it('test_clear_search_clears_text_but_keeps_filters', () => {

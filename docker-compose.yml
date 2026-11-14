@@ -3,9 +3,10 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 x-logging: &default-logging
-  driver: "json-file"
+  # ADR 0031: stdout carries diagnostics only; `local` compresses rotated files.
+  driver: "local"
   options:
-    max-size: "50m"
+    max-size: "20m"
     max-file: "5"
 
 x-backend-env: &backend-env
@@ -32,6 +33,8 @@ services:
       - "${HTTP_PORT:-35689}:80"
     environment:
       - NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-100m}
+      # 1 = also log GET/HEAD (media investigations); recreate nginx to apply
+      - NGINX_ACCESS_LOG_READS=${NGINX_ACCESS_LOG_READS:-0}
       # 05-data-group.sh adds the nginx worker to this group so it can read a 770 data volume
       - PGID=${PGID:-1042}
     volumes:
@@ -63,11 +66,13 @@ services:
     logging: *default-logging
 
   imgproxy:
-    image: darthsim/imgproxy:v3.31
+    image: darthsim/imgproxy:v4.0.23
     # same identity as api/worker so a 770 data volume stays readable
     user: "${PUID:-1042}:${PGID:-1042}"
     environment:
       IMGPROXY_LOCAL_FILESYSTEM_ROOT: /data
+      IMGPROXY_LOG_LEVEL: ${IMGPROXY_LOG_LEVEL:-warn}
+      IMGPROXY_LOG_FORMAT: structured
       IMGPROXY_MAX_SRC_RESOLUTION: ${IMGPROXY_MAX_SRC_RESOLUTION:-100}
       IMGPROXY_TTL: ${IMGPROXY_TTL:-2592000}
       IMGPROXY_WEBP_QUALITY: ${IMGPROXY_WEBP_QUALITY:-82}
@@ -95,7 +100,7 @@ services:
       args:
         APP_VERSION: ${APP_VERSION:-dev}
         GDL_VERSION: ${GDL_VERSION:-}
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8'
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8' --no-access-log
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     # uvicorn drains in-flight requests on SIGTERM; 10s is plenty for a personal gallery
     stop_grace_period: 10s
@@ -169,7 +174,7 @@ services:
     env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - app_data:/data
-      # host: owned by PUID:PGID (entrypoint re-owns it when PUID != 1042); chmod 750 ./config/gallery-dl
+      # host: owned by PUID:PGID (entrypoint re-owns it on every start); chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - gallery_dl_venv:/opt/gallery-dl
       # Same directory as api: downloads (worker) and URL detection (api) must
@@ -264,11 +269,11 @@ services:
 
   postgres:
     image: postgres:18-alpine
+    # health checks made ~97% of postgres log lines; log slow statements instead (ADR 0031)
     command: >
       postgres
       -c password_encryption=scram-sha-256
-      -c log_connections=on
-      -c log_disconnections=on
+      -c log_min_duration_statement=1000
     env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - postgres_data:/var/lib/postgresql
@@ -291,16 +296,20 @@ services:
     logging: *default-logging
 
   redis:
-    image: redis:8-alpine
+    # Valkey speaks the Redis protocol, so the service name, REDIS_* variables and
+    # redis:// URLs stay as they are.
+    image: valkey/valkey:9-alpine
     # --save "" disables automatic RDB snapshots. Recovery loads the AOF, never
     # dump.rdb, so the default save points (300s/100 changes) were rewriting the
     # whole dataset to disk every ~5 minutes for nothing. scripts/backup.sh still
     # issues an explicit BGSAVE for its portable point-in-time copy.
-    command: redis-server --appendonly yes --save "" --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    # The command must be valkey-server: the image entrypoint only drops root for
+    # that exact name, so its redis-server symlink would run as root.
+    command: valkey-server --appendonly yes --save "" --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy noeviction --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      test: ["CMD", "valkey-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
       interval: 30s
       timeout: 3s
       retries: 5

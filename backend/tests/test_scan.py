@@ -685,6 +685,42 @@ class TestRescanLibraryJob:
 
         mock_enqueue.assert_not_awaited()
 
+    async def test_page_and_thumbnail_stats_run_off_the_event_loop(self):
+        """Per-image exists() calls stalled every job sharing the worker; they must run in a thread."""
+        import threading
+
+        from worker.scan import rescan_library_job
+
+        blob = _make_blob(sha="offloop")
+        img = _make_image(image_id=6, gallery_id=60, blob=blob)
+        gallery = _make_gallery(gallery_id=60, pages=1)
+        session = _make_session(gallery_ids=[60], galleries=[gallery], images=[img])
+
+        stat_threads: list[int] = []
+
+        def _exists():
+            stat_threads.append(threading.get_ident())
+            return True
+
+        def _thumbs_complete(_dir):
+            stat_threads.append(threading.get_ident())
+            return True
+
+        existing_path = MagicMock(spec=Path)
+        existing_path.exists.side_effect = _exists
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan.thumbnails_complete_at", side_effect=_thumbs_complete),
+            patch("core.watcher.watcher_instance", None),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            await rescan_library_job({"redis": _make_redis()})
+
+        assert len(stat_threads) == 2
+        assert threading.get_ident() not in stat_threads
+
     async def test_missing_library_root_does_not_remove_link_gallery_images(self, tmp_path):
         """An unmounted root makes every link file look deleted; nothing may be removed."""
         from worker.scan import rescan_library_job
@@ -1125,6 +1161,58 @@ class TestRescanGalleryJob:
         assert gallery.download_status == "complete"
         assert result["status"] == "done"
         assert result["pages"] == 1
+
+    async def test_page_and_thumbnail_stats_run_off_the_event_loop(self):
+        """Per-image exists() calls stalled every job sharing the worker; they must run in a thread."""
+        import threading
+
+        from worker.scan import rescan_gallery_job
+
+        gallery = _make_gallery(gallery_id=410, pages=1, download_status="complete")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=gallery)
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        img = _make_image(image_id=31, gallery_id=410, blob=_make_blob(sha="offloop2"))
+        results = []
+        for rows in ([], [img], [img], [img]):
+            res = MagicMock()
+            res.scalars.return_value.all.return_value = rows
+            results.append(res)
+        session.execute = AsyncMock(side_effect=results)
+
+        stat_threads: list[int] = []
+
+        def _exists():
+            stat_threads.append(threading.get_ident())
+            return True
+
+        def _thumbs_complete(_dir):
+            stat_threads.append(threading.get_ident())
+            return True
+
+        existing_path = MagicMock(spec=Path)
+        existing_path.exists.side_effect = _exists
+        fake_gallery_dir = MagicMock(spec=Path)
+        fake_gallery_dir.exists.return_value = True
+        fake_gallery_dir.is_dir.return_value = True
+        fake_gallery_dir.iterdir.return_value = []
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan.thumbnails_complete_at", side_effect=_thumbs_complete),
+            patch("worker.scan.library_dir", return_value=fake_gallery_dir),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+        ):
+            result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=410)
+
+        assert result["status"] == "done"
+        assert len(stat_threads) >= 2
+        assert threading.get_ident() not in stat_threads[:2]
 
     async def test_zero_pages_non_link_mode_marks_missing(self):
         """Gallery with 0 pages and import_mode != 'link' should be marked 'missing'."""
@@ -1905,3 +1993,265 @@ class TestPendingLinkPagesSurviveRescans:
 
         store.assert_not_awaited()
         assert result["added"] == 0
+
+
+class TestDirectoryWalksRunOffTheEventLoop:
+    """Directory listings on the NFS data root stalled every job sharing the worker's loop."""
+
+    @staticmethod
+    def _spy_walk(threads: list[int]):
+        import os
+        import threading
+
+        real_walk = os.walk
+
+        def _walk(*args, **kwargs):
+            threads.append(threading.get_ident())
+            return real_walk(*args, **kwargs)
+
+        return patch("worker.scan.os.walk", side_effect=_walk)
+
+    @staticmethod
+    def _spy_iterdir(threads: list[int], only: Path | None = None):
+        import threading
+
+        real_iterdir = Path.iterdir
+
+        def _iterdir(self):
+            if only is None or self == only:
+                threads.append(threading.get_ident())
+            return real_iterdir(self)
+
+        return patch.object(Path, "iterdir", _iterdir)
+
+    @staticmethod
+    def _spy_stat(threads: list[int], only: Path):
+        import threading
+
+        real_stat = Path.stat
+
+        def _stat(self, *args, **kwargs):
+            if self == only:
+                threads.append(threading.get_ident())
+            return real_stat(self, *args, **kwargs)
+
+        return patch.object(Path, "stat", _stat)
+
+    @staticmethod
+    def _simple_session() -> AsyncMock:
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        res = MagicMock()
+        res.scalars.return_value.all.return_value = []
+        res.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=res)
+        return session
+
+    async def test_rescan_gallery_lists_gallery_dir_off_the_event_loop(self):
+        import threading
+
+        from worker.scan import rescan_gallery_job
+
+        gallery = _make_gallery(gallery_id=411, pages=0, download_status="complete")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=gallery)
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        results = []
+        for _ in range(6):
+            res = MagicMock()
+            res.scalars.return_value.all.return_value = []
+            results.append(res)
+        session.execute = AsyncMock(side_effect=results)
+
+        list_threads: list[int] = []
+
+        def _iterdir():
+            list_threads.append(threading.get_ident())
+            return []
+
+        fake_gallery_dir = MagicMock(spec=Path)
+        fake_gallery_dir.exists.return_value = True
+        fake_gallery_dir.is_dir.return_value = True
+        fake_gallery_dir.iterdir.side_effect = _iterdir
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan.library_dir", return_value=fake_gallery_dir),
+            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+        ):
+            await rescan_gallery_job({"redis": _make_redis()}, gallery_id=411)
+
+        assert len(list_threads) == 1
+        assert threading.get_ident() not in list_threads
+
+    async def test_auto_discover_walks_library_tree_off_the_event_loop(self, tmp_path):
+        import threading
+
+        from worker.scan import _LibrarySpec, auto_discover_job
+
+        (tmp_path / "gallery").mkdir()
+        (tmp_path / "gallery" / "001.jpg").write_bytes(b"data")
+        (tmp_path / ".hidden").mkdir()
+        (tmp_path / ".hidden" / "001.jpg").write_bytes(b"data")
+        walk_threads: list[int] = []
+        discovered_dirs: list[str] = []
+
+        async def discover(_session, _spec, current):
+            discovered_dirs.append(current.name)
+
+        with (
+            self._spy_walk(walk_threads),
+            patch(
+                "worker.scan._get_library_specs",
+                new_callable=AsyncMock,
+                return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
+            ),
+            patch("worker.scan._vanished_link_source_paths", new_callable=AsyncMock, return_value=[]),
+            patch("worker.scan._reconnect_vanished_gallery", new_callable=AsyncMock, return_value=None),
+            patch("worker.scan._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover),
+            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            await auto_discover_job({"redis": _make_redis()})
+
+        assert len(walk_threads) == 1
+        assert threading.get_ident() not in walk_threads
+        assert discovered_dirs == ["gallery"]
+
+    async def test_rescan_library_path_walks_library_tree_off_the_event_loop(self, tmp_path):
+        import threading
+
+        from worker.scan import _ImportRequest, _LibrarySpec, rescan_library_path_job
+
+        (tmp_path / "gallery").mkdir()
+        (tmp_path / "gallery" / "001.jpg").write_bytes(b"data")
+        (tmp_path / ".hidden").mkdir()
+        (tmp_path / ".hidden" / "001.jpg").write_bytes(b"data")
+        walk_threads: list[int] = []
+        discovered_dirs: list[str] = []
+
+        async def discover(_session, _spec, current):
+            discovered_dirs.append(current.name)
+            return _ImportRequest(gallery_id=7, source_dir=str(current), mode="link")
+
+        with (
+            self._spy_walk(walk_threads),
+            patch(
+                "worker.scan._get_library_specs",
+                new_callable=AsyncMock,
+                return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
+            ),
+            patch("worker.scan._existing_local_status", new_callable=AsyncMock, return_value=None, create=True),
+            patch("worker.scan._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover),
+            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            await rescan_library_path_job({"redis": _make_redis()}, str(tmp_path))
+
+        assert len(walk_threads) == 1
+        assert threading.get_ident() not in walk_threads
+        assert discovered_dirs == ["gallery"]
+
+    async def test_reconcile_library_path_lists_destination_off_the_event_loop(self, tmp_path):
+        import threading
+
+        from worker.scan import reconcile_library_path_job
+
+        destination = tmp_path / "dest"
+        destination.mkdir()
+        (destination / "001.jpg").write_bytes(b"data")
+        list_threads: list[int] = []
+        stat_threads: list[int] = []
+        rescan = AsyncMock(return_value={"status": "done"})
+
+        with (
+            self._spy_iterdir(list_threads, only=destination),
+            self._spy_stat(stat_threads, only=destination),
+            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan.rescan_by_path_job", rescan),
+        ):
+            result = await reconcile_library_path_job(
+                {"redis": _make_redis()}, [str(tmp_path / "old")], str(destination)
+            )
+
+        assert result == {"status": "done"}
+        assert list_threads and threading.get_ident() not in list_threads
+        assert stat_threads and threading.get_ident() not in stat_threads
+
+    async def test_reconcile_library_path_unavailable_destination_is_stale(self, tmp_path):
+        from worker.scan import reconcile_library_path_job
+
+        result = await reconcile_library_path_job({"redis": _make_redis()}, [], str(tmp_path / "gone"))
+
+        assert result["status"] == "stale"
+        assert result["reason"] == "destination_unavailable"
+
+    async def test_move_library_path_lists_destination_off_the_event_loop(self, tmp_path):
+        import threading
+
+        from worker.scan import _LibrarySpec, move_library_path_job
+
+        destination = tmp_path / "dest"
+        destination.mkdir()
+        list_threads: list[int] = []
+
+        with (
+            self._spy_iterdir(list_threads, only=destination),
+            patch(
+                "worker.scan._get_library_specs",
+                new_callable=AsyncMock,
+                return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
+            ),
+            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+        ):
+            result = await move_library_path_job({"redis": _make_redis()}, str(tmp_path / "old"), str(destination))
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "no_media"
+        assert len(list_threads) == 1
+        assert threading.get_ident() not in list_threads
+
+    async def test_rescan_by_path_lists_directory_off_the_event_loop(self, tmp_path):
+        import threading
+
+        from worker.scan import rescan_by_path_job
+
+        target = tmp_path / "dir"
+        target.mkdir()
+        list_threads: list[int] = []
+
+        with (
+            self._spy_iterdir(list_threads, only=target),
+            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan.settings", MagicMock(data_library_path=str(tmp_path / "lib"))),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_by_path_job({"redis": _make_redis()}, str(target))
+
+        assert result["status"] == "no_gallery_found"
+        assert len(list_threads) == 1
+        assert threading.get_ident() not in list_threads
+
+    async def test_rescan_by_path_unreadable_directory_counts_as_empty(self, tmp_path):
+        from worker.scan import rescan_by_path_job
+
+        target = tmp_path / "dir"
+        target.mkdir()
+
+        def _boom(self):
+            raise OSError("stale handle")
+
+        with (
+            patch.object(Path, "iterdir", _boom),
+            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan.settings", MagicMock(data_library_path=str(tmp_path / "lib"))),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await rescan_by_path_job({"redis": _make_redis()}, str(target))
+
+        assert result["status"] == "no_gallery_found"

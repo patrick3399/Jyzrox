@@ -63,6 +63,15 @@ export function estimateHistoryRowHeight(layout: RowHeightContext) {
   return Math.ceil((gridCardWidth(layout) * 4) / 3 + 3.4375 * rootFontSize() + 14.3334)
 }
 
+/** `GalleryListCard`: its height is set to this same sum in a `h-[calc(...)]` class.
+ *  In rem: `p-3` 1.5 + 2-line `text-sm leading-snug` title 2.40625 + `text-xs`
+ *  subtitle 1 + `gap-1` twice 0.5 + `mt-0.5` 0.125 + two tag rows and their gap
+ *  0.75 + `gap-1` 0.25 + `pt-1` 0.25 + badge padding 0.25. In px: the selected
+ *  card's 4px of border + two `text-[10px]` tag rows (34) + the source badge (17). */
+export function estimateLibraryListRowHeight() {
+  return Math.ceil(7.03125 * rootFontSize() + 55)
+}
+
 /** Gallery-detail thumbnail: a bare 3:4 image, no text. */
 export function estimateGalleryThumbRowHeight(layout: RowHeightContext) {
   return Math.ceil((gridCardWidth(layout) * 4) / 3)

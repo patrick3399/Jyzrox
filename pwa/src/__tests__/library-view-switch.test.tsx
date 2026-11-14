@@ -48,13 +48,15 @@ vi.mock('@/hooks/useUnifiedSearch', () => ({
       nameOnlyTags: [],
       excludeTags: [],
       title: null,
-      source: null,
+      sources: [],
+      excludeSources: [],
       rating: null,
       favorited: false,
       readingList: false,
       collection: null,
       artistId: null,
-      category: null,
+      categories: [],
+      excludeCategories: [],
       importMode: null,
       sort: null,
     },
@@ -89,6 +91,9 @@ vi.mock('@/hooks/useLibraryBrowseSession', () => ({
 }))
 vi.mock('@/hooks/useProfile', () => ({
   useProfile: () => ({ data: { username: 'member', role: 'member' } }),
+}))
+vi.mock('@/hooks/useLibraryFacets', () => ({
+  useLibraryFacets: () => ({ data: { sources: [], categories: [], uncategorized: 0 } }),
 }))
 vi.mock('@/hooks/useGalleries', () => ({
   useGalleryCategories: () => ({ data: { categories: [] } }),
@@ -206,7 +211,11 @@ function scrollWindowTo(y: number) {
   flush()
 }
 
-function mount({ stuck = true, first = 6, ids = IDS }: { stuck?: boolean; first?: number; ids?: number[] } = {}) {
+function mount({
+  stuck = true,
+  first = 6,
+  ids = IDS,
+}: { stuck?: boolean; first?: number; ids?: number[] } = {}) {
   setIds(ids)
   setTops(ids, first)
   const view = render(<LibraryPage />)
@@ -222,9 +231,7 @@ function mount({ stuck = true, first = 6, ids = IDS }: { stuck?: boolean; first?
 }
 
 const clickLayout = (name: 'Grid view' | 'List view') =>
-  fireEvent.click(
-    within(screen.getByTestId('library-view-inline')).getByRole('radio', { name }),
-  )
+  fireEvent.click(within(screen.getByTestId('library-view-inline')).getByRole('radio', { name }))
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -318,7 +325,7 @@ describe('Library view controls placement', () => {
 
 describe('Library layout switch while the search bar is stuck', () => {
   it('test_switch_mid_scroll_targets_the_first_visible_card_not_the_overscan_start', () => {
-    const { } = mount({ first: 6 })
+    const {} = mount({ first: 6 })
     // The grid reports overscan start 0 but the first card on screen is index 6.
     reportVisibleStart(6, 0)
 

@@ -19,7 +19,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
-const { mockList, mockGet, mockCreate, mockUpdate, mockDelete, mockAddGalleries, mockRemoveGallery } = vi.hoisted(() => ({
+const {
+  mockList,
+  mockGet,
+  mockCreate,
+  mockUpdate,
+  mockDelete,
+  mockAddGalleries,
+  mockRemoveGallery,
+} = vi.hoisted(() => ({
   mockList: vi.fn(),
   mockGet: vi.fn(),
   mockCreate: vi.fn(),
@@ -49,7 +57,7 @@ vi.mock('@/lib/api', () => ({
 
 interface SwrMutationCall {
   key: unknown
-  fetcher: ((_k: unknown, extra: { arg: unknown }) => unknown)
+  fetcher: (_k: unknown, extra: { arg: unknown }) => unknown
 }
 
 const swrMutationCalls: SwrMutationCall[] = []

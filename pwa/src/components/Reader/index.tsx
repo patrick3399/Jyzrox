@@ -34,6 +34,8 @@ import VideoPlayer from './VideoPlayer'
 import { THUMB_STRIP_CELL_HEIGHT, THUMB_STRIP_PADDING_Y } from './layout'
 import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
+import { isGalleryInProgress } from '@/lib/readerRefresh'
+import { pagePosition, sortPageNums, stepPage } from './pageOrder'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
 import { ThumbnailCell } from './ThumbnailCell'
 import { ThumbnailGridOverlay } from './ThumbnailGridOverlay'
@@ -73,6 +75,10 @@ function Spinner({ className = '' }: { className?: string }) {
 }
 
 // ── Scale mode CSS helpers ────────────────────────────────────────────
+
+// The Reader's own chrome (top bar, thumbnail strip, status bar). Touches and
+// wheel events that start there are its controls' input, not page gestures.
+const READER_CHROME_SELECTOR = '.reader-overlay'
 
 function getScaleContainerClass(scaleMode: ScaleMode): string {
   switch (scaleMode) {
@@ -463,6 +469,9 @@ function SinglePageView({
   // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
   const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const isDoubleTapRef = useRef(false)
+  const clearDoubleTap = useCallback(() => {
+    isDoubleTapRef.current = false
+  }, [])
   useEffect(() => () => clearTimeout(centerTapTimerRef.current), [])
   const { isZoomed, transform, isGesturing } = usePinchZoom(
     containerRef as React.RefObject<HTMLElement | null>,
@@ -509,6 +518,10 @@ function SinglePageView({
     <div
       ref={containerRef}
       className={`${getScaleContainerClass(scaleMode)} h-full w-full`}
+      // usePinchZoom cancels a double-tap's touchend, so its click never comes
+      // to consume isDoubleTapRef; clear it when the next touch begins, or that
+      // tap's click is swallowed.
+      onTouchStartCapture={clearDoubleTap}
       onTouchStart={imageLongPress?.onTouchStart}
       onTouchMove={imageLongPress?.onTouchMove}
       onTouchEnd={imageLongPress?.onTouchEnd}
@@ -904,6 +917,9 @@ function DoublePageView({
   // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
   const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const isDoubleTapRef = useRef(false)
+  const clearDoubleTap = useCallback(() => {
+    isDoubleTapRef.current = false
+  }, [])
   useEffect(() => () => clearTimeout(centerTapTimerRef.current), [])
   const { isZoomed, transform, isGesturing } = usePinchZoom(
     containerRef as React.RefObject<HTMLElement | null>,
@@ -940,6 +956,10 @@ function DoublePageView({
     <div
       ref={containerRef}
       className="relative flex h-full w-full items-center justify-center overflow-hidden"
+      // usePinchZoom cancels a double-tap's touchend, so its click never comes
+      // to consume isDoubleTapRef; clear it when the next touch begins, or that
+      // tap's click is swallowed.
+      onTouchStartCapture={clearDoubleTap}
     >
       <div
         style={{
@@ -1623,6 +1643,15 @@ export default function Reader({
     () => new Set(initialFavoritedImageIds ?? []),
   )
 
+  const pageOrder = useMemo(
+    () => sortPageNums(rawImages.map((img) => img.page_num).filter((p) => !hiddenPages.has(p))),
+    [rawImages, hiddenPages],
+  )
+  // Once no more pages can arrive, the list is the gallery: the Reader walks it
+  // and counts along it, so holes in page_num are neither shown nor counted.
+  const settledPages =
+    !isProxyMode && !isGalleryInProgress(downloadStatus) && pageOrder.length > 0 ? pageOrder : null
+
   // Memoized: this array feeds effects in the prefetch hook and the webtoon
   // observer. Rebuilding it on every render made those effects re-run on every
   // render — including the ones triggered by a prefetch settling — which tore
@@ -1633,6 +1662,7 @@ export default function Reader({
         .filter((img) => !hiddenPages.has(img.page_num))
         .map((img) => ({
           pageNum: img.page_num,
+          position: settledPages ? pagePosition(settledPages, img.page_num) : undefined,
           url: resolveImageUrl(img, source, sourceId),
           isLocal: img.file_path != null,
           width: img.width ?? undefined,
@@ -1642,7 +1672,7 @@ export default function Reader({
           thumbUrl: img.thumb_path?.replace('/data/', '/media/') ?? undefined,
           thumbhash: img.thumbhash ?? null,
         })),
-    [rawImages, hiddenPages, source, sourceId],
+    [rawImages, hiddenPages, settledPages, source, sourceId],
   )
 
   const {
@@ -1656,7 +1686,14 @@ export default function Reader({
     setReadingDirection,
     showGrid,
     hideGrid,
-  } = useReaderState(initialPage, totalPages, source, sourceId)
+  } = useReaderState(
+    initialPage,
+    // A download can have imported pages numbered above its running count.
+    Math.max(totalPages, pageOrder[pageOrder.length - 1] ?? 0),
+    source,
+    sourceId,
+    settledPages,
+  )
 
   // Reader settings (status bar, auto advance)
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS)
@@ -1674,9 +1711,10 @@ export default function Reader({
     setAutoAdvanceSeconds(s.autoAdvanceSeconds)
   }, [])
 
-  const effectiveTotalPages = totalPages - hiddenPages.size
+  const shownPage = settledPages ? pagePosition(settledPages, state.currentPage) : state.currentPage
+  const shownTotalPages = settledPages ? settledPages.length : totalPages - hiddenPages.size
   const isLastPage =
-    images.length > 0 ? state.currentPage >= images[images.length - 1].pageNum : true
+    pageOrder.length > 0 ? state.currentPage >= pageOrder[pageOrder.length - 1] : true
 
   const { countdown, resetCountdown } = useAutoAdvance(
     autoAdvanceEnabled,
@@ -1799,6 +1837,15 @@ export default function Reader({
     [setPage, onSeekToPage],
   )
 
+  // The page indicator and status bar speak in the numbers they show.
+  const selectShownPage = useCallback(
+    (shown: number) => setPageWithPrefetch(settledPages ? settledPages[shown - 1] : shown),
+    [settledPages, setPageWithPrefetch],
+  )
+
+  const pageAfter = (delta: number) =>
+    settledPages ? stepPage(settledPages, state.currentPage, delta) : state.currentPage + delta
+
   const prefetchedPages = useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(source, sourceId, state.currentPage, !isProxyMode)
 
@@ -1834,6 +1881,9 @@ export default function Reader({
   }, [handleBack])
 
   const isZoomedRef = useRef(false)
+  // Set once the image long-press menu is up: a finger that slides on after the
+  // menu opened is reaching for an item, not swiping the page underneath.
+  const imageMenuOpenRef = useRef(false)
   const handleZoomChange = useCallback((z: boolean) => {
     isZoomedRef.current = z
   }, [])
@@ -1848,7 +1898,9 @@ export default function Reader({
     // listener on containerRef; without this guard a downward scroll
     // (finger swiping up) inside the grid was misread as swipe-up-to-back
     // and exited the Reader instead of just scrolling the grid.
-    () => isZoomedRef.current || state.isGridOpen,
+    () => isZoomedRef.current || imageMenuOpenRef.current || state.isGridOpen,
+    // Scrolling the thumbnail strip or dragging the seek bar is not a page swipe.
+    READER_CHROME_SELECTOR,
   )
 
   useKeyboardNav(
@@ -1876,10 +1928,9 @@ export default function Reader({
     if (state.viewMode === 'webtoon') return
     let cooldown = false
     const handler = (e: WheelEvent) => {
-      // Don't intercept wheel events on the thumbnail strip (it has its own horizontal scroll)
-      if ((e.target as HTMLElement)?.closest('.reader-thumb-strip')) return
-      // Don't intercept wheel events on the overlay controls
-      if ((e.target as HTMLElement)?.closest('.reader-overlay')) return
+      // Don't intercept wheel events on the overlay controls, the thumbnail strip
+      // (it has its own horizontal scroll) or the status bar
+      if ((e.target as HTMLElement)?.closest(READER_CHROME_SELECTOR)) return
       if (cooldown) return
       const dy = e.deltaY
       if (Math.abs(dy) < 10) return
@@ -1934,15 +1985,34 @@ export default function Reader({
 
   const [saucenaoImageId, setSaucenaoImageId] = useState<number | null>(null)
 
+  useEffect(() => {
+    imageMenuOpenRef.current = imageMenu?.open ?? false
+  }, [imageMenu])
+
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null)
+
+  const cancelImageLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+    longPressStartRef.current = null
+  }, [])
 
   const makeImageLongPressHandlers = useCallback(
     (imageUrl: string, imageName: string, pageNum: number): ImageLongPressHandlers => ({
       onTouchStart: (e: React.TouchEvent) => {
+        // Every touchstart (including a pinch's second finger) replaces the
+        // pending timer; overwriting the ref without clearing it orphaned the
+        // first timer, which then opened the menu mid-pinch.
+        cancelImageLongPress()
+        // Only a single resting finger is a long-press; two fingers are a pinch.
+        if (e.touches.length !== 1) return
         const touch = e.touches[0]
         longPressStartRef.current = { x: touch.clientX, y: touch.clientY }
         longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null
           setImageMenu({
             open: true,
             position: { x: touch.clientX, y: touch.clientY },
@@ -1954,20 +2024,16 @@ export default function Reader({
       },
       onTouchMove: (e: React.TouchEvent) => {
         if (!longPressStartRef.current || !longPressTimerRef.current) return
+        if (e.touches.length !== 1) {
+          cancelImageLongPress()
+          return
+        }
         const touch = e.touches[0]
         const dx = touch.clientX - longPressStartRef.current.x
         const dy = touch.clientY - longPressStartRef.current.y
-        if (Math.sqrt(dx * dx + dy * dy) > 10) {
-          clearTimeout(longPressTimerRef.current)
-          longPressTimerRef.current = null
-        }
+        if (Math.sqrt(dx * dx + dy * dy) > 10) cancelImageLongPress()
       },
-      onTouchEnd: () => {
-        if (longPressTimerRef.current) {
-          clearTimeout(longPressTimerRef.current)
-          longPressTimerRef.current = null
-        }
-      },
+      onTouchEnd: cancelImageLongPress,
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault()
         setImageMenu({
@@ -1979,7 +2045,7 @@ export default function Reader({
         })
       },
     }),
-    [],
+    [cancelImageLongPress],
   )
 
   // Helper used by SinglePageView (single image, known at call site)
@@ -2111,8 +2177,17 @@ export default function Reader({
   }, [])
 
   const currentImage = images.find((i) => i.pageNum === state.currentPage)
-  const prevImage = images.find((i) => i.pageNum === state.currentPage - 1) ?? null
-  const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
+  // pageAfter() stays put at either end of a settled list.
+  const prevPageNum = pageAfter(-1)
+  const nextPageNum = pageAfter(1)
+  const prevImage =
+    prevPageNum !== state.currentPage
+      ? (images.find((i) => i.pageNum === prevPageNum) ?? null)
+      : null
+  const nextImage =
+    nextPageNum !== state.currentPage
+      ? (images.find((i) => i.pageNum === nextPageNum) ?? null)
+      : null
 
   // When downloading progressively, the current page may not have been imported yet.
   const isDownloading = downloadStatus === 'downloading'
@@ -2132,13 +2207,13 @@ export default function Reader({
     <div ref={containerRef} className="reader-container flex flex-col bg-black">
       {/* Top overlay — always rendered, slides in/out */}
       <div
-        className={`absolute top-0 left-0 right-0 z-20 transition-transform duration-300 ${
+        className={`reader-overlay absolute top-0 left-0 right-0 z-20 transition-transform duration-300 ${
           state.showOverlay ? 'translate-y-0' : '-translate-y-full'
         } ${!state.showOverlay ? 'pointer-events-none' : ''}`}
       >
         <ReaderOverlay
-          currentPage={state.currentPage}
-          totalPages={effectiveTotalPages}
+          currentPage={shownPage}
+          totalPages={shownTotalPages}
           viewMode={state.viewMode}
           scaleMode={state.scaleMode}
           readingDirection={state.readingDirection}
@@ -2151,7 +2226,7 @@ export default function Reader({
           onAutoAdvanceToggle={handleAutoAdvanceToggle}
           onAutoAdvanceIntervalChange={handleAutoAdvanceInterval}
           onShowHelp={handleShowHelp}
-          onPageSelect={setPageWithPrefetch}
+          onPageSelect={selectShownPage}
           onOpenGrid={showGrid}
         />
       </div>
@@ -2214,8 +2289,8 @@ export default function Reader({
             leftImage={currentImage}
             rightImage={nextImage}
             isLoading={pageLoading}
-            onNext={() => setPageWithPrefetch(state.currentPage + 2)}
-            onPrev={() => setPageWithPrefetch(state.currentPage - 2)}
+            onNext={() => setPageWithPrefetch(pageAfter(2))}
+            onPrev={() => setPageWithPrefetch(pageAfter(-2))}
             onToggleOverlay={handleToggleOverlay}
             onImageLoaded={handleImageLoaded}
             onImageError={handleImageError}
@@ -2241,7 +2316,7 @@ export default function Reader({
 
       {/* Bottom thumbnail strip — always rendered, slides in/out */}
       <div
-        className={`absolute bottom-0 left-0 right-0 z-20 transition-transform duration-300 ${
+        className={`reader-overlay absolute bottom-0 left-0 right-0 z-20 transition-transform duration-300 ${
           state.showOverlay ? 'translate-y-0' : 'translate-y-full'
         } ${!state.showOverlay ? 'pointer-events-none' : ''}`}
       >
@@ -2258,17 +2333,17 @@ export default function Reader({
 
       {/* Status bar — hidden via opacity when overlay is shown to avoid bleed-through the thumbnail strip */}
       <div
-        className={`absolute left-0 right-0 bottom-0 z-10 transition-opacity duration-300 ${state.showOverlay ? 'opacity-0' : 'opacity-100'}`}
+        className={`reader-overlay absolute left-0 right-0 bottom-0 z-10 transition-opacity duration-300 ${state.showOverlay ? 'opacity-0' : 'opacity-100'}`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <StatusBar
-          currentPage={state.currentPage}
-          totalPages={effectiveTotalPages}
+          currentPage={shownPage}
+          totalPages={shownTotalPages}
           settings={readerSettings}
           countdown={countdown}
           autoAdvanceEnabled={autoAdvanceEnabled}
-          onPageSelect={setPageWithPrefetch}
+          onPageSelect={selectShownPage}
           readingDirection={state.readingDirection}
         />
       </div>

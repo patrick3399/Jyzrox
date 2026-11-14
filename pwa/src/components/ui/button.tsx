@@ -8,7 +8,8 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         primary: 'bg-vault-accent text-vault-accent-fg hover:bg-vault-accent-hover',
-        secondary: 'border border-vault-border bg-vault-input text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text',
+        secondary:
+          'border border-vault-border bg-vault-input text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text',
         ghost: 'text-vault-text-muted hover:bg-vault-card-hover hover:text-vault-text',
         danger: 'bg-vault-danger text-white hover:bg-vault-danger-hover',
       },
@@ -27,5 +28,12 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
   VariantProps<typeof buttonVariants> & { ref?: Ref<HTMLButtonElement> }
 
 export function Button({ variant, size, className, type = 'button', ref, ...props }: ButtonProps) {
-  return <button ref={ref} type={type} className={cn(buttonVariants({ variant, size }), className)} {...props} />
+  return (
+    <button
+      ref={ref}
+      type={type}
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
+  )
 }

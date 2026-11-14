@@ -6,6 +6,7 @@ import { LocaleProvider } from '@/components/LocaleProvider'
 import { LayoutShell } from '@/components/LayoutShell'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { LOCALE_COOKIE, parseLocale, resolveLocale } from '@/lib/i18n/locales'
+import { SW_REGISTER_SCRIPT } from '@/lib/swRegisterScript'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -64,17 +65,7 @@ document.head.appendChild(s);}}
         <Script
           id="sw-register"
           strategy="afterInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').catch(function(err) {
-                    console.warn('SW registration failed:', err);
-                  });
-                });
-              }
-            `,
-          }}
+          dangerouslySetInnerHTML={{ __html: SW_REGISTER_SCRIPT }}
         />
         <ThemeProvider>
           <LocaleProvider initialLocale={initialLocale}>

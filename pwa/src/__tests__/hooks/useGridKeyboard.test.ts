@@ -222,9 +222,7 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_after_back_navigation_starts_from_visible_item', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 48, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 48, colCount: 3, onEnter }))
     const offscreen = document.createElement('div')
     const visible = document.createElement('div')
     vi.spyOn(offscreen, 'getBoundingClientRect').mockReturnValue({
