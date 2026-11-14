@@ -256,15 +256,18 @@ async def ready():
             await conn.execute(text("SELECT 1"))
         checks["database"] = True
     except Exception as exc:
+        # Unauthenticated endpoint: the reason goes to the log, not the response.
+        logger.warning("Readiness: database check failed: %s", exc)
         checks["database"] = False
-        details["database"] = str(exc)
+        details["database"] = "unavailable"
 
     try:
         await get_redis().ping()
         checks["redis"] = True
     except Exception as exc:
+        logger.warning("Readiness: redis check failed: %s", exc)
         checks["redis"] = False
-        details["redis"] = str(exc)
+        details["redis"] = "unavailable"
 
     try:
         queues = get_all_queues()
@@ -272,8 +275,9 @@ async def ready():
         if not queues:
             details["queue"] = "no initialized queues"
     except Exception as exc:
+        logger.warning("Readiness: queue check failed: %s", exc)
         checks["queue"] = False
-        details["queue"] = str(exc)
+        details["queue"] = "unavailable"
 
     for name, path in {
         "data_gallery": settings.data_gallery_path,
@@ -283,7 +287,8 @@ async def ready():
         exists = os.path.isdir(path)
         checks[name] = exists
         if not exists:
-            details[name] = f"{path} is not a directory"
+            logger.warning("Readiness: %s (%s) is not a directory", name, path)
+            details[name] = "not a directory"
 
     is_ready = all(checks.values())
     payload = {"status": "ok" if is_ready else "degraded", "checks": checks}

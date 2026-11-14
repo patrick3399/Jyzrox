@@ -396,7 +396,7 @@ async def test_system_health_returns_503_when_redis_unavailable(client, db_sessi
     assert "detail" in data
     # Redis error should be recorded in the services dict
     assert "redis" in data["detail"]
-    assert data["detail"]["redis"].startswith("error:")
+    assert data["detail"]["redis"] == "error"
 
 
 async def test_system_health_returns_503_when_postgres_unavailable(client, mock_redis):
@@ -425,7 +425,58 @@ async def test_system_health_returns_503_when_postgres_unavailable(client, mock_
     data = resp.json()
     assert "detail" in data
     assert "postgres" in data["detail"]
-    assert data["detail"]["postgres"].startswith("error:")
+    assert data["detail"]["postgres"] == "error"
+
+
+async def test_system_health_unauthenticated_503_omits_exception_text(client, mock_redis):
+    """/api/system/health needs no login, so driver errors (hosts, users) must stay in the log."""
+    mock_redis.ping = AsyncMock(side_effect=ConnectionError("Error 111 connecting to redis.internal:6379"))
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(side_effect=Exception('password authentication failed for user "vault"'))
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("routers.system.AsyncSessionLocal", MagicMock(return_value=mock_session)),
+        patch("asyncio.create_subprocess_exec") as mock_proc,
+    ):
+        proc_mock = AsyncMock()
+        proc_mock.communicate = AsyncMock(return_value=(b"IUse%\n10\n", b""))
+        mock_proc.return_value = proc_mock
+
+        resp = await client.get("/api/system/health")
+
+    assert resp.status_code == 503
+    assert "redis.internal" not in resp.text
+    assert "vault" not in resp.text
+    assert resp.json()["detail"] == {"postgres": "error", "redis": "error", "inodes": "ok"}
+
+
+async def test_ready_unauthenticated_503_omits_exception_text_and_paths(client, mock_redis, tmp_path):
+    """/api/ready is exposed by nginx without auth: no driver errors, no filesystem layout."""
+    mock_redis.ping = AsyncMock(side_effect=ConnectionError("Error 111 connecting to redis.internal:6379"))
+    failing_engine = MagicMock()
+    failing_engine.connect = MagicMock(side_effect=Exception('password authentication failed for user "vault"'))
+    missing = str(tmp_path / "secret-layout" / "gallery")
+
+    with (
+        patch("main.engine", failing_engine),
+        patch("main.settings.data_gallery_path", missing),
+    ):
+        resp = await client.get("/api/ready")
+
+    assert resp.status_code == 503
+    assert "redis.internal" not in resp.text
+    assert "vault" not in resp.text
+    assert "secret-layout" not in resp.text
+    body = resp.json()
+    assert body["checks"]["database"] is False
+    assert body["checks"]["redis"] is False
+    assert body["checks"]["data_gallery"] is False
+    assert body["details"]["database"] == "unavailable"
+    assert body["details"]["redis"] == "unavailable"
+    assert body["details"]["data_gallery"] == "not a directory"
 
 
 # -- health: inode warning / unknown (lines 136-142) -------------------------
@@ -488,6 +539,48 @@ async def test_system_health_records_unknown_when_df_raises(client, db_session_f
     services = data.get("services") or data.get("detail", {})
     assert "inodes" in services
     assert services["inodes"] == "unknown"
+
+
+async def test_system_health_inode_check_does_not_combine_df_i_with_output(client, db_session_factory, mock_redis):
+    """GNU df rejects `-i --output=...` ("mutually exclusive"), which left inodes "unknown" forever."""
+    mock_redis.ping = AsyncMock(return_value=True)
+
+    with (
+        patch("routers.system.AsyncSessionLocal", db_session_factory),
+        patch("asyncio.create_subprocess_exec") as mock_proc,
+    ):
+        proc_mock = AsyncMock()
+        proc_mock.communicate = AsyncMock(return_value=(b"IUse%\n10\n", b""))
+        mock_proc.return_value = proc_mock
+
+        await client.get("/api/system/health")
+
+    argv = mock_proc.call_args.args
+    assert argv[0] == "df"
+    assert "--output=ipcent" in argv
+    assert "-i" not in argv
+
+
+async def test_system_health_inode_check_parses_real_df_output(client, db_session_factory, mock_redis, tmp_path):
+    """Run the real df: a mocked subprocess cannot notice an argv that df itself refuses."""
+    import shutil
+    import subprocess
+
+    if shutil.which("df") is None:
+        pytest.skip("df not available")
+    probe = subprocess.run(["df", "--output=ipcent", str(tmp_path)], capture_output=True, text=True, check=False)
+    if probe.returncode != 0 or not probe.stdout.strip().splitlines()[-1].strip().rstrip("%").isdigit():
+        pytest.skip("filesystem does not report inode usage")
+
+    mock_redis.ping = AsyncMock(return_value=True)
+    with (
+        patch("routers.system.AsyncSessionLocal", db_session_factory),
+        patch("routers.system.settings.data_cas_path", str(tmp_path)),
+    ):
+        resp = await client.get("/api/system/health")
+
+    services = resp.json().get("services") or resp.json().get("detail", {})
+    assert services["inodes"] != "unknown"
 
 
 async def test_system_storage_returns_mounts_deduplicated_by_device(client):

@@ -348,3 +348,59 @@ async def test_saucenao_batch_returns_best_matches(client):
         )
     assert response.status_code == 200
     assert response.json()["results"][0]["best"]["source_url"] == best["source_url"]
+
+
+# ---------------------------------------------------------------------------
+# API key must never reach an error message (CodeQL py/stack-trace-exposure)
+# ---------------------------------------------------------------------------
+
+_SECRET_KEY = "s3cr3t-saucenao-key"
+
+
+async def test_search_by_image_http_500_error_message_omits_api_key():
+    """httpx puts the full request URL — api_key included — into raise_for_status() errors."""
+    from services import saucenao as sn
+
+    request = httpx.Request("POST", f"https://saucenao.com/search.php?api_key={_SECRET_KEY}&output_type=2")
+    real_resp = httpx.Response(500, request=request)
+
+    fake_client = AsyncMock()
+    fake_client.post = AsyncMock(return_value=real_resp)
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+
+    raised: Exception | None = None
+    with (
+        patch("services.saucenao._check_rate_limit", AsyncMock(return_value=True)),
+        patch("services.saucenao.httpx.AsyncClient", return_value=fake_client),
+    ):
+        try:
+            await sn.search_by_image(b"bytes", _SECRET_KEY)
+        except Exception as exc:  # noqa: BLE001 - the type is asserted below
+            raised = exc
+
+    assert isinstance(raised, SauceNaoError)
+    assert _SECRET_KEY not in str(raised)
+    assert "500" in str(raised)
+
+
+async def test_saucenao_batch_httpx_error_does_not_echo_api_key_to_client(client):
+    """A transport/status error must be reported generically, not as str(exc)."""
+    blob = _make_blob()
+    mock_session = _make_mock_session(blob=blob)
+    path_mock = _make_path_mock(exists=True, size=1024)
+    request = httpx.Request("POST", f"https://saucenao.com/search.php?api_key={_SECRET_KEY}")
+    leaky = httpx.HTTPStatusError(
+        f"Server error '500' for url '{request.url}'", request=request, response=httpx.Response(500, request=request)
+    )
+    with (
+        patch("routers.saucenao.get_credential", AsyncMock(return_value=_SECRET_KEY)),
+        patch("routers.saucenao.async_session", mock_session),
+        patch("routers.saucenao.resolve_blob_path", return_value=path_mock),
+        patch("routers.saucenao.search_by_image", AsyncMock(side_effect=leaky)),
+    ):
+        response = await client.post("/api/saucenao/batch", json={"image_ids": [1], "auto_fill_source": False})
+
+    assert response.status_code == 200
+    assert _SECRET_KEY not in response.text
+    assert response.json()["results"][0]["error"] == "saucenao_error"

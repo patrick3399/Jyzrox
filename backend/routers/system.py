@@ -86,7 +86,7 @@ async def system_health():
         results["postgres"] = "ok"
     except Exception as exc:
         logger.error("Postgres health check failed: %s", exc)
-        results["postgres"] = f"error: {exc}"
+        results["postgres"] = "error"
 
     # Redis
     try:
@@ -94,19 +94,20 @@ async def system_health():
         results["redis"] = "ok"
     except Exception as exc:
         logger.error("Redis health check failed: %s", exc)
-        results["redis"] = f"error: {exc}"
+        results["redis"] = "error"
 
     # Inode check
     try:
         proc = await asyncio.create_subprocess_exec(
             "df",
-            "-i",
+            # No `-i`: GNU df rejects it together with --output, and ipcent
+            # already selects the inode column.
             "--output=ipcent",
             settings.data_cas_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
         lines = stdout.decode().strip().split("\n")
         if len(lines) >= 2:
             pct = int(lines[1].strip().rstrip("%"))
@@ -115,8 +116,10 @@ async def system_health():
             else:
                 results["inodes"] = "ok"
         else:
+            logger.warning("Inode check returned no data: %s", stderr.decode(errors="replace").strip())
             results["inodes"] = "unknown"
-    except Exception:
+    except Exception as exc:
+        logger.warning("Inode check failed: %s", exc)
         results["inodes"] = "unknown"
 
     if any(v.startswith("error") for v in results.values()):
