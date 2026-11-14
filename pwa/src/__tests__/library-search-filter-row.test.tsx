@@ -426,7 +426,7 @@ describe('Library filter panel', () => {
     // Only the pill row: nothing is expanded until a pill is tapped.
     expect(screen.queryByTestId('library-filter-section')).toBeNull()
 
-    fireEvent.click(within(panel).getByText('library.minRating'))
+    fireEvent.click(within(panel).getByText('library.rating'))
     expect(screen.getByTestId('library-filter-section')).toBeInTheDocument()
 
     fireEvent.click(button)
@@ -537,7 +537,7 @@ describe('Library filter panel on desktop', () => {
     const sentinel = block.previousElementSibling as HTMLElement
 
     fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
-    fireEvent.click(within(panel).getByText('library.minRating'))
+    fireEvent.click(within(panel).getByText('library.rating'))
     expect(screen.getByTestId('library-filter-section')).toBeInTheDocument()
 
     scrollPage(sentinel, 400)

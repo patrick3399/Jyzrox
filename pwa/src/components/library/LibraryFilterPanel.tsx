@@ -197,7 +197,7 @@ export function LibraryFilterPanel({
           {sourceText}
         </Pill>
         <Pill section="rating" current={section} active={rating !== null} onToggle={toggle}>
-          {rating === null ? t('library.minRating') : `${t('library.minRating')} ${rating}+`}
+          {rating === null ? t('library.rating') : `${t('library.rating')} ${rating}+`}
         </Pill>
         {collections.length > 0 && (
           <Pill

@@ -85,7 +85,7 @@ describe('LibraryFilterPanel', () => {
     })
     expect(pill('category')).toHaveTextContent('library.facetMore Manga 1')
     expect(pill('source')).toHaveTextContent('library.facetNot External Folders')
-    expect(pill('rating')).toHaveTextContent('library.minRating 4+')
+    expect(pill('rating')).toHaveTextContent('library.rating 4+')
     expect(pill('collection')).toHaveTextContent('Best (3)')
     expect(pill('sort')).toHaveTextContent('library.sort · Rating')
   })
