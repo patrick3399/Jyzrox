@@ -28,6 +28,43 @@ describe('tagNameSearchTerm', () => {
   })
 })
 
+describe('quoted values containing quotes or backslashes (CodeQL js/incomplete-sanitization)', () => {
+  it.each([
+    ['say "hi" now'],
+    ['a"b'],
+    ['"'],
+    ['ends with backslash \\'],
+    ['C:\\dir\\ name'],
+    ['back\\slash'],
+    ['mixed \\" pair'],
+  ])('test_buildQuery_titleWithQuoteOrBackslash_roundTripsThroughParseQuery: %s', (title) => {
+    expect(parseQuery(buildQuery({ title })).title).toBe(title)
+  })
+
+  it('test_parseQuery_valueWithEmbeddedQuote_doesNotSplitIntoExtraTokens', () => {
+    const parsed = parseQuery(buildQuery({ categories: ['He said "x y"'], sources: ['local'] }))
+    expect(parsed.categories).toEqual(['He said "x y"'])
+    expect(parsed.sources).toEqual(['local'])
+    expect(parsed.nameOnlyTags).toEqual([])
+    expect(parsed.tags).toEqual([])
+  })
+
+  it('test_parseQuery_escapedQuoteInsideQuotedValue_doesNotEndTheToken', () => {
+    const parsed = parseQuery('title:"a \\" b" rem')
+    expect(parsed.title).toBe('a " b')
+    expect(parsed.nameOnlyTags).toEqual(['rem'])
+  })
+
+  it('test_buildQuery_unquotedBackslashValue_isLeftAsTyped', () => {
+    expect(buildQuery({ title: 'back\\slash' })).toBe('title:back\\slash')
+  })
+
+  it('test_tagNameSearchTerm_nameWithQuote_staysOneBareTerm', () => {
+    const parsed = parseQuery(tagNameSearchTerm('5" figure'))
+    expect(parsed.nameOnlyTags).toHaveLength(1)
+  })
+})
+
 describe('isFilterToken', () => {
   it.each([
     'title:x',

@@ -35,7 +35,12 @@ function tokenize(q: string): string[] {
     let inQuote = false
     while (i < s.length) {
       const ch = s[i]
-      if (ch === '"') {
+      if (inQuote && ch === '\\' && (s[i + 1] === '"' || s[i + 1] === '\\')) {
+        // Escaped quote or backslash inside a quoted value: keep the pair, do
+        // not let the quote end the value (see formatValue).
+        token += ch + s[i + 1]
+        i += 2
+      } else if (ch === '"') {
         inQuote = !inQuote
         token += ch
         i++
@@ -61,14 +66,19 @@ function tokenize(q: string): string[] {
 function extractValue(token: string, prefixLen: number): string {
   const raw = token.slice(prefixLen + 1) // skip "key:"
   if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) {
-    return raw.slice(1, -1)
+    return raw.slice(1, -1).replace(/\\(["\\])/g, '$1')
   }
   return raw
 }
 
+/**
+ * Inverse of extractValue. A value with whitespace or a quote is wrapped in
+ * quotes, with `"` and `\` escaped so the tokenizer reads it back unchanged.
+ * Anything else is emitted as typed (a bare backslash is literal).
+ */
 function formatValue(value: string): string {
-  const escaped = value.replace(/"/g, '\\"')
-  return /\s/.test(escaped) ? `"${escaped}"` : escaped
+  if (!/[\s"]/.test(value)) return value
+  return `"${value.replace(/["\\]/g, '\\$&')}"`
 }
 
 /**
