@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { Check, ChevronDown, HelpCircle, RotateCcw } from 'lucide-react'
+import { Check, HelpCircle, RotateCcw } from 'lucide-react'
 import { formatNumber, t } from '@/lib/i18n'
 import { resolveCategoryColors } from '@/lib/categoryPalette'
 import type { FacetKey, FacetSelection } from '@/lib/queryParser'
@@ -48,7 +48,9 @@ interface LibraryFilterPanelProps {
 }
 
 const PILL =
-  'flex h-8 shrink-0 max-w-48 items-center gap-1 rounded-full border px-3 text-sm transition-colors'
+  'flex h-8 shrink-0 max-w-48 items-center gap-1 rounded-full border px-2.5 text-sm transition-colors'
+// No chevron: the pill row has to fit a phone width, so colour alone marks a
+// pill as set or expanded (aria-expanded carries it for assistive tech).
 const PILL_ACTIVE = 'border-vault-accent bg-vault-accent/10 text-vault-accent'
 const PILL_IDLE =
   'border-vault-border bg-vault-input text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text'
@@ -86,10 +88,6 @@ function Pill({
       className={`${PILL} ${active || expanded ? PILL_ACTIVE : PILL_IDLE}`}
     >
       <span className="truncate">{children}</span>
-      <ChevronDown
-        size={14}
-        className={`shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-      />
     </button>
   )
 }
@@ -181,7 +179,7 @@ export function LibraryFilterPanel({
 
   return (
     <div className="mt-2">
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <Pill
           section="category"
           current={section}
