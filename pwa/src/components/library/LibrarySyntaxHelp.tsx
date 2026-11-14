@@ -2,7 +2,7 @@
 
 import { t } from '@/lib/i18n'
 
-/** The search-syntax cheat sheet shown by the desktop panel and the phone filter sheet. */
+/** The search-syntax cheat sheet shown by the desktop and phone filter panels. */
 export function LibrarySyntaxHelpLines() {
   return (
     <div className="mt-4 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">

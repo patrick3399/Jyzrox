@@ -136,12 +136,12 @@ export function LibrarySearchBar({
           <button
             type="button"
             onClick={onToggleFilters}
-            aria-haspopup="dialog"
             aria-expanded={filtersOpen}
+            aria-controls="library-mobile-filter-panel"
             tabIndex={focused ? -1 : undefined}
             aria-label={t('library.filters')}
             title={t('library.filters')}
-            // Desktop shows the filters inline, so the sheet toggle is phone/tablet-only.
+            // Desktop shows its filters expanded, so the toggle is phone/tablet-only.
             className={`${TOOLBAR_BUTTON} lg:hidden ${filtersOpen ? TOOLBAR_BUTTON_ACTIVE : TOOLBAR_BUTTON_IDLE}`}
           >
             <SlidersHorizontal size={16} />

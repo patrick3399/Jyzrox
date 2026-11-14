@@ -126,11 +126,11 @@ interface LibraryFacetListProps {
   selection: FacetSelection
   onChange: (selection: FacetSelection) => void
   categoryDefs?: GalleryCategoryDef[]
-  /** Desktop popover grid; the mobile sheet keeps the single scrolling column. */
+  /** Desktop popover grid; the phone panel keeps the single scrolling column. */
   columns?: FacetColumns
 }
 
-/** Mode toggle plus a checkbox list with counts; shared by the desktop popover and the mobile sheet. */
+/** Mode toggle plus a checkbox list with counts; shared by the desktop popover and the phone panel. */
 export function LibraryFacetList({
   options,
   selection: committed,

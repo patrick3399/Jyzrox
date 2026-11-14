@@ -100,7 +100,6 @@ const zhCN: Record<string, string> = {
   'library.facetExcept': '全部除外',
   'library.facetNot': '排除：{value}',
   'library.facetMore': '{label} +{count}',
-  'library.showResults': '显示 {count} 项',
   'library.resetFilters': '重置',
   'library.facetFilterPlaceholder': '筛选…',
   'library.facetOr': '或',

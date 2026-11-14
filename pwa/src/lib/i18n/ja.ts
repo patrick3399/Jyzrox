@@ -100,7 +100,6 @@ const ja: Record<string, string> = {
   'library.facetExcept': 'これらを除く',
   'library.facetNot': '除外：{value}',
   'library.facetMore': '{label} +{count}',
-  'library.showResults': '{count} 件を表示',
   'library.resetFilters': 'リセット',
   'library.facetFilterPlaceholder': '絞り込み…',
   'library.facetOr': 'または',

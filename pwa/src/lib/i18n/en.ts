@@ -2228,7 +2228,6 @@ const en: Record<string, string> = {
   'library.facetExcept': 'All except',
   'library.facetNot': 'Not: {value}',
   'library.facetMore': '{label} +{count}',
-  'library.showResults': 'Show {count}',
   'library.resetFilters': 'Reset',
   'library.facetFilterPlaceholder': 'Filter…',
   'library.facetOr': 'or',

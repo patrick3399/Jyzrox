@@ -101,7 +101,6 @@ const ko: Record<string, string> = {
   'library.facetExcept': '선택한 항목 제외',
   'library.facetNot': '제외: {value}',
   'library.facetMore': '{label} +{count}',
-  'library.showResults': '{count}개 보기',
   'library.resetFilters': '초기화',
   'library.facetFilterPlaceholder': '필터…',
   'library.facetOr': '또는',

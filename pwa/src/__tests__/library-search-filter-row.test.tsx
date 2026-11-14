@@ -379,24 +379,38 @@ describe('Library search focus behaviour', () => {
 })
 
 describe('Library filter panel', () => {
-  it('library_page_mobile_filter_button_opens_sheet_not_panel', async () => {
+  it('library_page_mobile_filter_button_expands_inline_panel_not_a_dialog', () => {
     const { container } = render(<LibraryPage />)
     const button = screen.getByRole('button', { name: 'library.filters' })
-    const panel = container.querySelector('#library-filter-panel')
+    const desktopPanel = container.querySelector('#library-filter-panel')
+    const panel = container.querySelector('#library-mobile-filter-panel') as HTMLElement
 
-    expect(panel).not.toBeNull()
     expect(button).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('dialog')).toBeNull()
-    // Not a phone control: the desktop panel stays inert and hidden below lg.
+    expect(button).toHaveAttribute('aria-controls', 'library-mobile-filter-panel')
     expect(panel).toHaveAttribute('inert')
-    expect(panel?.className).toMatch(/(^|\s)hidden(\s|$)/)
+    expect(panel.className).toMatch(/(^|\s)grid-rows-\[0fr\](\s|$)/)
+    expect(panel.className).toMatch(/(^|\s)lg:hidden(\s|$)/)
+    // Not a phone control: the desktop panel stays inert and hidden below lg.
+    expect(desktopPanel).toHaveAttribute('inert')
+    expect(desktopPanel?.className).toMatch(/(^|\s)hidden(\s|$)/)
 
     fireEvent.click(button)
 
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('library.filterCategory')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(panel).not.toHaveAttribute('inert')
+    expect(panel.className).toMatch(/(^|\s)grid-rows-\[1fr\](\s|$)/)
+    expect(within(panel).getByText('library.filterCategory')).toBeInTheDocument()
+    expect(desktopPanel).toHaveAttribute('inert')
+    // Only the pill row: nothing is expanded until a pill is tapped.
+    expect(screen.queryByTestId('library-filter-section')).toBeNull()
+
+    fireEvent.click(within(panel).getByText('library.minRating'))
+    expect(screen.getByTestId('library-filter-section')).toBeInTheDocument()
+
+    fireEvent.click(button)
     expect(panel).toHaveAttribute('inert')
+    expect(screen.queryByTestId('library-filter-section')).toBeNull()
   })
 
   it('test_syntax_help_stays_hidden_until_its_toggle_in_the_panel_is_pressed', () => {
@@ -494,20 +508,45 @@ describe('Library filter panel on desktop', () => {
     expect(block).not.toHaveAttribute('data-scroll-hidden')
   })
 
-  it('test_phone_viewport_keeps_panel_inert_and_an_open_sheet_pins_the_block', async () => {
+  it('test_phone_open_panel_does_not_pin_the_block_and_scrolling_down_collapses_the_section', () => {
     mockViewport(false)
     const { container } = render(<LibraryPage />)
-    const panel = container.querySelector('#library-filter-panel') as HTMLElement
+    const panel = container.querySelector('#library-mobile-filter-panel') as HTMLElement
     const block = screen.getByTestId('library-search-block')
     const sentinel = block.previousElementSibling as HTMLElement
 
-    expect(panel).toHaveAttribute('inert')
     fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
-    await screen.findByRole('dialog')
-    expect(panel).toHaveAttribute('inert')
+    fireEvent.click(within(panel).getByText('library.minRating'))
+    expect(screen.getByTestId('library-filter-section')).toBeInTheDocument()
 
     scrollPage(sentinel, 400)
     scrollPage(sentinel, 800)
+    expect(block).toHaveAttribute('data-scroll-hidden')
+
+    // Back up: the pill row is still there, the expanded section is not.
+    scrollPage(sentinel, 760)
+    expect(block).not.toHaveAttribute('data-scroll-hidden')
+    expect(panel).not.toHaveAttribute('inert')
+    expect(screen.queryByTestId('library-filter-section')).toBeNull()
+  })
+
+  it('test_phone_panel_checkbox_focus_does_not_pin_the_block_but_the_search_input_does', () => {
+    mockViewport(false)
+    const { container } = render(<LibraryPage />)
+    const panel = container.querySelector('#library-mobile-filter-panel') as HTMLElement
+    const block = screen.getByTestId('library-search-block')
+    const sentinel = block.previousElementSibling as HTMLElement
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.filters' }))
+    fireEvent.click(within(panel).getByText('library.source'))
+    fireEvent.focus(within(panel).getAllByRole('radio')[0])
+    scrollPage(sentinel, 400)
+    scrollPage(sentinel, 800)
+    expect(block).toHaveAttribute('data-scroll-hidden')
+
+    scrollPage(sentinel, 760)
+    fireEvent.focus(screen.getByPlaceholderText(PLACEHOLDER))
+    scrollPage(sentinel, 1200)
     expect(block).not.toHaveAttribute('data-scroll-hidden')
   })
 })

@@ -100,7 +100,6 @@ const zhTW: Record<string, string> = {
   'library.facetExcept': '全部除外',
   'library.facetNot': '排除：{value}',
   'library.facetMore': '{label} +{count}',
-  'library.showResults': '顯示 {count} 筆',
   'library.resetFilters': '重設',
   'library.facetFilterPlaceholder': '篩選…',
   'library.facetOr': '或',
