@@ -232,6 +232,104 @@ class TestSetJobStatus:
 
         mock_session.commit.assert_called_once()
 
+    @staticmethod
+    def _killed_process_progress() -> dict:
+        """Progress a job held when the inactivity watchdog killed gallery-dl (2026-11-15)."""
+        return {
+            "speed": 0.0,
+            "timing": {"elapsed_ms": 295805, "idle_timeout_ms": 300000},
+            "skipped": 0,
+            "gdl_state": "starting",
+            "downloaded": 0,
+            "started_at": "2026-11-15T09:31:45.524449+00:00",
+            "status_text": "Downloading...",
+            "current_file": "a.jpg",
+            "current_file_page": 3,
+            "gdl_state_seconds": 30.0,
+            "last_update_at": "2026-11-15T09:36:41.329880+00:00",
+        }
+
+    async def test_failed_status_drops_live_gdl_state_of_killed_process(self):
+        """A failed job must not keep reporting a live gallery-dl state ("Downloading...")."""
+        from worker.helpers import _set_job_status
+
+        original = self._killed_process_progress()
+        job = _make_job(progress=original)
+        mock_session = _make_mock_session(job)
+        mock_publish = AsyncMock()
+
+        with (
+            patch("worker.helpers.AsyncSessionLocal", return_value=mock_session),
+            patch("worker.helpers.publish_job_event", mock_publish),
+        ):
+            await _set_job_status(str(job.id), "failed", error="No output for 300s — process killed")
+
+        for live_key in ("gdl_state", "status_text", "current_file", "current_file_page", "gdl_state_seconds"):
+            assert live_key not in job.progress
+        # What the run did is kept for diagnosis.
+        assert job.progress["downloaded"] == 0
+        assert job.progress["timing"] == original["timing"]
+        # A new dict, so the JSONB column is marked dirty.
+        assert job.progress is not original
+        assert mock_publish.await_args.args[0]["progress"] == job.progress
+
+    async def test_cancelled_status_replaces_live_gdl_state_with_cancelled(self):
+        from worker.helpers import _set_job_status
+
+        job = _make_job(progress=self._killed_process_progress())
+        mock_session = _make_mock_session(job)
+
+        with (
+            patch("worker.helpers.AsyncSessionLocal", return_value=mock_session),
+            patch("worker.helpers.publish_job_event", new_callable=AsyncMock),
+        ):
+            await _set_job_status(str(job.id), "cancelled")
+
+        assert job.progress["gdl_state"] == "cancelled"
+        assert "status_text" not in job.progress
+        assert "current_file" not in job.progress
+
+    @pytest.mark.parametrize(
+        ("status", "progress"),
+        [
+            # The success path already wrote its final progress.
+            ("done", {"gdl_state": "done", "status_text": "Complete", "downloaded": 3}),
+            ("partial", {"gdl_state": "done", "status_text": "Partial — 1 pages failed"}),
+            # gallery-dl finished; the import then failed (HR-002 path).
+            ("failed", {"gdl_state": "done", "status_text": "Complete", "downloaded": 2}),
+            # Non-gallery-dl jobs carry no gdl_state at all.
+            ("failed", {"downloaded": 4, "status_text": "Syncing"}),
+        ],
+    )
+    async def test_terminal_status_keeps_already_settled_progress(self, status, progress):
+        from worker.helpers import _set_job_status
+
+        job = _make_job(progress=dict(progress))
+        mock_session = _make_mock_session(job)
+
+        with (
+            patch("worker.helpers.AsyncSessionLocal", return_value=mock_session),
+            patch("worker.helpers.publish_job_event", new_callable=AsyncMock),
+        ):
+            await _set_job_status(str(job.id), status)
+
+        assert job.progress == progress
+
+    @pytest.mark.parametrize("status", ["running", "paused", "queued"])
+    async def test_non_terminal_status_keeps_live_gdl_state(self, status):
+        from worker.helpers import _set_job_status
+
+        job = _make_job(progress=self._killed_process_progress())
+        mock_session = _make_mock_session(job)
+
+        with (
+            patch("worker.helpers.AsyncSessionLocal", return_value=mock_session),
+            patch("worker.helpers.publish_job_event", new_callable=AsyncMock),
+        ):
+            await _set_job_status(str(job.id), status)
+
+        assert job.progress == self._killed_process_progress()
+
 
 # ---------------------------------------------------------------------------
 # _set_job_progress

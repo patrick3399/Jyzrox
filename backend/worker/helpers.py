@@ -49,6 +49,29 @@ def check_disk_space(path: str = "/data", min_free_gb: float = 2.0) -> tuple[boo
         return True, -1.0
 
 
+# gallery-dl states that describe a process still running, and the progress keys
+# that only make sense next to one. A job that ends while it holds one of them
+# (watchdog kill, plugin failure, cancel) never reaches the final progress write.
+_LIVE_GDL_STATES = frozenset({"starting", "downloading", "sleeping", "rate_limited", "retrying", "paused"})
+_LIVE_PROGRESS_KEYS = ("status_text", "current_file", "current_file_page", "gdl_state_seconds")
+
+
+def _settle_live_progress(progress: object, status: str) -> object:
+    """Drop the live gallery-dl state from the progress of a job ending failed/cancelled.
+
+    Returns a new dict when something changed (so the JSONB column is marked
+    dirty), otherwise ``progress`` unchanged.
+    """
+    if status not in ("failed", "cancelled") or not isinstance(progress, dict):
+        return progress
+    if progress.get("gdl_state") not in _LIVE_GDL_STATES:
+        return progress
+    settled = {k: v for k, v in progress.items() if k not in _LIVE_PROGRESS_KEYS and k != "gdl_state"}
+    if status == "cancelled":
+        settled["gdl_state"] = "cancelled"
+    return settled
+
+
 async def _set_job_status(
     job_id: str | None,
     status: str,
@@ -72,6 +95,11 @@ async def _set_job_status(
                 # "paused" is an intermediate state — do not set finished_at
                 if status in ("done", "failed", "cancelled", "partial"):
                     job.finished_at = datetime.now(UTC)
+                settled = _settle_live_progress(job.progress, status)
+                if settled is not job.progress:
+                    # Only touch the column when settling changed it: re-assigning
+                    # an unchanged value could write back a stale progress.
+                    job.progress = settled
                 await session.commit()
                 try:
                     await publish_job_event(
