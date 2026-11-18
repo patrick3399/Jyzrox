@@ -52,6 +52,7 @@ export function useCreateSubscription() {
           group_id?: number | null
           download_options?: Record<string, unknown>
           reject_duplicate?: boolean
+          warn_existing_gallery?: boolean
         }
       },
     ) => api.subscriptions.create(arg),

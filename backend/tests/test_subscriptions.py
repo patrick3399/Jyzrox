@@ -1292,3 +1292,95 @@ class TestCreateSubscriptionRejectDuplicate:
         resp = await client.post("/api/subscriptions/", json={"url": url})
 
         assert resp.status_code != 409
+
+
+class TestCreateSubscriptionWarnExistingGallery:
+    """``warn_existing_gallery`` tells the form that a plain download already holds this account."""
+
+    _KEY = ("weibo", "3802725779")
+
+    async def _insert_gallery(self, db_session, *, deleted: bool = False) -> int:
+        gallery_id = (
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries (source, source_id, source_url, title, pages, download_status, deleted_at) "
+                    "VALUES ('weibo', '3802725779', 'https://weibo.com/u/3802725779', 'Held', 8827, 'complete', :d) "
+                    "RETURNING id"
+                ),
+                {"d": "2026-01-01 00:00:00" if deleted else None},
+            )
+        ).scalar_one()
+        await db_session.commit()
+        return gallery_id
+
+    async def test_warn_existing_gallery_account_url_with_prior_download_returns_409_without_creating(
+        self, client, db_session
+    ):
+        """A different spelling of the account URL still hits the held gallery, and nothing is created."""
+        await _ensure_user(db_session)
+        gallery_id = await self._insert_gallery(db_session)
+        url = "https://weibo.cn/u/3802725779?tabtype=album"
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+            resp = await client.post("/api/subscriptions/", json={"url": url, "warn_existing_gallery": True})
+
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == "gallery_exists"
+        assert detail["gallery_id"] == gallery_id
+        assert (detail["source"], detail["source_id"], detail["pages"]) == ("weibo", "3802725779", 8827)
+        listed = (await client.get("/api/subscriptions/")).json()["subscriptions"]
+        assert all(item["url"] != normalize_subscription_url(url) for item in listed)
+
+    async def test_without_warn_existing_gallery_prior_download_is_not_refused(self, client, db_session):
+        """Callers that did not opt in (batch import, API) are never refused over a held gallery."""
+        await _ensure_user(db_session)
+        await self._insert_gallery(db_session)
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+            resp = await client.post("/api/subscriptions/", json={"url": "https://weibo.cn/u/3802725779"})
+
+        # 500 is the SQLite pg_insert limitation; what matters is not refusing.
+        assert resp.status_code != 409
+
+    async def test_warn_existing_gallery_trashed_gallery_is_not_reported(self, client, db_session):
+        """A gallery in the trash is not something the user has to be warned about."""
+        await _ensure_user(db_session)
+        await self._insert_gallery(db_session, deleted=True)
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+            resp = await client.post(
+                "/api/subscriptions/", json={"url": "https://weibo.cn/u/3802725779", "warn_existing_gallery": True}
+            )
+
+        assert resp.status_code != 409
+
+    async def test_warn_existing_gallery_non_account_url_is_not_reported(self, client, db_session):
+        """A URL that names no account has no gallery of its own, so there is nothing to warn about."""
+        await _ensure_user(db_session)
+        await self._insert_gallery(db_session)
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=None):
+            resp = await client.post(
+                "/api/subscriptions/", json={"url": "https://weibo.cn/search?q=x", "warn_existing_gallery": True}
+            )
+
+        assert resp.status_code != 409
+
+    async def test_warn_existing_gallery_existing_subscription_answers_subscription_exists_first(
+        self, client, db_session
+    ):
+        """The more specific refusal wins when the URL already has a subscription."""
+        await _ensure_user(db_session)
+        await self._insert_gallery(db_session)
+        url = "https://weibo.cn/u/3802725779"
+        await _insert_subscription(db_session, url=url, source="weibo")
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+            resp = await client.post(
+                "/api/subscriptions/",
+                json={"url": url, "reject_duplicate": True, "warn_existing_gallery": True},
+            )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "subscription_exists"

@@ -1844,6 +1844,11 @@ const zhCN: Record<string, string> = {
   'subscriptions.duplicateBody':
     '此网址已属于“{name}”。更新后，名称、计划、自动下载和下载选项都会改为此表单的内容，订阅也会重新启用；所属分组不变。',
   'subscriptions.duplicateConfirm': '更新设置',
+  'subscriptions.existingGalleryTitle': '之前已下载过',
+  'subscriptions.existingGalleryBody':
+    '这个账号已有一个图库“{title}”（{pages} 页），来自之前的下载。新订阅会从头开始，重新抓取这个账号，已保存的内容会被跳过。',
+  'subscriptions.existingGalleryOpen': '打开图库',
+  'subscriptions.existingGalleryConfirm': '仍要订阅',
   'subscriptions.sourceOther': '其他',
   'subscriptions.ungrouped': '未分组',
   'subscriptions.viewLabel': '排列方式',

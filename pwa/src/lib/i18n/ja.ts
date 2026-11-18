@@ -1449,6 +1449,11 @@ const ja: Record<string, string> = {
   'subscriptions.duplicateBody':
     'このURLは「{name}」で登録済みです。更新すると、名前、スケジュール、自動ダウンロード、ダウンロードオプションがこのフォームの内容に置き換わり、有効に戻ります。グループは変わりません。',
   'subscriptions.duplicateConfirm': '設定を更新',
+  'subscriptions.existingGalleryTitle': '以前にダウンロード済みです',
+  'subscriptions.existingGalleryBody':
+    'このアカウントには、以前のダウンロードによるギャラリー「{title}」（{pages} ページ）が既にあります。新しい購読は最初から始まり、アカウントを再度取得しますが、保存済みの内容はスキップされます。',
+  'subscriptions.existingGalleryOpen': 'ギャラリーを開く',
+  'subscriptions.existingGalleryConfirm': 'それでも購読',
   'subscriptions.searchPlaceholder': 'サブスクリプションを検索...',
   'subscriptions.noResults': '検索に一致するサブスクリプションがありません',
   'subscriptions.filterDownloading': 'ダウンロード中 ({count})',

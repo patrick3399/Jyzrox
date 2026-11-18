@@ -1796,6 +1796,11 @@ const ko: Record<string, string> = {
   'subscriptions.duplicateBody':
     '이 URL은 이미 "{name}"에 등록되어 있습니다. 업데이트하면 이름, 일정, 자동 다운로드, 다운로드 옵션이 이 양식의 내용으로 바뀌고 구독이 다시 활성화됩니다. 그룹은 바뀌지 않습니다.',
   'subscriptions.duplicateConfirm': '설정 업데이트',
+  'subscriptions.existingGalleryTitle': '이전에 다운로드한 적이 있습니다',
+  'subscriptions.existingGalleryBody':
+    '이 계정에는 이전 다운로드로 만들어진 갤러리 "{title}"({pages}페이지)가 이미 있습니다. 새 구독은 처음부터 시작하여 계정을 다시 가져오며, 이미 저장된 항목은 건너뜁니다.',
+  'subscriptions.existingGalleryOpen': '갤러리 열기',
+  'subscriptions.existingGalleryConfirm': '그래도 구독',
   'subscriptions.searchPlaceholder': '구독 검색...',
   'subscriptions.noResults': '검색어와 일치하는 구독이 없습니다',
   'subscriptions.filterDownloading': '다운로드 중 ({count})',

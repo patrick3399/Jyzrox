@@ -1243,6 +1243,11 @@ const en: Record<string, string> = {
   'subscriptions.duplicateBody':
     'This URL already belongs to "{name}". Updating replaces its name, schedule, auto download and download options with this form, and re-enables it. Its group stays the same.',
   'subscriptions.duplicateConfirm': 'Update settings',
+  'subscriptions.existingGalleryTitle': 'Already downloaded before',
+  'subscriptions.existingGalleryBody':
+    'This account already has a gallery, "{title}" ({pages} pages), from an earlier download. A new subscription starts from scratch and fetches the account again, skipping what is already saved.',
+  'subscriptions.existingGalleryOpen': 'Open gallery',
+  'subscriptions.existingGalleryConfirm': 'Subscribe anyway',
   'subscriptions.searchPlaceholder': 'Search subscriptions...',
   'subscriptions.noResults': 'No subscriptions match your search',
   'subscriptions.filterDownloading': 'Downloading ({count})',

@@ -91,6 +91,9 @@ class CreateSubscriptionRequest(BaseModel):
     # Opt-in: answer 409 instead of overwriting the subscription this URL
     # already belongs to, so the caller can ask the user first.
     reject_duplicate: bool = False
+    # Opt-in: answer 409 ``gallery_exists`` when this account URL already has a
+    # gallery from an earlier download, so the caller can tell the user first.
+    warn_existing_gallery: bool = False
 
 
 class PatchSubscriptionRequest(BaseModel):
@@ -367,6 +370,28 @@ async def get_latest_jobs(auth: dict = Depends(require_auth)):
     }
 
 
+async def _find_account_gallery(session, url: str, auth: dict) -> Gallery | None:
+    """The visible, live gallery that ``url`` names as an account, if any."""
+    key = account_gallery_key(url)
+    if key is None:
+        return None
+    source, source_id = key
+    return (
+        await session.execute(
+            select(Gallery)
+            .where(
+                Gallery.source == source,
+                Gallery.source_id == source_id,
+                Gallery.deleted_at.is_(None),
+                Gallery.merged_into_gallery_id.is_(None),
+                gallery_access_filter(auth),
+            )
+            .order_by(Gallery.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 @router.post("/")
 async def create_subscription(
     req: CreateSubscriptionRequest,
@@ -410,6 +435,27 @@ async def create_subscription(
                     "url": normalized_url,
                 },
             )
+
+        # A new subscription over an account that was downloaded before starts
+        # from nothing (no boundary, no archive) and re-fetches what is already
+        # held. Say so before creating it; the duplicate-subscription answer
+        # above takes precedence because it is the more specific one.
+        if existing is None and req.warn_existing_gallery:
+            held = await _find_account_gallery(session, normalized_url, auth)
+            if held is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "gallery_exists",
+                        "url": normalized_url,
+                        "gallery_id": held.id,
+                        "source": held.source,
+                        "source_id": held.source_id,
+                        "title": held.title,
+                        "pages": held.pages,
+                        "download_status": held.download_status,
+                    },
+                )
 
         stmt = _build_subscription_upsert(
             user_id=user_id,

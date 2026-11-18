@@ -73,6 +73,10 @@ import {
   duplicateSubscriptionHint,
   type DuplicateSubscriptionHint,
 } from '@/components/subscriptions/duplicateSubscription'
+import {
+  existingGalleryHint,
+  type ExistingGalleryHint,
+} from '@/components/subscriptions/existingGallery'
 import { useOpenedOnce } from '@/hooks/useOpenedOnce'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -85,6 +89,13 @@ const DuplicateSubscriptionDialog = dynamic(
   () =>
     import('@/components/subscriptions/DuplicateSubscriptionDialog').then(
       (module) => module.DuplicateSubscriptionDialog,
+    ),
+  { ssr: false },
+)
+const ExistingGalleryDialog = dynamic(
+  () =>
+    import('@/components/subscriptions/ExistingGalleryDialog').then(
+      (module) => module.ExistingGalleryDialog,
     ),
   { ssr: false },
 )
@@ -312,6 +323,8 @@ export default function SubscriptionsPage() {
   const [mediaPolicy, setMediaPolicy] = useState<MediaPolicy>(DEFAULT_MEDIA_POLICY)
   const [duplicateHint, setDuplicateHint] = useState<DuplicateSubscriptionHint | null>(null)
   const duplicateDialogOpened = useOpenedOnce(duplicateHint !== null)
+  const [galleryHint, setGalleryHint] = useState<ExistingGalleryHint | null>(null)
+  const galleryDialogOpened = useOpenedOnce(galleryHint !== null)
   const [debouncedAddUrl, setDebouncedAddUrl] = useState('')
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedAddUrl(url), 300)
@@ -336,7 +349,10 @@ export default function SubscriptionsPage() {
   const [editingGroup, setEditingGroup] = useState<SubscriptionGroup | null>(null)
 
   // Handlers — subscriptions
-  const handleAdd = async ({ overwrite = false }: { overwrite?: boolean } = {}) => {
+  const handleAdd = async ({
+    overwrite = false,
+    acknowledgeGallery = false,
+  }: { overwrite?: boolean; acknowledgeGallery?: boolean } = {}) => {
     if (!url.trim()) return
     const fanboxOptions: Record<string, unknown> = url.includes('fanbox.cc')
       ? {
@@ -359,8 +375,10 @@ export default function SubscriptionsPage() {
         group_id: selectedGroupId,
         ...(Object.keys(downloadOptions).length > 0 ? { download_options: downloadOptions } : {}),
         ...(overwrite ? {} : { reject_duplicate: true }),
+        ...(overwrite || acknowledgeGallery ? {} : { warn_existing_gallery: true }),
       })
       setDuplicateHint(null)
+      setGalleryHint(null)
       if (result?.duplicate) {
         toast.info(t('subscriptions.duplicateUpdated'))
       } else {
@@ -380,10 +398,18 @@ export default function SubscriptionsPage() {
     } catch (err) {
       const hint = duplicateSubscriptionHint(err)
       if (hint) {
+        setGalleryHint(null)
         setDuplicateHint(hint)
         return
       }
+      const heldGallery = existingGalleryHint(err)
+      if (heldGallery) {
+        setDuplicateHint(null)
+        setGalleryHint(heldGallery)
+        return
+      }
       setDuplicateHint(null)
+      setGalleryHint(null)
       toast.error(err instanceof Error ? err.message : t('subscriptions.addFailed'))
     }
   }
@@ -1141,6 +1167,16 @@ export default function SubscriptionsPage() {
           busy={creating}
           onCancel={() => setDuplicateHint(null)}
           onConfirm={() => handleAdd({ overwrite: true })}
+        />
+      )}
+
+      {/* Notice for an account that an earlier plain download already holds */}
+      {galleryDialogOpened && (
+        <ExistingGalleryDialog
+          hint={galleryHint}
+          busy={creating}
+          onCancel={() => setGalleryHint(null)}
+          onConfirm={() => handleAdd({ acknowledgeGallery: true })}
         />
       )}
     </PageContainer>

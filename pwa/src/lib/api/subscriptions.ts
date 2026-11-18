@@ -19,6 +19,8 @@ export const subscriptions = {
     download_options?: Record<string, unknown>
     /** Refuse with 409 `{code: "subscription_exists"}` instead of overwriting. */
     reject_duplicate?: boolean
+    /** Refuse with 409 `{code: "gallery_exists"}` when an earlier download already holds this account. */
+    warn_existing_gallery?: boolean
   }) =>
     apiFetch<{ status: string; id: number; source: string | null; duplicate?: boolean }>(
       '/api/subscriptions/',

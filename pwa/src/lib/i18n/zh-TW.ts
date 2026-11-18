@@ -1655,6 +1655,11 @@ const zhTW: Record<string, string> = {
   'subscriptions.duplicateBody':
     '此網址已屬於「{name}」。更新後，名稱、排程、自動下載與下載選項都會改為此表單的內容，訂閱也會重新啟用；所屬群組不變。',
   'subscriptions.duplicateConfirm': '更新設定',
+  'subscriptions.existingGalleryTitle': '之前已下載過',
+  'subscriptions.existingGalleryBody':
+    '這個帳號已有一個圖庫「{title}」（{pages} 頁），來自先前的下載。新訂閱會從頭開始，重新抓取這個帳號，已儲存的內容會被略過。',
+  'subscriptions.existingGalleryOpen': '開啟圖庫',
+  'subscriptions.existingGalleryConfirm': '仍要訂閱',
   'subscriptions.sourceOther': '其他',
   'subscriptions.ungrouped': '未分組',
   'subscriptions.viewLabel': '排列方式',
