@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import and_, case, delete, select, update
+from sqlalchemy import and_, case, delete, or_, select, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -19,6 +19,7 @@ from db.models import DEFAULT_SUBSCRIPTION_CRON, DownloadJob, Gallery, Subscript
 from services.download_policy import normalize_download_options
 from services.download_stop import StopNotAllowed, request_stop
 from services.subscription_pause import check_lock_key, pause_subscription, resume_subscription
+from services.url_identity import account_gallery_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
@@ -218,6 +219,38 @@ async def list_subscriptions(
                         gallery = gallery_by_source_url.get(sub.url)
                         if gallery:
                             gallery_by_sub_id[sub.id] = gallery
+
+            # A gallery that came from a plain download, or from a subscription
+            # that was deleted and re-added, has no job pointing at this
+            # subscription and may carry another spelling of the URL (weibo.cn
+            # vs weibo.com). Match on the identity the importer upserts on.
+            keys_by_sub = {s.id: account_gallery_key(s.url) for s in subs if s.id not in gallery_by_sub_id}
+            wanted_keys = {k for k in keys_by_sub.values() if k is not None}
+            if wanted_keys:
+                identity_rows = (
+                    (
+                        await session.execute(
+                            select(Gallery)
+                            .where(
+                                or_(
+                                    *(and_(Gallery.source == src, Gallery.source_id == sid) for src, sid in wanted_keys)
+                                ),
+                                Gallery.deleted_at.is_(None),
+                                Gallery.merged_into_gallery_id.is_(None),
+                                gallery_access_filter(auth),
+                            )
+                            .order_by(Gallery.id.desc())
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                gallery_by_key = {}
+                for gallery in identity_rows:
+                    gallery_by_key.setdefault((gallery.source, gallery.source_id), gallery)
+                for sub_id, key in keys_by_sub.items():
+                    if key is not None and key in gallery_by_key:
+                        gallery_by_sub_id[sub_id] = gallery_by_key[key]
 
         count_q = select(sa_func.count(Subscription.id)).where(Subscription.user_id == user_id)
         if source:

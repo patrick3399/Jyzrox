@@ -187,6 +187,73 @@ class TestListSubscriptions:
         second_sub = next(item for item in second.json()["subscriptions"] if item["id"] == sub_id)
         assert second_sub["gallery_title"] == "Renamed Gallery"
 
+    async def _insert_gallery(self, db_session, *, source, source_id, source_url, deleted=False) -> int:
+        gallery_id = (
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries (source, source_id, source_url, title, deleted_at) "
+                    "VALUES (:s, :sid, :u, 'Pre-existing', :d) RETURNING id"
+                ),
+                {"s": source, "sid": source_id, "u": source_url, "d": "2026-01-01 00:00:00" if deleted else None},
+            )
+        ).scalar_one()
+        await db_session.commit()
+        return gallery_id
+
+    async def test_list_links_gallery_from_plain_download_when_url_spelling_differs(self, client, db_session):
+        """A gallery made by a non-subscription download links to a new subscription whose URL spells the same account differently (weibo.cn vs weibo.com) and has no job yet."""
+        await _ensure_user(db_session)
+        gallery_id = await self._insert_gallery(
+            db_session,
+            source="weibo",
+            source_id="3802725779",
+            source_url="https://weibo.com/u/3802725779?tabtype=album",
+        )
+        sub_id = await _insert_subscription(
+            db_session, url="https://weibo.cn/u/3802725779?tabtype=album", source="weibo"
+        )
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=("weibo", "3802725779")):
+            resp = await client.get("/api/subscriptions/")
+
+        sub = next(item for item in resp.json()["subscriptions"] if item["id"] == sub_id)
+        assert sub["gallery_id"] == gallery_id
+
+    async def test_list_does_not_link_trashed_gallery_by_identity(self, client, db_session):
+        """A gallery in the trash must not be offered as the subscription's gallery."""
+        await _ensure_user(db_session)
+        await self._insert_gallery(
+            db_session,
+            source="weibo",
+            source_id="3802725780",
+            source_url="https://weibo.com/u/3802725780",
+            deleted=True,
+        )
+        sub_id = await _insert_subscription(db_session, url="https://weibo.cn/u/3802725780", source="weibo")
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=("weibo", "3802725780")):
+            resp = await client.get("/api/subscriptions/")
+
+        sub = next(item for item in resp.json()["subscriptions"] if item["id"] == sub_id)
+        assert "gallery_id" not in sub
+
+    async def test_list_does_not_link_other_account_gallery_by_identity(self, client, db_session):
+        """Only the same (source, source_id) links; another account's gallery does not."""
+        await _ensure_user(db_session)
+        await self._insert_gallery(
+            db_session,
+            source="weibo",
+            source_id="1111111111",
+            source_url="https://weibo.com/u/1111111111",
+        )
+        sub_id = await _insert_subscription(db_session, url="https://weibo.cn/u/2222222222", source="weibo")
+
+        with patch("routers.subscriptions.account_gallery_key", return_value=("weibo", "2222222222")):
+            resp = await client.get("/api/subscriptions/")
+
+        sub = next(item for item in resp.json()["subscriptions"] if item["id"] == sub_id)
+        assert "gallery_id" not in sub
+
 
 # ---------------------------------------------------------------------------
 # POST /api/subscriptions/
