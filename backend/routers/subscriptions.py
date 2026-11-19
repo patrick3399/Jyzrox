@@ -16,7 +16,7 @@ from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
 from db.models import DEFAULT_SUBSCRIPTION_CRON, DownloadJob, Gallery, Subscription
-from services.download_mode import find_account_subscription
+from services.download_mode import find_account_subscription, find_gallery_subscription, is_account_gallery
 from services.download_policy import normalize_download_options
 from services.download_stop import StopNotAllowed, request_stop
 from services.subscription_pause import check_lock_key, pause_subscription, resume_subscription
@@ -371,6 +371,33 @@ async def get_latest_jobs(auth: dict = Depends(require_auth)):
         "jobs": {str(j.subscription_id): serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs},
         "runs": runs,
     }
+
+
+@router.get("/by-gallery/{gallery_id}")
+async def get_gallery_subscription(gallery_id: int, auth: dict = Depends(_member)):
+    """The caller's subscription that covers a gallery, for the gallery page.
+
+    ``subscription`` is the one a gallery update would check (see
+    ``find_gallery_subscription``). Without one, ``can_subscribe`` says whether
+    the gallery is an account the caller could subscribe to, with
+    ``subscribe_url`` the URL to subscribe with.
+    """
+    async with async_session() as session:
+        gallery = (
+            await session.execute(select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth)))
+        ).scalar_one_or_none()
+        if gallery is None or gallery.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Gallery not found")
+        sub = await find_gallery_subscription(session, gallery.id, auth["user_id"])
+        account = sub is None and is_account_gallery(gallery)
+    if sub is not None:
+        (checking,) = await _checking_flags([sub.id])
+        return {
+            "subscription": _serialize_subscription(sub, checking=checking),
+            "can_subscribe": False,
+            "subscribe_url": None,
+        }
+    return {"subscription": None, "can_subscribe": account, "subscribe_url": gallery.source_url if account else None}
 
 
 async def _find_account_gallery(session, url: str, auth: dict) -> Gallery | None:
