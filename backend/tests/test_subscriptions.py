@@ -1294,6 +1294,127 @@ class TestCreateSubscriptionRejectDuplicate:
         assert resp.status_code != 409
 
 
+class TestCreateSubscriptionSameAccountDifferentSpelling:
+    """One account is one subscription, whether the URL says www, http or another host."""
+
+    @staticmethod
+    def _key_for(url: str):
+        """Stand-in for gallery-dl's matcher: account name is the last path segment."""
+        host = url.split("//", 1)[-1].split("/", 1)[0]
+        name = url.rstrip("/").rsplit("/", 1)[-1]
+        site = "instagram" if "instagram" in host else "facebook"
+        return (site, name)
+
+    @staticmethod
+    def _detect(url: str):
+        return "instagram" if "instagram" in url else "facebook"
+
+    async def _post(self, client, url: str, **extra):
+        with (
+            patch("routers.subscriptions.account_gallery_key", side_effect=self._key_for),
+            patch("routers.subscriptions.detect_source", side_effect=self._detect),
+        ):
+            return await client.post("/api/subscriptions/", json={"url": url, **extra})
+
+    async def test_reject_duplicate_www_spelling_of_legacy_subscription_returns_409(self, client, db_session):
+        """A row saved before source_id was recorded is still matched by resolving its URL."""
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(
+            db_session, url="https://instagram.com/ruby_love7777", name="Ruby", source="instagram"
+        )
+
+        resp = await self._post(client, "https://www.instagram.com/ruby_love7777", reject_duplicate=True)
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == {
+            "code": "subscription_exists",
+            "subscription_id": sub_id,
+            "name": "Ruby",
+            "url": "https://instagram.com/ruby_love7777",
+        }
+
+    async def test_reject_duplicate_matches_recorded_source_id_without_resolving_the_stored_url(
+        self, client, db_session
+    ):
+        """A row that carries source_id is matched on it, so its own URL need not resolve."""
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(
+            db_session, url="https://example.invalid/unresolvable", name="Recorded", source="instagram"
+        )
+        await db_session.execute(
+            text("UPDATE subscriptions SET source_id = 'ruby_love7777' WHERE id = :i"), {"i": sub_id}
+        )
+        await db_session.commit()
+
+        resp = await self._post(client, "https://www.instagram.com/ruby_love7777", reject_duplicate=True)
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["subscription_id"] == sub_id
+
+    async def test_without_reject_duplicate_same_account_reuses_existing_and_creates_nothing(self, client, db_session):
+        """Callers that did not opt in get the existing subscription back, not a second row."""
+        await _ensure_user(db_session)
+        sub_id = await _insert_subscription(db_session, url="https://instagram.com/ruby_love7777", source="instagram")
+
+        resp = await self._post(client, "https://www.instagram.com/ruby_love7777")
+
+        assert resp.status_code == 200
+        assert resp.json()["id"] == sub_id
+        assert resp.json()["duplicate"] is True
+        listed = (await client.get("/api/subscriptions/")).json()["subscriptions"]
+        assert [item["id"] for item in listed] == [sub_id]
+
+    async def test_different_account_on_same_site_is_not_refused(self, client, db_session):
+        await _ensure_user(db_session)
+        await _insert_subscription(db_session, url="https://instagram.com/ruby_love7777", source="instagram")
+
+        resp = await self._post(client, "https://www.instagram.com/someone_else", reject_duplicate=True)
+
+        # 500 is the SQLite pg_insert limitation; what matters is not refusing.
+        assert resp.status_code != 409
+
+    async def test_same_account_name_on_another_site_is_not_refused(self, client, db_session):
+        """Account names are only unique per site."""
+        await _ensure_user(db_session)
+        await _insert_subscription(db_session, url="https://instagram.com/ruby_love7777", source="instagram")
+
+        resp = await self._post(client, "https://www.facebook.com/ruby_love7777", reject_duplicate=True)
+
+        assert resp.status_code != 409
+
+    async def test_same_account_of_another_user_is_not_refused(self, client, db_session):
+        await _ensure_user(db_session)
+        await _ensure_user(db_session, user_id=2)
+        await _insert_subscription(db_session, user_id=2, url="https://instagram.com/ruby_love7777", source="instagram")
+
+        resp = await self._post(client, "https://www.instagram.com/ruby_love7777", reject_duplicate=True)
+
+        assert resp.status_code != 409
+
+    def test_upsert_records_account_source_id(self):
+        """New rows store the account identity so later spellings match without re-resolving."""
+        from datetime import UTC, datetime
+
+        from sqlalchemy.dialects import postgresql
+
+        from routers.subscriptions import _build_subscription_upsert
+
+        stmt = _build_subscription_upsert(
+            user_id=1,
+            url="https://www.instagram.com/ruby_love7777",
+            name=None,
+            source="instagram",
+            auto_download=False,
+            cron_expr="0 */2 * * *",
+            next_check=datetime.now(UTC),
+            group_id=None,
+            source_id="ruby_love7777",
+        )
+
+        params = stmt.compile(dialect=postgresql.dialect()).params
+        assert params["source_id"] == "ruby_love7777"
+
+
 class TestCreateSubscriptionWarnExistingGallery:
     """``warn_existing_gallery`` tells the form that a plain download already holds this account."""
 

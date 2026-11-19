@@ -38,6 +38,7 @@ def _build_subscription_upsert(
     next_check,
     group_id: int | None,
     download_options: dict | None = None,
+    source_id: str | None = None,
 ):
     """Build the create-or-upsert statement for a subscription.
 
@@ -56,7 +57,7 @@ def _build_subscription_upsert(
             url=url,
             name=name,
             source=source,
-            source_id=None,
+            source_id=source_id,
             auto_download=auto_download,
             cron_expr=cron_expr,
             next_check_at=next_check,
@@ -68,6 +69,7 @@ def _build_subscription_upsert(
             set_={
                 "name": name,
                 "source": source,
+                "source_id": source_id,
                 "auto_download": auto_download,
                 "cron_expr": cron_expr,
                 "next_check_at": next_check,
@@ -392,6 +394,36 @@ async def _find_account_gallery(session, url: str, auth: dict) -> Gallery | None
     ).scalar_one_or_none()
 
 
+async def _find_account_subscription(session, user_id: int, source: str | None, key: tuple[str, str]):
+    """This user's subscription to the same account as ``key``, however its URL is spelled.
+
+    Rows created since account identity was recorded carry ``source_id``; older
+    rows have none, so their URL is resolved here instead. The site is matched on
+    ``Subscription.source`` too, because an account name is only unique per site.
+    """
+    if source is None:
+        return None
+    _, source_id = key
+    rows = (
+        await session.execute(
+            select(Subscription.id, Subscription.name, Subscription.url, Subscription.source_id)
+            .where(
+                Subscription.user_id == user_id,
+                Subscription.source == source,
+                or_(Subscription.source_id == source_id, Subscription.source_id.is_(None)),
+            )
+            .order_by(Subscription.id)
+        )
+    ).all()
+    for row in rows:
+        if row.source_id == source_id:
+            return row
+        legacy_key = account_gallery_key(row.url)
+        if legacy_key is not None and legacy_key[1] == source_id:
+            return row
+    return None
+
+
 @router.post("/")
 async def create_subscription(
     req: CreateSubscriptionRequest,
@@ -436,6 +468,26 @@ async def create_subscription(
                 },
             )
 
+        # A different spelling of an account already subscribed to (www, http,
+        # weibo.cn vs weibo.com) is the same subscription: both would fetch the
+        # same account into the same gallery on every cycle. Refuse or reuse it
+        # rather than creating a second row.
+        account_key = account_gallery_key(normalized_url)
+        if existing is None and account_key is not None:
+            same_account = await _find_account_subscription(session, user_id, source, account_key)
+            if same_account is not None:
+                if req.reject_duplicate:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "subscription_exists",
+                            "subscription_id": same_account.id,
+                            "name": same_account.name,
+                            "url": same_account.url,
+                        },
+                    )
+                return {"status": "ok", "id": same_account.id, "source": source, "duplicate": True}
+
         # A new subscription over an account that was downloaded before starts
         # from nothing (no boundary, no archive) and re-fetches what is already
         # held. Say so before creating it; the duplicate-subscription answer
@@ -467,6 +519,7 @@ async def create_subscription(
             next_check=next_check,
             group_id=req.group_id,
             download_options=download_options,
+            source_id=account_key[1] if account_key else None,
         )
 
         result = await session.execute(stmt)
