@@ -3,17 +3,19 @@
  *
  * Tests the prefetch hook used by the Reader component.
  * The hook has two modes:
- *   - Proxy mode: PROXY_PREFETCH_CONCURRENCY (4) concurrent slots with chaining.
- *     Page turns keep in-flight prefetches inside a window ahead of the current
- *     page ([currentPage, currentPage + PREFETCH_KEEP_AHEAD]) instead of aborting
- *     everything, so fast flipping can build a buffer.
+ *   - Proxy mode: a bounded window sized from page-turn history
+ *     (proxyPrefetchPolicy.ts), at most 4 requests in flight, waiting for the
+ *     current page first. Page turns keep in-flight prefetches inside the keep
+ *     window ([currentPage - behind, currentPage + PREFETCH_KEEP_AHEAD]) instead
+ *     of aborting everything, so fast flipping can build a buffer.
  *   - Local mode: LOCAL_PREFETCH_CONCURRENCY (2) slots over a window of 5 ahead +
  *     2 behind, shrunk by a decoded-pixel budget for huge originals
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useSequentialPrefetch } from '../components/Reader/hooks'
+import { PROXY_CURRENT_PAGE_GRACE_MS, useSequentialPrefetch } from '../components/Reader/hooks'
+import { SCRUB_QUIET_MS } from '../components/Reader/proxyPrefetchPolicy'
 import type { ReaderImage } from '../components/Reader/types'
 
 // ── Fake Image factory ────────────────────────────────────────────────
@@ -116,93 +118,71 @@ describe('useSequentialPrefetch', () => {
   // ── Proxy mode ───────────────────────────────────────────────────
 
   describe('proxy mode', () => {
-    it('should create 4 in-flight Image requests on initial render (concurrency=4)', () => {
-      const images = makeImages(5)
-
-      renderHook(() => useSequentialPrefetch(images, 1, true))
-
-      expect(instances).toHaveLength(4)
-      expect(instances[0].src).toBe('http://proxy/page/2')
-      expect(instances[1].src).toBe('http://proxy/page/3')
-      expect(instances[2].src).toBe('http://proxy/page/4')
-      expect(instances[3].src).toBe('http://proxy/page/5')
-    })
-
-    it('should NOT start more than 4 requests while all four are in flight', () => {
+    it('should request the initial forward window on first render', () => {
       const images = makeImages(10)
 
       renderHook(() => useSequentialPrefetch(images, 1, true))
 
-      expect(instances).toHaveLength(4)
+      expect(activeSrcs(instances)).toEqual([
+        'http://proxy/page/2',
+        'http://proxy/page/3',
+        'http://proxy/page/4',
+      ])
     })
 
-    it('should eventually prefetch all remaining pages after completing initial ones', async () => {
-      const images = makeImages(5)
+    // Regression: the proxy chain continued with pageNum + 1 after every settle
+    // and had no forward limit, so a reader resting on one page pulled the whole
+    // gallery from EH (3333614: all 80 remaining pages within 70 s).
+    it('should not prefetch past the forward window while the reader rests on one page', async () => {
+      const images = makeImages(30)
+
+      renderHook(() => useSequentialPrefetch(images, 1, true))
+      await settleInFlight(instances, 30)
+
+      expect(requestedSrcs(instances)).toEqual([
+        'http://proxy/page/2',
+        'http://proxy/page/3',
+        'http://proxy/page/4',
+      ])
+    })
+
+    it('should not re-request an errored page while the window stays put', async () => {
+      const images = makeImages(10)
 
       const { result } = renderHook(() => useSequentialPrefetch(images, 1, true))
 
-      // Complete all in-flight images until chain settles
-      for (let i = 0; i < 20 && instances.some((inst) => inst.onload); i++) {
-        const pending = instances.find((inst) => inst.onload)
-        if (!pending) break
-        await act(async () => {
-          pending.triggerLoad()
-        })
-      }
-
-      // All pages 2-5 should be prefetched
-      expect(result.current.has(2)).toBe(true)
-      expect(result.current.has(3)).toBe(true)
-      expect(result.current.has(4)).toBe(true)
-      expect(result.current.has(5)).toBe(true)
-    })
-
-    it('should continue the chain (not stall) when an image errors', async () => {
-      const images = makeImages(5)
-
-      const { result: _result } = renderHook(() => useSequentialPrefetch(images, 1, true))
-
-      // Error page 2
       await act(async () => {
         instances[0].triggerError()
       })
 
-      // The chain should have spawned at least one more request
-      expect(instances.length).toBeGreaterThan(2)
+      expect(requestedSrcs(instances).filter((src) => src === 'http://proxy/page/2')).toHaveLength(
+        1,
+      )
+      expect(result.current.has(2)).toBe(true)
+      expect(activeSrcs(instances)).toEqual(['http://proxy/page/3', 'http://proxy/page/4'])
     })
 
-    it('should abort out-of-window prefetches and start a new window when currentPage jumps far ahead', async () => {
-      // Page turns no longer restart the chain by aborting everything — they keep
-      // in-flight prefetches inside [currentPage, currentPage + PREFETCH_KEEP_AHEAD]
-      // (= 10) and only abort requests that fall outside it. A jump from page 1 to
-      // page 20 puts every pre-turn request (pages 2-5) outside the new window
-      // ([20, 30]), so — unlike a small in-window turn — all of them get aborted
-      // and a fresh window is started from the new position.
+    it('should abort the old window and request only the next page after a jump', async () => {
+      // A jump from page 1 to page 20 puts every pre-turn request (pages 2-4)
+      // outside the keep window ([20, 30]), so all of them get aborted. The
+      // reader has not shown which way they will read from page 20, so only
+      // page 21 is requested.
       const images = makeImages(30)
       let currentPage = 1
 
       const { rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
 
-      expect(instances).toHaveLength(4)
       const preTurnInstances = [...instances]
 
-      // User jumps to page 20 — far outside the old keep-ahead window.
       currentPage = 20
       await act(async () => {
         rerender()
       })
 
-      // Every pre-turn request must have been aborted (src reset).
       preTurnInstances.forEach((inst) => {
         expect(inst.src).toBe('')
       })
-
-      // A new window of 4 requests must have been started from page 21.
-      const srcs = activeSrcs(instances)
-      expect(srcs).toContain('http://proxy/page/21')
-      expect(srcs).toContain('http://proxy/page/22')
-      expect(srcs).toContain('http://proxy/page/23')
-      expect(srcs).toContain('http://proxy/page/24')
+      expect(activeSrcs(instances)).toEqual(['http://proxy/page/21'])
     })
 
     it('should not create a duplicate request for a page already in prefetchedRef', async () => {
@@ -458,8 +438,8 @@ describe('useSequentialPrefetch', () => {
         useSequentialPrefetch(images, currentPage, true),
       )
 
-      // Concurrency 4: initial in-flight requests are for pages 2, 3, 4, 5.
-      expect(instances).toHaveLength(4)
+      // The initial window puts pages 2, 3 and 4 in flight.
+      expect(instances).toHaveLength(3)
       const page2Image = instances[0]
       const page3Image = instances[1]
 
@@ -533,35 +513,144 @@ describe('useSequentialPrefetch', () => {
   // reproduces the stall this test pins.
 
   describe('no stall after a page turn', () => {
-    it('should issue a new prefetch once pre-turn in-flight requests settle even though all slots were full at the turn', async () => {
-      const images = makeImages(10)
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(0)
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('should use a freed slot for the window once pre-turn in-flight requests settle', async () => {
+      const images = makeImages(30)
       let currentPage = 1
 
       const { rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
 
-      // Concurrency 4: pages 2, 3, 4, 5 occupy every slot.
-      expect(instances).toHaveLength(4)
-      const page2Image = instances[0]
+      // A brisk forward reader (one page every 400 ms) earns a window wider than
+      // the concurrency cap, so every slot is busy after the third turn.
+      for (const page of [2, 3, 4]) {
+        await act(async () => {
+          vi.advanceTimersByTime(400)
+          currentPage = page
+          rerender()
+        })
+      }
+      const inFlight = activeSrcs(instances)
+      expect(inFlight).toHaveLength(4)
 
-      // Small turn to page 2: keep window [2, 12] keeps pages 2-5 all alive, so
-      // nothing is aborted and every concurrency slot stays occupied.
-      currentPage = 2
+      // Settles after a realistic EH fetch time, so the window keeps its width.
+      const settling = instances.find((inst) => inst.src === inFlight[0])
+      await act(async () => {
+        vi.advanceTimersByTime(1_500)
+        settling?.triggerLoad()
+      })
+
+      // The freed slot goes to the first window page nobody is fetching yet.
+      const after = activeSrcs(instances)
+      expect(after).toHaveLength(4)
+      const highest = (srcs: string[]) =>
+        Math.max(...srcs.map((src) => Number(src.split('/').pop())))
+      expect(highest(after)).toBe(highest(inFlight) + 1)
+    })
+  })
+
+  // ── Adaptive proxy window ────────────────────────────────────────────
+  // The proxy window follows how the reader moves: a jump fetches only the next
+  // page, a scrub fetches nothing until it stops, paging backwards fetches
+  // behind, and nothing competes with the current page until it has loaded.
+
+  describe('adaptive proxy window', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(0)
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('should hold proxy prefetch until the current page is ready', async () => {
+      const images = makeImages(10)
+      let ready = false
+
+      const { rerender } = renderHook(() =>
+        useSequentialPrefetch(images, 1, true, { currentPageReady: ready }),
+      )
+      expect(instances).toHaveLength(0)
+
+      ready = true
       await act(async () => {
         rerender()
       })
-      // No slot was freed by the turn itself, so no new request could start yet.
-      expect(instances).toHaveLength(4)
+      expect(activeSrcs(instances)).toEqual([
+        'http://proxy/page/2',
+        'http://proxy/page/3',
+        'http://proxy/page/4',
+      ])
+    })
 
-      // One of the pre-turn requests (page 2) finally settles.
+    it('should start proxy prefetch after the grace period when the current page never reports ready', async () => {
+      // A video page, or an image still retrying, may never report ready.
+      const images = makeImages(10)
+
+      renderHook(() => useSequentialPrefetch(images, 1, true, { currentPageReady: false }))
+      expect(instances).toHaveLength(0)
+
       await act(async () => {
-        page2Image.triggerLoad()
+        vi.advanceTimersByTime(PROXY_CURRENT_PAGE_GRACE_MS)
       })
+      expect(activeSrcs(instances)).toHaveLength(3)
+    })
 
-      // The freed slot must be used: the chain re-enters at currentPage+1 (=3)
-      // and hops forward past pages 3, 4, 5 (still in flight) to land on the
-      // first genuinely available page, 6.
-      expect(instances).toHaveLength(5)
-      expect(instances[4].src).toBe('http://proxy/page/6')
+    it('should not start proxy prefetches while the reader scrubs through pages', async () => {
+      const images = makeImages(40)
+      let currentPage = 1
+
+      const { rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+
+      const turnTo = async (page: number) => {
+        await act(async () => {
+          vi.advanceTimersByTime(100)
+          currentPage = page
+          rerender()
+        })
+      }
+
+      // Dragging across pages 10..14, 100 ms apart. The first two turns cannot
+      // be told apart from a jump and a step yet; from the third on it is a drag.
+      await turnTo(10)
+      await turnTo(11)
+      const beforeDrag = instances.length
+      for (const page of [12, 13, 14]) await turnTo(page)
+      expect(instances).toHaveLength(beforeDrag)
+
+      // Once the drag rests, only the page after where it stopped is fetched.
+      await act(async () => {
+        vi.advanceTimersByTime(SCRUB_QUIET_MS)
+      })
+      expect(requestedSrcs(instances.slice(beforeDrag))).toEqual(['http://proxy/page/15'])
+    })
+
+    it('should prefetch behind the current page while the reader pages backwards', async () => {
+      const images = makeImages(40)
+      let currentPage = 30
+
+      const { rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, true))
+
+      for (const page of [29, 28, 27]) {
+        await act(async () => {
+          vi.advanceTimersByTime(2_000)
+          currentPage = page
+          rerender()
+        })
+      }
+
+      const active = activeSrcs(instances)
+      expect(active).toContain('http://proxy/page/26')
+      expect(active).toContain('http://proxy/page/25')
+      expect(active.some((src) => Number(src.split('/').pop()) > 27)).toBe(false)
     })
   })
 })

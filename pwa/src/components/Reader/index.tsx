@@ -1771,6 +1771,11 @@ export default function Reader({
   const loadedPagesRef = useRef<Set<number>>(new Set())
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  // The page whose image has settled (loaded, or failed after ReaderImg's
+  // retries). Proxy prefetch waits for the page on screen to settle so its
+  // neighbours do not compete with it for the server's EH request slots.
+  const [settledPage, setSettledPage] = useState<number | null>(null)
+
   const handleImageLoaded = useCallback(() => {
     // Remember the load only while the page-change effect has not run for this
     // page yet (load fired first). After that the entry has no consumer and
@@ -1784,6 +1789,7 @@ export default function Reader({
       loadingTimerRef.current = undefined
     }
     setPageLoading(false)
+    setSettledPage(state.currentPage)
   }, [state.currentPage])
 
   // On image load failure, stop the spinner (ReaderImg shows its own retry placeholder).
@@ -1793,7 +1799,8 @@ export default function Reader({
       loadingTimerRef.current = undefined
     }
     setPageLoading(false)
-  }, [])
+    setSettledPage(state.currentPage)
+  }, [state.currentPage])
 
   // When page changes, start a short timer before showing the spinner.
   // If the image loads before the timer fires (onLoad clears the timer), the spinner never appears.
@@ -1846,7 +1853,11 @@ export default function Reader({
   const pageAfter = (delta: number) =>
     settledPages ? stepPage(settledPages, state.currentPage, delta) : state.currentPage + delta
 
-  const prefetchedPages = useSequentialPrefetch(images, state.currentPage, isProxyMode)
+  // Webtoon mounts every page and loads them as they near the viewport, so no
+  // single page load gates it.
+  const prefetchedPages = useSequentialPrefetch(images, state.currentPage, isProxyMode, {
+    currentPageReady: state.viewMode === 'webtoon' || settledPage === state.currentPage,
+  })
   useProgressSave(source, sourceId, state.currentPage, !isProxyMode)
 
   const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
