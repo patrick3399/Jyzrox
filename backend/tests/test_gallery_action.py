@@ -156,3 +156,27 @@ async def test_gallery_action_requires_member_role(make_client, db_session, enq)
         resp = await ac.post(f"/api/download/galleries/{gallery.id}/action", json={"action": "repair"})
 
     assert resp.status_code == 403
+
+
+async def test_gallery_update_on_paused_subscription_returns_409_without_enqueue(client, db_session, enq):
+    """A paused subscription starts no work (ADR 0030); the gallery page must not report a check the worker skips."""
+    gallery, _sub = await _subscribed_gallery(db_session, paused_at=utc(2026, 11, 1), paused_reason="manual")
+
+    resp = await client.post(f"/api/download/galleries/{gallery.id}/action", json={"action": "update"})
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Subscription is paused"
+    enq.assert_not_awaited()
+    assert len(await _jobs(db_session)) == 1  # only the fixture's linking job
+
+
+async def test_gallery_repair_on_paused_subscription_returns_409_without_a_job(client, db_session, enq):
+    """Repair inherits the subscription; a paused one must not get a new job past its pause."""
+    gallery, _sub = await _subscribed_gallery(db_session, paused_at=utc(2026, 11, 1), paused_reason="rate_limited")
+
+    resp = await client.post(f"/api/download/galleries/{gallery.id}/action", json={"action": "repair"})
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Subscription is paused"
+    enq.assert_not_awaited()
+    assert len(await _jobs(db_session)) == 1

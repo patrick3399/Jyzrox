@@ -724,6 +724,11 @@ async def gallery_action(
 
     sub = await find_gallery_subscription(db, gallery.id, auth["user_id"])
 
+    # A paused subscription starts no work (ADR 0030): neither its check nor a
+    # repair that inherits it. Answer like POST /subscriptions/{id}/check does.
+    if sub is not None and sub.paused_at is not None:
+        raise HTTPException(status_code=409, detail="Subscription is paused")
+
     if req.action == "update" and sub is not None:
         try:
             await core.queue.enqueue("check_single_subscription", _timeout=600, sub_id=sub.id)
