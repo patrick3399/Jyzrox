@@ -16,6 +16,8 @@ export interface GalleryAction {
   onSelect?: () => void
   danger?: boolean
   disabled?: boolean
+  /** Second line under the label, e.g. the subscription's status. */
+  description?: string
 }
 
 interface GalleryActionsSheetProps {
@@ -42,7 +44,14 @@ export function GalleryActionsSheet({ open, onClose, groups }: GalleryActionsShe
     const content = (
       <>
         <Icon size={18} className="shrink-0" />
-        <span className="flex-1 min-w-0 truncate">{action.label}</span>
+        <span className="flex-1 min-w-0">
+          <span className="block truncate">{action.label}</span>
+          {action.description && (
+            <span className="block truncate text-xs text-vault-text-secondary">
+              {action.description}
+            </span>
+          )}
+        </span>
       </>
     )
     if (action.href) {
