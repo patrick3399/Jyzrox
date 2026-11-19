@@ -1,11 +1,15 @@
 import asyncio
 import json
+import logging
 import time
+import uuid
 from contextlib import asynccontextmanager, suppress
 
 import redis.asyncio as aioredis
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 _redis: aioredis.Redis | None = None
 
@@ -84,14 +88,42 @@ async def get_image_concurrency(source: str, default: int = 1) -> int:
 
 class EhSemaphore:
     """
-    Redis-based global semaphore for E-Hentai concurrent image request limiting.
+    Redis-based global semaphore for E-Hentai browse requests (image proxy and
+    on-demand pToken lookups), shared by every API process.
 
-    Uses a Redis counter with INCR/DECR + polling.
-    Ensures at most EH_MAX_CONCURRENCY outgoing requests to E-H at any time,
-    across all API instances.
+    Each holder owns a lease: a member of a sorted set scored by its expiry.
+    Acquire atomically evicts expired leases and adds one while fewer than the
+    limit remain; release removes the holder's own lease. A holder that never
+    releases (its process killed mid-request by a deploy, or its release lost to
+    a Redis error or a cancellation) frees its slot when the lease lapses.
+
+    This replaced an INCR/DECR counter with no owner or expiry, under which every
+    missed DECR leaked a slot for good: production sat at 6 of 8 slots taken
+    with no EH traffic at all, so readers queued behind two usable slots.
     """
 
-    _COUNTER_KEY = "eh:semaphore:count"
+    _LEASES_KEY = "eh:semaphore:leases"
+    # A holder makes at most two EH requests (image page, then image), each
+    # bounded by a 30 s request timeout. A lease only outlives its holder when
+    # the release was lost, so this bounds how long a lost slot stays taken.
+    LEASE_SECONDS = 120
+
+    # Lua: atomic evict-expired + check-capacity + add. The key expires with the
+    # last lease so an idle semaphore leaves nothing behind.
+    _ACQUIRE_LUA = """
+    local key = KEYS[1]
+    local max = tonumber(ARGV[1])
+    local token = ARGV[2]
+    local now = tonumber(ARGV[3])
+    local expires = tonumber(ARGV[4])
+    redis.call('ZREMRANGEBYSCORE', key, '-inf', now)
+    if redis.call('ZCARD', key) < max then
+        redis.call('ZADD', key, expires, token)
+        redis.call('EXPIRE', key, tonumber(ARGV[5]))
+        return 1
+    end
+    return 0
+    """
 
     def __init__(self) -> None:
         self.acquire_timeout = settings.eh_acquire_timeout
@@ -115,20 +147,33 @@ class EhSemaphore:
         else:
             max_count = settings.eh_max_concurrency
 
+        token = uuid.uuid4().hex
         while True:
-            count = await r.incr(self._COUNTER_KEY)
-            if count <= max_count:
-                try:
-                    yield
-                finally:
-                    await r.decr(self._COUNTER_KEY)
-                return
-
-            # Slot not available — give it back and wait
-            await r.decr(self._COUNTER_KEY)
+            now = time.time()
+            acquired = await r.eval(
+                self._ACQUIRE_LUA,
+                1,
+                self._LEASES_KEY,
+                str(max_count),
+                token,
+                str(now),
+                str(now + self.LEASE_SECONDS),
+                str(self.LEASE_SECONDS),
+            )
+            if acquired:
+                break
             if loop.time() >= deadline:
                 raise TimeoutError(f"EH semaphore: could not acquire slot within {self.acquire_timeout}s")
             await asyncio.sleep(0.3)
+
+        try:
+            yield
+        finally:
+            try:
+                await r.zrem(self._LEASES_KEY, token)
+            except aioredis.RedisError as exc:
+                # The lease lapses on its own; the request itself already finished.
+                logger.warning("EH semaphore release failed, slot frees in %ss: %s", self.LEASE_SECONDS, exc)
 
 
 eh_semaphore = EhSemaphore()

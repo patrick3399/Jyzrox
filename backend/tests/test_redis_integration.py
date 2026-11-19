@@ -22,11 +22,14 @@ Implementation note on init_redis / close_redis:
   patches so subsequent tests are unaffected.
 """
 
+import contextlib
 import json
+import time
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from redis import exceptions as redis_exceptions
 
 import core.redis_client as mod
 
@@ -340,152 +343,190 @@ def test_get_pubsub_returns_pubsub_from_redis_instance():
 # ---------------------------------------------------------------------------
 
 
+class _FakeEhRedis:
+    """In-memory stand-in for the Redis calls EhSemaphore makes.
+
+    Speaks both the lease protocol (``eval`` of the acquire script, ``zrem``) and
+    the INCR/DECR counter it replaced, so the leak regressions below fail against
+    the counter. The acquire script is emulated in Python here; its Lua is run
+    against a real Redis when the change is deployed.
+    """
+
+    def __init__(self, config: dict[str, bytes] | None = None) -> None:
+        self.config = config or {}
+        self.counter = 0
+        self.leases: dict[str, float] = {}
+        self.fail_release = False
+        self.get_calls: list[str] = []
+
+    async def get(self, key):
+        self.get_calls.append(key)
+        return self.config.get(key)
+
+    async def incr(self, key):
+        self.counter += 1
+        return self.counter
+
+    async def decr(self, key):
+        if self.fail_release:
+            raise redis_exceptions.ConnectionError("connection lost")
+        self.counter -= 1
+        return self.counter
+
+    async def eval(self, script, numkeys, key, max_count, token, now, expires, ttl):
+        now_f = float(now)
+        # ZREMRANGEBYSCORE key -inf now
+        self.leases = {t: exp for t, exp in self.leases.items() if exp > now_f}
+        if len(self.leases) < int(max_count):
+            self.leases[token] = float(expires)
+            return 1
+        return 0
+
+    async def zrem(self, key, token):
+        if self.fail_release:
+            raise redis_exceptions.ConnectionError("connection lost")
+        return 1 if self.leases.pop(token, None) is not None else 0
+
+
+@contextmanager
+def _eh_semaphore(fake: _FakeEhRedis, *, max_concurrency: int = 1, acquire_timeout: int = 0):
+    from core.redis_client import EhSemaphore
+
+    with patch("core.redis_client.get_redis", return_value=fake):
+        with patch("core.redis_client.settings") as mock_settings:
+            mock_settings.eh_max_concurrency = max_concurrency
+            mock_settings.eh_acquire_timeout = acquire_timeout
+            yield EhSemaphore()
+
+
+def _lease_seconds() -> float:
+    from core.redis_client import EhSemaphore
+
+    return getattr(EhSemaphore, "LEASE_SECONDS", 120)
+
+
 class TestEhSemaphore:
-    async def test_acquire_success_yields_and_decrements_on_exit(self):
-        """acquire() yields when count <= max_count, then decrements the counter."""
-        from core.redis_client import EhSemaphore
+    async def test_eh_semaphore_slot_of_holder_killed_mid_request_frees_after_lease(self):
+        """A holder whose process dies mid-request (a deploy restarting the API)
+        never runs its release. Its slot must come back once the lease lapses.
 
-        sem = EhSemaphore()
-        mock_redis = AsyncMock()
-        mock_redis.get = AsyncMock(return_value=None)  # no custom concurrency
-        mock_redis.incr = AsyncMock(return_value=1)
-        mock_redis.decr = AsyncMock(return_value=0)
+        Regression: the INCR/DECR counter had no owner or expiry, so every holder
+        killed mid-request leaked its slot for good — production sat at 6 of 8
+        slots taken with no EH traffic at all.
+        """
+        fake = _FakeEhRedis()
+        with _eh_semaphore(fake) as sem:
+            killed = sem.acquire()
+            await killed.__aenter__()  # never exited: the process died here
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
-            with patch("core.redis_client.settings") as mock_settings:
-                mock_settings.eh_max_concurrency = 2
-                mock_settings.eh_acquire_timeout = 5
+            later = time.time() + _lease_seconds() + 1
+            with patch("core.redis_client.time.time", return_value=later):
                 async with sem.acquire():
-                    pass  # slot acquired successfully
+                    pass  # must not raise TimeoutError
 
-        mock_redis.decr.assert_called_once_with(EhSemaphore._COUNTER_KEY)
-
-    async def test_release_called_on_context_exit(self):
-        """decr is called in the finally block even when no exception occurs."""
-        from core.redis_client import EhSemaphore
-
-        sem = EhSemaphore()
-        mock_redis = AsyncMock()
-        mock_redis.get = AsyncMock(return_value=None)
-        mock_redis.incr = AsyncMock(return_value=1)
-        mock_redis.decr = AsyncMock(return_value=0)
-
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
-            with patch("core.redis_client.settings") as mock_settings:
-                mock_settings.eh_max_concurrency = 2
-                mock_settings.eh_acquire_timeout = 5
+    async def test_eh_semaphore_slot_frees_after_lease_when_release_hits_redis_error(self):
+        """A release lost to a Redis error must not hold the slot forever, and
+        must not surface as the request's own error."""
+        fake = _FakeEhRedis()
+        with _eh_semaphore(fake) as sem:
+            fake.fail_release = True
+            # The counter implementation let the release error escape here.
+            with contextlib.suppress(redis_exceptions.ConnectionError):
                 async with sem.acquire():
-                    assert mock_redis.decr.call_count == 0  # not yet released
+                    pass
+            fake.fail_release = False
 
-        assert mock_redis.decr.call_count == 1  # released on exit
+            later = time.time() + _lease_seconds() + 1
+            with patch("core.redis_client.time.time", return_value=later):
+                async with sem.acquire():
+                    pass  # must not raise TimeoutError
 
-    async def test_acquire_timeout_raises_timeout_error(self):
-        """acquire() raises TimeoutError when no slot is available within timeout."""
-        from core.redis_client import EhSemaphore
+    async def test_eh_semaphore_release_error_is_not_raised_to_the_request(self):
+        fake = _FakeEhRedis()
+        with _eh_semaphore(fake) as sem:
+            fake.fail_release = True
+            async with sem.acquire():
+                pass  # the lease expires on its own; the request already succeeded
 
-        sem = EhSemaphore()
-        sem.acquire_timeout = 0  # expire immediately
+    async def test_eh_semaphore_live_lease_still_blocks_when_full(self):
+        """Expiry only frees abandoned slots: within the lease the limit holds."""
+        fake = _FakeEhRedis()
+        with _eh_semaphore(fake) as sem:
+            holder = sem.acquire()
+            await holder.__aenter__()
 
-        mock_redis = AsyncMock()
-        mock_redis.get = AsyncMock(return_value=None)
-        mock_redis.incr = AsyncMock(return_value=100)  # always > max
-        mock_redis.decr = AsyncMock(return_value=99)
+            with pytest.raises(TimeoutError, match="EH semaphore"):
+                async with sem.acquire():
+                    pass
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
-            with patch("core.redis_client.settings") as mock_settings:
-                mock_settings.eh_max_concurrency = 2
-                mock_settings.eh_acquire_timeout = 0
-                with pytest.raises(TimeoutError, match="EH semaphore"):
-                    async with sem.acquire():
-                        pass
+            await holder.__aexit__(None, None, None)
+            async with sem.acquire():
+                pass  # released normally: the slot is free again
+
+    async def test_eh_semaphore_release_frees_only_its_own_slot(self):
+        fake = _FakeEhRedis()
+        with _eh_semaphore(fake, max_concurrency=2) as sem:
+            first = sem.acquire()
+            second = sem.acquire()
+            await first.__aenter__()
+            await second.__aenter__()
+
+            await first.__aexit__(None, None, None)
+
+            assert len(fake.leases) == 1
+            await second.__aexit__(None, None, None)
+            assert fake.leases == {}
+
+    async def test_eh_semaphore_timeout_raises_timeout_error_when_full(self):
+        fake = _FakeEhRedis()
+        with _eh_semaphore(fake, max_concurrency=0) as sem:
+            with pytest.raises(TimeoutError, match="EH semaphore"):
+                async with sem.acquire():
+                    pass
 
     async def test_concurrency_limit_read_from_browse_concurrency_redis_key(self):
-        """acquire() reads its concurrency limit from
-        rate_limit:config:ehentai:browse_concurrency (the reader/interactive key),
-        not rate_limit:config:ehentai:concurrency (DownloadSemaphore's key — see
-        TestDownloadSemaphoreAcquire below and test_acquire_reads_browse_concurrency_
-        key_and_ignores_download_concurrency_key for the coupling this guards
-        against)."""
-        from core.redis_client import EhSemaphore
+        """acquire() reads its limit from rate_limit:config:ehentai:browse_concurrency
+        (the reader/interactive key), overriding settings.eh_max_concurrency."""
+        fake = _FakeEhRedis({"rate_limit:config:ehentai:browse_concurrency": b"3"})
+        with _eh_semaphore(fake, max_concurrency=1) as sem:
+            holders = [sem.acquire() for _ in range(3)]
+            for holder in holders:
+                await holder.__aenter__()  # 3 slots: the Redis key, not settings' 1
 
-        sem = EhSemaphore()
-        mock_redis = AsyncMock()
-
-        def _get(key):
-            if key == "rate_limit:config:ehentai:browse_concurrency":
-                return b"5"
-            return None
-
-        mock_redis.get = AsyncMock(side_effect=_get)
-        mock_redis.incr = AsyncMock(return_value=4)  # ≤ 5 → should acquire
-        mock_redis.decr = AsyncMock(return_value=3)
-
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
-            with patch("core.redis_client.settings") as mock_settings:
-                mock_settings.eh_max_concurrency = 2
-                mock_settings.eh_acquire_timeout = 5
+            with pytest.raises(TimeoutError):
                 async with sem.acquire():
-                    pass  # acquired with custom limit of 5
-
-        mock_redis.decr.assert_called_once()
+                    pass
 
     async def test_acquire_reads_browse_concurrency_key_and_ignores_download_concurrency_key(self):
         """EhSemaphore must key off ehentai:browse_concurrency and must NOT also read
         (or be limited by) ehentai:concurrency — DownloadSemaphore's key.
 
         Sharing that key previously coupled the interactive reader's throughput to
-        background download job concurrency, which is the wrong bottleneck: a slot
-        count that satisfies the (higher) browse_concurrency limit but would exceed
-        the (lower) download concurrency value must still acquire successfully, and
-        the download key must never even be read.
+        background download job concurrency, which is the wrong bottleneck.
         """
-        from core.redis_client import EhSemaphore
+        fake = _FakeEhRedis(
+            {
+                "rate_limit:config:ehentai:browse_concurrency": b"5",
+                # DownloadSemaphore's key. Were it read (or min'd in), the third
+                # holder below would time out instead of acquiring.
+                "rate_limit:config:ehentai:concurrency": b"1",
+            }
+        )
+        with _eh_semaphore(fake, max_concurrency=2) as sem:
+            for _ in range(3):
+                await sem.acquire().__aenter__()
 
-        sem = EhSemaphore()
-        mock_redis = AsyncMock()
-
-        def _get(key):
-            if key == "rate_limit:config:ehentai:browse_concurrency":
-                return b"5"
-            if key == "rate_limit:config:ehentai:concurrency":
-                # DownloadSemaphore's key. If EhSemaphore ever reads this by mistake
-                # (or takes the min of both), a count of 3 would exceed this limit
-                # of 1 and the acquire below would time out instead of succeeding.
-                return b"1"
-            return None
-
-        mock_redis.get = AsyncMock(side_effect=_get)
-        mock_redis.incr = AsyncMock(return_value=3)  # > download key (1), <= browse key (5)
-        mock_redis.decr = AsyncMock(return_value=2)
-
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
-            with patch("core.redis_client.settings") as mock_settings:
-                mock_settings.eh_max_concurrency = 2
-                mock_settings.eh_acquire_timeout = 5
-                async with sem.acquire():
-                    pass  # must acquire: count=3 is within browse_concurrency=5
-
-        mock_redis.get.assert_awaited_once_with("rate_limit:config:ehentai:browse_concurrency")
-        mock_redis.decr.assert_called_once()
+        assert "rate_limit:config:ehentai:concurrency" not in fake.get_calls
 
     async def test_default_concurrency_fallback_when_no_redis_key(self):
         """acquire() uses settings.eh_max_concurrency when no Redis key is set."""
-        from core.redis_client import EhSemaphore
-
-        sem = EhSemaphore()
-        mock_redis = AsyncMock()
-        mock_redis.get = AsyncMock(return_value=None)  # no Redis key
-        mock_redis.incr = AsyncMock(return_value=2)  # == eh_max_concurrency=2 → should acquire
-        mock_redis.decr = AsyncMock(return_value=1)
-
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
-            with patch("core.redis_client.settings") as mock_settings:
-                mock_settings.eh_max_concurrency = 2
-                mock_settings.eh_acquire_timeout = 5
+        fake = _FakeEhRedis()
+        with _eh_semaphore(fake, max_concurrency=2) as sem:
+            await sem.acquire().__aenter__()
+            await sem.acquire().__aenter__()
+            with pytest.raises(TimeoutError):
                 async with sem.acquire():
                     pass
-
-        mock_redis.decr.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
