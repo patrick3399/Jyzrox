@@ -1312,6 +1312,7 @@ class TestCreateSubscriptionSameAccountDifferentSpelling:
     async def _post(self, client, url: str, **extra):
         with (
             patch("routers.subscriptions.account_gallery_key", side_effect=self._key_for),
+            patch("services.download_mode.account_gallery_key", side_effect=self._key_for),
             patch("routers.subscriptions.detect_source", side_effect=self._detect),
         ):
             return await client.post("/api/subscriptions/", json={"url": url, **extra})

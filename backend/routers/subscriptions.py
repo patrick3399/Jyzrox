@@ -16,6 +16,7 @@ from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
 from db.models import DEFAULT_SUBSCRIPTION_CRON, DownloadJob, Gallery, Subscription
+from services.download_mode import find_account_subscription
 from services.download_policy import normalize_download_options
 from services.download_stop import StopNotAllowed, request_stop
 from services.subscription_pause import check_lock_key, pause_subscription, resume_subscription
@@ -394,36 +395,6 @@ async def _find_account_gallery(session, url: str, auth: dict) -> Gallery | None
     ).scalar_one_or_none()
 
 
-async def _find_account_subscription(session, user_id: int, source: str | None, key: tuple[str, str]):
-    """This user's subscription to the same account as ``key``, however its URL is spelled.
-
-    Rows created since account identity was recorded carry ``source_id``; older
-    rows have none, so their URL is resolved here instead. The site is matched on
-    ``Subscription.source`` too, because an account name is only unique per site.
-    """
-    if source is None:
-        return None
-    _, source_id = key
-    rows = (
-        await session.execute(
-            select(Subscription.id, Subscription.name, Subscription.url, Subscription.source_id)
-            .where(
-                Subscription.user_id == user_id,
-                Subscription.source == source,
-                or_(Subscription.source_id == source_id, Subscription.source_id.is_(None)),
-            )
-            .order_by(Subscription.id)
-        )
-    ).all()
-    for row in rows:
-        if row.source_id == source_id:
-            return row
-        legacy_key = account_gallery_key(row.url)
-        if legacy_key is not None and legacy_key[1] == source_id:
-            return row
-    return None
-
-
 @router.post("/")
 async def create_subscription(
     req: CreateSubscriptionRequest,
@@ -474,7 +445,7 @@ async def create_subscription(
         # rather than creating a second row.
         account_key = account_gallery_key(normalized_url)
         if existing is None and account_key is not None:
-            same_account = await _find_account_subscription(session, user_id, source, account_key)
+            same_account = await find_account_subscription(session, user_id, source, account_key[1])
             if same_account is not None:
                 if req.reject_duplicate:
                     raise HTTPException(

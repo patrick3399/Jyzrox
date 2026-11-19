@@ -16,11 +16,12 @@ Shared by routers and worker code; keep this module free of router imports.
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.utils import normalize_download_url
-from db.models import DownloadJob, Subscription
+from db.models import DownloadJob, Gallery, Subscription
+from services.url_identity import account_gallery_key
 
 DOWNLOAD = "download"
 SUBSCRIPTION_INITIAL = "subscription_initial"
@@ -95,6 +96,48 @@ def repair_archive_table(real_table: str, job_id: str) -> str:
     return f"{prefix}{suffix}"
 
 
+def is_account_gallery(gallery: Gallery) -> bool:
+    """True when the gallery *is* an account: its source URL names that same account."""
+    if not gallery.source_url:
+        return False
+    return account_gallery_key(gallery.source_url) == (gallery.source, gallery.source_id)
+
+
+async def find_account_subscription(
+    session: AsyncSession, user_id: int, source: str | None, source_id: str
+) -> Subscription | None:
+    """This user's subscription to account ``(source, source_id)``, however its URL is spelled.
+
+    Rows created since account identity was recorded carry ``source_id``; older
+    rows have none, so their URL is resolved instead. The site is matched on
+    ``Subscription.source`` too, because an account name is only unique per site.
+    """
+    if source is None:
+        return None
+    subs = (
+        (
+            await session.execute(
+                select(Subscription)
+                .where(
+                    Subscription.user_id == user_id,
+                    Subscription.source == source,
+                    or_(Subscription.source_id == source_id, Subscription.source_id.is_(None)),
+                )
+                .order_by(Subscription.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for sub in subs:
+        if sub.source_id == source_id:
+            return sub
+        legacy_key = account_gallery_key(sub.url)
+        if legacy_key is not None and legacy_key[1] == source_id:
+            return sub
+    return None
+
+
 async def find_gallery_subscription(session: AsyncSession, gallery_id: int, user_id: int) -> Subscription | None:
     """The user's subscription that owns ``gallery_id`` as a whole, if any.
 
@@ -103,6 +146,8 @@ async def find_gallery_subscription(session: AsyncSession, gallery_id: int, user
     collections). A per-work gallery (e.g. one Fanbox post) also carries a
     ``subscription_id``, but its job URL is the post, not the creator: repairing
     it with the creator URL or running a creator check would not touch that post.
+    Without such a job, an account gallery falls back to the user's subscription
+    to the same (source, source_id).
     """
     stmt = (
         select(DownloadJob.canonical_url, Subscription)
@@ -120,7 +165,13 @@ async def find_gallery_subscription(session: AsyncSession, gallery_id: int, user
                 return sub
         except ValueError:
             continue
-    return None
+    # No owning job (a plain download, or a subscription deleted and re-added):
+    # an account gallery still belongs to the user's subscription to that
+    # account. Per-work galleries are not account galleries, so they stay None.
+    gallery = await session.get(Gallery, gallery_id)
+    if gallery is None or not is_account_gallery(gallery):
+        return None
+    return await find_account_subscription(session, user_id, gallery.source, gallery.source_id)
 
 
 async def find_subscription_for_url(session: AsyncSession, canonical_url: str, user_id: int) -> Subscription | None:

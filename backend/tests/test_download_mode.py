@@ -1,6 +1,7 @@
 """services/download_mode.py: the mode resolver and the policy that follows from it."""
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 
@@ -132,3 +133,54 @@ async def test_find_gallery_subscription_ignores_per_work_job_galleries(db_sessi
     )
 
     assert await dm.find_gallery_subscription(db_session, gallery.id, 1) is None
+
+
+WEIBO_KEY = ("weibo", "3802725779")
+
+
+def _weibo_key(url):
+    return WEIBO_KEY if "3802725779" in url else None
+
+
+async def test_find_gallery_subscription_falls_back_to_account_identity_without_a_linking_job(db_session):
+    """A plain download of an account, subscribed later under another spelling, still resolves to that subscription."""
+    gallery = await add_gallery(
+        db_session, source="weibo", source_id="3802725779", source_url="https://weibo.com/u/3802725779"
+    )
+    sub = await add_subscription(
+        db_session, url="https://weibo.cn/u/3802725779", source="weibo", source_id="3802725779"
+    )
+
+    with patch("services.download_mode.account_gallery_key", side_effect=_weibo_key):
+        assert (await dm.find_gallery_subscription(db_session, gallery.id, 1)).id == sub.id
+        assert await dm.find_gallery_subscription(db_session, gallery.id, 2) is None
+
+
+async def test_find_gallery_subscription_fallback_matches_legacy_row_without_source_id(db_session):
+    gallery = await add_gallery(
+        db_session, source="weibo", source_id="3802725779", source_url="https://weibo.com/u/3802725779"
+    )
+    legacy = await add_subscription(db_session, url="https://weibo.cn/u/3802725779", source="weibo")
+
+    with patch("services.download_mode.account_gallery_key", side_effect=_weibo_key):
+        assert (await dm.find_gallery_subscription(db_session, gallery.id, 1)).id == legacy.id
+
+
+async def test_find_gallery_subscription_fallback_skips_non_account_gallery(db_session):
+    """A gallery whose source URL is not its own account (a work or search URL) is never matched by identity."""
+    gallery = await add_gallery(
+        db_session, source="weibo", source_id="3802725779", source_url="https://weibo.com/detail/999"
+    )
+    await add_subscription(db_session, url="https://weibo.cn/u/3802725779", source="weibo", source_id="3802725779")
+
+    with patch("services.download_mode.account_gallery_key", return_value=None):
+        assert await dm.find_gallery_subscription(db_session, gallery.id, 1) is None
+
+
+async def test_find_account_subscription_requires_the_same_site(db_session):
+    """An account name is only unique per site."""
+    await add_subscription(db_session, url="https://instagram.com/ruby", source="instagram", source_id="ruby")
+
+    assert await dm.find_account_subscription(db_session, 1, "facebook", "ruby") is None
+    assert await dm.find_account_subscription(db_session, 1, None, "ruby") is None
+    assert (await dm.find_account_subscription(db_session, 1, "instagram", "ruby")).source_id == "ruby"

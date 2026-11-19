@@ -180,3 +180,27 @@ async def test_gallery_repair_on_paused_subscription_returns_409_without_a_job(c
     assert resp.json()["detail"] == "Subscription is paused"
     enq.assert_not_awaited()
     assert len(await _jobs(db_session)) == 1
+
+
+async def test_gallery_update_on_plain_download_account_gallery_checks_its_subscription(client, db_session, enq):
+    """No subscription job ever touched this gallery, but the user subscribes to the same account."""
+    gallery = await add_gallery(
+        db_session,
+        source="weibo",
+        source_id="3802725779",
+        source_url="https://weibo.com/u/3802725779",
+        download_status="complete",
+    )
+    sub = await add_subscription(
+        db_session, url="https://weibo.cn/u/3802725779", source="weibo", source_id="3802725779"
+    )
+
+    with patch(
+        "services.download_mode.account_gallery_key",
+        side_effect=lambda url: ("weibo", "3802725779") if "3802725779" in url else None,
+    ):
+        resp = await client.post(f"/api/download/galleries/{gallery.id}/action", json={"action": "update"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"kind": "subscription_check", "subscription_id": sub.id, "status": "queued"}
+    enq.assert_awaited_once_with("check_single_subscription", _timeout=600, sub_id=sub.id)
