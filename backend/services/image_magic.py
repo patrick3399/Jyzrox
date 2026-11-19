@@ -11,6 +11,24 @@ IMAGE_MAGIC = {
     # AVIF/HEIC: ftyp box at bytes 4-7, handled by the special-case check below
 }
 
+# JPEG XL has two on-disk forms: a bare codestream and an ISO-BMFF container.
+JXL_CODESTREAM_SIGNATURE = b"\xff\x0a"
+JXL_CONTAINER_SIGNATURE = b"\x00\x00\x00\x0cJXL \r\n\x87\n"
+
+
+def _is_jxl_header(header: bytes) -> bool:
+    return header.startswith(JXL_CODESTREAM_SIGNATURE) or header.startswith(JXL_CONTAINER_SIGNATURE)
+
+
+def is_jxl_file(path: Path) -> bool:
+    """Return True if the file content is JPEG XL, whatever its extension says."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(12)
+    except OSError:
+        return False
+    return _is_jxl_header(header)
+
 
 def validate_image_magic(file_path: Path) -> bool:
     """Validate that a file's content matches expected image magic bytes.
@@ -40,6 +58,10 @@ def validate_image_magic(file_path: Path) -> bool:
     # Special case: AVIF/HEIC ftyp box (offset 4 = 'ftyp')
     if len(header) >= 8 and header[4:8] == b"ftyp":
         return ext in {".avif", ".heic"}
+
+    # JPEG XL (checked after the others: the 2-byte codestream marker is weak)
+    if _is_jxl_header(header):
+        return ext == ".jxl"
 
     # Unknown magic — reject
     return False

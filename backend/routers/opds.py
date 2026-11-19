@@ -527,6 +527,7 @@ async def opds_gallery(
                 ".gif": "image/gif",
                 ".webp": "image/webp",
                 ".avif": "image/avif",
+                ".jxl": "image/jxl",
             }
             content_type = ext_map.get(blob.extension.lower(), "image/jpeg")
             img_link.set("type", content_type)

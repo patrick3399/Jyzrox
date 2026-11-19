@@ -14,7 +14,10 @@ from core.database import async_session
 from db.models import Blob, Gallery, Image
 from services.cas import resolve_blob_path
 from services.credential import get_credential
+from services.image_codecs import register_image_codecs
 from services.saucenao import InvalidApiKeyError, RateLimitError, SauceNaoError, search_by_image
+
+register_image_codecs()
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["saucenao"])
@@ -36,7 +39,8 @@ def _image_bytes(blob: Blob, external_path: str | None = None) -> bytes:
     path = resolve_blob_path(blob, external_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Image file not found on disk")
-    if path.stat().st_size <= _MAX_UPLOAD_SIZE:
+    # SauceNAO cannot read JPEG XL, so always re-encode it regardless of size.
+    if path.suffix.lower() != ".jxl" and path.stat().st_size <= _MAX_UPLOAD_SIZE:
         return path.read_bytes()
     with PILImage.open(path) as img:
         if img.mode in ("RGBA", "P"):

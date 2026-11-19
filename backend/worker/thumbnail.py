@@ -27,6 +27,7 @@ from services.cas import (
     thumb_dir,
     thumbnails_complete_at,
 )
+from services.image_codecs import register_image_codecs
 from worker.constants import logger
 from worker.helpers import env_int
 from worker.thumbhash_utils import encode_pil_thumbhash
@@ -41,13 +42,7 @@ try:
 except ImportError:
     pass
 
-try:
-    # .heic is an accepted import extension but Pillow has no HEIF decoder of its own.
-    from pillow_heif import register_heif_opener
-
-    register_heif_opener()
-except ImportError:
-    pass
+register_image_codecs()
 
 # Decode priorities; the lower value is served first.
 _PRIORITY_COVER = 0

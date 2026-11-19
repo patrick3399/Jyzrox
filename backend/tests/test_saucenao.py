@@ -404,3 +404,21 @@ async def test_saucenao_batch_httpx_error_does_not_echo_api_key_to_client(client
     assert response.status_code == 200
     assert _SECRET_KEY not in response.text
     assert response.json()["results"][0]["error"] == "saucenao_error"
+
+
+def test_saucenao_converts_jxl_to_jpeg_before_upload(tmp_path, monkeypatch):
+    """Weibo JXL incident 2026-11-19: SauceNAO cannot read JXL, so a small .jxl is re-encoded to JPEG."""
+    import pillow_jxl  # noqa: F401
+    from PIL import Image as PILImage
+
+    from routers.saucenao import _image_bytes
+
+    src = tmp_path / "pic.jxl"
+    PILImage.new("RGB", (64, 48), (10, 120, 200)).save(src, format="JXL")
+    assert src.stat().st_size < 1024 * 1024
+
+    monkeypatch.setattr("routers.saucenao.resolve_blob_path", lambda blob, external_path=None: src)
+
+    data = _image_bytes(_make_blob(extension=".jxl"))
+
+    assert data.startswith(b"\xff\xd8\xff")

@@ -388,10 +388,10 @@ def _remove_corrupt_images(target_dir: Path) -> list[tuple[str, int]]:
     for f in sorted(target_dir.rglob("*")):
         if f.suffix.lower() in _IMAGE_EXTS and f.is_file():
             if not _validate_image_magic(f):
-                try:
-                    page_num = int(f.stem.lstrip("0") or "0")
-                except ValueError:
-                    page_num = 0
+                # Page number = last digit run of the stem; a Weibo name like
+                # `<post_id>_01` must not parse as the concatenation of both runs.
+                digit_runs = re.findall(r"\d+", f.stem)
+                page_num = int(digit_runs[-1].lstrip("0") or "0") if digit_runs else 0
                 f.unlink(missing_ok=True)
                 removed.append((f.name, page_num))
     return removed

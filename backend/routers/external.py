@@ -398,6 +398,7 @@ async def get_image_file(
         ".gif": "image/gif",
         ".webp": "image/webp",
         ".avif": "image/avif",
+        ".jxl": "image/jxl",
     }
     extension = row.blob.extension if row.blob else file_path.suffix
     content_type = ext_map.get(extension.lower(), "application/octet-stream")

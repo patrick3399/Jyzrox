@@ -1,6 +1,7 @@
 """Progressive import: import files and generate thumbnails during download."""
 
 import asyncio
+import os
 import re
 import time
 import uuid
@@ -29,6 +30,7 @@ from services.cas import (
     thumb_dir,
 )
 from services.download_mode import gallery_status_on_stop
+from services.image_magic import is_jxl_file
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from services.tag_helpers import upsert_metadata_gallery_tags
 from services.thumbnail_lifecycle import cleanup_unreferenced_thumbnails
@@ -178,6 +180,13 @@ async def _is_archive_table(session, table: str) -> bool:
             )
         ).scalar()
     )
+
+
+def _rename_to_jxl(path: Path) -> Path:
+    """Rename a staged file to `.jxl` (atomic, same directory)."""
+    new_path = path.with_suffix(".jxl")
+    os.replace(path, new_path)
+    return new_path
 
 
 class ProgressiveImporter:
@@ -785,6 +794,15 @@ class ProgressiveImporter:
         """Import one file: sha256 -> store_blob -> image record -> symlink."""
         if not file_path.exists():
             return
+
+        suffix = file_path.suffix.lower()
+        if suffix not in _VIDEO_EXTS and suffix != ".jxl" and await asyncio.to_thread(is_jxl_file, file_path):
+            # A source served JPEG XL under another extension (Weibo `large`
+            # originals arrive as .jpg). gallery-dl's extension check has no JXL
+            # signature, so fix the name in our own staging dir. Record the new
+            # path so the staged-leftover sweep does not import it a second time.
+            file_path = await asyncio.to_thread(_rename_to_jxl, file_path)
+            self._processed.add(str(file_path))
 
         # Validate image magic bytes (skip check for videos)
         if file_path.suffix.lower() not in _VIDEO_EXTS:

@@ -6,7 +6,7 @@ accepted by one pipeline stage and silently reclassified or dropped by another.
 
 from pathlib import Path
 
-IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"})
+IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".jxl"})
 VIDEO_EXTENSIONS = frozenset({".mp4", ".webm", ".mov"})
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 

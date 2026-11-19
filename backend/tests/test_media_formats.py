@@ -45,3 +45,10 @@ def test_unimplemented_container_formats_are_not_advertised():
 
 def test_gif_keeps_animated_image_media_type():
     assert media_type_for_extension(".gif") == "gif"
+
+
+def test_media_formats_accepts_jxl_as_image():
+    """Weibo JXL incident 2026-11-19: `.jxl` must be a known image extension."""
+    assert ".jxl" in IMAGE_EXTENSIONS
+    assert ".jxl" in MEDIA_EXTENSIONS
+    assert media_type_for_extension(".jxl") == "image"
