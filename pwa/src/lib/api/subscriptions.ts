@@ -1,6 +1,12 @@
 import { apiFetch, qs } from './client'
 
-import type { DownloadJob, Subscription, SubscriptionGroup, SubscriptionRun } from '../types'
+import type {
+  DownloadJob,
+  GallerySubscriptionLink,
+  Subscription,
+  SubscriptionGroup,
+  SubscriptionRun,
+} from '../types'
 
 // ── Subscriptions ────────────────────────────────────────────────────
 
@@ -31,6 +37,10 @@ export const subscriptions = {
     ),
 
   get: (id: number) => apiFetch<Subscription>(`/api/subscriptions/${id}`),
+
+  /** The caller's subscription covering this gallery, or whether its account can be subscribed to. */
+  byGallery: (galleryId: number) =>
+    apiFetch<GallerySubscriptionLink>(`/api/subscriptions/by-gallery/${galleryId}`),
 
   update: (
     id: number,

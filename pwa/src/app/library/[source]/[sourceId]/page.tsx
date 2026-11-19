@@ -21,6 +21,8 @@ import { smartBack } from '@/lib/navBack'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
 import { ThumbPlaceholder } from '@/components/library/ThumbPlaceholder'
 import { AddToCollectionMenu } from '@/components/library/AddToCollectionMenu'
+import { useGallerySubscriptionActions } from '@/hooks/useGallerySubscription'
+import { SubscribeAccountDialog } from '@/components/library/SubscribeAccountDialog'
 import { GalleryActionsSheet, type GalleryAction } from '@/components/library/GalleryActionsSheet'
 import { RepairGalleryDialog } from '@/components/download/DownloadActionDialogs'
 import { useProfile } from '@/hooks/useProfile'
@@ -388,10 +390,22 @@ function GalleryDetailPageInner() {
   // nothing may open the reader or leave the page underneath them. Overlays
   // that close on Escape also mark it handled, because the close can commit
   // (and re-bind this listener without the overlay) before the key gets here.
+  const subscriptionActions = useGallerySubscriptionActions({
+    galleryId: gallery?.id,
+    enabled: canEdit,
+    busy:
+      isEnqueueingUpdate ||
+      !!activeJobId ||
+      gallery?.download_status === 'downloading' ||
+      gallery?.download_status === 'importing',
+    onJobStarted: setActiveJobId,
+  })
+
   const overlayOpen =
     selectMode ||
     moreOpen ||
     repairDialogOpen ||
+    subscriptionActions.confirm.open ||
     tagPopoverOpen ||
     collectionMenuOpen ||
     imageMenu !== null ||
@@ -932,6 +946,7 @@ function GalleryDetailPageInner() {
           },
         ]
       : [],
+    subscriptionActions.actions,
     canEdit
       ? [
           { id: 'share', label: t('library.share'), icon: Share2, onSelect: handleShare },
@@ -1368,6 +1383,7 @@ function GalleryDetailPageInner() {
       </div>
 
       <GalleryActionsSheet open={moreOpen} onClose={closeMoreSheet} groups={moreActionGroups} />
+      <SubscribeAccountDialog {...subscriptionActions.confirm} />
 
       {repairDialogOpen && (
         <RepairGalleryDialog

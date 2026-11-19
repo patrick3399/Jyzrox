@@ -1004,6 +1004,14 @@ export interface Subscription {
   gallery_title?: string | null
 }
 
+/** GET /api/subscriptions/by-gallery/{id}: the caller's subscription covering a gallery. */
+export interface GallerySubscriptionLink {
+  subscription: Subscription | null
+  /** True only without a subscription, when the gallery is an account the caller can subscribe to. */
+  can_subscribe: boolean
+  subscribe_url: string | null
+}
+
 // ── File Explorer ────────────────────────────────────────────────────
 
 export interface LibraryDirectory {
