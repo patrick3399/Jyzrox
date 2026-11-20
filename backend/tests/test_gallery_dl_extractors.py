@@ -39,7 +39,7 @@ def fake_gallery_dl(monkeypatch):
 def mock_config_path(tmp_path):
     """Mock settings.gallery_dl_config to a temp file."""
     config_file = tmp_path / "gallery-dl.json"
-    with patch("plugins.builtin.gallery_dl.source.settings") as mock_settings:
+    with patch("plugins.builtin.gallery_dl._config.settings") as mock_settings:
         mock_settings.data_gallery_path = "/data/download_temp"
         mock_settings.gallery_dl_config = str(config_file)
         mock_settings.gdl_archive_dsn = "postgresql://test:test@localhost:5432/test"
@@ -103,7 +103,7 @@ def test_extractor_source_dirs_empty_when_directory_missing(tmp_path, monkeypatc
 @pytest.mark.asyncio
 async def test_config_omits_module_sources_when_nothing_bundled(bundled_dir, mock_config_path):
     """Default install: emitted config must be identical to the pre-feature output."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -114,7 +114,7 @@ async def test_config_omits_module_sources_when_nothing_bundled(bundled_dir, moc
 async def test_config_module_sources_keeps_builtin_extractors(bundled_dir, mock_config_path):
     """A bare [dir] would disable every built-in extractor — the null entry restores them."""
     _write_extractor(bundled_dir, "example_site")
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())

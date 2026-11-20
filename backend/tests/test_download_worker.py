@@ -112,7 +112,7 @@ def _source_patches():
             return_value=Path("/tmp/gallery-dl-test.json"),
         ),
         patch(
-            "plugins.builtin.gallery_dl.source.settings",
+            "plugins.builtin.gallery_dl._config.settings",
             MagicMock(
                 data_gallery_path="/data/download_temp",
                 gallery_dl_config="/tmp/gallery-dl-test.json",

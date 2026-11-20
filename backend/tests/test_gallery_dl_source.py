@@ -23,13 +23,13 @@ from tests.helpers import make_mock_site_config_svc
 class TestProcessTreeTermination:
     async def test_invalid_mock_pid_never_signals_process_group(self):
         """A loose subprocess mock must not coerce its pid to process group 1."""
-        from plugins.builtin.gallery_dl.source import _terminate_process_tree
+        from plugins.builtin.gallery_dl._process_control import _terminate_process_tree
 
         proc = MagicMock()
         proc.wait = AsyncMock(return_value=0)
         with (
-            patch("plugins.builtin.gallery_dl.source.os.getpgid") as getpgid,
-            patch("plugins.builtin.gallery_dl.source.os.killpg") as killpg,
+            patch("plugins.builtin.gallery_dl._process_control.os.getpgid") as getpgid,
+            patch("plugins.builtin.gallery_dl._process_control.os.killpg") as killpg,
         ):
             await _terminate_process_tree(proc, grace=0.01)
 
@@ -39,13 +39,13 @@ class TestProcessTreeTermination:
         proc.wait.assert_awaited_once()
 
     async def test_terminate_signals_process_group_and_reaps_child(self):
-        from plugins.builtin.gallery_dl.source import _terminate_process_tree
+        from plugins.builtin.gallery_dl._process_control import _terminate_process_tree
 
         proc = MagicMock(pid=4321)
         proc.wait = AsyncMock(return_value=0)
         with (
-            patch("plugins.builtin.gallery_dl.source.os.getpgid", return_value=4321),
-            patch("plugins.builtin.gallery_dl.source.os.killpg") as killpg,
+            patch("plugins.builtin.gallery_dl._process_control.os.getpgid", return_value=4321),
+            patch("plugins.builtin.gallery_dl._process_control.os.killpg") as killpg,
         ):
             await _terminate_process_tree(proc, grace=0.01)
 
@@ -53,13 +53,13 @@ class TestProcessTreeTermination:
         proc.wait.assert_awaited_once()
 
     async def test_terminate_escalates_to_sigkill_after_grace_timeout(self):
-        from plugins.builtin.gallery_dl.source import _terminate_process_tree
+        from plugins.builtin.gallery_dl._process_control import _terminate_process_tree
 
         proc = MagicMock(pid=4321)
         proc.wait = AsyncMock(side_effect=[TimeoutError, 0])
         with (
-            patch("plugins.builtin.gallery_dl.source.os.getpgid", return_value=4321),
-            patch("plugins.builtin.gallery_dl.source.os.killpg") as killpg,
+            patch("plugins.builtin.gallery_dl._process_control.os.getpgid", return_value=4321),
+            patch("plugins.builtin.gallery_dl._process_control.os.killpg") as killpg,
         ):
             await _terminate_process_tree(proc, grace=0.01)
 
@@ -500,12 +500,9 @@ class TestGalleryDlDownloadErrors:
         a field called JYZROX_SKIP ("None") instead of the marker, so skipped
         files were never counted and an all-archived re-download ended as 0/0.
         """
-        from plugins.builtin.gallery_dl.source import (
-            _PRINT_SKIP_PREFIX,
-            GalleryDlPlugin,
-            _DownloadState,
-            _read_stdout,
-        )
+        from plugins.builtin.gallery_dl._process_io import _read_stdout
+        from plugins.builtin.gallery_dl._process_state import _PRINT_SKIP_PREFIX, _DownloadState
+        from plugins.builtin.gallery_dl.source import GalleryDlPlugin
 
         proc = _make_fake_process([], returncode=0)
         captured_cmd = []
@@ -639,7 +636,7 @@ class TestConfigGeneration:
         """Initial subscription downloads write the archive per file and set no abort skip before a success cutoff exists."""
         from unittest.mock import MagicMock, patch
 
-        from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+        from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
         config_file = tmp_path / "gallery-dl.json"
         mock_settings = MagicMock()
@@ -647,7 +644,7 @@ class TestConfigGeneration:
         mock_settings.gdl_archive_dsn = "postgresql://test/archive"
         mock_settings.gallery_dl_config = str(config_file)
 
-        with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+        with patch("plugins.builtin.gallery_dl._config.settings", mock_settings):
             path = await _build_gallery_dl_config({}, job_context="subscription")
 
         config = json.loads(path.read_text())
@@ -658,7 +655,7 @@ class TestConfigGeneration:
         """Default (manual) job_context should NOT set skip or archive-mode in extractor config."""
         from unittest.mock import MagicMock, patch
 
-        from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+        from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
         config_file = tmp_path / "gallery-dl.json"
         mock_settings = MagicMock()
@@ -666,7 +663,7 @@ class TestConfigGeneration:
         mock_settings.gdl_archive_dsn = "postgresql://test/archive"
         mock_settings.gallery_dl_config = str(config_file)
 
-        with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+        with patch("plugins.builtin.gallery_dl._config.settings", mock_settings):
             path = await _build_gallery_dl_config({}, job_context="manual")
 
         config = json.loads(path.read_text())
@@ -675,7 +672,7 @@ class TestConfigGeneration:
 
     @staticmethod
     async def _build_with_params(tmp_path, svc, params_by_source, **kwargs):
-        from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+        from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
         config_file = tmp_path / "gallery-dl.json"
         mock_settings = MagicMock()
@@ -684,7 +681,7 @@ class TestConfigGeneration:
         mock_settings.gallery_dl_config = str(config_file)
         svc.get_all_download_params = AsyncMock(return_value=params_by_source)
 
-        with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+        with patch("plugins.builtin.gallery_dl._config.settings", mock_settings):
             path = await _build_gallery_dl_config({}, **kwargs)
         return json.loads(path.read_text())
 
@@ -754,7 +751,8 @@ class TestProcessLifecycle:
 
     async def test_heartbeat_loop_eviction_kills_process(self):
         """_heartbeat_loop returns 'evicted' and delegates safe tree termination."""
-        from plugins.builtin.gallery_dl.source import _DownloadState, _heartbeat_loop
+        from plugins.builtin.gallery_dl._process_control import _heartbeat_loop
+        from plugins.builtin.gallery_dl._process_state import _DownloadState
 
         state = _DownloadState()
         proc = MagicMock()
@@ -765,7 +763,7 @@ class TestProcessLifecycle:
 
         with (
             patch("asyncio.sleep", new_callable=AsyncMock),
-            patch("plugins.builtin.gallery_dl.source._terminate_process_tree", terminate_tree),
+            patch("plugins.builtin.gallery_dl._process_control._terminate_process_tree", terminate_tree),
         ):
             result = await _heartbeat_loop(state, proc, lost_heartbeat, interval=0.01)
 
@@ -777,7 +775,8 @@ class TestProcessLifecycle:
         """_pause_cancel_watcher sends SIGSTOP when paused and SIGCONT when resumed."""
         import signal
 
-        from plugins.builtin.gallery_dl.source import _DownloadState, _pause_cancel_watcher
+        from plugins.builtin.gallery_dl._process_control import _pause_cancel_watcher
+        from plugins.builtin.gallery_dl._process_state import _DownloadState
 
         state = _DownloadState()
         proc = MagicMock()
@@ -798,7 +797,7 @@ class TestProcessLifecycle:
 
         with (
             patch("asyncio.sleep", new_callable=AsyncMock),
-            patch("plugins.builtin.gallery_dl.source._terminate_process_tree", terminate_tree),
+            patch("plugins.builtin.gallery_dl._process_control._terminate_process_tree", terminate_tree),
         ):
             await _pause_cancel_watcher(state, proc, cancel_check, pause_check)
 
@@ -880,7 +879,7 @@ class TestGalleryDlDownloadArchiveTable:
                 return_value=Path("/tmp/test-gdl.json"),
             ) as build_mock,
             patch("plugins.builtin.gallery_dl._identity.resolve_url_identity", return_value=self._identity(category)),
-            patch("plugins.builtin.gallery_dl.source.ensure_archive_table", side_effect=_ensure),
+            patch("plugins.builtin.gallery_dl._archive_jobs.ensure_archive_table", side_effect=_ensure),
             patch("core.database.AsyncSessionLocal", factory),
             patch("pathlib.Path.mkdir"),
         ):
@@ -924,7 +923,7 @@ class TestGalleryDlDownloadArchiveTable:
         async def _ensure_shadow(session, real, shadow):
             shadow_calls.append((real, shadow))
 
-        with patch("plugins.builtin.gallery_dl.source.ensure_repair_archive_table", side_effect=_ensure_shadow):
+        with patch("plugins.builtin.gallery_dl._archive_jobs.ensure_repair_archive_table", side_effect=_ensure_shadow):
             _, calls, _, build_mock, session = await self._download(
                 tmp_path, ensure, options={"force_full_scan": True, "config_id": job_id}
             )

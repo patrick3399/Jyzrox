@@ -10,8 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.builtin.gallery_dl import source
-from plugins.builtin.gallery_dl.source import _DownloadState, _inactivity_watchdog
+from plugins.builtin.gallery_dl import _process_control as source
+from plugins.builtin.gallery_dl._process_control import _inactivity_watchdog
+from plugins.builtin.gallery_dl._process_state import _DownloadState
 
 _TIMEOUT_S = 0.3
 _POLL_S = 0.05

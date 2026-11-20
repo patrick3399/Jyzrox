@@ -99,7 +99,7 @@ def test_adaptive_state_from_dict_handles_bad_input():
 
 
 def test_validate_download_content_returns_empty_for_zero_byte_file(tmp_path):
-    from plugins.builtin.gallery_dl.source import _validate_download_content
+    from plugins.builtin.gallery_dl._process_io import _validate_download_content
 
     f = tmp_path / "empty.jpg"
     f.write_bytes(b"")
@@ -107,7 +107,7 @@ def test_validate_download_content_returns_empty_for_zero_byte_file(tmp_path):
 
 
 def test_validate_download_content_returns_html_for_small_html_file(tmp_path):
-    from plugins.builtin.gallery_dl.source import _validate_download_content
+    from plugins.builtin.gallery_dl._process_io import _validate_download_content
 
     f = tmp_path / "bad.jpg"
     f.write_bytes(b"<!DOCTYPE html><html><head><title>Access Denied</title></head></html>")
@@ -115,7 +115,7 @@ def test_validate_download_content_returns_html_for_small_html_file(tmp_path):
 
 
 def test_validate_download_content_returns_none_for_valid_binary_file(tmp_path):
-    from plugins.builtin.gallery_dl.source import _validate_download_content
+    from plugins.builtin.gallery_dl._process_io import _validate_download_content
 
     f = tmp_path / "image.jpg"
     f.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * (200 * 1024))
@@ -123,7 +123,7 @@ def test_validate_download_content_returns_none_for_valid_binary_file(tmp_path):
 
 
 def test_validate_download_content_returns_none_for_missing_file():
-    from plugins.builtin.gallery_dl.source import _validate_download_content
+    from plugins.builtin.gallery_dl._process_io import _validate_download_content
 
     assert _validate_download_content(Path("/nonexistent/file.jpg")) is None
 

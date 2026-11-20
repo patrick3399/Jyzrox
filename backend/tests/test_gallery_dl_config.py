@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.builtin.gallery_dl.source import _is_fragment
+from plugins.builtin.gallery_dl._config_fragments import _is_fragment
 
 
 @pytest.fixture(autouse=True)
@@ -75,7 +75,7 @@ def test_is_fragment_rejects_none():
 def mock_config_path(tmp_path):
     """Mock settings.gallery_dl_config to a temp file."""
     config_file = tmp_path / "gallery-dl.json"
-    with patch("plugins.builtin.gallery_dl.source.settings") as mock_settings:
+    with patch("plugins.builtin.gallery_dl._config.settings") as mock_settings:
         mock_settings.data_gallery_path = "/data/download_temp"
         mock_settings.gallery_dl_config = str(config_file)
         mock_settings.gdl_archive_dsn = "postgresql://test:test@localhost:5432/test"
@@ -85,7 +85,7 @@ def mock_config_path(tmp_path):
 @pytest.mark.asyncio
 async def test_legacy_cookie_format(mock_config_path):
     """EH cookies in legacy format should be injected as-is."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     credentials = {"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'}
     await _build_gallery_dl_config(credentials)
@@ -100,7 +100,7 @@ async def test_legacy_cookie_format(mock_config_path):
 @pytest.mark.asyncio
 async def test_legacy_refresh_token(mock_config_path):
     """Pixiv refresh token in legacy format."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     credentials = {"pixiv": "my_token"}
     await _build_gallery_dl_config(credentials)
@@ -112,7 +112,7 @@ async def test_legacy_refresh_token(mock_config_path):
 @pytest.mark.asyncio
 async def test_new_fragment_cookies(mock_config_path):
     """New fragment format with cookies."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     credentials = {"twitter": '{"cookies": {"auth_token": "abc", "ct0": "xyz"}}'}
     await _build_gallery_dl_config(credentials)
@@ -124,7 +124,7 @@ async def test_new_fragment_cookies(mock_config_path):
 @pytest.mark.asyncio
 async def test_new_fragment_username_password(mock_config_path):
     """New fragment format with username/password."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     credentials = {"danbooru": '{"username": "user1", "password": "pass1"}'}
     await _build_gallery_dl_config(credentials)
@@ -137,7 +137,7 @@ async def test_new_fragment_username_password(mock_config_path):
 @pytest.mark.asyncio
 async def test_fragment_propagates_to_extra_extractors(mock_config_path):
     """Fragment cookies should propagate to extra_extractors (e.g., exhentai, e-hentai)."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     credentials = {"ehentai": '{"cookies": {"ipb": "1"}}'}
     await _build_gallery_dl_config(credentials)
@@ -150,7 +150,7 @@ async def test_fragment_propagates_to_extra_extractors(mock_config_path):
 @pytest.mark.asyncio
 async def test_empty_value_skipped(mock_config_path):
     """Empty credential values should be skipped."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     credentials = {"twitter": ""}
     await _build_gallery_dl_config(credentials)
@@ -164,7 +164,7 @@ async def test_empty_value_skipped(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_config_has_pg_archive(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -175,7 +175,7 @@ async def test_v3_config_has_pg_archive(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_config_has_native_rate_limiting(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -189,7 +189,7 @@ async def test_v3_sleep_429_uses_exponential_backoff_not_fixed(mock_config_path)
     sites at a constant interval. Use gallery-dl's exp duration syntax
     (exp:BASE:START:MAX=VALUE -> min(START + VALUE*BASE^(n-1), MAX)).
     """
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -202,7 +202,7 @@ async def test_v3_eh_has_conservative_backoff_override(mock_config_path):
     """EH 429s are ban-adjacent — back off harder than the global default.
     gallery-dl runs both EH domains under the 'exhentai' category.
     """
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -215,7 +215,7 @@ async def test_v3_eh_has_conservative_backoff_override(mock_config_path):
 async def test_eh_site_settings_reach_the_category_gallery_dl_reads(mock_config_path, mock_site_config_service):
     """EH request pacing and proxy went to an "ehentai" section, which gallery-dl never reads."""
     from core.site_config import DownloadParams
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     mock_site_config_service.get_all_download_params.return_value = {
         "ehentai": DownloadParams(sleep_request=(2.0, 4.0), proxy_url="http://proxy:3128"),
@@ -234,7 +234,7 @@ async def test_eh_site_settings_reach_the_category_gallery_dl_reads(mock_config_
 
 @pytest.mark.asyncio
 async def test_v3_config_has_file_unique(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -245,7 +245,7 @@ async def test_v3_config_has_file_unique(mock_config_path):
 async def test_subscription_archive_is_written_per_file_not_buffered_in_memory(mock_config_path):
     """Memory mode only flushes on an error-free exit, so one failed file or a
     killed process would drop every archive entry of the run."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({}, job_context="subscription")
     config = json.loads(mock_config_path.read_text())
@@ -255,7 +255,7 @@ async def test_subscription_archive_is_written_per_file_not_buffered_in_memory(m
 
 @pytest.mark.asyncio
 async def test_v3_manual_no_archive_mode_memory(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -264,7 +264,7 @@ async def test_v3_manual_no_archive_mode_memory(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_config_has_postprocessors(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -275,7 +275,7 @@ async def test_v3_config_has_postprocessors(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_metadata_pp_with_include_filter(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -288,7 +288,7 @@ async def test_v3_metadata_pp_with_include_filter(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_config_has_content_integrity(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -300,7 +300,7 @@ async def test_v3_config_has_content_integrity(mock_config_path):
 async def test_v3_subscription_context_has_abort_and_date(mock_config_path):
     from datetime import UTC, datetime
 
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     last = datetime(2026, 3, 15, 8, 0, 0, tzinfo=UTC)
     await _build_gallery_dl_config({}, job_context="subscription", last_completed_at=last)
@@ -312,7 +312,7 @@ async def test_v3_subscription_context_has_abort_and_date(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_manual_context_no_abort(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -321,7 +321,7 @@ async def test_v3_manual_context_no_abort(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_pixiv_has_ugoira_pp(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({"pixiv": "token123"})
     config = json.loads(mock_config_path.read_text())
@@ -331,7 +331,7 @@ async def test_v3_pixiv_has_ugoira_pp(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_non_pixiv_no_ugoira(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
@@ -341,7 +341,7 @@ async def test_v3_non_pixiv_no_ugoira(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_v3_archive_format_not_overridden(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -359,7 +359,7 @@ async def test_v3_cookie_update_is_writeback_path_not_true(mock_config_path):
     /tmp/gdl-cookies-{job}-{src}.txt that nothing wrote, so refreshed session
     cookies were never persisted back to the DB.
     """
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     path = await _build_gallery_dl_config(
         {"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'}, config_id="job-123"
@@ -374,7 +374,7 @@ async def test_v3_cookie_update_is_writeback_path_not_true(mock_config_path):
 @pytest.mark.asyncio
 async def test_v3_cookie_update_fragment_format_gets_path(mock_config_path):
     """Fragment-format cookie credentials get the same writeback path."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     path = await _build_gallery_dl_config({"twitter": '{"cookies": {"auth_token": "abc"}}'}, config_id="job-456")
     config = json.loads(path.read_text())
@@ -384,7 +384,7 @@ async def test_v3_cookie_update_fragment_format_gets_path(mock_config_path):
 @pytest.mark.asyncio
 async def test_v3_cookie_update_omitted_without_config_id(mock_config_path):
     """Without a job-scoped config_id there is no writeback reader — omit the option."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
@@ -399,7 +399,7 @@ async def test_v3_rate_limit_of_other_site_does_not_leak_into_job(mock_config_pa
     bandwidth cap silently throttled ehentai downloads too.
     """
     from core.site_config import DownloadParams
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     mock_site_config_service.get_all_download_params.return_value = {
         "pixiv": DownloadParams(rate_limit="500k"),
@@ -412,7 +412,7 @@ async def test_v3_rate_limit_of_other_site_does_not_leak_into_job(mock_config_pa
 @pytest.mark.asyncio
 async def test_v3_rate_limit_applies_when_site_is_target(mock_config_path, mock_site_config_service):
     from core.site_config import DownloadParams
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     mock_site_config_service.get_all_download_params.return_value = {
         "pixiv": DownloadParams(rate_limit="500k"),
@@ -426,7 +426,7 @@ async def test_v3_rate_limit_applies_when_site_is_target(mock_config_path, mock_
 async def test_v3_no_rate_limit_without_target_site(mock_config_path, mock_site_config_service):
     """Without a resolved target site no bandwidth cap should be applied."""
     from core.site_config import DownloadParams
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     mock_site_config_service.get_all_download_params.return_value = {
         "pixiv": DownloadParams(rate_limit="500k"),
@@ -449,7 +449,7 @@ async def test_v3_full_config_integration(mock_config_path):
     """Verify complete v3.0 config output with all features enabled."""
     from datetime import UTC, datetime
 
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     last = datetime(2026, 3, 15, 8, 0, 0, tzinfo=UTC)
     credentials = {
@@ -515,7 +515,7 @@ async def test_v3_full_config_integration(mock_config_path):
 async def test_postprocessors_live_under_extractor_so_cli_print_cannot_replace_them(mock_config_path):
     """gallery-dl's --Print does config.set((), "postprocessors", [...]), replacing a
     root-level list wholesale. Only extractor-level entries survive (and run first)."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -528,7 +528,7 @@ async def test_postprocessors_live_under_extractor_so_cli_print_cannot_replace_t
 @pytest.mark.asyncio
 async def test_hash_postprocessor_requests_sha256_with_the_option_gallery_dl_reads(mock_config_path):
     """HashPP reads "hashes"/"mode"; the old "algorithm" key was ignored (md5+sha1)."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -538,7 +538,7 @@ async def test_hash_postprocessor_requests_sha256_with_the_option_gallery_dl_rea
 
 @pytest.mark.asyncio
 async def test_metadata_include_keeps_the_fields_artist_extraction_reads(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -552,7 +552,7 @@ async def test_metadata_include_keeps_the_fields_artist_extraction_reads(mock_co
 @pytest.mark.asyncio
 async def test_archive_dsn_without_job_id_would_leave_rows_ownerless(mock_config_path, tmp_path):
     """Each job's archive connection carries its id; the column default reads it."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     job_id = "0199e0a1-7c3e-7b1a-9d2f-3c5b8a4e6f70"
     path = await _build_gallery_dl_config({}, config_id=job_id)
@@ -594,7 +594,7 @@ def test_archive_dsn_is_unchanged_when_job_id_is_not_a_uuid(job_id):
 
 @pytest.mark.asyncio
 async def test_unregistered_category_cookies_are_keyed_by_the_raw_category_not_gallery_dl(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     path = await _build_gallery_dl_config({"newsite": '{"sessionid": "abc"}'}, config_id="job-789")
     config = json.loads(path.read_text())
@@ -606,7 +606,7 @@ async def test_unregistered_category_cookies_are_keyed_by_the_raw_category_not_g
 
 @pytest.mark.asyncio
 async def test_unregistered_category_login_fragment_is_keyed_by_the_raw_category_not_gallery_dl(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({"newsite": '{"username": "user1", "password": "pass1"}'})
     config = json.loads(mock_config_path.read_text())
@@ -618,7 +618,7 @@ async def test_unregistered_category_login_fragment_is_keyed_by_the_raw_category
 
 @pytest.mark.asyncio
 async def test_two_unregistered_categories_do_not_overwrite_each_others_credentials(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({"newsite": '{"sid": "a"}', "othersite": '{"sid": "b"}'})
     config = json.loads(mock_config_path.read_text())
@@ -651,7 +651,7 @@ _MEDIA_KEYS = ("file-range", "file-filter", "videos")
 
 @pytest.mark.asyncio
 async def test_media_policy_max_files_sets_file_range(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
     from services.download_policy import MediaPolicy
 
     await _build_gallery_dl_config({}, media=MediaPolicy(max_files=200))
@@ -665,7 +665,7 @@ async def test_media_policy_max_files_sets_file_range(mock_config_path):
 
 @pytest.mark.asyncio
 async def test_media_policy_exclude_videos_sets_videos_false_and_filter(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
     from services.download_policy import MediaPolicy
 
     await _build_gallery_dl_config({}, media=MediaPolicy(include_videos=False))
@@ -679,7 +679,7 @@ async def test_media_policy_exclude_videos_sets_videos_false_and_filter(mock_con
 
 @pytest.mark.asyncio
 async def test_media_policy_both_fields_set_range_and_video_filter(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
     from services.download_policy import MediaPolicy
 
     await _build_gallery_dl_config({}, media=MediaPolicy(max_files=20, include_videos=False))
@@ -692,7 +692,7 @@ async def test_media_policy_both_fields_set_range_and_video_filter(mock_config_p
 
 @pytest.mark.asyncio
 async def test_no_media_policy_leaves_config_without_range_or_filter(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     config = json.loads(mock_config_path.read_text())
@@ -704,7 +704,7 @@ async def test_no_media_policy_leaves_config_without_range_or_filter(mock_config
 @pytest.mark.asyncio
 async def test_no_media_policy_config_is_identical_to_omitting_the_argument(mock_config_path):
     """A job without media must get the exact config it got before the feature."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config({})
     without_arg = mock_config_path.read_text()
@@ -716,7 +716,7 @@ async def test_no_media_policy_config_is_identical_to_omitting_the_argument(mock
 @pytest.mark.asyncio
 async def test_media_policy_does_not_leak_into_next_jobs_config(mock_config_path):
     """Media keys live in one job's config; a later job without media must not inherit them."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
     from services.download_policy import MediaPolicy
 
     await _build_gallery_dl_config({}, media=MediaPolicy(max_files=5, include_videos=False))
@@ -729,7 +729,7 @@ async def test_media_policy_does_not_leak_into_next_jobs_config(mock_config_path
 
 @pytest.mark.asyncio
 async def test_media_policy_applies_under_force_full_scan(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
     from services.download_policy import MediaPolicy
 
     await _build_gallery_dl_config(
@@ -751,7 +751,7 @@ async def test_media_policy_applies_under_force_full_scan(mock_config_path):
 async def test_media_policy_applies_under_incremental_subscription(mock_config_path):
     from datetime import UTC, datetime
 
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
     from services.download_policy import MediaPolicy
 
     last = datetime(2026, 3, 15, 8, 0, 0, tzinfo=UTC)
@@ -845,7 +845,7 @@ async def test_persona_config_routes_whole_job_through_persona_proxy_and_identit
     mock_config_path, mock_site_config_service
 ):
     from core.site_config import DownloadParams
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     # A per-site proxy/browser from site config must not survive in a persona job.
     mock_site_config_service.get_all_download_params.return_value = {
@@ -870,7 +870,7 @@ async def test_persona_config_routes_whole_job_through_persona_proxy_and_identit
 
 @pytest.mark.asyncio
 async def test_persona_overrides_proxy_and_user_agent_from_credential_fragment(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     fragment = '{"cookies": {"auth_token": "b"}, "user-agent": "FragmentUA", "proxy": "http://frag:1"}'
     path = await _build_gallery_dl_config(
@@ -889,7 +889,7 @@ async def test_persona_overrides_proxy_and_user_agent_from_credential_fragment(m
 
 @pytest.mark.asyncio
 async def test_persona_with_user_agent_sets_root_user_agent_only(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     ua = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
     path = await _build_gallery_dl_config(
@@ -907,7 +907,7 @@ async def test_persona_with_user_agent_sets_root_user_agent_only(mock_config_pat
 
 @pytest.mark.asyncio
 async def test_config_without_persona_is_unchanged(mock_config_path):
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     a = json.loads((await _build_gallery_dl_config({}, config_id="j", target_source_id="twitter")).read_text())
     b = json.loads(
@@ -918,7 +918,7 @@ async def test_config_without_persona_is_unchanged(mock_config_path):
 
 
 def test_sync_diagnostic_reports_throttle_signals_sorted():
-    from plugins.builtin.gallery_dl.source import _DownloadState, _sync_diagnostic
+    from plugins.builtin.gallery_dl._process_state import _DownloadState, _sync_diagnostic
 
     state = _DownloadState()
     state.throttle_signals.update({"http_429", "http_403"})

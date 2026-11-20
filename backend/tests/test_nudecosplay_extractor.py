@@ -298,7 +298,7 @@ def test_metadata_without_embedded_terms_has_no_tags_and_empty_artist(nudecospla
 
 
 def test_metadata_fields_are_not_dropped_by_the_metadata_allowlist(nudecosplay):
-    from plugins.builtin.gallery_dl.source import _METADATA_INCLUDE
+    from plugins.builtin.gallery_dl._config_fragments import _METADATA_INCLUDE
 
     assert set(nudecosplay._post_metadata(_POST)) <= set(_METADATA_INCLUDE)
 

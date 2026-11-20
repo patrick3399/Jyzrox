@@ -138,7 +138,7 @@ def mock_site_config_service():
 def mock_config_path(tmp_path):
     """Mock settings used by _build_gallery_dl_config."""
     config_file = tmp_path / "gallery-dl.json"
-    with patch("plugins.builtin.gallery_dl.source.settings") as mock_settings:
+    with patch("plugins.builtin.gallery_dl._config.settings") as mock_settings:
         mock_settings.data_gallery_path = str(tmp_path / "gallery")
         mock_settings.gallery_dl_config = str(config_file)
         mock_settings.gdl_archive_dsn = "postgresql://test:test@localhost:5432/test"
@@ -150,7 +150,7 @@ async def test_build_config_force_full_scan_disables_archive_and_no_date_after(
     mock_site_config_service, mock_config_path
 ):
     """Force mode in source.py: no archive, no archive skip, no date-after key."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config(
         credentials={},
@@ -174,7 +174,7 @@ async def test_build_config_force_full_scan_disables_archive_and_no_date_after(
 @pytest.mark.asyncio
 async def test_build_config_normal_subscription_unchanged(mock_site_config_service, mock_config_path):
     """Default subscription path keeps abort:10 + date-after."""
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     await _build_gallery_dl_config(
         credentials={},

@@ -112,7 +112,8 @@ def test_declared_site_is_seen_by_every_site_lookup(extractor_dir, registry):
     assert registry.gdl_extractor_name("dropin") == "dropin"
 
     from core.site_config import SiteConfigService
-    from plugins.builtin.gallery_dl.source import GalleryDlPlugin, _metadata_include
+    from plugins.builtin.gallery_dl._config_fragments import _metadata_include
+    from plugins.builtin.gallery_dl.source import GalleryDlPlugin
 
     assert SiteConfigService()._merge("dropin", None).retries == 7
     # Fields the declaration reads must survive the metadata postprocessor.

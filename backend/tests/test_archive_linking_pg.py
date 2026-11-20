@@ -77,13 +77,13 @@ def archive_dsn_for(pg_dsn, tmp_path):
 
     async def _dsn(job_id: str | None) -> str:
         with (
-            patch("plugins.builtin.gallery_dl.source.settings") as mock_settings,
+            patch("plugins.builtin.gallery_dl._config.settings") as mock_settings,
             patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             mock_settings.data_gallery_path = "/data/download_temp"
             mock_settings.gallery_dl_config = str(tmp_path / "gallery-dl.json")
             mock_settings.gdl_archive_dsn = pg_dsn
-            from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+            from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
             path = await _build_gallery_dl_config({}, config_id=job_id)
         return json.loads(path.read_text())["extractor"]["archive"]

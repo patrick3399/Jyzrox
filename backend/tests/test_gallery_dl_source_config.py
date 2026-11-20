@@ -15,13 +15,13 @@ SHADOW = f"newsite__repair_{uuid.UUID(int=7).hex}"
 
 
 async def _config(tmp_path, **kwargs) -> dict:
-    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+    from plugins.builtin.gallery_dl._config import _build_gallery_dl_config
 
     mock_settings = MagicMock()
     mock_settings.data_gallery_path = str(tmp_path / "gallery")
     mock_settings.gdl_archive_dsn = "postgresql://test/archive"
     mock_settings.gallery_dl_config = str(tmp_path / "gallery-dl.json")
-    with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+    with patch("plugins.builtin.gallery_dl._config.settings", mock_settings):
         path = await _build_gallery_dl_config({}, **kwargs)
     return json.loads(path.read_text())["extractor"]
 

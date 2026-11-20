@@ -17,16 +17,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.builtin.gallery_dl import source as gdl_source
-from plugins.builtin.gallery_dl.source import (
+from plugins.builtin.gallery_dl import _process_state as gdl_source
+from plugins.builtin.gallery_dl._process_io import _read_stderr, _read_stdout
+from plugins.builtin.gallery_dl._process_state import (
     GDL_STATE_CANCELLED,
     GDL_STATE_DOWNLOADING,
     GDL_STATE_PAUSED,
     GDL_STATE_RATE_LIMITED,
     GDL_STATE_SLEEPING,
     _DownloadState,
-    _read_stderr,
-    _read_stdout,
 )
 
 
