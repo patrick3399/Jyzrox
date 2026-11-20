@@ -1,7 +1,7 @@
 """
 Unit tests for services/cas.py.
 
-All pure functions are tested in isolation by patching `services.cas.settings`
+All pure functions are tested in isolation by patching `services.cas_paths.settings`
 so no real filesystem layout is required. The async `decrement_ref_count` test
 uses an AsyncMock session and verifies `session.execute` is called.
 """
@@ -39,7 +39,7 @@ class TestCasPath:
         """Path should follow /{cas_root}/{sha[:2]}/{sha[2:4]}/{sha}{ext}."""
         from services.cas import cas_path
 
-        with patch("services.cas.settings", _mock_settings(cas="/data/cas")):
+        with patch("services.cas_paths.settings", _mock_settings(cas="/data/cas")):
             result = cas_path(SHA, ".jpg")
 
         assert result == Path(f"/data/cas/{SHA[:2]}/{SHA[2:4]}/{SHA}.jpg")
@@ -48,7 +48,7 @@ class TestCasPath:
         """data_cas_path should be honoured."""
         from services.cas import cas_path
 
-        with patch("services.cas.settings", _mock_settings(cas="/mnt/store")):
+        with patch("services.cas_paths.settings", _mock_settings(cas="/mnt/store")):
             result = cas_path(SHA, ".png")
 
         # Use Path comparison so the test works on both POSIX and Windows.
@@ -58,7 +58,7 @@ class TestCasPath:
         """Extension (including the dot) must appear at the end of the filename."""
         from services.cas import cas_path
 
-        with patch("services.cas.settings", _mock_settings()):
+        with patch("services.cas_paths.settings", _mock_settings()):
             result = cas_path(SHA, ".webp")
 
         assert result.name == f"{SHA}.webp"
@@ -67,7 +67,7 @@ class TestCasPath:
         """Return type must be pathlib.Path."""
         from services.cas import cas_path
 
-        with patch("services.cas.settings", _mock_settings()):
+        with patch("services.cas_paths.settings", _mock_settings()):
             result = cas_path(SHA, ".jpg")
 
         assert isinstance(result, Path)
@@ -245,7 +245,7 @@ class TestLibraryDir:
         """Path should follow /{library_root}/{source}/{safe_source_id}."""
         from services.cas import library_dir
 
-        with patch("services.cas.settings", _mock_settings(library="/data/library")):
+        with patch("services.cas_paths.settings", _mock_settings(library="/data/library")):
             result = library_dir("ehentai", "12345")
 
         assert result == Path("/data/library/ehentai/12345")
@@ -254,7 +254,7 @@ class TestLibraryDir:
         """safe_source_id must be applied to source_id."""
         from services.cas import library_dir
 
-        with patch("services.cas.settings", _mock_settings(library="/data/library")):
+        with patch("services.cas_paths.settings", _mock_settings(library="/data/library")):
             result = library_dir("pixiv", "artist/name")
 
         assert result == Path("/data/library/pixiv/artist__name")
@@ -263,7 +263,7 @@ class TestLibraryDir:
         """Return type must be pathlib.Path."""
         from services.cas import library_dir
 
-        with patch("services.cas.settings", _mock_settings()):
+        with patch("services.cas_paths.settings", _mock_settings()):
             result = library_dir("source", "id")
 
         assert isinstance(result, Path)
@@ -290,7 +290,7 @@ class TestResolveBlobPath:
         from services.cas import resolve_blob_path
 
         blob = self._make_blob("cas")
-        with patch("services.cas.settings", _mock_settings()):
+        with patch("services.cas_paths.settings", _mock_settings()):
             result = resolve_blob_path(blob)
 
         assert result == Path(f"/data/cas/{SHA[:2]}/{SHA[2:4]}/{SHA}.jpg")
@@ -309,7 +309,7 @@ class TestResolveBlobPath:
         from services.cas import resolve_blob_path
 
         blob = self._make_blob("external", external_path=None)
-        with patch("services.cas.settings", _mock_settings()):
+        with patch("services.cas_paths.settings", _mock_settings()):
             result = resolve_blob_path(blob)
 
         assert result == Path(f"/data/cas/{SHA[:2]}/{SHA[2:4]}/{SHA}.jpg")
@@ -336,7 +336,7 @@ class TestThumbDir:
         """Path should follow /{thumbs_root}/{sha[:2]}/{sha[2:4]}/{sha}."""
         from services.cas import thumb_dir
 
-        with patch("services.cas.settings", _mock_settings(thumbs="/data/thumbs")):
+        with patch("services.cas_paths.settings", _mock_settings(thumbs="/data/thumbs")):
             result = thumb_dir(SHA)
 
         assert result == Path(f"/data/thumbs/{SHA[:2]}/{SHA[2:4]}/{SHA}")
@@ -345,7 +345,7 @@ class TestThumbDir:
         """Return type must be pathlib.Path."""
         from services.cas import thumb_dir
 
-        with patch("services.cas.settings", _mock_settings()):
+        with patch("services.cas_paths.settings", _mock_settings()):
             result = thumb_dir(SHA)
 
         assert isinstance(result, Path)
@@ -438,7 +438,7 @@ class TestStoreBlobConflict:
         session = MagicMock()
         session.execute = fake_execute
 
-        with patch("services.cas.settings", _mock_settings()):
+        with patch("services.cas_paths.settings", _mock_settings()):
             await store_blob(f, SHA, session, storage=storage, external_path=external_path)
 
         return [str(stmt.compile(dialect=postgresql.dialect())).lower() for stmt in captured]
@@ -604,7 +604,7 @@ class TestStoreBlobConcurrentWrite:
         cas_root = tmp_path / "cas"
 
         with (
-            patch("services.cas.settings", _mock_settings(cas=str(cas_root))),
+            patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root))),
             patch("services.cas.os.link", side_effect=FileExistsError) as link_mock,
             patch("services.cas.shutil.copy2") as copy_mock,
         ):
@@ -633,7 +633,7 @@ class TestStoreBlobConcurrentWrite:
             return real_copy2(s, d)
 
         with (
-            patch("services.cas.settings", _mock_settings(cas=str(cas_root))),
+            patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root))),
             patch("services.cas.os.link", side_effect=OSError(errno.EXDEV, "cross-device link")),
             patch("services.cas.shutil.copy2", side_effect=spy_copy2),
         ):
@@ -676,7 +676,7 @@ class TestStoreBlobConcurrentWrite:
             return real_replace(s, d)
 
         with (
-            patch("services.cas.settings", _mock_settings(cas=str(cas_root))),
+            patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root))),
             patch("services.cas.os.link", side_effect=OSError(errno.EXDEV, "cross-device link")),
             patch("services.cas.shutil.copy2", side_effect=spy_copy2),
             patch("services.cas.os.replace", side_effect=spy_replace),
@@ -726,7 +726,7 @@ class TestCreateLibrarySymlink:
         blob_file.write_bytes(b"image-bytes")
 
         blob = self._make_cas_blob()
-        with patch("services.cas.settings", _mock_settings(cas=str(cas_root), library=str(library_root))):
+        with patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root), library=str(library_root))):
             await create_library_symlink("ehentai", "12345", "001.jpg", blob)
 
         link = library_root / "ehentai" / "12345" / "001.jpg"
@@ -761,7 +761,7 @@ class TestCreateLibrarySymlink:
         blob.sha256 = SHA
         blob.extension = ".jpg"
 
-        with patch("services.cas.settings", _mock_settings(library=str(library_root))):
+        with patch("services.cas_paths.settings", _mock_settings(library=str(library_root))):
             await create_library_symlink("local", "art/title", "pic.jpg", blob)
 
         link = library_root / "local" / "art__title" / "pic.jpg"
@@ -785,7 +785,7 @@ class TestCreateLibrarySymlink:
         outside = data_root / "outside.jpg"
         outside.write_bytes(b"keep me")
 
-        with patch("services.cas.settings", _mock_settings(cas=str(cas_root), library=str(library_root))):
+        with patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root), library=str(library_root))):
             for name in ("../../../outside.jpg", "sub/001.jpg", "..", ""):
                 with pytest.raises(ValueError):
                     await create_library_symlink("webclip", "1:abc", name, self._make_cas_blob())
@@ -811,7 +811,7 @@ class TestLibraryDirCollisionGuard:
 
         from services.cas import LibraryDirCollisionError, ensure_library_dir
 
-        with patch("services.cas.settings", _mock_settings(library=str(tmp_path / "library"))):
+        with patch("services.cas_paths.settings", _mock_settings(library=str(tmp_path / "library"))):
             first = ensure_library_dir("ehentai", "a/b")
             assert first.exists()
             with pytest.raises(LibraryDirCollisionError):
@@ -820,7 +820,7 @@ class TestLibraryDirCollisionGuard:
     def test_same_gallery_reuse_of_library_dir_does_not_raise(self, tmp_path):
         from services.cas import ensure_library_dir
 
-        with patch("services.cas.settings", _mock_settings(library=str(tmp_path / "library"))):
+        with patch("services.cas_paths.settings", _mock_settings(library=str(tmp_path / "library"))):
             first = ensure_library_dir("ehentai", "12345")
             second = ensure_library_dir("ehentai", "12345")
             assert first == second
@@ -834,7 +834,7 @@ class TestLibraryDirCollisionGuard:
         legacy.mkdir(parents=True)
         (legacy / "001.jpg").write_bytes(b"x")
 
-        with patch("services.cas.settings", _mock_settings(library=str(tmp_path / "library"))):
+        with patch("services.cas_paths.settings", _mock_settings(library=str(tmp_path / "library"))):
             got = ensure_library_dir("ehentai", "999")
 
         assert got == legacy
@@ -860,7 +860,7 @@ class TestLibraryDirCollisionGuard:
 
         alert = AsyncMock()
         with (
-            patch("services.cas.settings", _mock_settings(cas=str(cas_root), library=str(library_root))),
+            patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root), library=str(library_root))),
             patch("services.cache.push_system_alert", alert),
         ):
             ensure_library_dir("ehentai", "a/b")
@@ -935,7 +935,7 @@ class TestStoreBlobExtensionFirstWins:
         second = tmp_path / "img.png"  # identical content, different extension
         second.write_bytes(b"same-bytes")
 
-        with patch("services.cas.settings", _mock_settings(cas=str(cas_root))):
+        with patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root))):
             await store_blob(first, SHA, self._session_returning(canonical_blob))
             # DB row already exists: the upsert returns the canonical .jpg row
             await store_blob(second, SHA, self._session_returning(canonical_blob))
@@ -953,7 +953,7 @@ class TestStoreBlobExtensionFirstWins:
         src = tmp_path / "img.png"
         src.write_bytes(b"fresh")
 
-        with patch("services.cas.settings", _mock_settings(cas=str(cas_root))):
+        with patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root))):
             await store_blob(src, SHA, self._session_returning(fresh_blob))
 
         assert (cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.png").read_bytes() == b"fresh"
@@ -1041,6 +1041,6 @@ async def test_resolver_prefers_cas_for_an_internal_blob(db_session, tmp_path):
     await db_session.commit()
     blob = (await db_session.execute(select(Blob).where(Blob.sha256 == sha256))).scalar_one()
 
-    with patch("services.cas.settings", _mock_settings(cas=str(cas_root))):
+    with patch("services.cas_paths.settings", _mock_settings(cas=str(cas_root))):
         resolved = await resolve_readable_blob_path(db_session, blob)
     assert resolved == cas_file

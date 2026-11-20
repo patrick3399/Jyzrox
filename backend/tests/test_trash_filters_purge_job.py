@@ -82,7 +82,7 @@ async def test_empty_trash_enqueues_job_instead_of_deleting_in_request(client, d
     await _ensure_users(db_session)
     ids = [await _gallery(db_session, f"c{i}") for i in range(3)]
     enqueue = AsyncMock()
-    with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+    with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
         resp = await client.post("/api/library/trash/empty")
     assert resp.status_code == 202
     assert resp.json() == {"status": "queued", "total": 3}
@@ -105,7 +105,7 @@ async def test_empty_trash_with_filter_snapshots_only_matching_ids(client, db_se
     await _gallery(db_session, "f_other_title", title="haystack", deleted_reason="user")
     await _gallery(db_session, "f_other_reason", title="needle two", deleted_reason="merged")
     enqueue = AsyncMock()
-    with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+    with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
         resp = await client.post("/api/library/trash/empty?q=needle&reason=user")
     assert resp.status_code == 202
     assert resp.json()["total"] == 1
@@ -117,7 +117,7 @@ async def test_empty_trash_returns_409_when_purge_guard_held(client, db_session,
     await _gallery(db_session, "g409")
     mock_redis.set = AsyncMock(return_value=None)  # SET NX lost
     enqueue = AsyncMock()
-    with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+    with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
         resp = await client.post("/api/library/trash/empty")
     assert resp.status_code == 409
     enqueue.assert_not_awaited()
@@ -128,7 +128,7 @@ async def test_empty_trash_returns_503_when_guard_redis_errors(client, db_sessio
     await _gallery(db_session, "g503")
     mock_redis.set = AsyncMock(side_effect=RedisError("down"))
     enqueue = AsyncMock()
-    with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+    with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
         resp = await client.post("/api/library/trash/empty")
     assert resp.status_code == 503
     enqueue.assert_not_awaited()
@@ -138,7 +138,7 @@ async def test_empty_trash_enqueue_failure_releases_guard_and_returns_503(client
     await _ensure_users(db_session)
     await _gallery(db_session, "gq503")
     enqueue = AsyncMock(side_effect=RuntimeError("queue down"))
-    with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+    with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
         resp = await client.post("/api/library/trash/empty")
     assert resp.status_code == 503
     mock_redis.delete.assert_awaited_with("trash:purge:1")
@@ -370,7 +370,7 @@ async def test_summary_next_expiry_is_oldest_deleted_at_plus_retention(client, d
     oldest = datetime.now(UTC) - timedelta(days=5)
     await _gallery(db_session, "ne_old", deleted_at=oldest)
     await _gallery(db_session, "ne_new", deleted_at=datetime.now(UTC) - timedelta(days=1))
-    with patch("routers.library._get_int_setting", new=AsyncMock(return_value=10)):
+    with patch("routers.library_trash_actions._get_int_setting", new=AsyncMock(return_value=10)):
         data = (await client.get("/api/library/trash/summary")).json()
     got = datetime.fromisoformat(data["next_expiry_at"]).replace(tzinfo=None)
     assert abs(got - (oldest + timedelta(days=10)).replace(tzinfo=None)) < timedelta(seconds=5)
@@ -394,7 +394,7 @@ async def test_summary_sources_ignore_filters(client, db_session):
 
 async def test_summary_purge_reflects_guard_json(client, mock_redis):
     mock_redis.get = AsyncMock(return_value=json.dumps({"done": 50, "total": 200}))
-    with patch("routers.library.get_redis", return_value=mock_redis):
+    with patch("routers.library_trash_actions.get_redis", return_value=mock_redis):
         data = (await client.get("/api/library/trash/summary")).json()
     assert data["purge"] == {"done": 50, "total": 200}
 

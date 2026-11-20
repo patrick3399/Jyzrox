@@ -276,7 +276,7 @@ class TestEnqueueDownload:
 
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
                 "/api/download/",
@@ -298,7 +298,7 @@ class TestEnqueueDownload:
 
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=fake_cred),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
                 "/api/download/",
@@ -315,7 +315,7 @@ class TestEnqueueDownload:
         """Enqueue Pixiv URL without credentials raises 400 (credentials required)."""
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
                 "/api/download/",
@@ -335,7 +335,7 @@ class TestEnqueueDownload:
         """The enqueue response dict always includes a 'warning' key."""
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
                 "/api/download/",
@@ -365,7 +365,7 @@ class TestEnqueueDownload:
                 "core.site_config.site_config_service.get_effective_download_params",
                 AsyncMock(return_value=DownloadParams(spread_personas=True)),
             ),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post("/api/download/", json={"url": "https://x.com/someone/media"})
 
@@ -386,7 +386,7 @@ class TestEnqueueDownload:
                 "core.site_config.site_config_service.get_effective_download_params",
                 AsyncMock(return_value=DownloadParams(spread_personas=False)),
             ),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post("/api/download/", json={"url": "https://x.com/someone/media"})
 
@@ -900,7 +900,7 @@ class TestQuickDownload:
         """
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(
                 "/api/download/quick",
@@ -932,7 +932,7 @@ class TestEnqueueDuplicateGuard:
         await _insert_job(db_session, url="https://e-hentai.org/g/555/dupe/", status="queued", user_id=1)
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(
                 "/api/download/",
@@ -1165,7 +1165,7 @@ class TestEnqueueOptions:
         """Providing total field should not cause a validation error."""
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(
                 "/api/download/",
@@ -1177,7 +1177,7 @@ class TestEnqueueOptions:
         """filesize_min and filesize_max should be passed to enqueue without error."""
         with (
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(
                 "/api/download/",
@@ -1267,9 +1267,9 @@ class TestEnqueueFailurePaths:
         from routers.download import _enqueue
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
-            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.credential_warning", new_callable=AsyncMock, return_value=None),
             patch("core.queue.enqueue", new_callable=AsyncMock, side_effect=RuntimeError("queue down")),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -1289,9 +1289,9 @@ class TestEnqueueFailurePaths:
         from routers.download import _enqueue
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
-            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.credential_warning", new_callable=AsyncMock, return_value=None),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             result = await _enqueue("https://www.pixiv.net/users/2587756", db_session, user_id=7)
@@ -1313,9 +1313,9 @@ class TestEnqueueFailurePaths:
         from routers.download import _enqueue
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
-            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.credential_warning", new_callable=AsyncMock, return_value=None),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             await _enqueue("https://www.pixiv.net/artworks/151313568", db_session, user_id=7)
@@ -1331,9 +1331,9 @@ class TestEnqueueFailurePaths:
         job_id = await _insert_job(db_session, url="https://e-hentai.org/g/999/dupe/", status="queued", user_id=42)
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
-            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.credential_warning", new_callable=AsyncMock, return_value=None),
         ):
             result = await _enqueue(
                 "https://e-hentai.org/g/999/dupe/",
@@ -1356,8 +1356,8 @@ class TestEnqueueFailurePaths:
         )
 
         with (
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
-            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.credential_warning", new_callable=AsyncMock, return_value=None),
             patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock,
         ):
             result = await _enqueue(
@@ -1376,9 +1376,9 @@ class TestEnqueueFailurePaths:
         job_id = await _insert_job(db_session, url="https://e-hentai.org/g/998/running/", status="running", user_id=7)
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
-            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.credential_warning", new_callable=AsyncMock, return_value=None),
         ):
             result = await _enqueue(
                 "https://e-hentai.org/g/998/running/",
@@ -1790,7 +1790,7 @@ class TestCancelJobBranches:
     async def test_cancel_done_job_returns_400(self, member_client, db_session, mock_redis):
         """Cancelling an already done job should return 400."""
         job_id = await _insert_job(db_session, status="done", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             resp = await member_client.delete(f"/api/download/jobs/{job_id}")
         assert resp.status_code in (400, 404)
         if resp.status_code == 400:
@@ -1799,7 +1799,7 @@ class TestCancelJobBranches:
     async def test_cancel_failed_job_returns_400(self, member_client, db_session, mock_redis):
         """Cancelling a failed job should return 400."""
         job_id = await _insert_job(db_session, status="failed", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             resp = await member_client.delete(f"/api/download/jobs/{job_id}")
         assert resp.status_code in (400, 404)
 
@@ -1807,7 +1807,7 @@ class TestCancelJobBranches:
         """A member cannot cancel another user's job."""
         job_id = await _insert_job(db_session, status="queued", user_id=99)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             async with make_client(user_id=2, role="member") as ac:
                 resp = await ac.delete(f"/api/download/jobs/{job_id}")
         assert resp.status_code in (403, 404)
@@ -1817,7 +1817,7 @@ class TestCancelJobBranches:
         mock_redis.get = AsyncMock(return_value=None)  # no PID stored
         job_id = await _insert_job(db_session, status="queued", user_id=1)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             resp = await member_client.delete(f"/api/download/jobs/{job_id}")
         assert resp.status_code in (200, 404)
         if resp.status_code == 200:
@@ -1829,7 +1829,7 @@ class TestCancelJobBranches:
         mock_redis.get = AsyncMock(return_value=None)
         job_id = await _insert_job(db_session, status="paused", user_id=1)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             resp = await member_client.delete(f"/api/download/jobs/{job_id}")
         assert resp.status_code in (200, 404)
         if resp.status_code == 200:
@@ -1840,7 +1840,7 @@ class TestCancelJobBranches:
         mock_redis.get = AsyncMock(return_value=None)
         job_id = await _insert_job(db_session, status="queued", user_id=99)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             async with make_client(user_id=1, role="admin") as ac:
                 resp = await ac.delete(f"/api/download/jobs/{job_id}")
         # 200 (found+cancelled) or 404 (SQLite UUID mismatch) — never 403
@@ -1869,7 +1869,7 @@ class TestRetryJobBranches:
         mock_redis.get = AsyncMock(return_value=None)
         job_id = await _insert_job(db_session, status="queued", user_id=1)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
         assert resp.status_code in (400, 404)
         if resp.status_code == 400:
@@ -1881,7 +1881,7 @@ class TestRetryJobBranches:
         job_id = await _insert_job(db_session, status="failed", user_id=1, retry_count=0)
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
             patch("core.queue.enqueue", new_callable=AsyncMock, side_effect=RuntimeError("queue unavailable")),
         ):
             resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
@@ -1896,7 +1896,7 @@ class TestRetryJobBranches:
         mock_redis.get = AsyncMock(return_value=b"10")
         job_id = await _insert_job(db_session, status="failed", user_id=1, retry_count=0)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
         # 200 (success) or 404/500 (SQLite); just verify no crash
         assert resp.status_code in (200, 404, 500, 503)
@@ -1946,9 +1946,9 @@ class TestRetryJobBranches:
         auth = {"user_id": 1, "role": "member"}
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
             patch(
-                "routers.download.enqueue_download_job",
+                "routers.download_job_ops.enqueue_download_job",
                 new=AsyncMock(side_effect=_record_enqueue),
             ),
         ):
@@ -2041,7 +2041,7 @@ class TestPreviewViaRegistry:
         plugin = MagicMock()
         plugin.preview_url = AsyncMock(return_value=PreviewData(source="ehentai", title="T", pages=5))
         with (
-            patch("routers.download.detect_source", return_value="ehentai"),
+            patch("routers.download_jobs.detect_source", return_value="ehentai"),
             patch("plugins.registry.plugin_registry.list_previewable", return_value=[plugin]),
         ):
             resp = await client.get("/api/download/preview", params={"url": "https://e-hentai.org/g/1/aaaaaaaaaa/"})
@@ -2055,7 +2055,7 @@ class TestPreviewViaRegistry:
         plugin = MagicMock()
         plugin.preview_url = AsyncMock(side_effect=RuntimeError("boom"))
         with (
-            patch("routers.download.detect_source", return_value="ehentai"),
+            patch("routers.download_jobs.detect_source", return_value="ehentai"),
             patch("plugins.registry.plugin_registry.list_previewable", return_value=[plugin]),
         ):
             resp = await client.get("/api/download/preview", params={"url": "https://e-hentai.org/g/1/aaaaaaaaaa/"})
@@ -2083,8 +2083,8 @@ class TestEnqueueMediaPolicy:
     @staticmethod
     def _patches():
         return (
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
-            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
+            patch("services.download_enqueue.credential_warning", new_callable=AsyncMock, return_value=None),
         )
 
     async def test_enqueue_rejects_media_options_for_eh_gallery_url(self, client):
@@ -2251,7 +2251,7 @@ class TestRequeueRestampsAdmissionKey:
         job_id = await self._manual_job(db_session, admission_key="gallery_dl:x.com")
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch(
                 "core.site_config.site_config_service.get_effective_download_params",
@@ -2280,7 +2280,7 @@ class TestRequeueRestampsAdmissionKey:
         await db_session.commit()
 
         with (
-            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("routers.download_job_ops.get_redis", return_value=mock_redis),
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch(
                 "core.site_config.site_config_service.get_effective_download_params",

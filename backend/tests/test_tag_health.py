@@ -3,11 +3,11 @@ Tests for the Tag Health Report endpoints (/api/tags/health/*, DELETE /api/tags/
 
 Follows the same SQLite raw-SQL insertion pattern as test_tag.py.
 
-Redis for these endpoints is accessed via `routers.tag.get_redis`, a name
+Redis for these endpoints is accessed via `routers.tag_health.get_redis`, a name
 bound at import time via `from core.redis_client import get_redis`. Patching
 `core.redis_client.get_redis` (done globally by the `client`/`make_client`
 fixtures) does NOT affect this already-bound name, so each test that hits
-Redis-backed logic patches `routers.tag.get_redis` directly.
+Redis-backed logic patches `routers.tag_health.get_redis` directly.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -113,7 +113,7 @@ class TestTagHealthOrphans:
         """A zero-count tag with no alias/implication references should be reported as orphan."""
         tid = await _insert_tag(db_session, "general", "isolated_orphan", count=0)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -126,7 +126,7 @@ class TestTagHealthOrphans:
         """A tag with count > 0 must never be reported as orphan even with no references."""
         tid = await _insert_tag(db_session, "general", "has_usages", count=5)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -138,7 +138,7 @@ class TestTagHealthOrphans:
         canonical_id = await _insert_tag(db_session, "general", "alias_target", count=0)
         await _insert_alias(db_session, "general", "alias_target_old_name", canonical_id)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -151,7 +151,7 @@ class TestTagHealthOrphans:
         con_id = await _insert_tag(db_session, "general", "impl_con", count=0)
         await _insert_implication(db_session, ant_id, con_id)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -164,7 +164,7 @@ class TestTagHealthOrphans:
         for i in range(5):
             await _insert_tag(db_session, "general", f"orphan_limit_{i:02d}", count=0)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health", params={"limit": 2})
 
         assert resp.status_code == 200
@@ -197,7 +197,7 @@ class TestTagHealthDuplicates:
         await _insert_tag(db_session, "general", "blue-hair", count=2)
         await _insert_tag(db_session, "general", "blue hair", count=1)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -212,7 +212,7 @@ class TestTagHealthDuplicates:
         """A namespace/normalized-name combo with only one tag must not appear as a duplicate group."""
         await _insert_tag(db_session, "general", "totally_unique_name", count=5)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -224,7 +224,7 @@ class TestTagHealthDuplicates:
         await _insert_tag(db_session, "general", "cat", count=5)
         await _insert_tag(db_session, "artist", "cat", count=3)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -244,7 +244,7 @@ class TestTagHealthImplicationCycles:
         tid = await _insert_tag(db_session, "general", "self_loop_tag", count=1)
         await _insert_implication(db_session, tid, tid)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -260,7 +260,7 @@ class TestTagHealthImplicationCycles:
         await _insert_implication(db_session, tid_a, tid_b)
         await _insert_implication(db_session, tid_b, tid_a)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -279,7 +279,7 @@ class TestTagHealthImplicationCycles:
         await _insert_implication(db_session, tid_b, tid_c)
         await _insert_implication(db_session, tid_c, tid_a)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -294,7 +294,7 @@ class TestTagHealthImplicationCycles:
         tid_b = await _insert_tag(db_session, "general", "acyclic_b", count=1)
         await _insert_implication(db_session, tid_a, tid_b)
 
-        with patch("routers.tag.get_redis", return_value=_mock_redis_with_ignored()):
+        with patch("routers.tag_health.get_redis", return_value=_mock_redis_with_ignored()):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -313,7 +313,7 @@ class TestTagHealthIgnoreFiltering:
         tid = await _insert_tag(db_session, "general", "ignored_orphan", count=0)
 
         mock_redis = _mock_redis_with_ignored([f"orphan:{tid}"])
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -328,7 +328,7 @@ class TestTagHealthIgnoreFiltering:
         await _insert_tag(db_session, "general", "ign-dup-a", count=1)
 
         mock_redis = _mock_redis_with_ignored(["dup:general:igndupa"])
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -343,7 +343,7 @@ class TestTagHealthIgnoreFiltering:
         await _insert_implication(db_session, tid, tid)
 
         mock_redis = _mock_redis_with_ignored([f"cycle:{tid}"])
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.get("/api/tags/health")
 
         assert resp.status_code == 200
@@ -361,7 +361,7 @@ class TestTagHealthIgnoreFiltering:
 class TestTagHealthIgnoreEndpoints:
     async def test_post_ignore_valid_orphan_key(self, client):
         mock_redis = _mock_redis_with_ignored()
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.post("/api/tags/health/ignore", json={"key": "orphan:123"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
@@ -369,19 +369,19 @@ class TestTagHealthIgnoreEndpoints:
 
     async def test_post_ignore_valid_dup_key(self, client):
         mock_redis = _mock_redis_with_ignored()
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.post("/api/tags/health/ignore", json={"key": "dup:general:bluehair"})
         assert resp.status_code == 200
 
     async def test_post_ignore_valid_cycle_key_single_node(self, client):
         mock_redis = _mock_redis_with_ignored()
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.post("/api/tags/health/ignore", json={"key": "cycle:5"})
         assert resp.status_code == 200
 
     async def test_post_ignore_valid_cycle_key_multi_node(self, client):
         mock_redis = _mock_redis_with_ignored()
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.post("/api/tags/health/ignore", json={"key": "cycle:2-5-9"})
         assert resp.status_code == 200
 
@@ -400,14 +400,14 @@ class TestTagHealthIgnoreEndpoints:
     async def test_post_ignore_invalid_key_returns_400(self, client, bad_key):
         """Any key not matching orphan:{int} / dup:{ns}:{norm} / cycle:{ids} must 400."""
         mock_redis = _mock_redis_with_ignored()
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.post("/api/tags/health/ignore", json={"key": bad_key})
         assert resp.status_code == 400
         mock_redis.sadd.assert_not_awaited()
 
     async def test_delete_ignore_removes_key(self, client):
         mock_redis = _mock_redis_with_ignored(["orphan:42"])
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.delete("/api/tags/health/ignore", params={"key": "orphan:42"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
@@ -415,7 +415,7 @@ class TestTagHealthIgnoreEndpoints:
 
     async def test_get_ignored_returns_decoded_sorted_keys(self, client):
         mock_redis = _mock_redis_with_ignored(["orphan:2", "dup:general:x", "orphan:1"])
-        with patch("routers.tag.get_redis", return_value=mock_redis):
+        with patch("routers.tag_health.get_redis", return_value=mock_redis):
             resp = await client.get("/api/tags/health/ignored")
         assert resp.status_code == 200
         data = resp.json()

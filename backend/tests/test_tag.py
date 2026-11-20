@@ -529,7 +529,7 @@ class TestManualTagGallery:
         """
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-        import routers.tag as _tag_mod
+        import routers.tag_blocked_manual as _tag_mod
 
         TestManualTagGallery._patch_worker_helpers(monkeypatch)
         monkeypatch.setattr(_tag_mod, "pg_insert", sqlite_insert)

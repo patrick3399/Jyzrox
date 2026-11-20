@@ -27,7 +27,7 @@ async def test_subscription_enqueue_options_are_json_serializable(monkeypatch):
     sub.last_success_at` (datetime). SAQ uses json.dumps to serialize job
     kwargs and crashes. Fix: send isoformat() string.
     """
-    from worker import subscription as sub_mod
+    from worker import subscription_enqueue as sub_mod
 
     captured: dict = {}
 
@@ -76,6 +76,10 @@ async def test_subscription_enqueue_options_are_json_serializable(monkeypatch):
     monkeypatch.setattr(
         sub_mod,
         "AsyncSessionLocal",
+        MagicMock(return_value=fake_session),
+    )
+    monkeypatch.setattr(
+        "worker.subscription_discovery.AsyncSessionLocal",
         MagicMock(return_value=fake_session),
     )
 

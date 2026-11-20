@@ -72,7 +72,7 @@ async def wait_for(predicate, timeout: float = 2.0) -> bool:
 @pytest.fixture
 def fast_backoff(monkeypatch):
     """Keep the reconnect delay out of the test runtime."""
-    import core.redis_client as redis_client
+    import core.redis_pubsub as redis_client
 
     monkeypatch.setattr(redis_client, "_PUBSUB_RETRY_START", 0.01)
     monkeypatch.setattr(redis_client, "_PUBSUB_RETRY_MAX", 0.01)
@@ -87,7 +87,7 @@ async def test_site_config_listener_resubscribes_after_connection_error(fast_bac
     svc = SiteConfigService()
     pubsub = FakePubSub()
 
-    with patch("core.redis_client.get_pubsub", return_value=pubsub):
+    with patch("core.redis_pubsub.get_pubsub", return_value=pubsub):
         await svc.start_listener()
         assert await wait_for(lambda: pubsub.subscribe_calls == 1)
 
@@ -106,7 +106,7 @@ async def test_site_config_listener_drops_cache_on_resubscribe(fast_backoff):
     svc = SiteConfigService()
     pubsub = FakePubSub()
 
-    with patch("core.redis_client.get_pubsub", return_value=pubsub):
+    with patch("core.redis_pubsub.get_pubsub", return_value=pubsub):
         await svc.start_listener()
         assert await wait_for(lambda: pubsub.subscribe_calls == 1)
 
@@ -128,7 +128,7 @@ async def test_site_config_listener_still_invalidates_after_reconnect(fast_backo
     svc = SiteConfigService()
     pubsub = FakePubSub()
 
-    with patch("core.redis_client.get_pubsub", return_value=pubsub):
+    with patch("core.redis_pubsub.get_pubsub", return_value=pubsub):
         await svc.start_listener()
         assert await wait_for(lambda: pubsub.subscribe_calls == 1)
 
@@ -156,7 +156,7 @@ async def test_site_config_listener_retries_when_redis_is_down_at_startup(fast_b
         return pubsub
 
     svc = SiteConfigService()
-    with patch("core.redis_client.get_pubsub", side_effect=_get_pubsub):
+    with patch("core.redis_pubsub.get_pubsub", side_effect=_get_pubsub):
         await svc.start_listener()
         assert await wait_for(lambda: pubsub.subscribe_calls >= 1)
         await svc.stop_listener()
@@ -168,7 +168,7 @@ async def test_site_config_listener_cancel_is_not_swallowed_by_retry_loop(fast_b
     svc = SiteConfigService()
     pubsub = FakePubSub()
 
-    with patch("core.redis_client.get_pubsub", return_value=pubsub):
+    with patch("core.redis_pubsub.get_pubsub", return_value=pubsub):
         await svc.start_listener()
         assert await wait_for(lambda: pubsub.subscribe_calls == 1)
 
@@ -183,7 +183,7 @@ async def test_site_config_listener_survives_malformed_message(fast_backoff):
     svc = SiteConfigService()
     pubsub = FakePubSub()
 
-    with patch("core.redis_client.get_pubsub", return_value=pubsub):
+    with patch("core.redis_pubsub.get_pubsub", return_value=pubsub):
         await svc.start_listener()
         assert await wait_for(lambda: pubsub.subscribe_calls == 1)
 
@@ -210,7 +210,7 @@ async def test_log_level_subscriber_reapplies_level_after_reconnect(fast_backoff
     applied = AsyncMock(return_value="DEBUG")
 
     with (
-        patch("core.redis_client.get_pubsub", return_value=pubsub),
+        patch("core.redis_pubsub.get_pubsub", return_value=pubsub),
         patch("core.log_handler.apply_log_level_from_redis", applied),
     ):
         task = asyncio.ensure_future(_log_level_subscriber({}))
@@ -237,7 +237,7 @@ async def test_log_level_subscriber_applies_worker_level_from_message(fast_backo
 
     try:
         with (
-            patch("core.redis_client.get_pubsub", return_value=pubsub),
+            patch("core.redis_pubsub.get_pubsub", return_value=pubsub),
             patch("core.log_handler.apply_log_level_from_redis", AsyncMock()),
         ):
             task = asyncio.ensure_future(_log_level_subscriber({}))
@@ -263,7 +263,7 @@ async def test_log_level_subscriber_cancel_is_not_swallowed_by_retry_loop(fast_b
     pubsub = FakePubSub()
 
     with (
-        patch("core.redis_client.get_pubsub", return_value=pubsub),
+        patch("core.redis_pubsub.get_pubsub", return_value=pubsub),
         patch("core.log_handler.apply_log_level_from_redis", AsyncMock()),
     ):
         task = asyncio.ensure_future(_log_level_subscriber({}))

@@ -1,17 +1,9 @@
 """Thumbnail generation job for the worker package."""
 
 import asyncio
-import concurrent.futures
-import heapq
-import itertools
 import json
-import os
 import subprocess
-import tempfile
-import threading
-import uuid
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy.sql import select
@@ -21,16 +13,38 @@ from core.gallery_helpers import select_cover_image
 from db.models import Gallery, Image
 from services.cas import (
     THUMBNAIL_SIZES,
-    THUMBNAIL_VERSION,
-    THUMBNAIL_VERSION_FILENAME,
     resolve_blob_path,
     thumb_dir,
     thumbnails_complete_at,
 )
 from services.image_codecs import register_image_codecs
 from worker.constants import logger
-from worker.helpers import env_int
-from worker.thumbhash_utils import encode_pil_thumbhash
+from worker.thumbnail_apply import _apply_thumbnail_result as _apply_thumbnail_result
+from worker.thumbnail_apply import _cover_first as _cover_first
+from worker.thumbnail_media import (
+    _atomic_save_webp,
+    _current_thumbnail_version,
+    _downscale_to_width,
+    _encode_thumbhash,
+    _ensure_preview,
+    _extract_video_frame,
+    _ffprobe_metadata,
+    _phash_parts,
+    _resize_width_tier,
+    _unique_video_frame_path,
+    _write_thumbnail_version,
+)
+from worker.thumbnail_media import (
+    _generate_zip_preview as _generate_zip_preview,
+)
+from worker.thumbnail_pool import (
+    _PRIORITY_BULK,
+    _PRIORITY_COVER,
+    _get_thumbnail_executor,
+    _get_thumbnail_semaphore,
+    _thumbnail_commit_batch,
+    _ThumbnailResult,
+)
 
 try:
     from PIL import Image as _PILImage
@@ -44,109 +58,6 @@ except ImportError:
 
 register_image_codecs()
 
-# Decode priorities; the lower value is served first.
-_PRIORITY_COVER = 0
-_PRIORITY_BULK = 1
-
-
-class _PrioritySemaphore:
-    """Semaphore that serves waiters by priority, then by arrival.
-
-    Every decode in the worker shares these slots. A full-gallery job queues a
-    whole commit batch at once, so with plain FIFO a one-image cover job waited
-    behind the pages of every gallery ahead of it. A cover now waits for the
-    decode already in flight at most.
-    """
-
-    def __init__(self, size: int) -> None:
-        self._free = size
-        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
-        self._arrival = itertools.count()
-
-    async def acquire(self, priority: int) -> None:
-        if self._free > 0:
-            self._free -= 1
-            return
-        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        heapq.heappush(self._waiters, (priority, next(self._arrival), waiter))
-        try:
-            await waiter
-        except asyncio.CancelledError:
-            # release() may have handed this waiter the slot just before the
-            # cancellation landed; pass it on or it is lost for good.
-            if waiter.done() and not waiter.cancelled():
-                self.release()
-            raise
-
-    def release(self) -> None:
-        while self._waiters:
-            _, _, waiter = heapq.heappop(self._waiters)
-            if not waiter.done():  # a cancelled waiter is skipped
-                waiter.set_result(None)
-                return
-        self._free += 1
-
-
-_thumbnail_semaphore: _PrioritySemaphore | None = None
-_thumbnail_semaphore_size: int | None = None
-_thumbnail_executor: concurrent.futures.ThreadPoolExecutor | None = None
-_thumbnail_executor_size: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class _ThumbnailResult:
-    width: int | None = None
-    height: int | None = None
-    duration: float | None = None
-    phash: str | None = None
-    phash_int: int | None = None
-    phash_q0: int | None = None
-    phash_q1: int | None = None
-    phash_q2: int | None = None
-    phash_q3: int | None = None
-    thumbhash: str | None = None
-
-
-def _thumbnail_workers() -> int:
-    return env_int("THUMBNAIL_WORKERS", 1)
-
-
-def _thumbnail_commit_batch() -> int:
-    return env_int("THUMBNAIL_COMMIT_BATCH", 25)
-
-
-def _get_thumbnail_semaphore() -> _PrioritySemaphore:
-    global _thumbnail_semaphore, _thumbnail_semaphore_size
-
-    size = _thumbnail_workers()
-    if _thumbnail_semaphore is None or _thumbnail_semaphore_size != size:
-        _thumbnail_semaphore = _PrioritySemaphore(size)
-        _thumbnail_semaphore_size = size
-    return _thumbnail_semaphore
-
-
-def _get_thumbnail_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """Dedicated pool so decode threads — and their glibc arenas — stay bounded.
-
-    `asyncio.to_thread` dispatches to the process-wide default executor, which
-    also serves file hashing and every other worker `to_thread` call, so decodes
-    land on arbitrary threads. glibc gives each thread its own arena, and with
-    `MALLOC_ARENA_MAX=2` two sequential decodes on two threads retain two
-    full-size arenas — roughly 2.5 GB for a 100 MP source, past the 2 GB
-    container cap. The semaphore below bounds how many decodes run at once but
-    says nothing about how many threads they are spread across, which is why
-    THUMBNAIL_WORKERS=1 alone did not stop the 2026-08-13 OOM kills.
-    """
-    global _thumbnail_executor, _thumbnail_executor_size
-
-    size = _thumbnail_workers()
-    if _thumbnail_executor is None or _thumbnail_executor_size != size:
-        if _thumbnail_executor is not None:
-            _thumbnail_executor.shutdown(wait=False)
-        _thumbnail_executor = concurrent.futures.ThreadPoolExecutor(max_workers=size, thread_name_prefix="thumbnail")
-        _thumbnail_executor_size = size
-    return _thumbnail_executor
-
 
 async def _run_thumbnail_in_thread(*args, priority: int = _PRIORITY_BULK) -> _ThumbnailResult | None:
     semaphore = _get_thumbnail_semaphore()
@@ -156,216 +67,6 @@ async def _run_thumbnail_in_thread(*args, priority: int = _PRIORITY_BULK) -> _Th
         return await loop.run_in_executor(_get_thumbnail_executor(), _generate_single_thumbnail_sync, *args)
     finally:
         semaphore.release()
-
-
-def _unique_tmp_path(dest: Path) -> Path:
-    suffix = f".{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp"
-    return dest.with_name(dest.name + suffix)
-
-
-def _unique_video_frame_path(td: Path) -> Path:
-    suffix = f"{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}"
-    return td / f"frame.{suffix}.jpg"
-
-
-def _atomic_save_webp(image, dest: Path) -> None:
-    tmp = _unique_tmp_path(dest)
-    try:
-        image.save(str(tmp), "WEBP", quality=85)
-        os.replace(tmp, dest)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
-def _current_thumbnail_version(td: Path) -> bool:
-    try:
-        return int((td / THUMBNAIL_VERSION_FILENAME).read_text(encoding="ascii").strip()) == THUMBNAIL_VERSION
-    except OSError, ValueError:
-        return False
-
-
-def _write_thumbnail_version(td: Path) -> None:
-    destination = td / THUMBNAIL_VERSION_FILENAME
-    temporary = _unique_tmp_path(destination)
-    try:
-        temporary.write_text(str(THUMBNAIL_VERSION), encoding="ascii")
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _downscale_to_width(image, size: int):
-    """Return `image` no wider than `size`, allocating only the destination.
-
-    `Image.thumbnail()` mutates in place, so a caller has to copy first — at
-    source resolution that copy is one of the largest allocations in the
-    pipeline (300 MB for a 100 MP source). `resize()` allocates the
-    destination only.
-    """
-    width, height = image.size
-    if width <= size:
-        return image.copy()
-    target_height = max(1, round(height * size / width))
-    return image.resize((size, target_height), _PILImage.Resampling.LANCZOS)
-
-
-def _resize_width_tier(image, size: int):
-    """Downscale to a width tier while preserving the complete aspect ratio."""
-    thumbnail = image.copy()
-    # Passing the source height as the vertical bound makes width the only
-    # limiting dimension without upscaling small originals.  The resulting
-    # files can therefore be used with standard HTML width descriptors.
-    thumbnail.thumbnail((size, thumbnail.height), _PILImage.Resampling.LANCZOS)
-    return thumbnail
-
-
-def _encode_thumbhash(pil) -> str | None:
-    try:
-        return encode_pil_thumbhash(pil)
-    except Exception as exc:
-        logger.warning("[thumbnail] thumbhash failed: %s", exc)
-        return None
-
-
-def _phash_parts(phash: str) -> dict[str, int]:
-    phash_int_val = int(phash, 16)
-    if phash_int_val >= (1 << 63):
-        phash_int_val -= 1 << 64
-
-    def _to_signed16(v: int) -> int:
-        return v - 0x10000 if v >= 0x8000 else v
-
-    return {
-        "phash_int": phash_int_val,
-        "phash_q0": _to_signed16((phash_int_val >> 48) & 0xFFFF),
-        "phash_q1": _to_signed16((phash_int_val >> 32) & 0xFFFF),
-        "phash_q2": _to_signed16((phash_int_val >> 16) & 0xFFFF),
-        "phash_q3": _to_signed16(phash_int_val & 0xFFFF),
-    }
-
-
-def _ffprobe_metadata(src: Path) -> dict:
-    """Extract width, height, duration from video using ffprobe."""
-    cmd = [
-        "ffprobe",
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_streams",
-        "-show_format",
-        str(src),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    data = json.loads(result.stdout)
-
-    # Find the video stream
-    width, height, duration = None, None, None
-    for stream in data.get("streams", []):
-        if stream.get("codec_type") == "video":
-            width = int(stream.get("width", 0)) or None
-            height = int(stream.get("height", 0)) or None
-            break
-
-    # Duration from format (more reliable)
-    fmt = data.get("format", {})
-    dur_str = fmt.get("duration")
-    if dur_str:
-        duration = float(dur_str)
-
-    return {"width": width, "height": height, "duration": duration}
-
-
-def _extract_video_frame(src: Path, output: Path, seek: float) -> None:
-    """Extract a single frame from video at `seek` seconds as JPEG."""
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        str(seek),
-        "-i",
-        str(src),
-        "-frames:v",
-        "1",
-        "-q:v",
-        "2",
-        str(output),
-    ]
-    subprocess.run(cmd, capture_output=True, timeout=30, check=True)
-
-
-def _encode_preview(src: Path, destination: Path, *, concat: bool = False) -> None:
-    temporary = destination.with_name(f".{uuid.uuid4().hex}.webm")
-    cmd = ["ffmpeg", "-y"]
-    if concat:
-        cmd.extend(["-f", "concat", "-safe", "0"])
-    cmd.extend(
-        [
-            "-i",
-            str(src),
-            "-t",
-            "3",
-            "-vf",
-            "scale='min(720,iw)':-2:force_original_aspect_ratio=decrease,fps=12",
-            "-an",
-            "-c:v",
-            "libvpx-vp9",
-            "-crf",
-            "36",
-            "-b:v",
-            "0",
-            str(temporary),
-        ]
-    )
-    try:
-        subprocess.run(cmd, capture_output=True, timeout=90, check=True)
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _generate_zip_preview(src: Path, destination: Path) -> None:
-    with tempfile.TemporaryDirectory(prefix="jyzrox-ugoira-") as raw_dir:
-        directory = Path(raw_dir)
-        frames: list[Path] = []
-        total_size = 0
-        with zipfile.ZipFile(src) as archive:
-            for index, info in enumerate(archive.infolist()[:300]):
-                suffix = Path(info.filename).suffix.lower()
-                if info.is_dir() or suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
-                    continue
-                total_size += info.file_size
-                if total_size > 1024 * 1024 * 1024:
-                    raise ValueError("Ugoira archive exceeds extraction limit")
-                frame = directory / f"{index:06d}{suffix}"
-                frame.write_bytes(archive.read(info))
-                frames.append(frame)
-        if not frames:
-            raise ValueError("Ugoira archive contains no supported frames")
-        concat = directory / "frames.txt"
-        lines: list[str] = []
-        for frame in frames:
-            escaped = str(frame).replace("'", "'\\''")
-            lines.extend([f"file '{escaped}'", "duration 0.083333"])
-        last_frame = str(frames[-1]).replace("'", "'\\''")
-        lines.append(f"file '{last_frame}'")
-        concat.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        _encode_preview(concat, destination, concat=True)
-
-
-def _ensure_preview(src: Path, td: Path) -> Path | None:
-    destination = td / "preview.webm"
-    if destination.exists():
-        return destination
-    try:
-        if zipfile.is_zipfile(src):
-            _generate_zip_preview(src, destination)
-        else:
-            _encode_preview(src, destination)
-        return destination
-    except (OSError, ValueError, zipfile.BadZipFile, subprocess.SubprocessError) as exc:
-        logger.warning("[thumbnail] preview %s: %s", src, exc)
-        return None
 
 
 def _generate_single_thumbnail_sync(
@@ -478,33 +179,6 @@ async def generate_single_thumbnail(blob, src: Path, session=None) -> bool:
         return False
     _apply_thumbnail_result(blob, result)
     return True
-
-
-def _apply_thumbnail_result(blob, result: _ThumbnailResult) -> None:
-    blob.width = result.width
-    blob.height = result.height
-    blob.duration = result.duration
-    if result.phash is not None:
-        if blob.phash_int != result.phash_int:
-            blob.dedup_scanned_threshold = None
-            blob.dedup_scanned_phash_int = None
-            blob.dedup_scanned_version = None
-        blob.phash = result.phash
-        blob.phash_int = result.phash_int
-        blob.phash_q0 = result.phash_q0
-        blob.phash_q1 = result.phash_q1
-        blob.phash_q2 = result.phash_q2
-        blob.phash_q3 = result.phash_q3
-    if result.thumbhash is not None:
-        blob.thumbhash = result.thumbhash
-
-
-def _cover_first(images: list[Image], cover_page: str) -> list[Image]:
-    if not images:
-        return []
-    cover_index = len(images) - 1 if cover_page == "last" else 0
-    cover = images[cover_index]
-    return [cover, *(img for idx, img in enumerate(images) if idx != cover_index)]
 
 
 def _blob_needs_thumbnail(blob) -> bool:

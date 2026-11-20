@@ -213,7 +213,7 @@ class TestListSubscriptions:
             db_session, url="https://weibo.cn/u/3802725779?tabtype=album", source="weibo"
         )
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=("weibo", "3802725779")):
+        with patch("routers.subscriptions_list.account_gallery_key", return_value=("weibo", "3802725779")):
             resp = await client.get("/api/subscriptions/")
 
         sub = next(item for item in resp.json()["subscriptions"] if item["id"] == sub_id)
@@ -231,7 +231,7 @@ class TestListSubscriptions:
         )
         sub_id = await _insert_subscription(db_session, url="https://weibo.cn/u/3802725780", source="weibo")
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=("weibo", "3802725780")):
+        with patch("routers.subscriptions_list.account_gallery_key", return_value=("weibo", "3802725780")):
             resp = await client.get("/api/subscriptions/")
 
         sub = next(item for item in resp.json()["subscriptions"] if item["id"] == sub_id)
@@ -248,7 +248,7 @@ class TestListSubscriptions:
         )
         sub_id = await _insert_subscription(db_session, url="https://weibo.cn/u/2222222222", source="weibo")
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=("weibo", "2222222222")):
+        with patch("routers.subscriptions_list.account_gallery_key", return_value=("weibo", "2222222222")):
             resp = await client.get("/api/subscriptions/")
 
         sub = next(item for item in resp.json()["subscriptions"] if item["id"] == sub_id)
@@ -351,7 +351,7 @@ class TestCreateSubscriptionDefaultCron:
     """A subscription created without cron_expr is scheduled weekly, not every 2h."""
 
     async def test_create_without_cron_uses_weekly_default(self, client, db_session):
-        from routers import subscriptions as router_mod
+        from routers import subscriptions_create as router_mod
 
         await _ensure_user(db_session)
         captured: dict = {}
@@ -369,7 +369,7 @@ class TestCreateSubscriptionDefaultCron:
         assert captured["auto_download"] is False
 
     async def test_create_with_explicit_cron_keeps_it(self, client, db_session):
-        from routers import subscriptions as router_mod
+        from routers import subscriptions_create as router_mod
 
         await _ensure_user(db_session)
         captured: dict = {}
@@ -401,7 +401,7 @@ class TestSubscriptionUpsertRefreshesSchedule:
     def test_conflict_update_refreshes_next_check_at(self):
         from datetime import UTC, datetime
 
-        from routers.subscriptions import _build_subscription_upsert
+        from routers.subscriptions_create import _build_subscription_upsert
 
         stmt = _build_subscription_upsert(
             user_id=1,
@@ -419,7 +419,7 @@ class TestSubscriptionUpsertRefreshesSchedule:
     def test_conflict_update_refreshes_source(self):
         from datetime import UTC, datetime
 
-        from routers.subscriptions import _build_subscription_upsert
+        from routers.subscriptions_create import _build_subscription_upsert
 
         stmt = _build_subscription_upsert(
             user_id=1,
@@ -438,7 +438,7 @@ class TestSubscriptionUpsertRefreshesSchedule:
         """group_id must be preserved on conflict (moves go via PATCH/bulk-move)."""
         from datetime import UTC, datetime
 
-        from routers.subscriptions import _build_subscription_upsert
+        from routers.subscriptions_create import _build_subscription_upsert
 
         stmt = _build_subscription_upsert(
             user_id=1,
@@ -1014,7 +1014,7 @@ class TestDeleteSubscription:
         session = _Session()
 
         with (
-            patch("routers.subscriptions.async_session", return_value=session),
+            patch("routers.subscriptions_manage.async_session", return_value=session),
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
@@ -1084,7 +1084,7 @@ class TestDeleteSubscription:
         mock_redis.setex = AsyncMock(side_effect=RuntimeError("redis unavailable"))
 
         with (
-            patch("routers.subscriptions.async_session", return_value=session),
+            patch("routers.subscriptions_manage.async_session", return_value=session),
             patch("core.redis_client.get_redis", return_value=mock_redis),
             pytest.raises(RuntimeError, match="redis unavailable"),
         ):
@@ -1311,9 +1311,9 @@ class TestCreateSubscriptionSameAccountDifferentSpelling:
 
     async def _post(self, client, url: str, **extra):
         with (
-            patch("routers.subscriptions.account_gallery_key", side_effect=self._key_for),
+            patch("routers.subscriptions_create.account_gallery_key", side_effect=self._key_for),
             patch("services.download_mode.account_gallery_key", side_effect=self._key_for),
-            patch("routers.subscriptions.detect_source", side_effect=self._detect),
+            patch("routers.subscriptions_create.detect_source", side_effect=self._detect),
         ):
             return await client.post("/api/subscriptions/", json={"url": url, **extra})
 
@@ -1398,7 +1398,7 @@ class TestCreateSubscriptionSameAccountDifferentSpelling:
 
         from sqlalchemy.dialects import postgresql
 
-        from routers.subscriptions import _build_subscription_upsert
+        from routers.subscriptions_create import _build_subscription_upsert
 
         stmt = _build_subscription_upsert(
             user_id=1,
@@ -1443,7 +1443,7 @@ class TestCreateSubscriptionWarnExistingGallery:
         gallery_id = await self._insert_gallery(db_session)
         url = "https://weibo.cn/u/3802725779?tabtype=album"
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+        with patch("routers.subscriptions_create.account_gallery_key", return_value=self._KEY):
             resp = await client.post("/api/subscriptions/", json={"url": url, "warn_existing_gallery": True})
 
         assert resp.status_code == 409
@@ -1459,7 +1459,7 @@ class TestCreateSubscriptionWarnExistingGallery:
         await _ensure_user(db_session)
         await self._insert_gallery(db_session)
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+        with patch("routers.subscriptions_create.account_gallery_key", return_value=self._KEY):
             resp = await client.post("/api/subscriptions/", json={"url": "https://weibo.cn/u/3802725779"})
 
         # 500 is the SQLite pg_insert limitation; what matters is not refusing.
@@ -1470,7 +1470,7 @@ class TestCreateSubscriptionWarnExistingGallery:
         await _ensure_user(db_session)
         await self._insert_gallery(db_session, deleted=True)
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+        with patch("routers.subscriptions_create.account_gallery_key", return_value=self._KEY):
             resp = await client.post(
                 "/api/subscriptions/", json={"url": "https://weibo.cn/u/3802725779", "warn_existing_gallery": True}
             )
@@ -1482,7 +1482,7 @@ class TestCreateSubscriptionWarnExistingGallery:
         await _ensure_user(db_session)
         await self._insert_gallery(db_session)
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=None):
+        with patch("routers.subscriptions_create.account_gallery_key", return_value=None):
             resp = await client.post(
                 "/api/subscriptions/", json={"url": "https://weibo.cn/search?q=x", "warn_existing_gallery": True}
             )
@@ -1498,7 +1498,7 @@ class TestCreateSubscriptionWarnExistingGallery:
         url = "https://weibo.cn/u/3802725779"
         await _insert_subscription(db_session, url=url, source="weibo")
 
-        with patch("routers.subscriptions.account_gallery_key", return_value=self._KEY):
+        with patch("routers.subscriptions_create.account_gallery_key", return_value=self._KEY):
             resp = await client.post(
                 "/api/subscriptions/",
                 json={"url": url, "reject_duplicate": True, "warn_existing_gallery": True},

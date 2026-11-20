@@ -261,7 +261,10 @@ class TestExternalStatus:
                 _FakeSession = _make_pg_stat_mock(0, 0, 0)
                 yield _FakeSession(session)
 
-        with patch("routers.external.async_session", _fake_session_ctx):
+        with (
+            patch("routers.external_status.async_session", _fake_session_ctx),
+            patch("services.external_auth.async_session", _fake_session_ctx),
+        ):
             resp = await ext_client.get(
                 "/api/external/v1/status",
                 headers={"X-API-Token": _TEST_TOKEN},
@@ -289,7 +292,10 @@ class TestExternalStatus:
                 _FakeSession = _make_pg_stat_mock(gallery_count=2, image_count=0, tag_count=0)
                 yield _FakeSession(session)
 
-        with patch("routers.external.async_session", _fake_session_ctx):
+        with (
+            patch("routers.external_status.async_session", _fake_session_ctx),
+            patch("services.external_auth.async_session", _fake_session_ctx),
+        ):
             resp = await ext_client.get(
                 "/api/external/v1/status",
                 headers={"X-API-Token": _TEST_TOKEN},
@@ -741,7 +747,7 @@ class TestExternalImageFile:
             temp_path = Path(f.name)
 
         try:
-            with patch("routers.external.resolve_blob_path", return_value=temp_path):
+            with patch("routers.external_images.resolve_blob_path", return_value=temp_path):
                 resp = await ext_client.get(
                     f"/api/external/v1/galleries/{gid}/images/1/file",
                     headers={"X-API-Token": _TEST_TOKEN},
@@ -781,7 +787,7 @@ class TestExternalImageFile:
             temp_path = Path(f.name)
 
         try:
-            with patch("routers.external.resolve_blob_path", return_value=temp_path):
+            with patch("routers.external_images.resolve_blob_path", return_value=temp_path):
                 resp = await ext_client.get(
                     f"/api/external/v1/galleries/{gid}/images/1/file",
                     headers={"X-API-Token": _TEST_TOKEN},
@@ -816,7 +822,7 @@ class TestExternalImageFile:
 
         # Return a path that does not exist on disk
         nonexistent = Path("/tmp/nonexistent_jyzrox_test_image_xyz.jpg")
-        with patch("routers.external.resolve_blob_path", return_value=nonexistent):
+        with patch("routers.external_images.resolve_blob_path", return_value=nonexistent):
             resp = await ext_client.get(
                 f"/api/external/v1/galleries/{gid}/images/1/file",
                 headers={"X-API-Token": _TEST_TOKEN},

@@ -108,8 +108,8 @@ class TestPixivDownloaderSinglePage:
         mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=111111,
@@ -129,8 +129,8 @@ class TestPixivDownloaderSinglePage:
         mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             await download_pixiv_illust(
                 illust_id=111111,
@@ -151,8 +151,8 @@ class TestPixivDownloaderSinglePage:
         mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             await download_pixiv_illust(
                 illust_id=111111,
@@ -180,8 +180,8 @@ class TestPixivDownloaderSinglePage:
         mock_client = _make_pixiv_client_mock(_SINGLE_PAGE_DETAIL)
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             await download_pixiv_illust(
                 illust_id=111111,
@@ -209,8 +209,8 @@ class TestPixivDownloaderMultiPage:
         mock_client = _make_pixiv_client_mock(_MULTI_PAGE_DETAIL)
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=222222,
@@ -236,8 +236,8 @@ class TestPixivDownloaderMultiPage:
         mock_client = _make_pixiv_client_mock(_MULTI_PAGE_DETAIL)
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             await download_pixiv_illust(
                 illust_id=222222,
@@ -266,8 +266,8 @@ class TestPixivDownloaderUgoira:
         mock_client.download_image = AsyncMock(return_value=(b"PK\x03\x04" + b"\x00" * 50, "application/zip"))
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=333333,
@@ -300,8 +300,8 @@ class TestPixivDownloaderCancellation:
             return True
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=111111,
@@ -346,8 +346,8 @@ class TestPixivDownloaderCancellation:
             return check_calls > 2  # allow first iteration, cancel afterwards
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=222222,
@@ -377,8 +377,8 @@ class TestPixivDownloaderErrorHandling:
         mock_client.illust_detail = AsyncMock(side_effect=ValueError("Illust 999 not found"))
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=999,
@@ -398,8 +398,8 @@ class TestPixivDownloaderErrorHandling:
         mock_client.illust_detail = AsyncMock(side_effect=PermissionError("Pixiv token invalid"))
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=111111,
@@ -418,8 +418,8 @@ class TestPixivDownloaderErrorHandling:
         mock_client.download_image = AsyncMock(side_effect=ConnectionError("Network unreachable"))
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=111111,
@@ -447,8 +447,8 @@ class TestPixivDownloaderErrorHandling:
         mock_client.download_image = _fail_second_page
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=222222,
@@ -474,8 +474,8 @@ class TestPixivDownloaderErrorHandling:
         mock_client = _make_pixiv_client_mock(_MULTI_PAGE_DETAIL)
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
         ):
             result = await download_pixiv_illust(
                 illust_id=222222,
@@ -683,8 +683,8 @@ class TestPixivDownloaderRateLimit:
         sleep = AsyncMock()
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
-            patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
             patch("services.pixiv_downloader.asyncio.sleep", sleep),
         ):
             result = await download_pixiv_illust(111111, "tok", tmp_path)
@@ -701,7 +701,7 @@ class TestPixivDownloaderRateLimit:
         mock_client.illust_detail = AsyncMock(side_effect=PixivRateLimitError(1.0))
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
             patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
         ):
             result = await download_pixiv_illust(111111, "tok", tmp_path)
@@ -718,7 +718,7 @@ class TestPixivDownloaderRateLimit:
         mock_client.illust_detail = AsyncMock(side_effect=PixivRateLimitError(120.0))
 
         with (
-            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
             patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
         ):
             result = await download_pixiv_illust(111111, "tok", tmp_path, cancel_check=AsyncMock(return_value=True))
@@ -744,6 +744,8 @@ class TestPixivDownloaderRateLimit:
 
         with (
             patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
             patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
             patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
         ):
@@ -768,6 +770,8 @@ class TestPixivDownloaderRateLimit:
 
         with (
             patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_illust_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
             patch("services.pixiv_downloader.get_typed_download_delay", new_callable=AsyncMock, return_value=0),
             patch("services.pixiv_downloader.asyncio.sleep", AsyncMock()),
         ):

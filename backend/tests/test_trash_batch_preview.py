@@ -238,7 +238,7 @@ async def test_batch_purge_enqueues_only_trashed_scoped_ids(make_client, db_sess
     live = await _gallery(db_session, "pg_live", owner=MEMBER_ID, trashed=False)
     enqueue = AsyncMock()
     async with make_client(user_id=MEMBER_ID, role="member") as ac:
-        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+        with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
             resp = await ac.post("/api/library/trash/purge", json={"gallery_ids": [mine, theirs, live]})
     assert resp.status_code == 202
     assert resp.json() == {"status": "queued", "total": 1}
@@ -301,7 +301,7 @@ async def test_preview_returns_thumbs_without_file_path(client, db_session):
     sha_a, sha_b = "aa" * 32, "bb" * 32
     await _image(db_session, gid, sha_a, 1)
     await _image(db_session, gid, sha_b, 2)
-    with patch("routers.library.existing_base_thumbs", new=AsyncMock(return_value={sha_a})):
+    with patch("routers.library_trash_actions.existing_base_thumbs", new=AsyncMock(return_value={sha_a})):
         resp = await client.get(f"/api/library/trash/{gid}/preview?page=1&limit=60")
     assert resp.status_code == 200
     data = resp.json()
@@ -337,7 +337,7 @@ async def test_preview_pages_images_by_limit(client, db_session):
 async def test_delete_gallery_records_user_reason_and_actor(client, db_session):
     await _ensure_users(db_session)
     gid = await _gallery(db_session, "rd1", trashed=False)
-    with patch("routers.library._get_toggle", new=AsyncMock(return_value=True)):
+    with patch("routers.library_gallery_edit._get_toggle", new=AsyncMock(return_value=True)):
         resp = await client.delete("/api/library/galleries/local/rd1")
     assert resp.status_code == 200
     row = await _row(db_session, gid)

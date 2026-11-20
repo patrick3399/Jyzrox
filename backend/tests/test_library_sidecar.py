@@ -65,7 +65,7 @@ class TestWriteGallerySidecar:
     async def test_sidecar_written_as_valid_json_with_written_at(self, tmp_path):
         from services.library_sidecar import SIDECAR_FILENAME, write_gallery_sidecar
 
-        with patch("services.cas.settings", _mock_settings(tmp_path / "library")):
+        with patch("services.cas_paths.settings", _mock_settings(tmp_path / "library")):
             ok = await write_gallery_sidecar("weibo", "12345", {"title": "T", "tags": []})
 
         assert ok is True
@@ -77,7 +77,7 @@ class TestWriteGallerySidecar:
     async def test_sidecar_write_is_atomic_no_temp_litter(self, tmp_path):
         from services.library_sidecar import SIDECAR_FILENAME, write_gallery_sidecar
 
-        with patch("services.cas.settings", _mock_settings(tmp_path / "library")):
+        with patch("services.cas_paths.settings", _mock_settings(tmp_path / "library")):
             await write_gallery_sidecar("weibo", "12345", {"title": "T"})
 
         gdir = tmp_path / "library" / "weibo" / "12345"
@@ -86,7 +86,7 @@ class TestWriteGallerySidecar:
     async def test_sidecar_overwrites_previous_content(self, tmp_path):
         from services.library_sidecar import SIDECAR_FILENAME, write_gallery_sidecar
 
-        with patch("services.cas.settings", _mock_settings(tmp_path / "library")):
+        with patch("services.cas_paths.settings", _mock_settings(tmp_path / "library")):
             await write_gallery_sidecar("weibo", "12345", {"title": "Old"})
             await write_gallery_sidecar("weibo", "12345", {"title": "New"})
 
@@ -98,7 +98,7 @@ class TestWriteGallerySidecar:
         writes it."""
         from services.library_sidecar import write_gallery_sidecar
 
-        with patch("services.cas.settings", _mock_settings(tmp_path / "library")):
+        with patch("services.cas_paths.settings", _mock_settings(tmp_path / "library")):
             ok = await write_gallery_sidecar("weibo", "12345", {"bad": object()})
 
         assert ok is False
@@ -106,7 +106,7 @@ class TestWriteGallerySidecar:
     async def test_unwritable_library_root_is_swallowed_not_raised(self):
         from services.library_sidecar import write_gallery_sidecar
 
-        with patch("services.cas.settings", _mock_settings("/proc/definitely/not/writable")):
+        with patch("services.cas_paths.settings", _mock_settings("/proc/definitely/not/writable")):
             ok = await write_gallery_sidecar("weibo", "12345", {"title": "T"})
 
         assert ok is False

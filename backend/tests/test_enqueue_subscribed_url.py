@@ -14,7 +14,7 @@ def enq():
     mock = AsyncMock()
     with (
         patch("core.queue.enqueue", mock),
-        patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+        patch("services.download_enqueue.check_source_enabled", new_callable=AsyncMock),
         patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
     ):
         yield mock

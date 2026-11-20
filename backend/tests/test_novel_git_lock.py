@@ -66,15 +66,15 @@ class FakeRedis:
 def fast_lock():
     """Shrink the TTL and renew interval so the test runs in about a second."""
     with (
-        patch("routers.novels._GIT_LOCK_TTL", 1),
-        patch("routers.novels._GIT_LOCK_RENEW_INTERVAL", 0.2),
+        patch("services.novel_gitlock._GIT_LOCK_TTL", 1),
+        patch("services.novel_gitlock._GIT_LOCK_RENEW_INTERVAL", 0.2),
     ):
         yield
 
 
 async def test_lock_survives_an_operation_longer_than_its_ttl(fast_lock):
     """The whole point: a slow push+rebase must not drop mutual exclusion."""
-    from routers import novels
+    from services import novel_gitlock as novels
 
     redis = FakeRedis()
     started = asyncio.Event()
@@ -84,7 +84,7 @@ async def test_lock_survives_an_operation_longer_than_its_ttl(fast_lock):
         await asyncio.sleep(1.6)  # comfortably past the 1s TTL
         return "done"
 
-    with patch("routers.novels.get_redis", return_value=redis):
+    with patch("services.novel_gitlock.get_redis", return_value=redis):
         task = asyncio.create_task(novels._with_git_lock(_slow_operation))
         await started.wait()
         await asyncio.sleep(1.3)  # past the original expiry
@@ -97,14 +97,14 @@ async def test_lock_survives_an_operation_longer_than_its_ttl(fast_lock):
 
 async def test_lock_is_released_once_the_operation_finishes(fast_lock):
     """The heartbeat must not keep the key alive after the work is done."""
-    from routers import novels
+    from services import novel_gitlock as novels
 
     redis = FakeRedis()
 
     async def _quick():
         return "ok"
 
-    with patch("routers.novels.get_redis", return_value=redis):
+    with patch("services.novel_gitlock.get_redis", return_value=redis):
         assert await novels._with_git_lock(_quick) == "ok"
 
     assert await redis.get(novels._GIT_LOCK) is None
@@ -113,14 +113,14 @@ async def test_lock_is_released_once_the_operation_finishes(fast_lock):
 
 async def test_lock_is_released_when_the_operation_raises(fast_lock):
     """A failing git op must not leave the repo locked for a whole TTL."""
-    from routers import novels
+    from services import novel_gitlock as novels
 
     redis = FakeRedis()
 
     async def _boom():
         raise RuntimeError("push failed")
 
-    with patch("routers.novels.get_redis", return_value=redis):
+    with patch("services.novel_gitlock.get_redis", return_value=redis):
         with pytest.raises(RuntimeError, match="push failed"):
             await novels._with_git_lock(_boom)
 
@@ -129,7 +129,7 @@ async def test_lock_is_released_when_the_operation_raises(fast_lock):
 
 async def test_second_writer_is_refused_immediately_while_held(fast_lock):
     """Concurrent request → 409, not a queue."""
-    from routers import novels
+    from services import novel_gitlock as novels
 
     redis = FakeRedis()
     started = asyncio.Event()
@@ -139,7 +139,7 @@ async def test_second_writer_is_refused_immediately_while_held(fast_lock):
         await asyncio.sleep(0.5)
         return "held"
 
-    with patch("routers.novels.get_redis", return_value=redis):
+    with patch("services.novel_gitlock.get_redis", return_value=redis):
         task = asyncio.create_task(novels._with_git_lock(_hold))
         await started.wait()
 
@@ -155,7 +155,7 @@ async def test_second_writer_is_refused_immediately_while_held(fast_lock):
 
 async def test_renewal_stops_after_the_lock_changes_hands(fast_lock):
     """Renewal is compare-and-expire: it must never revive someone else's lock."""
-    from routers import novels
+    from services import novel_gitlock as novels
     from worker.helpers import renew_lock
 
     redis = FakeRedis()

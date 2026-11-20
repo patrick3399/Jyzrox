@@ -72,7 +72,9 @@ async def _novel_client(db_session, db_session_factory, role, mock_redis):
     _app.dependency_overrides[require_auth] = _override_require_auth
     patches = [
         patch("routers.novels.async_session", db_session_factory),
+        patch("routers.novels_ops.async_session", db_session_factory),
         patch("routers.novels.get_redis", return_value=mock_redis),
+        patch("services.novel_gitlock.get_redis", return_value=mock_redis),
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
@@ -247,7 +249,7 @@ async def test_write_rechecks_head_under_git_lock(member_client, novel_repo, mon
     """A commit that lands after the client read base_sha but before the write
     serializes must be caught as stale — the optimistic-lock check runs under
     the git lock, not before it (otherwise it is a lost-update TOCTOU)."""
-    import routers.novels as rn
+    import services.novel_gitlock as rn
 
     work = novel_repo["work"]
     head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
@@ -747,7 +749,7 @@ async def test_rejected_write_does_not_enqueue_novel_index_job(member_client, no
 
 
 async def test_sync_pull_with_changes_enqueues_novel_index_job(member_client, novel_repo, monkeypatch):
-    import routers.novels as rn
+    import services.novel_gitlock as rn
 
     enqueued = _capture_enqueue(monkeypatch)
     monkeypatch.setattr(rn.novel_git, "fetch", AsyncMock())
@@ -766,7 +768,7 @@ async def test_sync_pull_with_changes_enqueues_novel_index_job(member_client, no
 async def test_sync_already_up_to_date_does_not_enqueue_novel_index_job(member_client, novel_repo, monkeypatch):
     """pull_ff returns True even when already up to date (ff-only exit 0) —
     the enqueue gate must key on behind>0, not on pull_ff's return value."""
-    import routers.novels as rn
+    import services.novel_gitlock as rn
 
     enqueued = _capture_enqueue(monkeypatch)
     monkeypatch.setattr(rn.novel_git, "fetch", AsyncMock())
@@ -783,7 +785,7 @@ async def test_sync_already_up_to_date_does_not_enqueue_novel_index_job(member_c
 
 async def test_reset_enqueues_novel_index_job(admin_client, novel_repo, monkeypatch):
     """reset --hard rewrites the working tree; the index must follow."""
-    import routers.novels as rn
+    import services.novel_gitlock as rn
 
     enqueued = _capture_enqueue(monkeypatch)
     monkeypatch.setattr(rn.novel_git, "reset_to_origin", AsyncMock())

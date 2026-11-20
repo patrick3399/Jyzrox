@@ -78,7 +78,7 @@ async def test_bulk_metadata_category_set_resolves_through_registry(client, db_s
 
 
 async def test_batch_scan_preview_reports_registry_resolution(client, db_session, tmp_path, monkeypatch):
-    import routers.import_router as ir
+    import routers.import_batch as ir
 
     await _seed(db_session, "Cosplay")
     for category in ("cosplay", "Novel"):
@@ -106,8 +106,8 @@ async def test_batch_start_payload_carries_registry_names_and_none_for_misses(cl
 
     await _seed(db_session, "Cosplay")
     with (
-        patch("routers.import_router._validate_root_dir", AsyncMock(return_value="/mnt/test_lib/root")),
-        patch("routers.import_router.core.queue.enqueue", AsyncMock()) as enqueue,
+        patch("routers.import_batch._validate_root_dir", AsyncMock(return_value="/mnt/test_lib/root")),
+        patch("routers.import_batch.core.queue.enqueue", AsyncMock()) as enqueue,
     ):
         resp = await client.post(
             "/api/import/batch/start",

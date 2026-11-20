@@ -185,7 +185,7 @@ async def test_cancel_download_emits_download_cancelled(client, db_session, mock
     mock_emit = AsyncMock()
     # download.py imports get_redis at module level, so patch the bound name in the module
     with patch("core.events.emit_safe", mock_emit):
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download_job_ops.get_redis", return_value=mock_redis):
             resp = await client.delete(f"/api/download/jobs/{job_id}")
 
     assert resp.status_code == 200

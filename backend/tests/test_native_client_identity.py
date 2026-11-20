@@ -270,8 +270,8 @@ async def test_eh_thumbnail_proxy_is_a_chrome_image_load(client, mock_redis):
     recorder = _Recorder()
 
     with (
-        patch("plugins.builtin.ehentai.browse._is_private", return_value=True),
-        patch("plugins.builtin.ehentai.browse.get_credential", new_callable=AsyncMock, return_value=None),
+        patch("plugins.builtin.ehentai._browse_thumb._is_private", return_value=True),
+        patch("plugins.builtin.ehentai._browse_thumb.get_credential", new_callable=AsyncMock, return_value=None),
         patch("httpx.AsyncClient", recorder.client_class),
     ):
         resp = await client.get("/api/eh/thumb-proxy", params={"url": "https://ehgt.org/t/00/01.jpg"})
@@ -300,8 +300,8 @@ async def test_eh_password_login_requests_are_chrome_navigations(client):
     eh_client.get_account_info = AsyncMock(return_value={})
 
     with (
-        patch("routers.settings.set_credential", new_callable=AsyncMock),
-        patch("routers.settings.EhClient", return_value=eh_client),
+        patch("routers.settings_credentials_eh.set_credential", new_callable=AsyncMock),
+        patch("routers.settings_credentials_eh.EhClient", return_value=eh_client),
         patch("httpx.AsyncClient", recorder.client_class),
     ):
         resp = await client.post(
@@ -405,7 +405,7 @@ async def test_pixiv_public_ranking_is_a_chrome_fetch(client):
     recorder = _Recorder(lambda request: httpx.Response(200, json={"contents": []}))
 
     with (
-        patch("plugins.builtin.pixiv._browse.get_credential", new_callable=AsyncMock, return_value=None),
+        patch("plugins.builtin.pixiv._browse_common.get_credential", new_callable=AsyncMock, return_value=None),
         patch("httpx.AsyncClient", recorder.client_class),
     ):
         resp = await client.get("/api/pixiv/ranking", params={"mode": "daily"})
@@ -424,7 +424,7 @@ async def test_pixiv_anonymous_image_fallback_is_a_chrome_image_load(client):
         patch("services.cache.get_pixiv_image_cache", new_callable=AsyncMock, return_value=None),
         patch("services.cache.set_pixiv_image_cache", new_callable=AsyncMock),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
-        patch("plugins.builtin.pixiv._browse.get_credential", new_callable=AsyncMock, return_value=None),
+        patch("plugins.builtin.pixiv._browse_common.get_credential", new_callable=AsyncMock, return_value=None),
         patch("httpx.AsyncClient", recorder.client_class),
     ):
         resp = await client.get(
@@ -492,7 +492,7 @@ async def test_pixiv_credential_verify_uses_the_app_identity_client():
 async def test_saving_pixiv_refresh_token_verifies_with_the_app_identity_client(client):
     sent: list = []
     with (
-        patch("routers.settings.set_credential", new_callable=AsyncMock),
+        patch("routers.settings_credentials_pixiv.set_credential", new_callable=AsyncMock),
         patch("services.pixiv_client.new_app_api", _recording_app_api(sent)),
         patch("pixivpy3.AppPixivAPI", side_effect=AssertionError("bare pixivpy3 client")),
     ):
@@ -510,7 +510,7 @@ async def test_pixiv_oauth_callback_exchanges_code_with_the_app_identity(client)
     recorder = _Recorder(lambda request: httpx.Response(200, json={"refresh_token": "rt", "user": {"name": "u"}}))
 
     with (
-        patch("routers.settings.set_credential", new_callable=AsyncMock),
+        patch("routers.settings_credentials_pixiv.set_credential", new_callable=AsyncMock),
         patch("httpx.AsyncClient", recorder.client_class),
     ):
         resp = await client.post(
@@ -534,7 +534,7 @@ async def test_pixiv_cookie_login_uses_chrome_for_the_web_session_and_the_app_fo
 
     recorder = _Recorder(respond)
     with (
-        patch("routers.settings.set_credential", new_callable=AsyncMock),
+        patch("routers.settings_credentials_pixiv.set_credential", new_callable=AsyncMock),
         patch("httpx.AsyncClient", recorder.client_class),
     ):
         resp = await client.post("/api/settings/credentials/pixiv/cookie", json={"phpsessid": "session"})

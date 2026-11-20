@@ -25,7 +25,7 @@ SHA_X = "f" * 64
 @pytest.fixture(autouse=True)
 def fs(tmp_path, monkeypatch):
     """Point CAS / library / thumbs at a per-test tmp dir."""
-    import services.cas as cas_module
+    import services.cas_paths as cas_module
 
     settings = cas_module.settings
     monkeypatch.setattr(settings, "data_cas_path", str(tmp_path / "cas"))
@@ -37,8 +37,8 @@ def fs(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_side_effects():
     with (
-        patch("routers.explorer.invalidate_sources_cache", new_callable=AsyncMock) as invalidate,
-        patch("routers.explorer.emit_safe", new_callable=AsyncMock) as emit,
+        patch("routers.explorer_galleries.invalidate_sources_cache", new_callable=AsyncMock) as invalidate,
+        patch("routers.explorer_galleries.emit_safe", new_callable=AsyncMock) as emit,
     ):
         yield {"invalidate": invalidate, "emit": emit}
 

@@ -52,7 +52,7 @@ class TestBrowseFilesystem:
         fake_path.realpath = _realpath
         fake_os = types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os)})
         fake_os.path = fake_path
-        monkeypatch.setattr("routers.import_router.os", fake_os)
+        monkeypatch.setattr("routers.import_browse.os", fake_os)
 
         iterdir_threads: list[int] = []
         real_iterdir = Path.iterdir
@@ -85,12 +85,12 @@ class TestBatchScan:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
             patch("os.walk", side_effect=_walk),
         ):
             resp = await client.post(
@@ -112,12 +112,12 @@ class TestBatchScan:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
             patch("os.walk", return_value=iter(walk_data)),
         ):
             resp = await client.post(
@@ -163,13 +163,13 @@ class TestBatchScan:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.relpath", side_effect=_posix_relpath),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
             patch("os.walk", return_value=iter(walk_data)),
         ):
             resp = await client.post(
@@ -206,13 +206,13 @@ class TestBatchScan:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.relpath", side_effect=_posix_relpath),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
             patch("os.walk", return_value=iter(walk_data)),
         ):
             # Pattern {title} only matches one level deep — "deep/nested" should not match
@@ -270,12 +270,12 @@ class TestBatchStart:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
         ):
             resp = await client.post(
                 "/api/import/batch/start",
@@ -313,13 +313,13 @@ class TestBatchStart:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
-            patch("routers.import_router.async_session", mock_session_factory),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.async_session", mock_session_factory),
         ):
             resp = await client.post(
                 "/api/import/batch/start",
@@ -337,12 +337,12 @@ class TestBatchStart:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
         ):
             resp = await client.post(
                 "/api/import/batch/start",
@@ -380,7 +380,7 @@ class TestBatchProgress:
     async def test_progress_unknown_batch(self, client, mock_redis):
         """Unknown batch_id should return 404 (not found in Redis)."""
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_batch.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/batch/progress/nonexistent-batch-id")
 
         assert resp.status_code == 404
@@ -396,7 +396,7 @@ class TestBatchProgress:
             "current_gallery_id": None,
         }
         mock_redis.get = AsyncMock(return_value=json.dumps(progress_payload).encode())
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_batch.get_redis", return_value=mock_redis):
             resp = await client.get(f"/api/import/batch/progress/{batch_id}")
 
         assert resp.status_code == 200
@@ -425,7 +425,7 @@ class TestGetImportProgress:
     async def test_progress_unknown_gallery(self, client, mock_redis):
         """Gallery with no Redis progress data should return status=unknown."""
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_conflicts.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/progress/9999")
         assert resp.status_code == 200
         data = resp.json()
@@ -436,7 +436,7 @@ class TestGetImportProgress:
         """Gallery with Redis progress data should return parsed status."""
         progress_data = {"status": "running", "current": 5, "total": 20}
         mock_redis.get = AsyncMock(return_value=json.dumps(progress_data).encode())
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_conflicts.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/progress/42")
         assert resp.status_code == 200
         data = resp.json()
@@ -449,7 +449,7 @@ class TestGetImportProgress:
         """Completed import should return status=completed in progress data."""
         progress_data = {"status": "completed", "current": 10, "total": 10}
         mock_redis.get = AsyncMock(return_value=json.dumps(progress_data).encode())
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_conflicts.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/progress/7")
         assert resp.status_code == 200
         data = resp.json()
@@ -1479,7 +1479,7 @@ class TestRecentImports:
 
     async def test_recent_imports_empty_returns_empty_list(self, client, db_session_factory):
         """With no local galleries, should return an empty list."""
-        with patch("routers.import_router.async_session", db_session_factory):
+        with patch("routers.import_browse.async_session", db_session_factory):
             resp = await client.get("/api/import/recent")
         assert resp.status_code == 200
         data = resp.json()
@@ -1506,7 +1506,7 @@ class TestRecentImports:
         )
         await db_session.commit()
 
-        with patch("routers.import_router.async_session", db_session_factory):
+        with patch("routers.import_browse.async_session", db_session_factory):
             resp = await client.get("/api/import/recent")
         assert resp.status_code == 200
         data = resp.json()
@@ -1532,10 +1532,10 @@ class TestListLibraries:
         """Should return a list of configured library paths."""
         with (
             patch(
-                "routers.import_router.get_all_library_paths",
+                "routers.import_libraries.get_all_library_paths",
                 AsyncMock(return_value=["/mnt/lib1"]),
             ),
-            patch("routers.import_router.async_session", db_session_factory),
+            patch("routers.import_libraries.async_session", db_session_factory),
         ):
             resp = await client.get("/api/import/libraries")
         assert resp.status_code == 200
@@ -1560,7 +1560,7 @@ class TestRescanStatus:
     async def test_rescan_status_not_running(self, client, mock_redis):
         """With no rescan in progress, running=False should be returned."""
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/rescan/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -1571,7 +1571,7 @@ class TestRescanStatus:
         import json as _json
 
         mock_redis.get = AsyncMock(return_value=_json.dumps({"status": "running", "current": 3, "total": 10}).encode())
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/rescan/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -1581,7 +1581,7 @@ class TestRescanStatus:
         """running=True response must include current and total progress fields."""
         progress = json.dumps({"status": "running", "current": 5, "total": 100})
         mock_redis.get = AsyncMock(return_value=progress.encode())
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/rescan/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -1606,7 +1606,7 @@ class TestScanSettings:
     async def test_get_scan_settings_returns_defaults(self, client, mock_redis):
         """With no Redis overrides, default scan settings should be returned."""
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/scan-settings")
         assert resp.status_code == 200
         data = resp.json()
@@ -1619,7 +1619,7 @@ class TestScanSettings:
         """interval_hours outside [6, 168] should return 400."""
         mock_redis.set = AsyncMock(return_value=True)
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.patch(
                 "/api/import/scan-settings",
                 json={"interval_hours": 2},
@@ -1630,7 +1630,7 @@ class TestScanSettings:
         """Valid interval_hours should be accepted and returned."""
         mock_redis.set = AsyncMock(return_value=True)
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.patch(
                 "/api/import/scan-settings",
                 json={"interval_hours": 24},
@@ -1643,7 +1643,7 @@ class TestScanSettings:
         """Legacy scan settings must not modify scheduled task cron keys."""
         mock_redis.set = AsyncMock(return_value=True)
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.patch(
                 "/api/import/scan-settings",
                 json={"enabled": False, "interval_hours": 24},
@@ -1690,7 +1690,7 @@ class TestRescanCancel:
 
     async def test_rescan_cancel_returns_cancelling(self, client, mock_redis):
         """POST /api/import/rescan/cancel should set Redis key and return status=cancelling."""
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_rescan.get_redis", return_value=mock_redis):
             resp = await client.post("/api/import/rescan/cancel")
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelling"
@@ -1717,7 +1717,7 @@ class TestMonitorStatus:
     async def test_monitor_status_no_redis_data_returns_defaults(self, client, mock_redis):
         """No Redis watcher:status data should return running=False."""
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_libraries.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/monitor/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -1729,7 +1729,7 @@ class TestMonitorStatus:
         """Redis data should be reflected in the response."""
         watcher_data = json.dumps({"running": True, "paths": ["/mnt/library"]})
         mock_redis.get = AsyncMock(return_value=watcher_data.encode())
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_libraries.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/monitor/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -1742,8 +1742,8 @@ class TestMonitorStatus:
         values = {"watcher:status": status, "watcher:enabled": stored}
         mock_redis.get = AsyncMock(side_effect=values.get)
         with (
-            patch("routers.import_router.get_redis", return_value=mock_redis),
-            patch("routers.import_router.settings", MagicMock(library_monitor_enabled=setting)),
+            patch("routers.import_libraries.get_redis", return_value=mock_redis),
+            patch("routers.import_libraries.settings", MagicMock(library_monitor_enabled=setting)),
         ):
             resp = await client.get("/api/import/monitor/status")
         assert resp.status_code == 200
@@ -1789,7 +1789,7 @@ class TestMonitorToggle:
         mock_redis.get = AsyncMock(return_value=None)
         from main import app
 
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_libraries.get_redis", return_value=mock_redis):
             resp = await client.post(
                 "/api/import/monitor/toggle",
                 json={"enabled": True},
@@ -1803,7 +1803,7 @@ class TestMonitorToggle:
     async def test_monitor_toggle_disable(self, client, mock_redis):
         """Toggling monitor off should return status=disabled."""
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
+        with patch("routers.import_libraries.get_redis", return_value=mock_redis):
             resp = await client.post(
                 "/api/import/monitor/toggle",
                 json={"enabled": False},
@@ -1831,8 +1831,8 @@ class TestLibraries:
     async def test_list_libraries_returns_list(self, client, mock_redis, db_session_factory):
         """GET /api/import/libraries should return a list of library paths."""
         with (
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=[])),
-            patch("routers.import_router.async_session", db_session_factory),
+            patch("routers.import_libraries.get_all_library_paths", AsyncMock(return_value=[])),
+            patch("routers.import_libraries.async_session", db_session_factory),
         ):
             resp = await client.get("/api/import/libraries")
         assert resp.status_code == 200
@@ -1847,7 +1847,7 @@ class TestLibraries:
     async def test_add_library_nonexistent_path_returns_400(self, client):
         """Adding a library path that doesn't exist on disk should return 400."""
         with (
-            patch("routers.import_router.async_session"),
+            patch("routers.import_libraries.async_session"),
             patch("os.path.realpath", side_effect=lambda p: p),
         ):
             resp = await client.post(
@@ -1868,7 +1868,7 @@ class TestLibraries:
         from main import app
 
         mock_redis.get = AsyncMock(return_value=b"1")
-        with patch("routers.import_router.async_session", self._library_session()):
+        with patch("routers.import_libraries.async_session", self._library_session()):
             resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
 
         assert resp.status_code == 200
@@ -1878,7 +1878,7 @@ class TestLibraries:
         from main import app
 
         mock_redis.get = AsyncMock(return_value=b"1")
-        with patch("routers.import_router.async_session", self._library_session()):
+        with patch("routers.import_libraries.async_session", self._library_session()):
             resp = await client.delete("/api/import/libraries/1")
 
         assert resp.status_code == 200
@@ -1888,7 +1888,7 @@ class TestLibraries:
         from main import app
 
         mock_redis.get = AsyncMock(return_value=b"0")
-        with patch("routers.import_router.async_session", self._library_session()):
+        with patch("routers.import_libraries.async_session", self._library_session()):
             resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
 
         assert resp.status_code == 200
@@ -1900,7 +1900,7 @@ class TestLibraries:
 
         mock_redis.get = AsyncMock(return_value=b"1")
         app.state.enqueue.side_effect = RuntimeError("queue down")
-        with patch("routers.import_router.async_session", self._library_session()):
+        with patch("routers.import_libraries.async_session", self._library_session()):
             resp = await client.post("/api/import/libraries", json={"path": str(tmp_path)})
 
         assert resp.status_code == 200
@@ -1932,7 +1932,7 @@ class TestImportConflicts:
             )
         )
         await db_session.commit()
-        with patch("routers.import_router.async_session", db_session_factory):
+        with patch("routers.import_conflicts.async_session", db_session_factory):
             listed = await client.get("/api/import/conflicts")
             resolved = await client.post("/api/import/conflicts/9401/resolve", json={"resolution": "merge"})
         assert listed.status_code == 200
@@ -1966,10 +1966,10 @@ async def test_web_clip_imports_browser_authenticated_image(client, db_session, 
         return blob
 
     with (
-        patch("routers.import_router.settings.data_training_path", str(tmp_path)),
-        patch("routers.import_router.store_blob", side_effect=fake_store),
-        patch("routers.import_router.create_library_symlink", new_callable=AsyncMock),
-        patch("routers.import_router.emit_safe", new_callable=AsyncMock),
+        patch("routers.import_webclip.settings.data_training_path", str(tmp_path)),
+        patch("routers.import_webclip.store_blob", side_effect=fake_store),
+        patch("routers.import_webclip.create_library_symlink", new_callable=AsyncMock),
+        patch("routers.import_webclip.emit_safe", new_callable=AsyncMock),
     ):
         response = await client.post(
             "/api/import/web-clip",
@@ -2015,10 +2015,10 @@ async def test_web_clip_upload_filename_with_path_is_reduced_to_its_basename(cli
 
     symlink = AsyncMock()
     with (
-        patch("routers.import_router.settings.data_training_path", str(tmp_path)),
-        patch("routers.import_router.store_blob", side_effect=fake_store),
-        patch("routers.import_router.create_library_symlink", symlink),
-        patch("routers.import_router.emit_safe", new_callable=AsyncMock),
+        patch("routers.import_webclip.settings.data_training_path", str(tmp_path)),
+        patch("routers.import_webclip.store_blob", side_effect=fake_store),
+        patch("routers.import_webclip.create_library_symlink", symlink),
+        patch("routers.import_webclip.emit_safe", new_callable=AsyncMock),
     ):
         response = await client.post(
             "/api/import/web-clip",
@@ -2075,7 +2075,7 @@ class TestImportConflictOptions:
 class TestBatchScanCategory:
     async def test_scan_returns_category_group_for_four_segment_pattern(self, client, tmp_path, monkeypatch):
         """{category} must reach the preview payload so the UI can show it."""
-        import routers.import_router as ir
+        import routers.import_batch as ir
 
         gallery = tmp_path / "Cosplay" / "abfluss" / "g1"
         gallery.mkdir(parents=True)
@@ -2153,12 +2153,12 @@ class TestBatchStartCategoryTypeChecking:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
         ):
             resp = await client.post(
                 "/api/import/batch/start",
@@ -2183,12 +2183,12 @@ class TestBatchStartCategoryTypeChecking:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
         ):
             resp = await client.post(
                 "/api/import/batch/start",
@@ -2208,12 +2208,12 @@ class TestBatchStartCategoryTypeChecking:
         with (
             patch("core.config.settings.data_gallery_path", "/data/download_temp"),
             patch("core.config.settings.library_base_path", "/mnt"),
-            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("routers.import_batch.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
             patch("os.sep", "/"),
-            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_batch.get_redis", return_value=mock_redis),
         ):
             resp = await client.post(
                 "/api/import/batch/start",

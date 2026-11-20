@@ -137,9 +137,9 @@ class TestEhFavoriteState:
     async def test_returns_authenticated_cloud_state(self, client):
         eh_mock = _make_eh_client_mock()
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_proxy_favorites._make_client", return_value=eh_mock),
             patch(
-                "plugins.builtin.ehentai.browse.get_credential",
+                "plugins.builtin.ehentai._browse_proxy_favorites.get_credential",
                 new_callable=AsyncMock,
                 return_value='{"ipb_member_id":"1","ipb_pass_hash":"hash"}',
             ),
@@ -156,9 +156,9 @@ class TestEhImageSearch:
         eh_mock = _make_eh_client_mock()
         jpeg = b"\xff\xd8\xff" + b"original"
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_search._make_client", return_value=eh_mock),
             patch(
-                "plugins.builtin.ehentai.browse._get_blocked_tags",
+                "plugins.builtin.ehentai._browse_search._get_blocked_tags",
                 new_callable=AsyncMock,
                 return_value=set(),
             ),
@@ -199,7 +199,7 @@ class TestEhSearch:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_search._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -229,7 +229,7 @@ class TestEhSearch:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_search._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -246,7 +246,7 @@ class TestEhSearch:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_search._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -261,9 +261,9 @@ class TestEhSearch:
         eh_mock.search = AsyncMock(side_effect=PermissionError("Sad Panda"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_search._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
-            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+            patch("plugins.builtin.ehentai._browse_search.push_system_alert", new_callable=AsyncMock),
         ):
             resp = await client.get("/api/eh/search")
 
@@ -275,7 +275,7 @@ class TestEhSearch:
         eh_mock.search = AsyncMock(side_effect=ValueError("scrape failed"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_search._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
         ):
             resp = await client.get("/api/eh/search")
@@ -301,7 +301,7 @@ class TestEhGalleryMetadata:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_gallery._make_client", return_value=eh_mock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_gallery_cache", new_callable=AsyncMock),
         ):
@@ -329,9 +329,9 @@ class TestEhGalleryMetadata:
         eh_mock.get_gallery_metadata = AsyncMock(side_effect=PermissionError("Sad Panda"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_gallery._make_client", return_value=eh_mock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
-            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+            patch("plugins.builtin.ehentai._browse_gallery.push_system_alert", new_callable=AsyncMock),
         ):
             resp = await client.get("/api/eh/gallery/99/badtoken")
 
@@ -343,7 +343,7 @@ class TestEhGalleryMetadata:
         eh_mock.get_gallery_metadata = AsyncMock(side_effect=ValueError("parse failed"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_gallery._make_client", return_value=eh_mock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
         ):
             resp = await client.get("/api/eh/gallery/99/badtoken")
@@ -370,7 +370,7 @@ class TestEhGalleryComments:
         eh_mock = _make_eh_client_mock(comments=fake_comments)
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_gallery._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -412,7 +412,7 @@ class TestEhPopularAndToplist:
         eh_mock.get_popular = AsyncMock(return_value=fake_popular)
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_listing._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -434,7 +434,7 @@ class TestEhPopularAndToplist:
         eh_mock.get_toplist = AsyncMock(return_value={"galleries": [], "total": 0})
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_listing._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -497,9 +497,9 @@ class TestEhThumbProxy:
 
         with (
             # LAN clients bypass the limiter outright; the bug only bites public ones.
-            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
-            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
-            patch("plugins.builtin.ehentai.browse.get_credential", new_callable=AsyncMock) as credential,
+            patch("plugins.builtin.ehentai._browse_thumb._is_private", return_value=False),
+            patch("plugins.builtin.ehentai._browse_thumb.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("plugins.builtin.ehentai._browse_thumb.get_credential", new_callable=AsyncMock) as credential,
         ):
             resp = await client.get(
                 "/api/eh/thumb-proxy",
@@ -517,14 +517,14 @@ class TestEhThumbProxy:
         mock_redis.get = AsyncMock(return_value=None)
 
         with (
-            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
-            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("plugins.builtin.ehentai._browse_thumb._is_private", return_value=False),
+            patch("plugins.builtin.ehentai._browse_thumb.check_rate_limit", new_callable=AsyncMock) as rate_limit,
             patch(
-                "plugins.builtin.ehentai.browse.get_credential",
+                "plugins.builtin.ehentai._browse_thumb.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("plugins.builtin.ehentai.browse.httpx.AsyncClient") as http_client,
+            patch("plugins.builtin.ehentai._browse_thumb.httpx.AsyncClient") as http_client,
         ):
             http_client.return_value.__aenter__.return_value.get = AsyncMock(side_effect=httpx.HTTPError("boom"))
             resp = await client.get(
@@ -555,13 +555,13 @@ class TestEhThumbProxy:
         upstream.raise_for_status = MagicMock()
 
         with (
-            patch("plugins.builtin.ehentai.browse._is_private", return_value=True),
+            patch("plugins.builtin.ehentai._browse_thumb._is_private", return_value=True),
             patch(
-                "plugins.builtin.ehentai.browse.get_credential",
+                "plugins.builtin.ehentai._browse_thumb.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("plugins.builtin.ehentai.browse.httpx.AsyncClient") as http_client,
+            patch("plugins.builtin.ehentai._browse_thumb.httpx.AsyncClient") as http_client,
         ):
             http_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=upstream)
             resp = await client.get(
@@ -576,8 +576,8 @@ class TestEhThumbProxy:
     async def test_thumb_proxy_rejects_bad_domain_before_touching_rate_limit(self, client):
         """SSRF validation stays ahead of the limiter so bad URLs cost no quota."""
         with (
-            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
-            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("plugins.builtin.ehentai._browse_thumb._is_private", return_value=False),
+            patch("plugins.builtin.ehentai._browse_thumb.check_rate_limit", new_callable=AsyncMock) as rate_limit,
         ):
             resp = await client.get(
                 "/api/eh/thumb-proxy",
@@ -1118,7 +1118,7 @@ class TestEhGalleryPreviews:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_gallery._make_client", return_value=eh_mock),
             patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_preview_cache", new_callable=AsyncMock),
         ):
@@ -1136,9 +1136,9 @@ class TestEhGalleryPreviews:
         eh_mock.get_previews = AsyncMock(side_effect=PermissionError("Sad Panda"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_gallery._make_client", return_value=eh_mock),
             patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value=None),
-            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+            patch("plugins.builtin.ehentai._browse_gallery.push_system_alert", new_callable=AsyncMock),
         ):
             resp = await client.get("/api/eh/gallery/12345/abcdef/previews")
 
@@ -1158,7 +1158,7 @@ class TestEhGalleryImages:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_gallery._make_client", return_value=eh_mock),
             patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_imagelist_cache", new_callable=AsyncMock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=_FAKE_GALLERY_META),
@@ -1259,7 +1259,8 @@ class TestEhGalleryImagesPaginated:
         )
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_paginated._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_proxy_favorites._make_client", return_value=eh_mock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=gallery_cache),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
@@ -1327,7 +1328,8 @@ class TestEhImageProxy:
         eh_mock.fetch_image_bytes = AsyncMock(return_value=(fake_jpeg, "image/jpeg"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_paginated._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_proxy_favorites._make_client", return_value=eh_mock),
             patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
             patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
             patch("services.cache.set_imagelist_cache", new_callable=AsyncMock) as set_imagelist,
@@ -1354,7 +1356,7 @@ class TestEhImageProxy:
     async def test_image_proxy_missing_ptoken_without_gallery_cache_returns_404(self, client):
         """No pToken and no gallery cache (so no gallery token to fetch with) → 404, no EH request."""
         with (
-            patch("plugins.builtin.ehentai.browse._make_client") as make_client,
+            patch("plugins.builtin.ehentai._browse_paginated._make_client") as make_client,
             patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
             patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
@@ -1375,7 +1377,8 @@ class TestEhImageProxy:
         eh_mock.fetch_image_bytes = AsyncMock(return_value=(fake_jpeg, "image/jpeg"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_paginated._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_proxy_favorites._make_client", return_value=eh_mock),
             patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
             patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
             patch(
@@ -1399,7 +1402,7 @@ class TestEhImageProxy:
         eh_mock.get_image_url = AsyncMock(side_effect=httpx.ConnectTimeout("connect timed out"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_proxy_favorites._make_client", return_value=eh_mock),
             patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
             patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
         ):
@@ -1420,8 +1423,10 @@ class TestEhImageProxy:
 
         with (
             # LAN clients bypass the limiter outright; the bug only bites public ones.
-            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
-            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("plugins.builtin.ehentai._browse_proxy_favorites._is_private", return_value=False),
+            patch(
+                "plugins.builtin.ehentai._browse_proxy_favorites.check_rate_limit", new_callable=AsyncMock
+            ) as rate_limit,
             patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=fake_jpeg),
         ):
             resp = await client.get("/api/eh/image-proxy/12345/1")
@@ -1435,8 +1440,10 @@ class TestEhImageProxy:
         must still apply, keyed per-endpoint under `img_proxy:eh:` (not `eh_thumb:`,
         the sibling thumb-proxy endpoint's key)."""
         with (
-            patch("plugins.builtin.ehentai.browse._is_private", return_value=False),
-            patch("plugins.builtin.ehentai.browse.check_rate_limit", new_callable=AsyncMock) as rate_limit,
+            patch("plugins.builtin.ehentai._browse_proxy_favorites._is_private", return_value=False),
+            patch(
+                "plugins.builtin.ehentai._browse_proxy_favorites.check_rate_limit", new_callable=AsyncMock
+            ) as rate_limit,
             patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
             patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
@@ -1466,9 +1473,9 @@ class TestEhErrorParsing:
         eh_mock.get_toplist = AsyncMock(side_effect=PermissionError("bandwidth 509 exceeded"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_listing._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
-            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+            patch("plugins.builtin.ehentai._browse_listing.push_system_alert", new_callable=AsyncMock),
         ):
             resp = await client.get("/api/eh/toplists", params={"tl": 11})
 
@@ -1480,9 +1487,9 @@ class TestEhErrorParsing:
         eh_mock.get_toplist = AsyncMock(side_effect=PermissionError("Sad Panda"))
 
         with (
-            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai._browse_listing._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
-            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+            patch("plugins.builtin.ehentai._browse_listing.push_system_alert", new_callable=AsyncMock),
         ):
             resp = await client.get("/api/eh/toplists", params={"tl": 11})
 

@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from services import novel_git, novel_remote
+from services import novel_git, novel_git_core, novel_remote
 
 
 def _run(cwd, *args):
@@ -31,7 +31,7 @@ def _make_origin(tmp_path, name, branch="main", files=None):
 
 @pytest.fixture(autouse=True)
 def _allow_local_protocol(monkeypatch):
-    monkeypatch.setattr(novel_git, "_REMOTE_PROTOCOLS", "ssh:file")
+    monkeypatch.setattr(novel_git_core, "_REMOTE_PROTOCOLS", "ssh:file")
 
 
 @pytest.fixture()

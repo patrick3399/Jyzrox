@@ -119,7 +119,7 @@ async def test_monitored_directory_move_preserves_gallery_and_user_state(
         patch("worker.scan.AsyncSessionLocal", db_session_factory),
         patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
         patch("worker.scan.settings", scan_settings),
-        patch("services.cas.settings", cas_settings),
+        patch("services.cas_paths.settings", cas_settings),
         patch("core.events.emit_safe", new_callable=AsyncMock) as emit_spy,
     ):
         if cross_root:
@@ -395,7 +395,7 @@ def _move_patches(db_session_factory, library_root, sha_spy=None):
         patch("worker.scan.AsyncSessionLocal", db_session_factory),
         patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
         patch("worker.scan.settings", scan_settings),
-        patch("services.cas.settings", MagicMock(data_library_path=str(library_root))),
+        patch("services.cas_paths.settings", MagicMock(data_library_path=str(library_root))),
         patch("core.events.emit_safe", new_callable=AsyncMock),
     ]
     if sha_spy is not None:
@@ -603,7 +603,7 @@ def _missed_move_patches(db_session_factory, library_root):
         patch("worker.scan.get_all_library_paths", new=AsyncMock(return_value=[])),
         patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
         patch("worker.scan.settings", scan_settings),
-        patch("services.cas.settings", MagicMock(data_library_path=str(library_root))),
+        patch("services.cas_paths.settings", MagicMock(data_library_path=str(library_root))),
         patch("core.events.emit_safe", new_callable=AsyncMock),
         patch("core.queue.enqueue", new_callable=AsyncMock),
     )

@@ -55,8 +55,8 @@ async def viewer_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
-        patch("routers.settings.get_redis", return_value=mock_redis),
-        patch("routers.settings.async_session", db_session_factory),
+        patch("routers.settings_rate_limits.get_redis", return_value=mock_redis),
+        patch("routers.settings_tokens.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
         async with AsyncClient(
@@ -82,7 +82,7 @@ class TestGetRateLimits:
         """With no Redis keys set, should return config with fallback defaults."""
         mock_redis.get = AsyncMock(return_value=None)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.get("/api/settings/rate-limits")
 
         assert resp.status_code == 200
@@ -144,7 +144,7 @@ class TestGetRateLimits:
 
         mock_redis.get = AsyncMock(side_effect=_get_side_effect)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.get("/api/settings/rate-limits")
 
         assert resp.status_code == 200
@@ -172,7 +172,7 @@ class TestGetRateLimits:
 
         mock_redis.get = AsyncMock(side_effect=_get_side_effect)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.get("/api/settings/rate-limits")
 
         assert resp.status_code == 200
@@ -188,7 +188,7 @@ class TestGetRateLimits:
 
         mock_redis.get = AsyncMock(side_effect=_get_side_effect)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.get("/api/settings/rate-limits")
 
         assert resp.status_code == 200
@@ -201,7 +201,7 @@ class TestGetRateLimits:
 
     async def test_get_rate_limits_requires_admin_viewer_returns_403(self, viewer_client):
         """Viewer-role request should return 403."""
-        with patch("routers.settings.get_redis", return_value=AsyncMock(get=AsyncMock(return_value=None))):
+        with patch("routers.settings_rate_limits.get_redis", return_value=AsyncMock(get=AsyncMock(return_value=None))):
             resp = await viewer_client.get("/api/settings/rate-limits")
         assert resp.status_code == 403
 
@@ -219,7 +219,7 @@ class TestPatchRateLimits:
         mock_redis.set = AsyncMock(return_value=True)
 
         payload = {"sites": {"ehentai": {"concurrency": 3}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -233,7 +233,7 @@ class TestPatchRateLimits:
         mock_redis.set = AsyncMock(return_value=True)
 
         payload = {"sites": {"pixiv": {"delay_ms": 2000}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -244,7 +244,7 @@ class TestPatchRateLimits:
         mock_redis.set = AsyncMock(return_value=True)
 
         payload = {"sites": {"pixiv": {"image_concurrency": 4}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -262,7 +262,7 @@ class TestPatchRateLimits:
                 "mode": "full_speed",
             }
         }
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -276,7 +276,7 @@ class TestPatchRateLimits:
     async def test_patch_rate_limits_rejects_concurrency_zero(self, client, mock_redis):
         """Concurrency value of 0 should return 400 (out of range 1-10)."""
         payload = {"sites": {"ehentai": {"concurrency": 0}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 400
@@ -284,7 +284,7 @@ class TestPatchRateLimits:
     async def test_patch_rate_limits_rejects_concurrency_above_max(self, client, mock_redis):
         """Concurrency value of 11 should return 400 (out of range 1-10)."""
         payload = {"sites": {"ehentai": {"concurrency": 11}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 400
@@ -292,7 +292,7 @@ class TestPatchRateLimits:
     async def test_patch_rate_limits_rejects_negative_delay_ms(self, client, mock_redis):
         """Negative delay_ms should return 400."""
         payload = {"sites": {"ehentai": {"delay_ms": -1}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 400
@@ -300,7 +300,7 @@ class TestPatchRateLimits:
     async def test_patch_rate_limits_rejects_delay_ms_above_max(self, client, mock_redis):
         """delay_ms of 10001 should return 400 (out of range 0-10000)."""
         payload = {"sites": {"ehentai": {"delay_ms": 10001}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 400
@@ -309,7 +309,7 @@ class TestPatchRateLimits:
         """delay_ms of exactly 10000 should be accepted as valid."""
         mock_redis.set = AsyncMock(return_value=True)
         payload = {"sites": {"ehentai": {"delay_ms": 10000}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -317,7 +317,7 @@ class TestPatchRateLimits:
     async def test_patch_rate_limits_rejects_schedule_hour_above_23(self, client, mock_redis):
         """schedule.start_hour of 24 should return 400 (out of range 0-23)."""
         payload = {"schedule": {"start_hour": 24}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 400
@@ -325,7 +325,7 @@ class TestPatchRateLimits:
     async def test_patch_rate_limits_rejects_schedule_end_hour_negative(self, client, mock_redis):
         """schedule.end_hour of -1 should return 400."""
         payload = {"schedule": {"end_hour": -1}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 400
@@ -334,7 +334,7 @@ class TestPatchRateLimits:
         """Boundary values 0 and 23 for schedule hours should be accepted."""
         mock_redis.set = AsyncMock(return_value=True)
         payload = {"schedule": {"start_hour": 0, "end_hour": 23}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -345,7 +345,7 @@ class TestPatchRateLimits:
 
         # Only update concurrency, not delay_ms or image_concurrency
         payload = {"sites": {"ehentai": {"concurrency": 4}}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -360,7 +360,7 @@ class TestPatchRateLimits:
         """Empty body (no sites, no schedule) should succeed without touching Redis."""
         mock_redis.set = AsyncMock(return_value=True)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json={})
 
         assert resp.status_code == 200
@@ -371,7 +371,7 @@ class TestPatchRateLimits:
     async def test_patch_rate_limits_rejects_invalid_schedule_mode(self, client, mock_redis):
         """Invalid schedule mode string should return 400."""
         payload = {"schedule": {"mode": "turbo_boost"}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 400
@@ -380,7 +380,7 @@ class TestPatchRateLimits:
         """schedule.mode 'standard' should be accepted."""
         mock_redis.set = AsyncMock(return_value=True)
         payload = {"schedule": {"mode": "standard"}}
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.patch("/api/settings/rate-limits", json=payload)
 
         assert resp.status_code == 200
@@ -395,7 +395,7 @@ class TestPatchRateLimits:
 
     async def test_patch_rate_limits_requires_admin_viewer_returns_403(self, viewer_client):
         """Viewer-role request should return 403."""
-        with patch("routers.settings.get_redis", return_value=AsyncMock(set=AsyncMock())):
+        with patch("routers.settings_rate_limits.get_redis", return_value=AsyncMock(set=AsyncMock())):
             resp = await viewer_client.patch(
                 "/api/settings/rate-limits",
                 json={"sites": {"ehentai": {"concurrency": 2}}},
@@ -416,7 +416,7 @@ class TestSetRateLimitOverride:
         mock_redis.set = AsyncMock(return_value=True)
         mock_redis.delete = AsyncMock(return_value=1)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.post("/api/settings/rate-limits/override", json={"unlocked": True})
 
         assert resp.status_code == 200
@@ -429,7 +429,7 @@ class TestSetRateLimitOverride:
         mock_redis.set = AsyncMock(return_value=True)
         mock_redis.delete = AsyncMock(return_value=1)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.post("/api/settings/rate-limits/override", json={"unlocked": False})
 
         assert resp.status_code == 200
@@ -443,7 +443,7 @@ class TestSetRateLimitOverride:
         mock_redis.set = AsyncMock(return_value=True)
         mock_redis.delete = AsyncMock(return_value=1)
 
-        with patch("routers.settings.get_redis", return_value=mock_redis):
+        with patch("routers.settings_rate_limits.get_redis", return_value=mock_redis):
             resp = await client.post("/api/settings/rate-limits/override", json={"unlocked": unlocked})
 
         assert resp.status_code == 200
@@ -456,7 +456,9 @@ class TestSetRateLimitOverride:
 
     async def test_set_override_requires_admin_viewer_returns_403(self, viewer_client):
         """Viewer-role request should return 403."""
-        with patch("routers.settings.get_redis", return_value=AsyncMock(set=AsyncMock(), delete=AsyncMock())):
+        with patch(
+            "routers.settings_rate_limits.get_redis", return_value=AsyncMock(set=AsyncMock(), delete=AsyncMock())
+        ):
             resp = await viewer_client.post("/api/settings/rate-limits/override", json={"unlocked": True})
         assert resp.status_code == 403
 
@@ -754,7 +756,7 @@ class TestDownloadSemaphoreGetLimit:
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await DownloadSemaphore.get_limit("ehentai")
 
         # ehentai has default 2 in _LIMITS
@@ -773,7 +775,7 @@ class TestDownloadSemaphoreGetLimit:
 
         mock_redis.get = AsyncMock(side_effect=_get)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await DownloadSemaphore.get_limit("ehentai")
 
         assert result == 5
@@ -785,7 +787,7 @@ class TestDownloadSemaphoreGetLimit:
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await DownloadSemaphore.get_limit("unknown_site", default=7)
 
         assert result == 7
@@ -803,7 +805,7 @@ class TestDownloadSemaphoreGetLimit:
 
         mock_redis.get = AsyncMock(side_effect=_get)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await DownloadSemaphore.get_limit("pixiv")
 
         # Falls back to _LIMITS["pixiv"] = 2
@@ -816,7 +818,7 @@ class TestDownloadSemaphoreGetLimit:
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             await DownloadSemaphore.get_limit("gallery_dl")
 
         mock_redis.get.assert_awaited_with("rate_limit:config:gallery_dl:concurrency")

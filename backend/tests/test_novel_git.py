@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from services import novel_git
+from services import novel_git, novel_git_core
 
 
 def _run(cwd, *args):
@@ -83,7 +83,7 @@ async def test_git_timeout_reaps_the_killed_process(monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(novel_git.asyncio, "create_subprocess_exec", _fake_exec)
-    monkeypatch.setattr(novel_git, "_TIMEOUT", 0.05)
+    monkeypatch.setattr(novel_git_core, "_TIMEOUT", 0.05)
     with pytest.raises(novel_git.NovelGitError):
         await novel_git.head_sha("/tmp")
     assert reaped["kill"] is True

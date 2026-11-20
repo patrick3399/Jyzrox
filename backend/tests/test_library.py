@@ -1343,7 +1343,7 @@ class TestListGallerySources:
         from unittest.mock import patch
 
         mock_redis.get = AsyncMock_returning(None)
-        with patch("routers.library.get_redis", return_value=mock_redis):
+        with patch("routers.library_galleries_meta.get_redis", return_value=mock_redis):
             resp = await client.get("/api/library/galleries/sources")
         assert resp.status_code == 200
         assert resp.json() == []
@@ -1356,7 +1356,7 @@ class TestListGallerySources:
         for src, sid in [("pixiv", "src1"), ("pixiv", "src2"), ("ehentai", "src3")]:
             await _insert_gallery(db_session, source=src, source_id=sid)
 
-        with patch("routers.library.get_redis", return_value=mock_redis):
+        with patch("routers.library_galleries_meta.get_redis", return_value=mock_redis):
             resp = await client.get("/api/library/galleries/sources")
         assert resp.status_code == 200
         values = [s["value"] for s in resp.json()]
@@ -1371,7 +1371,7 @@ class TestListGallerySources:
 
         cached_sources = [{"value": "pixiv", "label": "pixiv"}]
         mock_redis.get = AsyncMock_returning(_json.dumps(cached_sources).encode())
-        with patch("routers.library.get_redis", return_value=mock_redis):
+        with patch("routers.library_galleries_meta.get_redis", return_value=mock_redis):
             resp = await client.get("/api/library/galleries/sources")
         assert resp.status_code == 200
         assert resp.json() == cached_sources
@@ -1395,7 +1395,7 @@ class TestListGallerySources:
         )
         await db_session.commit()
 
-        with patch("routers.library.get_redis", return_value=mock_redis):
+        with patch("routers.library_galleries_meta.get_redis", return_value=mock_redis):
             resp = await client.get("/api/library/galleries/sources")
         assert resp.status_code == 200
         values = [s["value"] for s in resp.json()]
@@ -1409,7 +1409,7 @@ class TestListGallerySources:
         mock_redis.get = AsyncMock_returning(None)
         await _insert_gallery(db_session, source="pixiv", source_id="cw1")
 
-        with patch("routers.library.get_redis", return_value=mock_redis):
+        with patch("routers.library_galleries_meta.get_redis", return_value=mock_redis):
             resp = await client.get("/api/library/galleries/sources")
         assert resp.status_code == 200
         mock_redis.set.assert_called_once()
@@ -4063,7 +4063,7 @@ class TestTrashEndpoints:
         assert resp.json()["count"] == 3
 
         enqueue = AsyncMock()
-        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+        with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
             resp = await client.post("/api/library/trash/empty")
         assert resp.status_code == 202
         assert resp.json() == {"status": "queued", "total": 3}
@@ -4080,7 +4080,7 @@ class TestTrashEndpoints:
         from unittest.mock import AsyncMock, patch
 
         enqueue = AsyncMock()
-        with patch("routers.library.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
+        with patch("services.library_trash.get_redis", return_value=mock_redis), patch("core.queue.enqueue", enqueue):
             resp = await client.post("/api/library/trash/empty")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok", "total": 0}

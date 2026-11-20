@@ -21,7 +21,7 @@ def enq():
 @pytest.fixture
 def redis_patched(mock_redis):
     with (
-        patch("routers.download.get_redis", return_value=mock_redis),
+        patch("routers.download_job_ops.get_redis", return_value=mock_redis),
         patch("services.download_stop.get_redis", return_value=mock_redis),
     ):
         yield mock_redis

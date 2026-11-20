@@ -102,7 +102,7 @@ async def admin_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
-        patch("routers.download.get_redis", return_value=mock_redis),
+        patch("routers.download_actions.get_redis", return_value=mock_redis),
         patch("core.site_config.AsyncSessionLocal", db_session_factory),
         patch("core.site_config.get_redis", return_value=mock_redis),
     ]
@@ -525,7 +525,7 @@ class TestSemaphoreEventEmission:
         job_id = str(uuid.uuid4())
 
         with (
-            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.redis_semaphores.get_redis", return_value=mock_redis),
             patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit,
         ):
             await sem.acquire(job_id)
@@ -548,7 +548,7 @@ class TestSemaphoreEventEmission:
         job_id = str(uuid.uuid4())
 
         with (
-            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.redis_semaphores.get_redis", return_value=mock_redis),
             patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit,
         ):
             await sem.release(job_id)
@@ -570,7 +570,7 @@ class TestSemaphoreEventEmission:
         job_id = str(uuid.uuid4())
 
         with (
-            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.redis_semaphores.get_redis", return_value=mock_redis),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
@@ -590,7 +590,7 @@ class TestSemaphoreEventEmission:
         job_id = str(uuid.uuid4())
 
         with (
-            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.redis_semaphores.get_redis", return_value=mock_redis),
             patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             with pytest.raises(TimeoutError):

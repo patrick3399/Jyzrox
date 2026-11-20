@@ -71,7 +71,9 @@ async def _novel_client(db_session, db_session_factory, role, mock_redis):
     _app.dependency_overrides[require_auth] = _override_require_auth
     patches = [
         patch("routers.novels.async_session", db_session_factory),
+        patch("routers.novels_ops.async_session", db_session_factory),
         patch("routers.novels.get_redis", return_value=mock_redis),
+        patch("services.novel_gitlock.get_redis", return_value=mock_redis),
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
@@ -112,9 +114,9 @@ async def admin_client(db_session, db_session_factory, mock_redis):
 
 @pytest.fixture(autouse=True)
 def _local_protocol(monkeypatch):
-    from services import novel_git
+    from services import novel_git_core
 
-    monkeypatch.setattr(novel_git, "_REMOTE_PROTOCOLS", "ssh:file")
+    monkeypatch.setattr(novel_git_core, "_REMOTE_PROTOCOLS", "ssh:file")
 
 
 @pytest.fixture()
@@ -247,7 +249,7 @@ async def test_put_unrelated_with_confirm_reclones_and_reindexes(
 ):
     other = _unrelated_hub(tmp_path)
     reindex = AsyncMock()
-    monkeypatch.setattr("routers.novels._enqueue_reindex", reindex)
+    monkeypatch.setattr("routers.novels_remote._enqueue_reindex", reindex)
     r = await admin_client.put("/api/novels/remote", json={"url": str(other), "confirm_reclone": True})
     assert r.status_code == 200 and r.json()["mode"] == "recloned"
     assert (novel_repo["work"] / "z.md").exists()
@@ -261,7 +263,7 @@ async def test_put_without_existing_clone_clones(local_urls, admin_client, tmp_p
     hub = _unrelated_hub(tmp_path)
     target = tmp_path / "fresh"
     monkeypatch.setattr(settings, "novel_repo_path", str(target))
-    monkeypatch.setattr("routers.novels._enqueue_reindex", AsyncMock())
+    monkeypatch.setattr("routers.novels_remote._enqueue_reindex", AsyncMock())
     r = await admin_client.put("/api/novels/remote", json={"url": str(hub)})
     assert r.status_code == 200 and r.json()["mode"] == "cloned"
     assert (target / "z.md").exists()
@@ -278,7 +280,7 @@ async def test_remote_routes_work_while_module_disabled(
 
 
 async def test_put_holds_git_lock(local_urls, admin_client, novel_repo, tmp_path, monkeypatch):
-    import routers.novels as rn
+    import routers.novels_remote as rn
 
     mirror = tmp_path / "mirror.git"
     _run(tmp_path, "clone", "--bare", str(novel_repo["bare"]), str(mirror))

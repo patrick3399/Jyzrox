@@ -26,8 +26,8 @@ async def test_sync_link_gallery_returns_service_result(client, db_session):
     sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=2, pending=2, pages=5))
 
     with (
-        patch("routers.library.sync_link_gallery", sync),
-        patch("routers.library.get_redis", return_value=AsyncMock()),
+        patch("routers.library_gallery_detail.sync_link_gallery", sync),
+        patch("routers.library_gallery_detail.get_redis", return_value=AsyncMock()),
     ):
         response = await client.post("/api/library/galleries/local/linked/sync")
 
@@ -54,8 +54,8 @@ async def test_sync_endpoint_never_passes_hash_limits(client, db_session):
     sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=300, pending=300, pages=303))
 
     with (
-        patch("routers.library.sync_link_gallery", sync),
-        patch("routers.library.get_redis", return_value=AsyncMock()),
+        patch("routers.library_gallery_detail.sync_link_gallery", sync),
+        patch("routers.library_gallery_detail.get_redis", return_value=AsyncMock()),
         patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
     ):
         response = await client.post("/api/library/galleries/local/nolimits/sync")
@@ -70,7 +70,7 @@ async def test_sync_non_link_gallery_does_no_filesystem_work(client, db_session)
     await _insert(db_session, "copied", import_mode="copy", source_path=None)
     sync = AsyncMock()
 
-    with patch("routers.library.sync_link_gallery", sync):
+    with patch("routers.library_gallery_detail.sync_link_gallery", sync):
         response = await client.post("/api/library/galleries/local/copied/sync")
 
     assert response.status_code == 200

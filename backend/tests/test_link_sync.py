@@ -73,12 +73,12 @@ def _env(db_session_factory, library_root: Path):
     hasher = MagicMock(side_effect=AssertionError("sync must not hash"))
     with (
         patch("services.link_sync.AsyncSessionLocal", db_session_factory),
-        patch("services.cas.settings", cas_settings),
+        patch("services.cas_paths.settings", cas_settings),
         patch("services.link_sync.emit_safe", new_callable=AsyncMock),
         patch("services.link_sync.write_gallery_sidecar", new_callable=AsyncMock),
         patch("services.link_sync.cleanup_unreferenced_thumbnails", new_callable=AsyncMock, return_value=set()),
         # create=True: the hash pass (and its import) arrives with the background job.
-        patch("services.link_sync.hash_file_with_identity", hasher, create=True),
+        patch("services.link_sync_hash.hash_file_with_identity", hasher, create=True),
         patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
     ):
         enqueue.hasher = hasher

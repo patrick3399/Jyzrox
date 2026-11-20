@@ -17,8 +17,10 @@ def _hash_env(db_session_factory, library_root: Path):
     cas_settings.data_library_path = str(library_root)
     with (
         patch("services.link_sync.AsyncSessionLocal", db_session_factory),
-        patch("services.cas.settings", cas_settings),
+        patch("services.cas_paths.settings", cas_settings),
         patch("services.link_sync.emit_safe", new_callable=AsyncMock),
+        patch("services.link_sync_hash.AsyncSessionLocal", db_session_factory),
+        patch("services.link_sync_hash.emit_safe", new_callable=AsyncMock),
         patch("services.link_sync.write_gallery_sidecar", new_callable=AsyncMock),
         patch("services.link_sync.cleanup_unreferenced_thumbnails", new_callable=AsyncMock, return_value=set()),
         patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
@@ -125,13 +127,13 @@ async def test_hash_row_deleted_during_pass_takes_no_reference(
     mock_redis,
     layout,  # noqa: F811
 ):
-    from services import link_sync
+    from services import link_sync_hash
     from services.link_sync import hash_pending_images, sync_link_gallery
 
     root, source, library = layout
     _write(source / "001.jpg", b"one")
     gallery_id = await _gallery(db_session, source, root)
-    real_hash_path = link_sync._hash_path
+    real_hash_path = link_sync_hash._hash_path
 
     async def hash_then_delete_row(path: str):
         outcome = await real_hash_path(path)
@@ -142,7 +144,7 @@ async def test_hash_row_deleted_during_pass_takes_no_reference(
 
     with _hash_env(db_session_factory, library):
         await sync_link_gallery(gallery_id, redis=mock_redis)
-        with patch("services.link_sync._hash_path", hash_then_delete_row):
+        with patch("services.link_sync_hash._hash_path", hash_then_delete_row):
             result = await hash_pending_images(gallery_id)
 
     assert result.hashed == 0
@@ -259,13 +261,13 @@ async def test_hash_page_whose_fingerprint_moved_during_pass_takes_no_reference(
     layout,  # noqa: F811
 ):
     """A sync that re-fingerprints the row mid-pass must win over the stale hash."""
-    from services import link_sync
+    from services import link_sync_hash
     from services.link_sync import hash_pending_images, sync_link_gallery
 
     root, source, library = layout
     _write(source / "001.jpg", b"one")
     gallery_id = await _gallery(db_session, source, root)
-    real_hash_path = link_sync._hash_path
+    real_hash_path = link_sync_hash._hash_path
 
     async def hash_then_refingerprint(path: str):
         outcome = await real_hash_path(path)
@@ -279,7 +281,7 @@ async def test_hash_page_whose_fingerprint_moved_during_pass_takes_no_reference(
 
     with _hash_env(db_session_factory, library):
         await sync_link_gallery(gallery_id, redis=mock_redis)
-        with patch("services.link_sync._hash_path", hash_then_refingerprint):
+        with patch("services.link_sync_hash._hash_path", hash_then_refingerprint):
             result = await hash_pending_images(gallery_id)
 
     assert result.hashed == 0

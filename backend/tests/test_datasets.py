@@ -289,7 +289,10 @@ async def test_dataset_filters_preview_apply_and_relax_preserve_manual_exclusion
         dimensions=[(512, 512), (2048, 2048), (5000, 1200), (None, None)],
     )
 
-    with patch("routers.datasets.emit_safe", new_callable=AsyncMock):
+    with (
+        patch("routers.datasets.emit_safe", new_callable=AsyncMock),
+        patch("routers.datasets_ops.emit_safe", new_callable=AsyncMock),
+    ):
         async with make_client(user_id=1) as ac:
             created = await ac.post(
                 "/api/datasets/",
@@ -361,7 +364,10 @@ async def test_dataset_phash_filter_keeps_first_and_restores_when_disabled(db_se
         phashes=[0b0000, 0b0001, 0b1111, None],
     )
 
-    with patch("routers.datasets.emit_safe", new_callable=AsyncMock):
+    with (
+        patch("routers.datasets.emit_safe", new_callable=AsyncMock),
+        patch("routers.datasets_ops.emit_safe", new_callable=AsyncMock),
+    ):
         async with make_client(user_id=1) as ac:
             created = await ac.post(
                 "/api/datasets/", json={"name": "pHash", "image_ids": [image.id for image in images]}
@@ -404,7 +410,10 @@ async def test_dataset_caption_review_and_batch_rewrite(db_session, make_client)
     )
 
     async with make_client(user_id=1) as ac:
-        with patch("routers.datasets.emit_safe", new_callable=AsyncMock):
+        with (
+            patch("routers.datasets.emit_safe", new_callable=AsyncMock),
+            patch("routers.datasets_ops.emit_safe", new_callable=AsyncMock),
+        ):
             created = await ac.post(
                 "/api/datasets/", json={"name": "Captions", "image_ids": [image.id for image in images]}
             )

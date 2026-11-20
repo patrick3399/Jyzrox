@@ -332,7 +332,7 @@ def test_get_pubsub_returns_pubsub_from_redis_instance():
     mock_redis = AsyncMock()
     mock_redis.pubsub = lambda: mock_pubsub
 
-    with patch("core.redis_client.get_redis", return_value=mock_redis):
+    with patch("core.redis_pubsub.get_redis", return_value=mock_redis):
         result = get_pubsub()
 
     assert result is mock_pubsub
@@ -543,7 +543,7 @@ class TestDownloadSemaphoreAcquire:
         mock_redis = AsyncMock()
         mock_redis.eval = AsyncMock(return_value=1)  # Lua returns 1 = acquired
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             with patch("core.events.emit_safe", new_callable=AsyncMock):
                 wait_time = await sem.acquire("job-001")
 
@@ -558,7 +558,7 @@ class TestDownloadSemaphoreAcquire:
         mock_redis = AsyncMock()
         mock_redis.eval = AsyncMock(return_value=0)  # never acquired
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             with pytest.raises(TimeoutError, match="Download semaphore"):
                 await sem.acquire("job-timeout", timeout=0)
 
@@ -570,7 +570,7 @@ class TestDownloadSemaphoreAcquire:
         mock_redis = AsyncMock()
         mock_redis.eval = AsyncMock(return_value=1)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             with patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit:
                 await sem.acquire("job-emit")
 
@@ -594,7 +594,7 @@ class TestDownloadSemaphoreRelease:
         mock_redis = AsyncMock()
         mock_redis.zrem = AsyncMock(return_value=1)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             with patch("core.events.emit_safe", new_callable=AsyncMock):
                 await sem.release("job-zrem")
 
@@ -608,7 +608,7 @@ class TestDownloadSemaphoreRelease:
         mock_redis = AsyncMock()
         mock_redis.zrem = AsyncMock(return_value=1)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             with patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit:
                 await sem.release("job-release-emit")
 
@@ -632,7 +632,7 @@ class TestDownloadSemaphoreHeartbeat:
         mock_redis = AsyncMock()
         mock_redis.eval = AsyncMock(return_value=1)  # job exists
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await sem.heartbeat("job-alive")
 
         assert result is True
@@ -645,7 +645,7 @@ class TestDownloadSemaphoreHeartbeat:
         mock_redis = AsyncMock()
         mock_redis.eval = AsyncMock(return_value=0)  # job not found
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await sem.heartbeat("job-evicted")
 
         assert result is False
@@ -664,7 +664,7 @@ class TestDownloadSemaphoreGetAllActive:
         mock_redis = AsyncMock()
         mock_redis.scan = AsyncMock(return_value=(0, []))  # no keys
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await DownloadSemaphore.get_all_active()
 
         assert result == {}
@@ -681,7 +681,7 @@ class TestDownloadSemaphoreGetAllActive:
         # ehentai: used=2, limit=None (default 2); pixiv: used=1, limit=b"3"
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
-        with patch("core.redis_client.get_redis", return_value=mock_redis):
+        with patch("core.redis_semaphores.get_redis", return_value=mock_redis):
             result = await DownloadSemaphore.get_all_active()
 
         assert "ehentai" in result

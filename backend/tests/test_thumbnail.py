@@ -40,7 +40,7 @@ def test_ugoira_zip_preview_builds_bounded_concat_manifest(tmp_path):
         captured["destination"] = str(output)
         captured["concat"] = str(concat)
 
-    with patch("worker.thumbnail._encode_preview", side_effect=capture):
+    with patch("worker.thumbnail_media._encode_preview", side_effect=capture):
         _generate_zip_preview(archive, destination)
 
     assert "000000.jpg" in captured["manifest"]
@@ -697,10 +697,10 @@ def single_decode_slot(monkeypatch):
     from worker import thumbnail as thumbnail_module
 
     monkeypatch.setenv("THUMBNAIL_WORKERS", "1")
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore", None)
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore_size", None)
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor", None)
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor_size", None)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_semaphore", None)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_semaphore_size", None)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_executor", None)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_executor_size", None)
     return thumbnail_module
 
 

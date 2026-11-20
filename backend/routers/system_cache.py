@@ -1,0 +1,110 @@
+"""System cache management endpoints."""
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from core.auth import require_role
+from core.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+_admin = require_role("admin")
+
+
+# ── Cache management ──────────────────────────────────────────────────
+
+_CACHE_PATTERNS: dict[str, str] = {
+    "eh_search": "eh:search:*",
+    "eh_gallery": "eh:gallery:*",
+    "eh_image": "thumb:proxied:*",
+    "thumbs": "thumb:cdn:*",
+    "eh_popular": "eh:popular",
+    "eh_toplist": "eh:toplist:*",
+    "eh_comments": "eh:comments:*",
+    "eh_favorites": "eh:favorites:*",
+    "eh_previews": "eh:previews:*",
+    "eh_imagelist": "eh:imagelist:*",
+}
+
+
+async def _count_keys(pattern: str, max_iterations: int = 500) -> int:
+    """Count Redis keys matching a glob pattern (uses SCAN to avoid blocking).
+
+    Caps at max_iterations SCAN rounds (~100K keys) to prevent blocking on large keyspaces.
+    """
+    r = get_redis()
+    count = 0
+    cursor = 0
+    iterations = 0
+    while True:
+        cursor, keys = await r.scan(cursor, match=pattern, count=200)
+        count += len(keys)
+        iterations += 1
+        if cursor == 0 or iterations >= max_iterations:
+            break
+    return count
+
+
+async def _delete_keys(pattern: str) -> int:
+    """Delete all Redis keys matching a glob pattern via SCAN + DEL."""
+    r = get_redis()
+    deleted = 0
+    cursor = 0
+    while True:
+        cursor, keys = await r.scan(cursor, match=pattern, count=200)
+        if keys:
+            deleted += await r.delete(*keys)
+        if cursor == 0:
+            break
+    return deleted
+
+
+@router.get("/cache")
+async def get_cache_stats(_: dict = Depends(_admin)):
+    """Return Redis memory usage and key counts by category."""
+    r = get_redis()
+
+    # Memory info
+    info = await r.info("memory")
+    used_memory = info.get("used_memory", 0)
+    used_memory_human = info.get("used_memory_human", "N/A")
+
+    # Key counts
+    total_keys = await r.dbsize()
+    breakdown = {}
+    for category, pattern in _CACHE_PATTERNS.items():
+        breakdown[category] = await _count_keys(pattern)
+    breakdown["sessions"] = await _count_keys("session:*")
+
+    return {
+        "total_memory": used_memory,
+        "total_memory_human": used_memory_human,
+        "total_keys": total_keys,
+        "breakdown": breakdown,
+    }
+
+
+@router.delete("/cache")
+async def clear_cache(_: dict = Depends(_admin)):
+    """Clear all EH cache (search, gallery, images, thumbs). Does not clear sessions."""
+    deleted = 0
+    for pattern in _CACHE_PATTERNS.values():
+        deleted += await _delete_keys(pattern)
+    return {"status": "ok", "deleted_keys": deleted}
+
+
+@router.delete("/cache/{category}")
+async def clear_cache_category(
+    category: str,
+    _: dict = Depends(_admin),
+):
+    """Clear a specific cache category: eh_search, eh_gallery, eh_image, thumbs."""
+    if category not in _CACHE_PATTERNS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown category. Valid: {list(_CACHE_PATTERNS.keys())}",
+        )
+    deleted = await _delete_keys(_CACHE_PATTERNS[category])
+    return {"status": "ok", "category": category, "deleted_keys": deleted}

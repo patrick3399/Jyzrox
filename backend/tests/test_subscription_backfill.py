@@ -29,6 +29,7 @@ def _build_session_stub(monkeypatch, sub_mod):
     fake_session.add = MagicMock()
     fake_session.commit = AsyncMock()
     monkeypatch.setattr(sub_mod, "AsyncSessionLocal", MagicMock(return_value=fake_session))
+    monkeypatch.setattr("worker.subscription_discovery.AsyncSessionLocal", MagicMock(return_value=fake_session))
     return fake_session
 
 
@@ -48,7 +49,7 @@ def _make_sub():
 @pytest.mark.asyncio
 async def test_enqueue_for_subscription_force_full_scan_omits_last_completed_at(monkeypatch):
     """Force mode must drop last_completed_at so source.py won't set date-after."""
-    from worker import subscription as sub_mod
+    from worker import subscription_enqueue as sub_mod
 
     captured: dict = {}
 
@@ -82,7 +83,7 @@ async def test_enqueue_for_subscription_force_full_scan_omits_last_completed_at(
 @pytest.mark.asyncio
 async def test_enqueue_for_subscription_normal_mode_unchanged(monkeypatch):
     """Default mode (no force) keeps existing behavior: last_completed_at as iso, no force_full_scan."""
-    from worker import subscription as sub_mod
+    from worker import subscription_enqueue as sub_mod
 
     captured: dict = {}
 

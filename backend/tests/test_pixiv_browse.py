@@ -266,7 +266,7 @@ class TestPixivImageProxyAnonymousFallback:
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
             # No credentials → _make_client raises HTTPException → triggers fallback
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -300,7 +300,7 @@ class TestPixivImageProxyAnonymousFallback:
             patch("services.cache.set_pixiv_image_cache", new_callable=AsyncMock),
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -372,7 +372,7 @@ class TestPixivImageProxyAnonymousFallback:
             patch("services.cache.get_pixiv_image_cache", new_callable=AsyncMock, return_value=None),
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -405,12 +405,12 @@ class TestPixivImageProxyAnonymousFallback:
             patch("services.cache.set_pixiv_image_cache", new_callable=AsyncMock),
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_refresh_token",
             ),
             patch(
-                "plugins.builtin.pixiv._browse.PixivClient",
+                "plugins.builtin.pixiv._browse_common.PixivClient",
                 return_value=mock_pixiv_client,
             ),
         ):
@@ -441,7 +441,7 @@ class TestPixivSearch:
         with (
             patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -852,11 +852,11 @@ class TestPixivSearchAuthenticated:
             patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_pixiv_search_cache", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
         ):
             resp = await client.get("/api/pixiv/search", params={"word": "blue hair"})
 
@@ -889,11 +889,11 @@ class TestPixivSearchAuthenticated:
         with (
             patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="expired_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
         ):
             resp = await client.get("/api/pixiv/search", params={"word": "test"})
 
@@ -927,11 +927,11 @@ class TestPixivIllustDetail:
             patch("services.cache.get_pixiv_illust_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_pixiv_illust_cache", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_illust.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_illust.PixivClient", return_value=mock_pixiv_client),
         ):
             resp = await client.get("/api/pixiv/illust/12345")
 
@@ -1014,11 +1014,11 @@ class TestPixivUserDetail:
             patch("services.cache.get_pixiv_user_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_pixiv_user_cache", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
         ):
             resp = await client.get("/api/pixiv/user/555")
 
@@ -1042,7 +1042,7 @@ class TestPixivUserDetail:
         with (
             patch("services.cache.get_pixiv_user_cache", new_callable=AsyncMock, return_value=None),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1178,11 +1178,11 @@ class TestPixivUserBookmarks:
             patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_pixiv_search_cache", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
         ):
             resp = await client.get("/api/pixiv/user/555/bookmarks")
 
@@ -1217,11 +1217,11 @@ class TestPixivFollowingFeed:
             patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_pixiv_search_cache", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
         ):
             resp = await client.get("/api/pixiv/following/feed")
 
@@ -1234,7 +1234,7 @@ class TestPixivFollowingFeed:
         with (
             patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1280,11 +1280,11 @@ class TestPixivR18Ranking:
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
         ):
             resp = await client.get("/api/pixiv/ranking", params={"mode": "daily_r18"})
 
@@ -1298,7 +1298,7 @@ class TestPixivR18Ranking:
         with (
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1330,7 +1330,7 @@ class TestPixivMyBookmarks:
         with (
             patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1365,11 +1365,11 @@ class TestPixivFollowOps:
 
         with (
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
             patch("core.redis_client.get_redis", return_value=mock_redis),
         ):
             resp = await client.post("/api/pixiv/user/555/follow")
@@ -1390,11 +1390,11 @@ class TestPixivFollowOps:
 
         with (
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
             patch("core.redis_client.get_redis", return_value=mock_redis),
         ):
             resp = await client.delete("/api/pixiv/user/555/follow")
@@ -1415,7 +1415,7 @@ class TestPixivFollowOps:
     async def test_follow_user_no_credentials_returns_400(self, client):
         """POST /user/{id}/follow without credentials → 400 (pixiv_not_configured)."""
         with patch(
-            "plugins.builtin.pixiv._browse.get_credential",
+            "plugins.builtin.pixiv._browse_common.get_credential",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -1474,11 +1474,11 @@ class TestPixivAccountCacheInvalidation:
         mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
         with (
             patch(
-                "plugins.builtin.pixiv._browse.get_credential",
+                "plugins.builtin.pixiv._browse_common.get_credential",
                 new_callable=AsyncMock,
                 return_value="valid_token",
             ),
-            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("plugins.builtin.pixiv._browse_common.PixivClient", return_value=mock_pixiv_client),
             patch("core.redis_client.get_redis", return_value=redis),
             patch("services.cache.get_redis", return_value=redis),
         ):

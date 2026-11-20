@@ -88,7 +88,9 @@ class TestAccountEndpoints:
 
 class TestExistingCredentialEndpointsWithAccounts:
     async def test_save_passes_named_account_to_the_service(self, client):
-        with patch("routers.settings.set_credential", new_callable=AsyncMock, return_value="alt") as mock_set:
+        with patch(
+            "routers.settings_credentials_misc.set_credential", new_callable=AsyncMock, return_value="alt"
+        ) as mock_set:
             resp = await client.post(
                 f"{_BASE}/site", json={"source": "twitter", "cookies": "auth_token=abc", "account": "alt"}
             )
@@ -97,14 +99,16 @@ class TestExistingCredentialEndpointsWithAccounts:
         assert mock_set.call_args.kwargs["account"] == "alt"
 
     async def test_save_without_account_targets_the_active_account(self, client):
-        with patch("routers.settings.set_credential", new_callable=AsyncMock, return_value="default") as mock_set:
+        with patch(
+            "routers.settings_credentials_misc.set_credential", new_callable=AsyncMock, return_value="default"
+        ) as mock_set:
             resp = await client.post(f"{_BASE}/site", json={"source": "twitter", "cookies": "auth_token=abc"})
 
         assert resp.status_code == 200
         assert mock_set.call_args.kwargs["account"] is None
 
     async def test_save_rejects_invalid_account_name(self, client):
-        with patch("routers.settings.set_credential", new_callable=AsyncMock) as mock_set:
+        with patch("routers.settings_credentials_misc.set_credential", new_callable=AsyncMock) as mock_set:
             resp = await client.post(
                 f"{_BASE}/site", json={"source": "twitter", "cookies": "auth_token=abc", "account": "bad name"}
             )

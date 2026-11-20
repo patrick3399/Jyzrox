@@ -114,7 +114,8 @@ class TestEnqueueForSubscription:
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=False),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
 
@@ -142,7 +143,8 @@ class TestEnqueueForSubscription:
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
 
@@ -190,8 +192,9 @@ class TestEnqueueForSubscription:
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
-            patch("worker.subscription._current_paused_at", AsyncMock(return_value=None)),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue._current_paused_at", AsyncMock(return_value=None)),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
 
@@ -218,7 +221,8 @@ class TestEnqueueForSubscription:
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -248,7 +252,8 @@ class TestEnqueueForSubscription:
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -316,6 +321,8 @@ class TestCheckSingleSubscription:
 
         with (
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
@@ -404,7 +411,7 @@ class TestSubscriptionCheckLockTtl:
         sub.id = 1
 
         with (
-            patch("worker.subscription.acquire_lock", side_effect=_acquire),
+            patch("worker.subscription_enqueue.acquire_lock", side_effect=_acquire),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
         ):
             result = await _enqueue_for_subscription({"redis": MagicMock()}, sub)
@@ -601,8 +608,9 @@ class TestDuplicateGuardIncludesPaused:
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
-            patch("worker.subscription._current_paused_at", AsyncMock(return_value=None)),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue._current_paused_at", AsyncMock(return_value=None)),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
 
@@ -658,7 +666,8 @@ class TestNextCheckAtAdvances:
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
@@ -733,7 +742,8 @@ class TestDiscoveredWorksDispatch:
             patch("services.download_policy.get_credential_policy", new_callable=AsyncMock) as pol,
             patch("plugins.registry.plugin_registry.get_subscriber", return_value=subscriber),
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value="cred"),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -760,7 +770,8 @@ class TestDiscoveredWorksDispatch:
             patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("services.download_policy.get_credential_policy", new_callable=AsyncMock) as pol,
             patch("plugins.registry.plugin_registry.get_subscriber", return_value=None),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -791,7 +802,8 @@ class TestDiscoveredWorksDispatch:
             patch("services.download_policy.get_credential_policy", new_callable=AsyncMock) as pol,
             patch("plugins.registry.plugin_registry.get_subscriber", return_value=subscriber),
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
-            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_enqueue.AsyncSessionLocal", return_value=session),
+            patch("worker.subscription_discovery.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
         ):
             pol.return_value = MagicMock(missing_required=False)
@@ -808,10 +820,10 @@ class TestDiscoveredWorksDispatch:
 
 def _gate_patches(paused_at, publish):
     return (
-        patch("worker.subscription.acquire_lock", AsyncMock(return_value="tok")),
-        patch("worker.subscription.release_lock", AsyncMock()),
-        patch("worker.subscription._current_paused_at", AsyncMock(return_value=paused_at)),
-        patch("worker.subscription._enqueue_discovered_works", AsyncMock(return_value={"status": "ok"})),
+        patch("worker.subscription_enqueue.acquire_lock", AsyncMock(return_value="tok")),
+        patch("worker.subscription_enqueue.release_lock", AsyncMock()),
+        patch("worker.subscription_enqueue._current_paused_at", AsyncMock(return_value=paused_at)),
+        patch("worker.subscription_enqueue._enqueue_discovered_works", AsyncMock(return_value={"status": "ok"})),
         patch("core.redis_client.get_redis", return_value=AsyncMock()),
         patch("core.redis_client.publish_job_event", publish),
         patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),

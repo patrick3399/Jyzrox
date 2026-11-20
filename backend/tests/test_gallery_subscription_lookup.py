@@ -16,7 +16,7 @@ def _weibo_key(url):
 
 @pytest.fixture(autouse=True)
 def _no_check_locks():
-    with patch("routers.subscriptions._checking_flags", new=AsyncMock(side_effect=lambda ids: [False] * len(ids))):
+    with patch("routers.subscriptions_list._checking_flags", new=AsyncMock(side_effect=lambda ids: [False] * len(ids))):
         yield
 
 

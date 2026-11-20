@@ -143,10 +143,10 @@ async def test_decodes_stay_within_thumbnail_workers_threads(
     from worker import thumbnail as thumbnail_module
 
     monkeypatch.setenv("THUMBNAIL_WORKERS", "2")
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore", None)
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_semaphore_size", None)
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor", None, raising=False)
-    monkeypatch.setattr(thumbnail_module, "_thumbnail_executor_size", None, raising=False)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_semaphore", None)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_semaphore_size", None)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_executor", None, raising=False)
+    monkeypatch.setattr("worker.thumbnail_pool._thumbnail_executor_size", None, raising=False)
 
     seen: set[str] = set()
     lock = threading.Lock()

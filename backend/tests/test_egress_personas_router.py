@@ -10,7 +10,7 @@ from db.models import Credential
 @pytest.fixture(autouse=True)
 def _persona_db(db_session_factory):
     with (
-        patch("services.egress_persona.AsyncSessionLocal", db_session_factory),
+        patch("services.egress_persona_admin.AsyncSessionLocal", db_session_factory),
         patch("services.credential.AsyncSessionLocal", db_session_factory),
     ):
         yield

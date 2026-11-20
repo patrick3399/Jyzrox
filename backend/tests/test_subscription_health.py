@@ -284,7 +284,7 @@ class TestEnqueueBackoffGate:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("worker.subscription._current_paused_at", AsyncMock(return_value=None)),
+            patch("worker.subscription_enqueue._current_paused_at", AsyncMock(return_value=None)),
             patch(
                 "services.subscription_health.should_backoff",
                 new_callable=AsyncMock,
@@ -318,7 +318,8 @@ class TestEnqueueBackoffGate:
                 new_callable=AsyncMock,
                 return_value=False,  # stop the flow right after the gate
             ),
-            patch("worker.subscription.AsyncSessionLocal"),
+            patch("worker.subscription_enqueue.AsyncSessionLocal"),
+            patch("worker.subscription_discovery.AsyncSessionLocal"),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub, manual=True)
 

@@ -59,7 +59,7 @@ async def _insert_relationship(
 
 async def test_dedup_stats_empty_db_returns_zero_counts(client, db_session, db_session_factory):
     await _insert_user(db_session)
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/stats")
     assert resp.status_code == 200
     data = resp.json()
@@ -80,7 +80,7 @@ async def test_dedup_stats_with_blob_relationships_returns_correct_counts(client
     await _insert_relationship(db_session, "aaa111", "bbb222", "quality_conflict")
     await _insert_relationship(db_session, "ccc333", "ddd444", "variant")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/stats")
 
     assert resp.status_code == 200
@@ -97,7 +97,7 @@ async def test_dedup_stats_with_blob_relationships_returns_correct_counts(client
 
 async def test_dedup_review_empty_returns_empty_items(client, db_session, db_session_factory):
     await _insert_user(db_session)
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review")
     assert resp.status_code == 200
     data = resp.json()
@@ -111,7 +111,7 @@ async def test_dedup_review_with_data_returns_items(client, db_session, db_sessi
     await _insert_blob(db_session, "sha_b1")
     await _insert_relationship(db_session, "sha_a1", "sha_b1", "quality_conflict")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review")
 
     assert resp.status_code == 200
@@ -148,7 +148,7 @@ async def test_dedup_review_returns_gallery_occurrences(client, db_session, db_s
     )
     await db_session.commit()
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review")
 
     assert resp.status_code == 200
@@ -205,7 +205,7 @@ async def test_dedup_review_external_blob_image_url_uses_occurrence_library_path
     await _insert_relationship(db_session, "link_a", "link_b", "needs_review")
     await _insert_link_occurrence(db_session, "link_a", "link-gallery", "/mnt/lib/book #1/001.jpg")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review")
 
     assert resp.status_code == 200
@@ -226,7 +226,7 @@ async def test_dedup_review_external_blob_without_occurrence_falls_back_to_blob_
     await db_session.commit()
     await _insert_relationship(db_session, "orphan_link_a", "orphan_link_b", "needs_review")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review")
 
     assert resp.status_code == 200
@@ -243,7 +243,7 @@ async def test_dedup_review_cas_blob_with_external_occurrence_keeps_cas_image_ur
     await _insert_relationship(db_session, "cas_shared_a", "cas_shared_b", "needs_review")
     await _insert_link_occurrence(db_session, "cas_shared_a", "shared-gallery", "/mnt/lib/shared/001.jpg")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review")
 
     assert resp.status_code == 200
@@ -259,7 +259,7 @@ async def test_dedup_review_filter_by_relationship_type(client, db_session, db_s
     await _insert_relationship(db_session, "sha_q1", "sha_q2", "quality_conflict")
     await _insert_relationship(db_session, "sha_v1", "sha_v2", "variant")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review?relationship=variant")
 
     assert resp.status_code == 200
@@ -275,7 +275,7 @@ async def test_dedup_review_excludes_non_review_relationships(client, db_session
     # "resolved" is not in REVIEW_RELATIONSHIPS and should not appear
     await _insert_relationship(db_session, "sha_r1", "sha_r2", "resolved")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review")
 
     assert resp.status_code == 200
@@ -289,7 +289,7 @@ async def test_dedup_review_excludes_non_review_relationships(client, db_session
 
 async def test_dedup_keep_pair_not_found_returns_404(client, db_session, db_session_factory):
     await _insert_user(db_session)
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post(
             "/api/dedup/review/99999/keep",
             json={"keep_sha": "nonexistent"},
@@ -303,7 +303,7 @@ async def test_dedup_keep_pair_invalid_sha_returns_400(client, db_session, db_se
     await _insert_blob(db_session, "keep_b")
     pair_id = await _insert_relationship(db_session, "keep_a", "keep_b", "quality_conflict")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post(
             f"/api/dedup/review/{pair_id}/keep",
             json={"keep_sha": "not_in_pair"},
@@ -331,7 +331,7 @@ async def test_dedup_keep_rejects_stale_global_reference_count(client, db_sessio
     )
     await db_session.commit()
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post(
             f"/api/dedup/review/{pair_id}/keep",
             json={"keep_sha": "stale_keep", "expected_discard_refs": 0},
@@ -352,7 +352,7 @@ async def test_dedup_whitelist_pair_updates_relationship(client, db_session, db_
     await _insert_blob(db_session, "wl_sha_b")
     pair_id = await _insert_relationship(db_session, "wl_sha_a", "wl_sha_b", "quality_conflict")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post(f"/api/dedup/review/{pair_id}/whitelist")
 
     assert resp.status_code == 200
@@ -364,14 +364,14 @@ async def test_dedup_whitelist_pair_updates_relationship(client, db_session, db_
     )
     assert row.one() == ("decided", "whitelisted")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         second = await client.post(f"/api/dedup/review/{pair_id}/whitelist")
     assert second.status_code == 409
 
 
 async def test_dedup_whitelist_pair_not_found_returns_404(client, db_session, db_session_factory):
     await _insert_user(db_session)
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post("/api/dedup/review/99999/whitelist")
     assert resp.status_code == 404
 
@@ -507,7 +507,7 @@ async def test_dedup_stats_counts_each_relationship_status_independently(client,
     await _insert_relationship(db_session, "s_wla", "s_wlb", "whitelisted")
     await _insert_relationship(db_session, "s_rsa", "s_rsb", "resolved")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/stats")
 
     assert resp.status_code == 200
@@ -530,7 +530,7 @@ async def test_dedup_stats_total_blobs_excludes_entries_without_phash(client, db
     await _insert_blob(db_session, "ph_nil1", phash_int=None)
     await _insert_blob(db_session, "ph_nil2", phash_int=None)
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/stats")
 
     assert resp.status_code == 200
@@ -555,7 +555,7 @@ async def test_dedup_review_pagination_limit_returns_next_cursor(client, db_sess
     await _insert_relationship(db_session, "pag_a2", "pag_b2", "quality_conflict")
     await _insert_relationship(db_session, "pag_a3", "pag_b3", "quality_conflict")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.get("/api/dedup/review?limit=1")
 
     assert resp.status_code == 200
@@ -577,7 +577,7 @@ async def test_dedup_review_pagination_next_cursor_fetches_next_page(client, db_
     await _insert_relationship(db_session, "pg2_a2", "pg2_b2", "quality_conflict")
     await _insert_relationship(db_session, "pg2_a3", "pg2_b3", "quality_conflict")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         page1 = await client.get("/api/dedup/review?limit=1")
         cursor = page1.json()["next_cursor"]
         assert cursor is not None
@@ -603,7 +603,7 @@ async def test_dedup_review_pagination_invalid_cursor_returns_first_page(client,
     await _insert_relationship(db_session, "inv_a1", "inv_b1", "quality_conflict")
     await _insert_relationship(db_session, "inv_a2", "inv_b2", "quality_conflict")
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp_no_cursor = await client.get("/api/dedup/review?limit=2")
         resp_bad_cursor = await client.get("/api/dedup/review?limit=2&cursor=totally.invalid")
 
@@ -645,7 +645,7 @@ async def test_dedup_keep_pair_resolves_relationship_and_returns_200(client, db_
     )
     await db_session.commit()
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post(
             f"/api/dedup/review/{pair_id}/keep",
             json={"keep_sha": "keep_ok_a", "expected_discard_refs": 1},
@@ -687,7 +687,7 @@ async def test_dedup_keep_pair_remaps_images_from_discard_to_keep(client, db_ses
     )
     await db_session.commit()
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post(
             f"/api/dedup/review/{pair_id}/keep",
             json={"keep_sha": "remap_keep", "expected_discard_refs": 2},
@@ -731,7 +731,7 @@ async def test_dedup_keep_rejects_image_bound_external_location(client, db_sessi
     )
     await db_session.commit()
 
-    with patch("routers.dedup.async_session", db_session_factory):
+    with patch("routers.dedup_review.async_session", db_session_factory):
         resp = await client.post(
             f"/api/dedup/review/{pair_id}/keep",
             json={"keep_sha": "external_keep", "expected_discard_refs": 1},
@@ -773,7 +773,7 @@ async def test_dedup_viewer_cannot_access_stats(make_client, db_session, db_sess
     """viewer role is rejected with 403 on GET /api/dedup/stats."""
     await _insert_user(db_session)
     async with make_client(user_id=2, role="viewer") as ac:
-        with patch("routers.dedup.async_session", db_session_factory):
+        with patch("routers.dedup_review.async_session", db_session_factory):
             resp = await ac.get("/api/dedup/stats")
     assert resp.status_code == 403
 
@@ -782,7 +782,7 @@ async def test_dedup_viewer_cannot_start_scan(make_client, db_session, db_sessio
     """viewer role is rejected with 403 on POST /api/dedup/scan/start."""
     await _insert_user(db_session)
     async with make_client(user_id=2, role="viewer") as ac:
-        with patch("routers.dedup.async_session", db_session_factory):
+        with patch("routers.dedup_review.async_session", db_session_factory):
             resp = await ac.post("/api/dedup/scan/start", json={"mode": "pending"})
     assert resp.status_code == 403
 
@@ -791,7 +791,7 @@ async def test_dedup_member_cannot_access_stats(make_client, db_session, db_sess
     """member role is rejected with 403 on GET /api/dedup/stats."""
     await _insert_user(db_session)
     async with make_client(user_id=2, role="member") as ac:
-        with patch("routers.dedup.async_session", db_session_factory):
+        with patch("routers.dedup_review.async_session", db_session_factory):
             resp = await ac.get("/api/dedup/stats")
     assert resp.status_code == 403
 
@@ -803,7 +803,7 @@ async def test_dedup_member_cannot_keep_pair(make_client, db_session, db_session
     await _insert_blob(db_session, "rbac_keep_b")
     pair_id = await _insert_relationship(db_session, "rbac_keep_a", "rbac_keep_b", "quality_conflict")
     async with make_client(user_id=2, role="member") as ac:
-        with patch("routers.dedup.async_session", db_session_factory):
+        with patch("routers.dedup_review.async_session", db_session_factory):
             resp = await ac.post(
                 f"/api/dedup/review/{pair_id}/keep",
                 json={"keep_sha": "rbac_keep_a"},

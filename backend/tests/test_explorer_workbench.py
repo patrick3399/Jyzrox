@@ -291,7 +291,7 @@ async def test_physical_entries_lists_and_stats_folder_off_the_event_loop(client
 
     monkeypatch.setattr(Path, "iterdir", _iterdir)
     monkeypatch.setattr(Path, "stat", _stat)
-    with patch("routers.explorer._enqueue_folder_stats", AsyncMock(return_value=None)):
+    with patch("routers.explorer_physical._enqueue_folder_stats", AsyncMock(return_value=None)):
         resp = await client.get("/api/explorer/physical/14/entries", params={"path": "Gallery"})
 
     assert resp.status_code == 200, resp.text
@@ -928,7 +928,7 @@ async def test_roots_categories_exclude_other_users_private_galleries(make_clien
 
     # Members also get the physical roots, which touches Redis; there are no
     # enabled library paths here so a bare mock is enough.
-    with patch("routers.explorer.get_redis", return_value=AsyncMock()):
+    with patch("routers.explorer_roots.get_redis", return_value=AsyncMock()):
         async with make_client(user_id=2, role="member") as ac:
             response = await ac.get("/api/explorer/roots")
 
