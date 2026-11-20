@@ -130,7 +130,7 @@ async def test_batch_start_payload_carries_registry_names_and_none_for_misses(cl
 
 
 async def test_scan_discovery_binds_registry_name_and_none_for_unregistered_folder(tmp_path, monkeypatch):
-    import worker.scan as scan
+    import worker.scan_common as scan
 
     async def _resolve(_session, raw):
         return {"cosplay": "Cosplay"}.get(str(raw).lower())

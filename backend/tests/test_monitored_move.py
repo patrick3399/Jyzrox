@@ -116,9 +116,10 @@ async def test_monitored_directory_move_preserves_gallery_and_user_state(
     cas_settings = MagicMock(data_library_path=str(library_root))
 
     with (
-        patch("worker.scan.AsyncSessionLocal", db_session_factory),
-        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
-        patch("worker.scan.settings", scan_settings),
+        patch("worker.scan_paths.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_move.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_common.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan_common.settings", scan_settings),
         patch("services.cas_paths.settings", cas_settings),
         patch("core.events.emit_safe", new_callable=AsyncMock) as emit_spy,
     ):
@@ -246,10 +247,12 @@ async def test_reconcile_skips_hashing_when_no_candidate_matches_names_and_sizes
     sha_spy = MagicMock(side_effect=AssertionError("must not hash: sizes already rule this out"))
 
     with (
-        patch("worker.scan.AsyncSessionLocal", db_session_factory),
-        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
-        patch("worker.scan.settings", MagicMock(library_monitor_enabled=True, data_library_path=str(tmp_path))),
-        patch("worker.scan._sha256", sha_spy),
+        patch("worker.scan_paths.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_move.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_common.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan_common.settings", MagicMock(library_monitor_enabled=True, data_library_path=str(tmp_path))),
+        patch("worker.scan_paths._sha256", sha_spy),
+        patch("worker.scan_move._sha256", sha_spy),
         patch("core.events.emit_safe", new_callable=AsyncMock),
     ):
         result = await reconcile_library_path_job(
@@ -312,10 +315,12 @@ async def test_reconcile_still_hashes_a_size_compatible_candidate(
     sha_spy = MagicMock(return_value="cc" * 32)  # not the recorded sha
 
     with (
-        patch("worker.scan.AsyncSessionLocal", db_session_factory),
-        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
-        patch("worker.scan.settings", MagicMock(library_monitor_enabled=True, data_library_path=str(tmp_path))),
-        patch("worker.scan._sha256", sha_spy),
+        patch("worker.scan_paths.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_move.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_common.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan_common.settings", MagicMock(library_monitor_enabled=True, data_library_path=str(tmp_path))),
+        patch("worker.scan_paths._sha256", sha_spy),
+        patch("worker.scan_move._sha256", sha_spy),
         patch("core.events.emit_safe", new_callable=AsyncMock),
     ):
         result = await reconcile_library_path_job(
@@ -392,14 +397,16 @@ async def _seed_gallery_with_pending_pages(db_session, root_a, root_b, old_dir, 
 def _move_patches(db_session_factory, library_root, sha_spy=None):
     scan_settings = MagicMock(library_monitor_enabled=True, data_library_path=str(library_root))
     patches = [
-        patch("worker.scan.AsyncSessionLocal", db_session_factory),
-        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
-        patch("worker.scan.settings", scan_settings),
+        patch("worker.scan_paths.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_move.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_common.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan_common.settings", scan_settings),
         patch("services.cas_paths.settings", MagicMock(data_library_path=str(library_root))),
         patch("core.events.emit_safe", new_callable=AsyncMock),
     ]
     if sha_spy is not None:
-        patches.append(patch("worker.scan._sha256", sha_spy))
+        patches.append(patch("worker.scan_paths._sha256", sha_spy))
+        patches.append(patch("worker.scan_move._sha256", sha_spy))
     return patches
 
 
@@ -410,7 +417,8 @@ async def test_monitored_move_keeps_gallery_identity_with_pending_pages(
     size, gets no BlobLocation, and its link follows the moved file."""
     from contextlib import ExitStack
 
-    from worker.scan import _sha256, move_library_path_job
+    from worker.helpers import _sha256
+    from worker.scan import move_library_path_job
 
     root_a, root_b, library_root = tmp_path / "source-a", tmp_path / "source-b", tmp_path / "library"
     root_a.mkdir()
@@ -505,7 +513,8 @@ async def test_cross_root_move_matches_gallery_with_pending_pages(db_session, db
     the hash signature leaves it out on both sides."""
     from contextlib import ExitStack
 
-    from worker.scan import _sha256, reconcile_library_path_job
+    from worker.helpers import _sha256
+    from worker.scan import reconcile_library_path_job
 
     root_a, root_b, library_root = tmp_path / "source-a", tmp_path / "source-b", tmp_path / "library"
     root_a.mkdir()
@@ -599,13 +608,15 @@ async def _seed_link_gallery(db_session, root, source_dir, *, status):
 def _missed_move_patches(db_session_factory, library_root):
     scan_settings = MagicMock(library_monitor_enabled=True, data_library_path=str(library_root))
     return (
-        patch("worker.scan.AsyncSessionLocal", db_session_factory),
-        patch("worker.scan.get_all_library_paths", new=AsyncMock(return_value=[])),
-        patch("worker.scan.get_monitored_library_paths", new=AsyncMock(return_value=[])),
-        patch("worker.scan.settings", scan_settings),
+        patch("worker.scan_discover.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_common.get_all_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan_common.get_monitored_library_paths", new=AsyncMock(return_value=[])),
+        patch("worker.scan_paths.settings", scan_settings),
         patch("services.cas_paths.settings", MagicMock(data_library_path=str(library_root))),
         patch("core.events.emit_safe", new_callable=AsyncMock),
         patch("core.queue.enqueue", new_callable=AsyncMock),
+        patch("worker.scan_paths.AsyncSessionLocal", db_session_factory),
+        patch("worker.scan_move.AsyncSessionLocal", db_session_factory),
     )
 
 
@@ -624,7 +635,17 @@ async def test_auto_discover_reconnects_folder_rename_the_watcher_missed(
     old_dir.rename(new_dir)
 
     patches = _missed_move_patches(db_session_factory, tmp_path / "library")
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6] as enqueue,
+        patches[7],
+        patches[8],
+    ):
         result = await auto_discover_job({"redis": mock_redis})
 
     assert result["discovered"] == 0
@@ -664,8 +685,8 @@ async def test_auto_discover_imports_unrelated_folder_while_a_source_is_vanished
     patches = _missed_move_patches(db_session_factory, tmp_path / "library")
     # The upsert's ON CONFLICT target only exists on Postgres; this test is about what reaches it.
     discover = AsyncMock(return_value=None)
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
-        with patch("worker.scan._discover_single_library_dir", discover):
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
+        with patch("worker.scan_discover._discover_single_library_dir", discover):
             await auto_discover_job({"redis": mock_redis})
 
     discover.assert_awaited_once()
@@ -713,7 +734,17 @@ async def test_auto_discover_skips_folder_matching_two_vanished_galleries(
     first.rename(new_dir)
 
     patches = _missed_move_patches(db_session_factory, tmp_path / "library")
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6] as enqueue,
+        patches[7],
+        patches[8],
+    ):
         result = await auto_discover_job({"redis": mock_redis})
 
     assert result["discovered"] == 0
@@ -753,8 +784,8 @@ async def test_auto_discover_does_not_treat_sources_under_an_empty_root_as_vanis
 
     patches = _missed_move_patches(db_session_factory, tmp_path / "library")
     discover = AsyncMock(return_value=None)
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
-        with patch("worker.scan._discover_single_library_dir", discover):
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
+        with patch("worker.scan_discover._discover_single_library_dir", discover):
             await auto_discover_job({"redis": mock_redis})
 
     discover.assert_awaited_once()
@@ -780,7 +811,17 @@ async def test_rescan_by_path_reconnects_folder_rename_the_watcher_missed(
     old_dir.rename(new_dir)
 
     patches = _missed_move_patches(db_session_factory, tmp_path / "library")
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6] as enqueue,
+        patches[7],
+        patches[8],
+    ):
         result = await rescan_by_path_job({"redis": mock_redis}, str(new_dir))
 
     assert result["status"] == "moved"
@@ -803,7 +844,17 @@ async def test_second_rename_after_a_missed_one_reconnects_through_the_move_job(
     old_dir.rename(final_dir)
 
     patches = _missed_move_patches(db_session_factory, tmp_path / "library")
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as enqueue:
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6] as enqueue,
+        patches[7],
+        patches[8],
+    ):
         result = await move_library_path_job({"redis": mock_redis}, str(root / "second-name"), str(final_dir))
 
     assert result["status"] == "moved"

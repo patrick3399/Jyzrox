@@ -2,7 +2,7 @@
 Tests for worker/scan.py — rescan_library_job, rescan_gallery_job,
 auto_discover_job, scheduled_scan_job, and rescan_by_path_job.
 
-Strategy: Mock-DB pattern (patch worker.scan.AsyncSessionLocal).
+Strategy: Mock-DB pattern (patch the AsyncSessionLocal global of each scan_* module).
 Redis is provided via ctx["redis"] as an AsyncMock.
 Filesystem operations are mocked via patch on resolve_blob_path / thumb_dir.
 """
@@ -16,10 +16,17 @@ import pytest
 @pytest.fixture(autouse=True)
 def _mock_shared_thumbnail_cleanup():
     """Mock-DB scan tests do not model the lifecycle service's extra query."""
-    with patch(
-        "worker.scan.cleanup_unreferenced_thumbnails",
-        new_callable=AsyncMock,
-        return_value=set(),
+    with (
+        patch(
+            "worker.scan_rescan_library.cleanup_unreferenced_thumbnails",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
+        patch(
+            "worker.scan_rescan_gallery.cleanup_unreferenced_thumbnails",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         yield
 
@@ -30,7 +37,7 @@ def _mock_shared_thumbnail_cleanup():
 
 
 def _make_redis() -> AsyncMock:
-    """Return a fully-wired mock Redis compatible with worker.scan usage."""
+    """Return a fully-wired mock Redis compatible with worker.scan_* usage."""
     r = AsyncMock()
     r.get = AsyncMock(return_value=None)
     r.set = AsyncMock(return_value=True)
@@ -160,7 +167,7 @@ class TestLibraryDiscoveryCategory:
 
     @pytest.fixture(autouse=True)
     def _registry(self, monkeypatch):
-        import worker.scan as scan
+        import worker.scan_common as scan
 
         async def _resolve(_session, raw):
             from core.local_category_plan import normalize_category
@@ -270,7 +277,7 @@ class TestRescanLibraryJob:
         r = _make_redis()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
         ):
             result = await rescan_library_job({"redis": r})
@@ -286,9 +293,9 @@ class TestRescanLibraryJob:
         session = _make_session(gallery_ids=[10, 11, 12], galleries=galleries, images=[])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
-            patch("worker.scan.asyncio.sleep", new_callable=AsyncMock) as sleep,
+            patch("worker.scan_rescan_library.asyncio.sleep", new_callable=AsyncMock) as sleep,
         ):
             result = await rescan_library_job({"redis": _make_redis()})
 
@@ -332,9 +339,10 @@ class TestRescanLibraryJob:
         thumb_path.__truediv__ = lambda self, other: MagicMock(exists=MagicMock(return_value=False))
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=missing_path),
-            patch("worker.scan.thumb_dir", return_value=thumb_path),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.thumb_dir", return_value=thumb_path),
             patch("core.watcher.watcher_instance", None),
         ):
             result = await rescan_library_job({"redis": r})
@@ -382,9 +390,10 @@ class TestRescanLibraryJob:
         missing_path.exists.return_value = False
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=missing_path),
-            patch("worker.scan.decrement_ref_count", side_effect=record_decrement),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_rescan_library.decrement_ref_count", side_effect=record_decrement),
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
         ):
@@ -447,9 +456,10 @@ class TestRescanLibraryJob:
         missing_path.exists.return_value = False
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=missing_path),
-            patch("worker.scan.decrement_ref_count", side_effect=decrement),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_rescan_library.decrement_ref_count", side_effect=decrement),
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
         ):
@@ -490,9 +500,10 @@ class TestRescanLibraryJob:
         thumb_path.__truediv__ = lambda self, other: MagicMock(exists=MagicMock(return_value=False))
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=missing_path),
-            patch("worker.scan.thumb_dir", return_value=thumb_path),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.thumb_dir", return_value=thumb_path),
             patch("core.watcher.watcher_instance", None),
         ):
             await rescan_library_job({"redis": r})
@@ -518,7 +529,7 @@ class TestRescanLibraryJob:
         r.get = AsyncMock(return_value=b"cancel")
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
         ):
             result = await rescan_library_job({"redis": r})
@@ -537,7 +548,7 @@ class TestRescanLibraryJob:
         r = _make_redis()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
         ):
             await rescan_library_job({"redis": r})
@@ -583,10 +594,11 @@ class TestRescanLibraryJob:
         thumb_path.__truediv__ = lambda self, other: thumb_160
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=existing_path),
-            patch("worker.scan.thumb_dir", return_value=thumb_path),
-            patch("worker.scan.thumbnails_complete_at", return_value=False),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.thumb_dir", return_value=thumb_path),
+            patch("worker.scan_common.thumbnails_complete_at", return_value=False),
             patch("core.watcher.watcher_instance", None),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -622,10 +634,10 @@ class TestRescanLibraryJob:
         mock_watcher.resume = MagicMock()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", mock_watcher),
             # The job imports watcher_instance inside the function body
-            patch("worker.scan.__builtins__", __builtins__),
+            patch("worker.scan_rescan_library.__builtins__", __builtins__),
         ):
             # Patch the import inside the function
             import core.watcher as _cw
@@ -674,10 +686,11 @@ class TestRescanLibraryJob:
         thumb_path.__truediv__ = lambda self, other: thumb_160
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=existing_path),
-            patch("worker.scan.thumb_dir", return_value=thumb_path),
-            patch("worker.scan.thumbnails_complete_at", return_value=True),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.thumb_dir", return_value=thumb_path),
+            patch("worker.scan_common.thumbnails_complete_at", return_value=True),
             patch("core.watcher.watcher_instance", None),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
@@ -710,9 +723,10 @@ class TestRescanLibraryJob:
         existing_path.exists.side_effect = _exists
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=existing_path),
-            patch("worker.scan.thumbnails_complete_at", side_effect=_thumbs_complete),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.thumbnails_complete_at", side_effect=_thumbs_complete),
             patch("core.watcher.watcher_instance", None),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
@@ -734,8 +748,8 @@ class TestRescanLibraryJob:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.decrement_ref_count", new_callable=AsyncMock) as decrement,
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
         ):
@@ -763,11 +777,11 @@ class TestRescanLibraryJob:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.decrement_ref_count", new_callable=AsyncMock) as decrement,
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
-            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock),
+            patch("worker.scan_vanished.invalidate_sources_cache", new_callable=AsyncMock),
         ):
             result = await rescan_library_job({"redis": _make_redis()})
 
@@ -806,10 +820,10 @@ class TestRescanLibraryJob:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
-            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock),
+            patch("worker.scan_vanished.invalidate_sources_cache", new_callable=AsyncMock),
         ):
             await rescan_library_job({"redis": _make_redis()})
 
@@ -840,11 +854,11 @@ class TestRescanLibraryJob:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.decrement_ref_count", new_callable=AsyncMock) as decrement,
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
-            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock) as invalidate,
+            patch("worker.scan_vanished.invalidate_sources_cache", new_callable=AsyncMock) as invalidate,
         ):
             await rescan_library_job({"redis": _make_redis()})
 
@@ -870,8 +884,9 @@ class TestRescanLibraryJob:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan._has_thumb_160", return_value=True),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library._has_thumb_160", return_value=True),
+            patch("worker.scan_common._has_thumb_160", return_value=True),
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
         ):
@@ -899,7 +914,7 @@ class TestRescanGalleryJob:
 
         r = _make_redis()
 
-        with patch("worker.scan.AsyncSessionLocal", return_value=session):
+        with patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session):
             result = await rescan_gallery_job({"redis": r}, gallery_id=999)
 
         assert result["status"] == "failed"
@@ -931,7 +946,7 @@ class TestRescanGalleryJob:
 
         r = _make_redis()
 
-        with patch("worker.scan.AsyncSessionLocal", return_value=session):
+        with patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session):
             result = await rescan_gallery_job({"redis": r}, gallery_id=100)
 
         # session.execute must never run: we never reached the image query.
@@ -980,11 +995,14 @@ class TestRescanGalleryJob:
         thumb_path.__truediv__ = lambda self, other: MagicMock(exists=MagicMock(return_value=False))
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=missing_path),
-            patch("worker.scan.thumb_dir", return_value=thumb_path),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
-            patch("worker.scan.library_dir", return_value=MagicMock(exists=MagicMock(return_value=False))),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.thumb_dir", return_value=thumb_path),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock),
+            patch(
+                "worker.scan_rescan_gallery.library_dir", return_value=MagicMock(exists=MagicMock(return_value=False))
+            ),
         ):
             result = await rescan_gallery_job({"redis": r}, gallery_id=100)
 
@@ -1043,12 +1061,12 @@ class TestRescanGalleryJob:
             mock_blob = _make_blob(sha="newfilesha")
 
             with (
-                patch("worker.scan.AsyncSessionLocal", return_value=session),
-                patch("worker.scan.library_dir", return_value=fake_gallery_dir),
-                patch("worker.scan._sha256", return_value="newfilesha"),
-                patch("worker.scan.store_blob", new_callable=AsyncMock, return_value=mock_blob),
-                patch("worker.scan.create_library_symlink", new_callable=AsyncMock),
-                patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+                patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+                patch("worker.scan_rescan_gallery.library_dir", return_value=fake_gallery_dir),
+                patch("worker.scan_rescan_gallery._sha256", return_value="newfilesha"),
+                patch("worker.scan_rescan_gallery.store_blob", new_callable=AsyncMock, return_value=mock_blob),
+                patch("worker.scan_rescan_gallery.create_library_symlink", new_callable=AsyncMock),
+                patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock),
             ):
                 result = await rescan_gallery_job({"redis": r}, gallery_id=200)
 
@@ -1096,11 +1114,11 @@ class TestRescanGalleryJob:
             store_blob_mock = AsyncMock()
 
             with (
-                patch("worker.scan.AsyncSessionLocal", return_value=session),
-                patch("worker.scan.library_dir", return_value=fake_gallery_dir),
-                patch("worker.scan._sha256", return_value="excludedsha"),
-                patch("worker.scan.store_blob", store_blob_mock),
-                patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+                patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+                patch("worker.scan_rescan_gallery.library_dir", return_value=fake_gallery_dir),
+                patch("worker.scan_rescan_gallery._sha256", return_value="excludedsha"),
+                patch("worker.scan_rescan_gallery.store_blob", store_blob_mock),
+                patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock),
             ):
                 result = await rescan_gallery_job({"redis": r}, gallery_id=300)
 
@@ -1150,11 +1168,12 @@ class TestRescanGalleryJob:
         fake_gallery_dir.iterdir.return_value = []  # no new files on disk
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=existing_path),
-            patch("worker.scan.thumb_dir", return_value=thumb_path),
-            patch("worker.scan.library_dir", return_value=fake_gallery_dir),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.thumb_dir", return_value=thumb_path),
+            patch("worker.scan_rescan_gallery.library_dir", return_value=fake_gallery_dir),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock),
         ):
             result = await rescan_gallery_job({"redis": r}, gallery_id=400)
 
@@ -1202,11 +1221,12 @@ class TestRescanGalleryJob:
         fake_gallery_dir.iterdir.return_value = []
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=existing_path),
-            patch("worker.scan.thumbnails_complete_at", side_effect=_thumbs_complete),
-            patch("worker.scan.library_dir", return_value=fake_gallery_dir),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=existing_path),
+            patch("worker.scan_common.thumbnails_complete_at", side_effect=_thumbs_complete),
+            patch("worker.scan_rescan_gallery.library_dir", return_value=fake_gallery_dir),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock),
         ):
             result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=410)
 
@@ -1254,11 +1274,12 @@ class TestRescanGalleryJob:
         fake_gallery_dir.exists.return_value = False
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.resolve_blob_path", return_value=missing_path),
-            patch("worker.scan.thumb_dir", return_value=thumb_path),
-            patch("worker.scan.library_dir", return_value=fake_gallery_dir),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.resolve_blob_path", return_value=missing_path),
+            patch("worker.scan_common.thumb_dir", return_value=thumb_path),
+            patch("worker.scan_rescan_gallery.library_dir", return_value=fake_gallery_dir),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock),
         ):
             await rescan_gallery_job({"redis": r}, gallery_id=500)
 
@@ -1277,8 +1298,8 @@ class TestRescanGalleryJob:
         sync = AsyncMock(return_value=LinkSyncResult(status="synced", added=2, removed=1, pages=5))
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.sync_link_gallery", sync, create=True),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.sync_link_gallery", sync, create=True),
         ):
             result = await rescan_gallery_job({"redis": _make_redis()}, 10)
 
@@ -1302,7 +1323,7 @@ class TestAutoDiscoverJob:
         redis = AsyncMock()
         redis.get = AsyncMock(return_value=b"0")
 
-        with patch("worker.scan.AsyncSessionLocal") as session_factory:
+        with patch("worker.scan_discover.AsyncSessionLocal") as session_factory:
             result = await auto_discover_job({"redis": redis}, watcher_origin=True)
 
         assert result == {"status": "skipped", "reason": "watcher_disabled", "discovered": 0}
@@ -1323,8 +1344,8 @@ class TestAutoDiscoverJob:
         r = _make_redis()
 
         with (
-            patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[]),
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_common.get_all_library_paths", new_callable=AsyncMock, return_value=[]),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
         ):
             result = await auto_discover_job({"redis": r})
 
@@ -1353,8 +1374,8 @@ class TestAutoDiscoverJob:
             (hidden_dir / "image.jpg").write_bytes(b"data")
 
             with (
-                patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
-                patch("worker.scan.AsyncSessionLocal", return_value=session),
+                patch("worker.scan_common.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
+                patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
             ):
                 result = await auto_discover_job({"redis": r})
 
@@ -1380,12 +1401,12 @@ class TestAutoDiscoverJob:
         request = _ImportRequest(gallery_id=42, source_dir=str(gallery_dir), mode="link")
         with (
             patch(
-                "worker.scan._get_library_specs",
+                "worker.scan_discover._get_library_specs",
                 new_callable=AsyncMock,
                 return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
             ),
-            patch("worker.scan._discover_single_library_dir", new_callable=AsyncMock, return_value=request),
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_discover._discover_single_library_dir", new_callable=AsyncMock, return_value=request),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             result = await auto_discover_job({"redis": r})
@@ -1428,8 +1449,8 @@ class TestAutoDiscoverJob:
             session.execute = AsyncMock(side_effect=[library_paths_res, existing_res, vanished_res, insert_res])
 
             with (
-                patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
-                patch("worker.scan.AsyncSessionLocal", return_value=session),
+                patch("worker.scan_common.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
+                patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
                 patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
             ):
                 result = await auto_discover_job({"redis": r})
@@ -1463,8 +1484,8 @@ class TestAutoDiscoverJob:
             (gallery_dir / "data.csv").write_bytes(b"csv")
 
             with (
-                patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
-                patch("worker.scan.AsyncSessionLocal", return_value=session),
+                patch("worker.scan_common.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
+                patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
             ):
                 result = await auto_discover_job({"redis": r})
 
@@ -1485,7 +1506,7 @@ class TestScheduledScanJob:
 
         r = _make_redis()
 
-        with patch("worker.scan._cron_should_run", new_callable=AsyncMock, return_value=False):
+        with patch("worker.scan_discover._cron_should_run", new_callable=AsyncMock, return_value=False):
             result = await scheduled_scan_job({"redis": r})
 
         assert result["status"] == "skipped"
@@ -1499,12 +1520,14 @@ class TestScheduledScanJob:
         rescan_mock = AsyncMock(return_value={"status": "done", "total": 0})
 
         with (
-            patch("worker.scan._cron_should_run", new_callable=AsyncMock, return_value=False) as should_run_mock,
-            patch("worker.scan._cron_record", new_callable=AsyncMock),
-            patch("worker.scan.auto_discover_job", auto_discover_mock),
-            patch("worker.scan.rescan_library_job", rescan_mock),
             patch(
-                "worker.scan.sync_all_link_galleries",
+                "worker.scan_discover._cron_should_run", new_callable=AsyncMock, return_value=False
+            ) as should_run_mock,
+            patch("worker.scan_discover._cron_record", new_callable=AsyncMock),
+            patch("worker.scan_discover.auto_discover_job", auto_discover_mock),
+            patch("worker.scan_discover.rescan_library_job", rescan_mock),
+            patch(
+                "worker.scan_discover.sync_all_link_galleries",
                 new_callable=AsyncMock,
                 return_value={"checked": 0, "changed": 0},
                 create=True,
@@ -1527,12 +1550,12 @@ class TestScheduledScanJob:
         rescan_mock = AsyncMock(return_value={"status": "done", "total": 0})
 
         with (
-            patch("worker.scan._cron_should_run", new_callable=AsyncMock, return_value=True),
-            patch("worker.scan._cron_record", new_callable=AsyncMock),
-            patch("worker.scan.auto_discover_job", auto_discover_mock),
-            patch("worker.scan.rescan_library_job", rescan_mock),
+            patch("worker.scan_discover._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.scan_discover._cron_record", new_callable=AsyncMock),
+            patch("worker.scan_discover.auto_discover_job", auto_discover_mock),
+            patch("worker.scan_discover.rescan_library_job", rescan_mock),
             patch(
-                "worker.scan.sync_all_link_galleries",
+                "worker.scan_discover.sync_all_link_galleries",
                 new_callable=AsyncMock,
                 return_value={"checked": 0, "changed": 0},
                 create=True,
@@ -1552,14 +1575,16 @@ class TestScheduledScanJob:
         cron_record_mock = AsyncMock()
 
         with (
-            patch("worker.scan._cron_should_run", new_callable=AsyncMock, return_value=True),
-            patch("worker.scan._cron_record", cron_record_mock),
-            patch("worker.scan.auto_discover_job", new_callable=AsyncMock, return_value={"discovered": 0}),
+            patch("worker.scan_discover._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.scan_discover._cron_record", cron_record_mock),
+            patch("worker.scan_discover.auto_discover_job", new_callable=AsyncMock, return_value={"discovered": 0}),
             patch(
-                "worker.scan.rescan_library_job", new_callable=AsyncMock, return_value={"status": "done", "total": 0}
+                "worker.scan_discover.rescan_library_job",
+                new_callable=AsyncMock,
+                return_value={"status": "done", "total": 0},
             ),
             patch(
-                "worker.scan.sync_all_link_galleries",
+                "worker.scan_discover.sync_all_link_galleries",
                 new_callable=AsyncMock,
                 return_value={"checked": 0, "changed": 0},
                 create=True,
@@ -1596,8 +1621,8 @@ class TestRescanByPathJob:
         r = _make_redis()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.settings") as mock_settings,
+            patch("worker.scan_paths.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_paths.settings") as mock_settings,
             patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             mock_settings.data_library_path = "/data/library"
@@ -1621,9 +1646,9 @@ class TestRescanByPathJob:
         rescan_gallery_mock = AsyncMock(return_value={"status": "done", "gallery_id": 77})
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.settings") as mock_settings,
-            patch("worker.scan.rescan_gallery_job", rescan_gallery_mock),
+            patch("worker.scan_paths.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_paths.settings") as mock_settings,
+            patch("worker.scan_paths.rescan_gallery_job", rescan_gallery_mock),
         ):
             mock_settings.data_library_path = "/data/library"
             result = await rescan_by_path_job({"redis": r}, dir_path="/data/library/ehentai/12345")
@@ -1650,10 +1675,10 @@ class TestRescanByPathJob:
         rescan_gallery_mock = AsyncMock(return_value={"status": "done", "gallery_id": 88})
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan._get_library_specs", new=AsyncMock(return_value=[])),
-            patch("worker.scan.settings") as mock_settings,
-            patch("worker.scan.rescan_gallery_job", rescan_gallery_mock),
+            patch("worker.scan_paths.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_paths._get_library_specs", new=AsyncMock(return_value=[])),
+            patch("worker.scan_paths.settings") as mock_settings,
+            patch("worker.scan_paths.rescan_gallery_job", rescan_gallery_mock),
         ):
             mock_settings.data_library_path = "/data/library"
             result = await rescan_by_path_job({"redis": r}, dir_path="/mnt/nas/manga_collection")
@@ -1683,7 +1708,7 @@ class TestRescanLibraryJobDeletedAtFilter:
         r = _make_redis()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
         ):
             await rescan_library_job({"redis": r})
@@ -1724,20 +1749,20 @@ class TestRescanLibraryPathJob:
 
         with (
             patch(
-                "worker.scan._get_library_specs",
+                "worker.scan_discover._get_library_specs",
                 new_callable=AsyncMock,
                 return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
             ),
             patch(
-                "worker.scan._existing_local_status",
+                "worker.scan_discover._existing_local_status",
                 new_callable=AsyncMock,
                 side_effect=existing_status,
                 create=True,
             ),
             patch(
-                "worker.scan._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover
+                "worker.scan_discover._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover
             ) as discover_mock,
-            patch("worker.scan.AsyncSessionLocal", return_value=self._session()),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=self._session()),
             patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue,
         ):
             result = await rescan_library_path_job({"redis": _make_redis()}, str(tmp_path))
@@ -1780,8 +1805,8 @@ class TestSyncAllLinkGalleries:
         sync = AsyncMock(side_effect=[LinkSyncResult(status="synced", added=1), LinkSyncResult(status="unchanged")])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.sync_link_gallery", sync),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_discover.sync_link_gallery", sync),
         ):
             result = await sync_all_link_galleries({"redis": _make_redis()})
 
@@ -1821,8 +1846,8 @@ class TestPendingLinkPagesSurviveRescans:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.decrement_ref_count", new_callable=AsyncMock) as decrement,
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
         ):
@@ -1845,8 +1870,8 @@ class TestPendingLinkPagesSurviveRescans:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.decrement_ref_count", new_callable=AsyncMock) as decrement,
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
         ):
@@ -1865,8 +1890,8 @@ class TestPendingLinkPagesSurviveRescans:
         session = _make_session(gallery_ids=[10], galleries=[gallery], images=[img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.decrement_ref_count", new_callable=AsyncMock) as decrement,
             patch("core.queue.enqueue", new_callable=AsyncMock),
             patch("core.watcher.watcher_instance", None),
         ):
@@ -1906,9 +1931,9 @@ class TestPendingLinkPagesSurviveRescans:
         session = self._gallery_rescan_session(gallery, [img], [img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
-            patch("worker.scan.library_dir", return_value=tmp_path / "no-library-dir"),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_gallery.library_dir", return_value=tmp_path / "no-library-dir"),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
             result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
@@ -1928,9 +1953,9 @@ class TestPendingLinkPagesSurviveRescans:
         session = self._gallery_rescan_session(gallery, [img], [])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
-            patch("worker.scan.library_dir", return_value=tmp_path / "no-library-dir"),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_rescan_gallery.library_dir", return_value=tmp_path / "no-library-dir"),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
             result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
@@ -1954,9 +1979,9 @@ class TestPendingLinkPagesSurviveRescans:
         session = self._gallery_rescan_session(gallery, [img], [])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock) as decrement,
-            patch("worker.scan.invalidate_sources_cache", new_callable=AsyncMock),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock) as decrement,
+            patch("worker.scan_vanished.invalidate_sources_cache", new_callable=AsyncMock),
         ):
             result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
 
@@ -1983,10 +2008,13 @@ class TestPendingLinkPagesSurviveRescans:
         session = self._gallery_rescan_session(gallery, [img], [img])
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.library_dir", return_value=library),
-            patch("worker.scan.store_blob", new_callable=AsyncMock) as store,
-            patch("worker.scan._sha256", side_effect=AssertionError("pending file must not be re-registered")),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.library_dir", return_value=library),
+            patch("worker.scan_rescan_gallery.store_blob", new_callable=AsyncMock) as store,
+            patch(
+                "worker.scan_rescan_gallery._sha256",
+                side_effect=AssertionError("pending file must not be re-registered"),
+            ),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
             result = await rescan_gallery_job({"redis": _make_redis()}, gallery_id=10)
@@ -2009,7 +2037,7 @@ class TestDirectoryWalksRunOffTheEventLoop:
             threads.append(threading.get_ident())
             return real_walk(*args, **kwargs)
 
-        return patch("worker.scan.os.walk", side_effect=_walk)
+        return patch("worker.scan_common.os.walk", side_effect=_walk)
 
     @staticmethod
     def _spy_iterdir(threads: list[int], only: Path | None = None):
@@ -2080,9 +2108,9 @@ class TestDirectoryWalksRunOffTheEventLoop:
         fake_gallery_dir.iterdir.side_effect = _iterdir
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.library_dir", return_value=fake_gallery_dir),
-            patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
+            patch("worker.scan_rescan_gallery.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_gallery.library_dir", return_value=fake_gallery_dir),
+            patch("worker.scan_rescan_gallery.decrement_ref_count", new_callable=AsyncMock),
         ):
             await rescan_gallery_job({"redis": _make_redis()}, gallery_id=411)
 
@@ -2107,14 +2135,14 @@ class TestDirectoryWalksRunOffTheEventLoop:
         with (
             self._spy_walk(walk_threads),
             patch(
-                "worker.scan._get_library_specs",
+                "worker.scan_discover._get_library_specs",
                 new_callable=AsyncMock,
                 return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
             ),
-            patch("worker.scan._vanished_link_source_paths", new_callable=AsyncMock, return_value=[]),
-            patch("worker.scan._reconnect_vanished_gallery", new_callable=AsyncMock, return_value=None),
-            patch("worker.scan._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover),
-            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan_discover._vanished_link_source_paths", new_callable=AsyncMock, return_value=[]),
+            patch("worker.scan_discover._reconnect_vanished_gallery", new_callable=AsyncMock, return_value=None),
+            patch("worker.scan_discover._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=self._simple_session()),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
             await auto_discover_job({"redis": _make_redis()})
@@ -2142,13 +2170,15 @@ class TestDirectoryWalksRunOffTheEventLoop:
         with (
             self._spy_walk(walk_threads),
             patch(
-                "worker.scan._get_library_specs",
+                "worker.scan_discover._get_library_specs",
                 new_callable=AsyncMock,
                 return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
             ),
-            patch("worker.scan._existing_local_status", new_callable=AsyncMock, return_value=None, create=True),
-            patch("worker.scan._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover),
-            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch(
+                "worker.scan_discover._existing_local_status", new_callable=AsyncMock, return_value=None, create=True
+            ),
+            patch("worker.scan_discover._discover_single_library_dir", new_callable=AsyncMock, side_effect=discover),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=self._simple_session()),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
             await rescan_library_path_job({"redis": _make_redis()}, str(tmp_path))
@@ -2172,8 +2202,8 @@ class TestDirectoryWalksRunOffTheEventLoop:
         with (
             self._spy_iterdir(list_threads, only=destination),
             self._spy_stat(stat_threads, only=destination),
-            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
-            patch("worker.scan.rescan_by_path_job", rescan),
+            patch("worker.scan_paths.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan_paths.rescan_by_path_job", rescan),
         ):
             result = await reconcile_library_path_job(
                 {"redis": _make_redis()}, [str(tmp_path / "old")], str(destination)
@@ -2203,11 +2233,11 @@ class TestDirectoryWalksRunOffTheEventLoop:
         with (
             self._spy_iterdir(list_threads, only=destination),
             patch(
-                "worker.scan._get_library_specs",
+                "worker.scan_move._get_library_specs",
                 new_callable=AsyncMock,
                 return_value=[_LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="link")],
             ),
-            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan_move.AsyncSessionLocal", return_value=self._simple_session()),
         ):
             result = await move_library_path_job({"redis": _make_redis()}, str(tmp_path / "old"), str(destination))
 
@@ -2227,8 +2257,8 @@ class TestDirectoryWalksRunOffTheEventLoop:
 
         with (
             self._spy_iterdir(list_threads, only=target),
-            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
-            patch("worker.scan.settings", MagicMock(data_library_path=str(tmp_path / "lib"))),
+            patch("worker.scan_paths.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan_paths.settings", MagicMock(data_library_path=str(tmp_path / "lib"))),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
             result = await rescan_by_path_job({"redis": _make_redis()}, str(target))
@@ -2248,8 +2278,8 @@ class TestDirectoryWalksRunOffTheEventLoop:
 
         with (
             patch.object(Path, "iterdir", _boom),
-            patch("worker.scan.AsyncSessionLocal", return_value=self._simple_session()),
-            patch("worker.scan.settings", MagicMock(data_library_path=str(tmp_path / "lib"))),
+            patch("worker.scan_paths.AsyncSessionLocal", return_value=self._simple_session()),
+            patch("worker.scan_paths.settings", MagicMock(data_library_path=str(tmp_path / "lib"))),
             patch("core.queue.enqueue", new_callable=AsyncMock),
         ):
             result = await rescan_by_path_job({"redis": _make_redis()}, str(target))

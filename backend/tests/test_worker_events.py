@@ -647,7 +647,7 @@ class TestScanJobEmitsEvent:
         mock_emit = AsyncMock()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
             patch("core.events.emit_safe", mock_emit),
         ):
@@ -689,7 +689,7 @@ class TestScanJobEmitsEvent:
         mock_emit = AsyncMock()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
             patch("core.events.emit_safe", mock_emit),
         ):
@@ -717,7 +717,7 @@ class TestScanJobEmitsEvent:
         session.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_rescan_library.AsyncSessionLocal", return_value=session),
             patch("core.watcher.watcher_instance", None),
             patch("core.events.emit_safe", AsyncMock(side_effect=RuntimeError("bus error"))),
         ):
@@ -752,8 +752,8 @@ class TestScanJobEmitsEvent:
         mock_emit = AsyncMock()
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.get_all_library_paths", AsyncMock(return_value=[])),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_common.get_all_library_paths", AsyncMock(return_value=[])),
             patch("core.events.emit_safe", mock_emit),
         ):
             result = await auto_discover_job(ctx)
@@ -783,8 +783,8 @@ class TestScanJobEmitsEvent:
         session.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch("worker.scan.AsyncSessionLocal", return_value=session),
-            patch("worker.scan.get_all_library_paths", AsyncMock(return_value=[])),
+            patch("worker.scan_discover.AsyncSessionLocal", return_value=session),
+            patch("worker.scan_common.get_all_library_paths", AsyncMock(return_value=[])),
             patch("core.events.emit_safe", AsyncMock(side_effect=RuntimeError("bus error"))),
         ):
             try:
