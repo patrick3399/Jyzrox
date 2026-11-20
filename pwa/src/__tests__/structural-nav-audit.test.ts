@@ -120,7 +120,7 @@ describe('structural-nav-audit — E-hentai browse state architecture', () => {
   it('test_ehentai_restoreIsScopedToMatchingQueryKey', () => {
     // A snapshot only restores when its persisted identity matches the requested
     // identity (store lookup filters on queryKey equality).
-    expect(src('lib/ehBrowseState.ts')).toContain('x.queryKey === currentKey')
+    expect(src('lib/ehBrowseSnapshot.ts')).toContain('x.queryKey === currentKey')
     expect(src('hooks/useEhBrowse.ts')).toContain('parseSnapshot(')
   })
 
@@ -131,7 +131,7 @@ describe('structural-nav-audit — E-hentai browse state architecture', () => {
     expect(hook).toContain('...parseUrlToIdentity(params)')
     expect(hook).toContain("identityDispatch({ type: 'APPLY_IDENTITY', identity })")
 
-    const stateLib = src('lib/ehBrowseState.ts')
+    const stateLib = src('lib/ehBrowseSnapshot.ts')
     const parser = stateLib.slice(
       stateLib.indexOf('export function parseUrlToIdentity'),
       stateLib.indexOf('export function serializeEhSavedSearchParams'),
@@ -142,7 +142,7 @@ describe('structural-nav-audit — E-hentai browse state architecture', () => {
 
   it('test_ehentai_urlCarriesIdentityNotView', () => {
     // URL serialisation lives in identityToUrlParams and must not leak the view buffer/cursor/scroll.
-    const stateLib = src('lib/ehBrowseState.ts')
+    const stateLib = src('lib/ehBrowseSnapshot.ts')
     expect(stateLib).toContain('export function identityToUrlParams')
     const fnBody = stateLib.slice(
       stateLib.indexOf('export function identityToUrlParams'),

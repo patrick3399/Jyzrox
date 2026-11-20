@@ -1,0 +1,161 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '@/lib/api'
+
+/**
+ * Paginated EH image token loader.
+ *
+ * - Starts by fetching the first `batchSize` tokens immediately.
+ * - When the user reaches within `prefetchThreshold` pages of the last
+ *   fetched page, the next batch is fetched automatically.
+ * - Returns `{ tokens, totalPages, isLoading, fetchUpTo }` so the caller
+ *   can also imperatively trigger a fetch (e.g., on seek to a far page).
+ */
+export function useEhGalleryImagesPaginated(
+  gid: number | null,
+  token: string | null,
+  totalPages: number,
+  batchSize = 20,
+  prefetchThreshold = 5,
+) {
+  // Map of page (1-indexed) -> pToken string
+  const [tokenMap, setTokenMap] = useState<Record<number, string>>({})
+  // Map of page (string key) -> preview URL or sprite string "url|ox|w|h"
+  const [previewMap, setPreviewMap] = useState<Record<string, string>>({})
+  const [isLoading, setIsLoading] = useState(false)
+  const [isDone, setIsDone] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+
+  // startPage for next batch to fetch (0-indexed as the API expects)
+  const nextStartRef = useRef(0)
+  // Whether all pages have been fetched
+  const doneRef = useRef(false)
+  // In-flight guard
+  const fetchingRef = useRef(false)
+  // Mounted guard
+  const mountedRef = useRef(true)
+  // fetchUpTo single-instance guards
+  const fetchUpToTargetRef = useRef(0)
+  const fetchUpToActiveRef = useRef(false)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  // Reset when gid/token changes
+  useEffect(() => {
+    setTokenMap({})
+    setPreviewMap({})
+    setError(null)
+    setIsDone(false)
+    nextStartRef.current = 0
+    doneRef.current = false
+    fetchingRef.current = false
+    fetchUpToTargetRef.current = 0
+    fetchUpToActiveRef.current = false
+  }, [gid, token])
+
+  const fetchNextBatch = useCallback(async () => {
+    if (!gid || !token) return
+    if (doneRef.current || fetchingRef.current) return
+
+    fetchingRef.current = true
+    if (mountedRef.current) setIsLoading(true)
+
+    try {
+      const result = await api.eh.getImagesPaginated(gid, token, nextStartRef.current, batchSize)
+      if (!mountedRef.current) return
+
+      setTokenMap((prev) => {
+        const next = { ...prev }
+        for (const item of result.images) {
+          next[item.page] = item.token
+        }
+        return next
+      })
+
+      if (result.previews && Object.keys(result.previews).length > 0) {
+        setPreviewMap((prev) => ({ ...prev, ...result.previews }))
+      }
+
+      nextStartRef.current += result.images.length
+      if (!result.has_more || nextStartRef.current >= totalPages) {
+        doneRef.current = true
+        setIsDone(true)
+      }
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      fetchingRef.current = false
+      if (mountedRef.current) setIsLoading(false)
+    }
+  }, [gid, token, batchSize, totalPages])
+
+  // Initial fetch
+  useEffect(() => {
+    if (gid && token && totalPages > 0) {
+      fetchNextBatch()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gid, token, totalPages])
+
+  /**
+   * Called by the reader when the current page changes.
+   * Triggers the next batch fetch when within `prefetchThreshold` pages
+   * of the last fetched page.
+   * Skips if fetchUpTo is actively running — it will handle any needed fetches.
+   */
+  const onPageChange = useCallback(
+    (currentPage: number) => {
+      if (doneRef.current || fetchingRef.current) return
+      if (fetchUpToActiveRef.current) return
+      const fetchedUpTo = nextStartRef.current // already fetched count (0-indexed count = highest page index)
+      if (currentPage >= fetchedUpTo - prefetchThreshold) {
+        fetchNextBatch()
+      }
+    },
+    [fetchNextBatch, prefetchThreshold],
+  )
+
+  /**
+   * Imperatively ensure tokens are available up to `targetPage`.
+   * Single-instance: if already running, the active loop picks up the
+   * latest target via fetchUpToTargetRef instead of spawning a second loop.
+   */
+  const fetchUpTo = useCallback(
+    async (targetPage: number) => {
+      // Update target — latest/highest caller wins
+      fetchUpToTargetRef.current = Math.max(fetchUpToTargetRef.current, targetPage)
+
+      // If already running, the active loop will pick up the new target
+      if (fetchUpToActiveRef.current) return
+      fetchUpToActiveRef.current = true
+
+      try {
+        while (!doneRef.current && nextStartRef.current < fetchUpToTargetRef.current) {
+          if (fetchingRef.current) {
+            // Wait for the in-flight batch to finish before attempting the next
+            await new Promise<void>((r) => setTimeout(r, 100))
+            continue
+          }
+          await fetchNextBatch()
+        }
+      } finally {
+        fetchUpToActiveRef.current = false
+      }
+    },
+    [fetchNextBatch],
+  )
+
+  return {
+    tokenMap,
+    previewMap,
+    isLoading,
+    error,
+    onPageChange,
+    fetchUpTo,
+    isDone,
+  }
+}
