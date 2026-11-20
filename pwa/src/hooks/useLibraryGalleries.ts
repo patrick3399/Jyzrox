@@ -4,7 +4,7 @@ import useSWRMutation from 'swr/mutation'
 import { useEffect, useMemo, useRef } from 'react'
 import { api } from '@/lib/api'
 import { useWsJobs } from '@/lib/ws'
-import type { GalleryImage, GalleryListResponse, GallerySearchParams } from '@/lib/types'
+import type { Gallery, GalleryImage, GalleryListResponse, GallerySearchParams } from '@/lib/types'
 import { isGalleryChangingJobStatus, type SwrOpts } from './galleryHookShared'
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -202,6 +202,21 @@ export function useGalleryProgress(source: string | null, sourceId: string | nul
   )
 }
 
+/**
+ * Folds a PATCH response into the cached detail. PATCH serialises the bare
+ * row: it has no `media_stats` / `source_items` and a null `cover_thumb`, so
+ * those keep the values from the last GET instead of being wiped.
+ */
+export function mergeGalleryPatch(current: Gallery | undefined, patched: Gallery): Gallery {
+  if (!current) return patched
+  return {
+    ...current,
+    ...patched,
+    cover_thumb: current.cover_thumb,
+    media_stats: current.media_stats,
+  }
+}
+
 export function useUpdateGallery(source: string, sourceId: string) {
   return useSWRMutation(
     ['library/gallery', source, sourceId],
@@ -216,8 +231,18 @@ export function useUpdateGallery(source: string, sourceId: string) {
           title?: string
           title_jpn?: string
           category?: string
+          in_reading_list?: boolean
         }
       },
     ) => api.library.updateGallery(source, sourceId, arg),
+    {
+      // The hook owns the cache write. Callers must not mutate the detail key
+      // with the response themselves: a raw write drops the GET-only fields,
+      // and SWR then discards any refetch that started before it.
+      populateCache: (patched: Gallery, current?: Gallery) => mergeGalleryPatch(current, patched),
+      // PATCH never changes the GET-only fields, and gallery.updated over WS
+      // refetches anyway.
+      revalidate: false,
+    },
   )
 }

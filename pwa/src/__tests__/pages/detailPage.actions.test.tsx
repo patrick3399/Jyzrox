@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import type { Gallery } from '@/lib/types'
 
 const h = vi.hoisted(() => ({
@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
   ratingProps: [] as Array<{ readonly?: boolean }>,
   back: vi.fn(),
   push: vi.fn(),
+  trigger: vi.fn(),
+  mutateGallery: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -38,7 +40,12 @@ vi.mock('@/hooks/useProfile', () => ({
   useProfile: () => ({ data: h.role ? { username: 'u', role: h.role } : undefined }),
 }))
 vi.mock('@/hooks/useGalleries', () => ({
-  useLibraryGallery: () => ({ data: h.gallery, isLoading: false, error: null, mutate: vi.fn() }),
+  useLibraryGallery: () => ({
+    data: h.gallery,
+    isLoading: false,
+    error: null,
+    mutate: h.mutateGallery,
+  }),
   useInfiniteGalleryImages: () => ({
     data: {
       images: [{ id: 1, page_num: 1, thumb_path: '/t/1.webp', file_path: '/f/1.webp' }],
@@ -50,7 +57,7 @@ vi.mock('@/hooks/useGalleries', () => ({
     loadMore: vi.fn(),
     mutate: vi.fn(),
   }),
-  useUpdateGallery: () => ({ trigger: vi.fn(), isMutating: false }),
+  useUpdateGallery: () => ({ trigger: h.trigger, isMutating: false }),
 }))
 vi.mock('@/hooks/useTagTranslations', () => ({ useTagTranslations: () => ({ data: undefined }) }))
 vi.mock('@/hooks/useLinkGallerySync', () => ({ useLinkGallerySync: vi.fn() }))
@@ -108,6 +115,8 @@ describe('gallery detail page header actions', () => {
     h.ratingProps = []
     h.back.mockClear()
     h.push.mockClear()
+    h.mutateGallery.mockReset()
+    h.trigger.mockReset()
     h.gallery = {
       id: 7,
       title: 'Gallery',
@@ -227,5 +236,31 @@ describe('gallery detail page header actions', () => {
     // With the sheet closed, Escape navigates away again.
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(h.back.mock.calls.length + h.push.mock.calls.length).toBe(1)
+  })
+
+  // PATCH returns the bare row (no media_stats, null cover_thumb). The page used
+  // to write it into the detail cache, which hid the size line after an edit.
+  it('category_change_leaves_the_detail_cache_write_to_useUpdateGallery', async () => {
+    h.role = 'member'
+    h.trigger.mockResolvedValue({ ...(h.gallery as Gallery), category: '', cover_thumb: null })
+    render(<GalleryDetailPage />)
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '' } })
+
+    await waitFor(() => expect(h.trigger).toHaveBeenCalledWith({ category: '' }))
+    await Promise.resolve()
+    expect(h.mutateGallery.mock.calls.filter((args) => args.length > 0)).toEqual([])
+  })
+
+  it('read_later_toggle_goes_through_useUpdateGallery_instead_of_overwriting_the_cache', async () => {
+    h.role = 'member'
+    h.trigger.mockResolvedValue({ ...(h.gallery as Gallery), in_reading_list: true })
+    render(<GalleryDetailPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read Later' }))
+
+    await waitFor(() => expect(h.trigger).toHaveBeenCalledWith({ in_reading_list: true }))
+    await Promise.resolve()
+    expect(h.mutateGallery.mock.calls.filter((args) => args.length > 0)).toEqual([])
   })
 })

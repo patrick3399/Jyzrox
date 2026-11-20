@@ -518,14 +518,13 @@ function GalleryDetailPageInner() {
       const original = field === 'title' ? gallery.title : (gallery.title_jpn ?? '')
       if (value === original) return
       try {
-        const updated = await updateGallery({ [field]: value })
-        if (updated) mutateGallery(updated, false)
+        await updateGallery({ [field]: value })
         toast.success(t('library.titleUpdated'))
       } catch {
         toast.error(t('library.updateFailed'))
       }
     },
-    [gallery, updateGallery, mutateGallery],
+    [gallery, updateGallery],
   )
 
   const { data: categoryRegistry } = useCategoryRegistry()
@@ -543,21 +542,19 @@ function GalleryDetailPageInner() {
     async (category: string) => {
       if (!gallery || category === gallery.category) return
       try {
-        const updated = await updateGallery({ category })
-        if (updated) mutateGallery(updated, false)
+        await updateGallery({ category })
         toast.success(t('library.categoryUpdated'))
       } catch {
         toast.error(t('library.updateFailed'))
       }
     },
-    [gallery, updateGallery, mutateGallery],
+    [gallery, updateGallery],
   )
 
   const handleFavoriteToggle = async () => {
     if (!gallery) return
     try {
-      const updated = await updateGallery({ favorited: !gallery.is_favorited })
-      if (updated) mutateGallery(updated, false)
+      await updateGallery({ favorited: !gallery.is_favorited })
     } catch {
       toast.error(t('library.favoriteError'))
     }
@@ -566,8 +563,7 @@ function GalleryDetailPageInner() {
   const handleRatingChange = async (newRating: number) => {
     if (!gallery) return
     try {
-      const updated = await updateGallery({ rating: newRating })
-      if (updated) mutateGallery(updated, false)
+      await updateGallery({ rating: newRating })
     } catch {
       toast.error(t('library.ratingError'))
     }
@@ -576,10 +572,7 @@ function GalleryDetailPageInner() {
   const handleReadingListToggle = async () => {
     if (!gallery || !source || !sourceId) return
     try {
-      const updated = await api.library.updateGallery(source, sourceId, {
-        in_reading_list: !gallery.in_reading_list,
-      })
-      mutateGallery(updated, false)
+      await updateGallery({ in_reading_list: !gallery.in_reading_list })
       toast.success(
         gallery.in_reading_list
           ? t('contextMenu.removeFromReadingList')
