@@ -286,6 +286,40 @@ class TestUpsertMetadataGuard:
         assert "cardinality" in tags_sql, "tags may only overwrite when the new array is non-empty"
         assert "galleries.tags_array" in tags_sql
 
+    def test_redownload_upsert_keeps_title_when_locked_field_state_row_exists(self):
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from db.models import Gallery
+        from worker.progressive import _upsert_metadata_set
+
+        excluded = pg_insert(Gallery).excluded
+        set_ = _upsert_metadata_set(excluded, include_title_tags=True)
+
+        title_sql = _compile_pg(set_["title"])
+        assert "case" in title_sql
+        assert "exists" in title_sql
+        assert "gallery_metadata_field_states" in title_sql, "title SET must consult the manual title lock"
+        assert "field_name = 'title'" in title_sql
+        assert "locked" in title_sql
+        # Correlated to the conflicting galleries row: the subquery FROM lists
+        # only the field-state table, not galleries.
+        sub = title_sql[title_sql.index("select") :]
+        from_clause = sub.split("from", 1)[1].split("where", 1)[0]
+        assert "galleries" not in from_clause, "subquery must correlate to galleries, not re-select it"
+        assert "gallery_id = galleries.id" in title_sql
+        # Blank-safe fallback is still there.
+        assert "nullif" in title_sql and "coalesce" in title_sql
+
+    def test_redownload_upsert_without_title_tags_has_no_title_lock_expression(self):
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from db.models import Gallery
+        from worker.progressive import _upsert_metadata_set
+
+        set_ = _upsert_metadata_set(pg_insert(Gallery).excluded, include_title_tags=False)
+
+        assert "title" not in set_
+
     def test_redownload_upsert_keeps_first_source_url(self):
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -2174,3 +2208,57 @@ class TestLinkArchiveEntriesTable:
     async def test_registered_site_keeps_its_configured_table(self):
         assert await self._looked_up_table("twitter") == "twitter"
         assert await self._looked_up_table("sankaku") == "sankakucomplex"
+
+
+async def _seed_title_state(db_session, *, locked: bool, source_value=None) -> int:
+    from db.models import Gallery, GalleryMetadataFieldState
+
+    gallery = Gallery(source="x", source_id="lt1", title="Manual Title")
+    db_session.add(gallery)
+    await db_session.flush()
+    db_session.add(
+        GalleryMetadataFieldState(
+            gallery_id=gallery.id, field_name="title", origin="manual", locked=locked, source_value=source_value
+        )
+    )
+    await db_session.commit()
+    return gallery.id
+
+
+async def _title_source_value(db_session, gid: int):
+    from sqlalchemy import select
+
+    from db.models import GalleryMetadataFieldState
+
+    return (
+        await db_session.execute(
+            select(GalleryMetadataFieldState.source_value).where(
+                GalleryMetadataFieldState.gallery_id == gid, GalleryMetadataFieldState.field_name == "title"
+            )
+        )
+    ).scalar_one()
+
+
+async def test_record_locked_title_source_locked_row_gets_incoming_title(db_session):
+    from worker.progressive import record_locked_title_source
+
+    gid = await _seed_title_state(db_session, locked=True)
+    await record_locked_title_source(db_session, gid, "Source Title")
+    assert await _title_source_value(db_session, gid) == "Source Title"
+
+
+async def test_record_locked_title_source_unlocked_row_is_untouched(db_session):
+    from worker.progressive import record_locked_title_source
+
+    gid = await _seed_title_state(db_session, locked=False)
+    await record_locked_title_source(db_session, gid, "Source Title")
+    assert await _title_source_value(db_session, gid) is None
+
+
+async def test_record_locked_title_source_blank_or_none_title_leaves_value_unchanged(db_session):
+    from worker.progressive import record_locked_title_source
+
+    gid = await _seed_title_state(db_session, locked=True, source_value="Old Source")
+    for blank in ("", "   ", None):
+        await record_locked_title_source(db_session, gid, blank)
+    assert await _title_source_value(db_session, gid) == "Old Source"

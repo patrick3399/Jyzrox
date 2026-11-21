@@ -123,7 +123,11 @@ describe('SubscriptionCard job gallery title', () => {
   })
 
   it('prefers the current gallery title over a stale job title', () => {
-    renderCard(makeJob('done'), { gallery_title: 'Renamed gallery' })
+    renderCard(makeJob('done'), {
+      gallery_title: 'Renamed gallery',
+      gallery_source: 'pixiv',
+      gallery_source_id: '67890',
+    })
 
     expect(screen.getByRole('link', { name: 'Renamed gallery' })).toBeInTheDocument()
     expect(screen.queryByText('Always visible gallery')).not.toBeInTheDocument()

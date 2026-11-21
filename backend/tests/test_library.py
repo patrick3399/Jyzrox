@@ -138,6 +138,17 @@ class TestListGalleries:
         assert data["total"] == 1
         assert data["galleries"][0]["title"] == "Naruto Doujin"
 
+    async def test_title_search_matches_gallery_whose_only_match_is_title_jpn(self, client, db_session):
+        """?q= must also match title_jpn, not only the primary title."""
+        await _insert_gallery(db_session, source_id="1", title="Unrelated Latin Title", title_jpn="ナルト同人誌")
+        await _insert_gallery(db_session, source_id="2", title="One Piece Fan Art", title_jpn=None)
+
+        resp = await client.get("/api/library/galleries", params={"q": "ナルト"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["title"] == "Unrelated Latin Title"
+
     async def test_favorited_filter(self, client, db_session):
         """?favorited=true should only return galleries in user_favorites for the current user."""
         fav_gid = await _insert_gallery(db_session, source_id="1", title="Fav", favorited=1)
@@ -1210,6 +1221,20 @@ class TestListFiles:
         assert item["uploader"] == "Alice"
         assert item["library_path"] == "/mnt/library/{artist}/{title}"
         assert item["source_path"] == "/mnt/library/Alice/Linked Gallery"
+
+    async def test_list_files_q_matches_gallery_whose_only_match_is_title_jpn(self, client, db_session):
+        """/library/files ?q= must also match title_jpn."""
+        await _insert_gallery(
+            db_session, source="local", source_id="jpn_only", title="Latin Name", title_jpn="日本語だけ一致"
+        )
+        await _insert_gallery(db_session, source="local", source_id="other", title="Other", title_jpn=None)
+
+        resp = await client.get("/api/library/files", params={"q": "日本語"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["directories"][0]["source_id"] == "jpn_only"
 
     async def test_list_files_import_mode_filter(self, client, db_session):
         """?import_mode= filters file directory results before pagination."""

@@ -1,5 +1,6 @@
 'use client'
 
+import { matchesSubscriptionSearch } from '@/lib/subscriptionSearch'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import {
@@ -231,14 +232,8 @@ export default function SubscriptionsPage() {
   const filteredSubscriptions = useMemo(() => {
     const subs = data?.subscriptions ?? []
     if (!debouncedSearch.trim()) return subs
-    const q = debouncedSearch.toLowerCase()
-    return subs.filter(
-      (s) =>
-        s.name?.toLowerCase().includes(q) ||
-        s.url.toLowerCase().includes(q) ||
-        s.source?.toLowerCase().includes(q),
-    )
-  }, [data?.subscriptions, debouncedSearch])
+    return subs.filter((s) => matchesSubscriptionSearch(s, jobsData?.[s.id], debouncedSearch))
+  }, [data?.subscriptions, debouncedSearch, jobsData])
 
   // Subscriptions that currently have an active download job
   const { data: activeJobsData } = useDownloadJobs(SUBSCRIPTION_ACTIVE_PARAMS)

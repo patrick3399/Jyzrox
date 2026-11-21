@@ -66,6 +66,47 @@ async def _insert_subscription(
     return result.scalar_one()
 
 
+async def _insert_gallery_row(
+    db_session,
+    source_id: str,
+    title: str,
+    deleted: bool = False,
+    created_by: int | None = None,
+    visibility: str = "private",
+) -> int:
+    """Insert a gallery directly and return its id."""
+    result = await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, pages, download_status, tags_array, "
+            "deleted_at, created_by_user_id, visibility) "
+            "VALUES ('x', :sid, :t, 1, 'complete', '[]', "
+            ":del, :cb, :vis) RETURNING id"
+        ),
+        {
+            "sid": source_id,
+            "t": title,
+            "del": "2026-01-01 00:00:00" if deleted else None,
+            "cb": created_by,
+            "vis": visibility,
+        },
+    )
+    await db_session.commit()
+    return result.scalar_one()
+
+
+async def _insert_job_with_gallery(db_session, sub_id: int, gallery_id: int, created_at: str, user_id: int = 1) -> str:
+    job_id = str(uuid.uuid4())
+    await db_session.execute(
+        text(
+            "INSERT INTO download_jobs (id, url, status, progress, subscription_id, user_id, created_at, gallery_id) "
+            "VALUES (:jid, 'https://example.com/dl', 'done', '{}', :sid, :uid, :ts, :gid)"
+        ),
+        {"jid": job_id, "sid": sub_id, "uid": user_id, "ts": created_at, "gid": gallery_id},
+    )
+    await db_session.commit()
+    return job_id
+
+
 # ---------------------------------------------------------------------------
 # GET /api/subscriptions/
 # ---------------------------------------------------------------------------
@@ -107,6 +148,43 @@ class TestListSubscriptions:
         sub = resp.json()["subscriptions"][0]
         for field in ("id", "name", "url", "source", "enabled", "auto_download", "cron_expr"):
             assert field in sub
+
+    async def test_list_subscriptions_newest_job_gallery_trashed_falls_back_to_older_live_gallery(
+        self, client, db_session
+    ):
+        """Latest job whose gallery is VISIBLE wins: a trashed newer gallery is skipped."""
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        live = await _insert_gallery_row(db_session, "live", "Live")
+        trashed = await _insert_gallery_row(db_session, "trashed", "Trashed", deleted=True)
+        await _insert_job_with_gallery(db_session, sub, live, "2026-01-01 00:00:00")
+        await _insert_job_with_gallery(db_session, sub, trashed, "2026-01-02 00:00:00")
+
+        resp = await client.get("/api/subscriptions/")
+        row = next(s for s in resp.json()["subscriptions"] if s["id"] == sub)
+        assert row["gallery_id"] == live
+
+    async def test_list_subscriptions_jobs_tied_on_created_at_higher_job_id_gallery_wins(self, client, db_session):
+        """Tie on created_at breaks by job id DESC (the rewrite's row_number order)."""
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        g1 = await _insert_gallery_row(db_session, "g1", "G1")
+        g2 = await _insert_gallery_row(db_session, "g2", "G2")
+        ids = sorted([str(uuid.uuid4()), str(uuid.uuid4())])
+        for jid, gid in zip(ids, (g1, g2), strict=True):  # higher job id -> g2
+            await db_session.execute(
+                text(
+                    "INSERT INTO download_jobs (id, url, status, progress, subscription_id, user_id, created_at, "
+                    "gallery_id) VALUES (:jid, 'https://example.com/dl', 'done', '{}', :sid, 1, "
+                    "'2026-01-01 00:00:00', :gid)"
+                ),
+                {"jid": jid, "sid": sub, "gid": gid},
+            )
+        await db_session.commit()
+
+        resp = await client.get("/api/subscriptions/")
+        row = next(s for s in resp.json()["subscriptions"] if s["id"] == sub)
+        assert row["gallery_id"] == g2
 
     async def test_list_subscriptions_filter_by_source(self, client, db_session):
         """?source= filters results to matching source only."""
@@ -591,6 +669,41 @@ class TestLatestJobs:
         resp = await client.get("/api/subscriptions/latest-jobs")
         assert resp.status_code == 200
         assert resp.json()["jobs"] == {}
+
+    async def test_latest_jobs_trashed_gallery_has_no_gallery_source_keys(self, client, db_session):
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        g = await _insert_gallery_row(db_session, "t1", "Trashed", deleted=True)
+        await _insert_job_with_gallery(db_session, sub, g, "2026-01-01 00:00:00")
+
+        job = (await client.get("/api/subscriptions/latest-jobs")).json()["jobs"][str(sub)]
+        assert "gallery_source" not in job
+        assert "gallery_source_id" not in job
+        assert "gallery_title" not in job
+
+    async def test_latest_jobs_other_users_private_gallery_hidden_from_non_admin(self, make_client, db_session):
+        await _ensure_user(db_session)
+        await _ensure_user(db_session, user_id=2)
+        sub = await _insert_subscription(db_session, user_id=2)
+        g = await _insert_gallery_row(db_session, "p1", "Private", created_by=1, visibility="private")
+        await _insert_job_with_gallery(db_session, sub, g, "2026-01-01 00:00:00", user_id=2)
+
+        async with make_client(user_id=2, role="member") as ac:
+            job = (await ac.get("/api/subscriptions/latest-jobs")).json()["jobs"][str(sub)]
+        assert "gallery_source" not in job
+        assert "gallery_source_id" not in job
+        assert "gallery_title" not in job
+
+    async def test_latest_jobs_visible_gallery_includes_gallery_title(self, client, db_session):
+        await _ensure_user(db_session)
+        sub = await _insert_subscription(db_session)
+        g = await _insert_gallery_row(db_session, "v1", "Visible Title")
+        await _insert_job_with_gallery(db_session, sub, g, "2026-01-01 00:00:00")
+
+        job = (await client.get("/api/subscriptions/latest-jobs")).json()["jobs"][str(sub)]
+        assert job["gallery_source"] == "x"
+        assert job["gallery_source_id"] == "v1"
+        assert job["gallery_title"] == "Visible Title"
 
     async def test_latest_jobs_same_batch_returns_running_job_not_arbitrary_queued(self, client, db_session):
         """A discovery batch shares one created_at and has random uuid4 ids."""

@@ -1200,3 +1200,68 @@ class TestBatchImportCategory:
         src = inspect.getsource(batch_import_job)
         assert '"category": category,' in src
         assert "category, created_by_user_id" in src
+
+
+# ---------------------------------------------------------------------------
+# import_job — title upsert honours a manual title lock
+# ---------------------------------------------------------------------------
+
+
+class TestImportJobTitleUpsertGuard:
+    """A re-import hitting ON CONFLICT must not overwrite a manually locked
+    title, and a blank incoming title must not blank the stored one."""
+
+    async def _captured_upsert_sql(self, tmp_path) -> str:
+        from sqlalchemy.dialects import postgresql
+
+        from worker.importer import import_job
+
+        gallery_dir = _create_test_gallery(
+            tmp_path,
+            metadata={"category": "ehentai", "title": "Test Gallery", "tags": {}, "gid": 12345},
+        )
+        mock_session = _make_mock_session()
+        site_cfg = MagicMock(source_id="ehentai", source_id_fields=("gid",), category="gallery")
+        with (
+            patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(mock_session)),
+            patch("worker.importer.store_blob", AsyncMock(return_value=MagicMock(sha256="abc123"))),
+            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.helpers._sha256", return_value="abc" * 21 + "ab"),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer._normalize_tags", side_effect=lambda t, s: t),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=site_cfg),
+            patch("plugins.registry.plugin_registry.get_parser", return_value=None),
+            patch("plugins.builtin.gallery_dl._metadata._extract_artist", return_value="ehentai:test_artist"),
+            patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
+            patch("worker.importer.upsert_tag_translations", AsyncMock()),
+            patch("shutil.rmtree"),
+        ):
+            await import_job(_make_ctx(), path=str(gallery_dir), user_id=1)
+
+        for call in mock_session.execute.call_args_list:
+            stmt = call.args[0]
+            if not hasattr(stmt, "compile"):
+                continue
+            sql = str(stmt.compile(dialect=postgresql.dialect())).lower()
+            if "on conflict" in sql and "insert into galleries" in sql:
+                return sql
+        raise AssertionError("import_job never executed the galleries upsert")
+
+    async def test_import_upsert_on_conflict_title_respects_locked_field_state(self, tmp_path):
+        sql = await self._captured_upsert_sql(tmp_path)
+        set_clause = sql.split("do update set", 1)[1]
+        title_expr = set_clause.split("tags_array", 1)[0]
+
+        assert "gallery_metadata_field_states" in title_expr, "title SET must consult the manual lock"
+        assert "locked" in title_expr
+        assert "case" in title_expr
+        # Correlated subquery: its FROM lists only the field-state table.
+        sub = title_expr[title_expr.index("select") :]
+        from_clause = sub.split("from", 1)[1].split("where", 1)[0]
+        assert "galleries" not in from_clause
+
+    async def test_import_upsert_blank_excluded_title_keeps_existing_title(self, tmp_path):
+        sql = await self._captured_upsert_sql(tmp_path)
+        title_expr = sql.split("do update set", 1)[1].split("tags_array", 1)[0]
+
+        assert "nullif" in title_expr and "coalesce" in title_expr, "blank excluded title must not blank the row"

@@ -45,20 +45,36 @@ async def list_subscriptions(
         gallery_by_sub_id: dict[int, Gallery] = {}
         if subs:
             sub_ids = [s.id for s in subs]
+            # Latest job per subscription whose gallery is visible: access
+            # filter applies before ranking so hidden galleries never win.
+            ranked_jobs = (
+                select(
+                    DownloadJob.subscription_id.label("sid"),
+                    DownloadJob.gallery_id.label("gid"),
+                    sa_func.row_number()
+                    .over(
+                        partition_by=DownloadJob.subscription_id,
+                        order_by=(DownloadJob.created_at.desc(), DownloadJob.id.desc()),
+                    )
+                    .label("rn"),
+                )
+                .join(Gallery, Gallery.id == DownloadJob.gallery_id)
+                .where(
+                    DownloadJob.subscription_id.in_(sub_ids),
+                    DownloadJob.gallery_id.is_not(None),
+                    gallery_access_filter(auth),
+                )
+                .subquery()
+            )
             job_gallery_rows = (
                 await session.execute(
-                    select(DownloadJob.subscription_id, Gallery)
-                    .join(Gallery, Gallery.id == DownloadJob.gallery_id)
-                    .where(
-                        DownloadJob.subscription_id.in_(sub_ids),
-                        DownloadJob.gallery_id.is_not(None),
-                        gallery_access_filter(auth),
-                    )
-                    .order_by(DownloadJob.subscription_id.asc(), DownloadJob.created_at.desc())
+                    select(ranked_jobs.c.sid, Gallery)
+                    .join(Gallery, Gallery.id == ranked_jobs.c.gid)
+                    .where(ranked_jobs.c.rn == 1)
                 )
             ).all()
             for sub_id, gallery in job_gallery_rows:
-                gallery_by_sub_id.setdefault(sub_id, gallery)
+                gallery_by_sub_id[sub_id] = gallery
 
             # Keep the link stable even if old download jobs are cleaned up.
             urls_missing_job_gallery = [s.url for s in subs if s.id not in gallery_by_sub_id]
@@ -188,7 +204,11 @@ async def get_latest_jobs(auth: dict = Depends(require_auth)):
         gallery_ids = [j.gallery_id for j in jobs if j.gallery_id]
         gallery_map = {}
         if gallery_ids:
-            gs = (await session.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
+            gs = (
+                (await session.execute(select(Gallery).where(Gallery.id.in_(gallery_ids), gallery_access_filter(auth))))
+                .scalars()
+                .all()
+            )
             gallery_map = {g.id: g for g in gs}
 
         # Run = jobs created at or after the oldest still-active job, or the
@@ -225,10 +245,15 @@ async def get_latest_jobs(auth: dict = Depends(require_auth)):
                 run[status] += n
             run["total"] += n
 
-    return {
-        "jobs": {str(j.subscription_id): serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs},
-        "runs": runs,
-    }
+    out_jobs: dict[str, dict] = {}
+    for j in jobs:
+        gallery = gallery_map.get(j.gallery_id)
+        d = serialize_download_job(j, gallery)
+        if gallery is not None:
+            # Access-filtered above; kept out of the shared presenter on purpose.
+            d["gallery_title"] = gallery.title
+        out_jobs[str(j.subscription_id)] = d
+    return {"jobs": out_jobs, "runs": runs}
 
 
 @router.get("/by-gallery/{gallery_id}")

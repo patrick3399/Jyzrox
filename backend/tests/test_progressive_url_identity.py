@@ -71,8 +71,18 @@ class _Harness:
             return await importer.ensure_gallery_from_identity(identity, metadata, dest)
 
     def last(self):
-        compiled = self.statements[-1].compile(dialect=postgresql.dialect())
+        # The gallery upsert is not necessarily the last statement: work-type
+        # sites also issue a field-state UPDATE after it.
+        upserts = [s for s in self.statements if getattr(getattr(s, "table", None), "name", None) == "galleries"]
+        compiled = upserts[-1].compile(dialect=postgresql.dialect())
         return compiled.params, str(compiled)
+
+    def field_state_updates(self) -> list:
+        return [
+            s
+            for s in self.statements
+            if getattr(getattr(s, "table", None), "name", None) == "gallery_metadata_field_states"
+        ]
 
 
 @pytest.fixture
@@ -149,6 +159,19 @@ async def test_work_type_site_keeps_the_title_from_metadata(harness):
     params, _ = harness.last()
     assert params["title"] == "Some Book"
     assert (params["source"], params["source_id"]) == ("nhentai", "gallery=123456")
+    # Work-type site: a field-state UPDATE is issued after the gallery upsert.
+    assert len(harness.field_state_updates()) == 1
+    assert harness.statements.index(harness.field_state_updates()[0]) > 0
+
+
+@pytest.mark.asyncio
+async def test_account_site_does_not_record_locked_title_source(harness):
+    await harness.run(
+        harness.make("https://x.com/cafu0425/media"),
+        UrlIdentity("twitter", "cafu0425", True, "twitter"),
+        _TWEET_META,
+    )
+    assert harness.field_state_updates() == []
 
 
 _COLLAB_POST_META = {"category": "instagram", "subcategory": "user", "username": "mancity", "fullname": "Man City"}

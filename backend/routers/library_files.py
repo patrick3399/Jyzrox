@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -89,7 +89,13 @@ async def list_files(
     """List library galleries with image counts and size from DB metadata."""
     filters = [gallery_access_filter(auth)]
     if q:
-        filters.append(Gallery.title.ilike(f"%{escape_like(q)}%", escape="\\"))
+        pattern = f"%{escape_like(q)}%"
+        filters.append(
+            or_(
+                Gallery.title.ilike(pattern, escape="\\"),
+                Gallery.title_jpn.ilike(pattern, escape="\\"),
+            )
+        )
     if source:
         filters.append(Gallery.source == source)
     if import_mode:

@@ -18,7 +18,7 @@ from core.config import settings
 from core.database import AsyncSessionLocal
 from core.events import EventType, emit_safe
 from core.social_order import reorder_social_gallery_images
-from db.models import ExcludedBlob, Gallery, Image
+from db.models import ExcludedBlob, Gallery, GalleryMetadataFieldState, Image
 from plugins.builtin.gallery_dl._archive import drop_repair_archive, merge_repair_archive
 from plugins.models import GalleryImportData
 from services.cas import (
@@ -97,6 +97,58 @@ def _subscription_artist_id(data: GalleryImportData, source_url: str | None) -> 
     return None
 
 
+def _title_locked_expr():
+    """Correlated EXISTS: the gallery's title is manually locked.
+
+    Explicit ``correlate(Gallery)`` keeps ``galleries`` out of the subquery
+    FROM when used inside INSERT ... ON CONFLICT.
+    """
+    from sqlalchemy import literal, literal_column
+
+    # literal_column keeps ``galleries`` out of the subquery FROM even when the
+    # expression is compiled outside an enclosing statement.
+    return (
+        select(literal(1))
+        .where(
+            GalleryMetadataFieldState.gallery_id == literal_column("galleries.id"),
+            GalleryMetadataFieldState.field_name == "title",
+            GalleryMetadataFieldState.locked.is_(True),
+        )
+        .correlate(Gallery)
+        .exists()
+    )
+
+
+def lock_aware_title_set(excluded):
+    """ON CONFLICT value for ``title``: keep a locked title, else blank-safe replace."""
+    from sqlalchemy import case
+
+    return case(
+        (_title_locked_expr(), Gallery.title),
+        else_=func.coalesce(func.nullif(excluded.title, ""), Gallery.title),
+    )
+
+
+async def record_locked_title_source(session, gallery_id: int, title: str | None) -> None:
+    """Refresh the pending source value of a locked title after a re-download.
+
+    A locked title is not overwritten by the upsert; the incoming source title
+    is stored in ``source_value`` so the workbench can show the pending diff.
+    Core statement on the field-state table only (no gallery ORM mutation).
+    """
+    if not title or not title.strip():
+        return
+    await session.execute(
+        update(GalleryMetadataFieldState)
+        .where(
+            GalleryMetadataFieldState.gallery_id == gallery_id,
+            GalleryMetadataFieldState.field_name == "title",
+            GalleryMetadataFieldState.locked.is_(True),
+        )
+        .values(source_value=title, updated_at=func.now())
+    )
+
+
 def _upsert_metadata_set(excluded, *, include_title_tags: bool) -> dict:
     """ON CONFLICT SET mapping shared by the ensure_gallery* upserts (BR-007).
 
@@ -104,7 +156,8 @@ def _upsert_metadata_set(excluded, *, include_title_tags: bool) -> dict:
     metadata with blank values: empty/NULL title and empty tag arrays keep the
     existing row, artist_id only overwrites when the new value is non-NULL, and
     source_url is first-wins (the URL the gallery was originally created from).
-    ``include_title_tags=False`` is for the URL-fallback path, whose title is
+    A manually locked title (``gallery_metadata_field_states.locked``) is
+    never overwritten. ``include_title_tags=False`` is for the URL-fallback path, whose title is
     derived from the URL path and must never overwrite real metadata.
     """
     from sqlalchemy import case, func
@@ -116,7 +169,7 @@ def _upsert_metadata_set(excluded, *, include_title_tags: bool) -> dict:
         "source_pages": func.coalesce(excluded.source_pages, Gallery.source_pages),
     }
     if include_title_tags:
-        set_["title"] = func.coalesce(func.nullif(excluded.title, ""), Gallery.title)
+        set_["title"] = lock_aware_title_set(excluded)
         # cardinality(NULL) is NULL → condition falsy → existing tags kept.
         set_["tags_array"] = case(
             (func.cardinality(excluded.tags_array) > 0, excluded.tags_array),
@@ -485,6 +538,7 @@ class ProgressiveImporter:
                 .returning(Gallery.id)
             )
             self.gallery_id = (await session.execute(stmt)).scalar_one()
+            await record_locked_title_source(session, self.gallery_id, import_data.title)
 
             # tags_array above is a denormalised view of gallery_tags, and
             # rebuild_gallery_tags_array() regenerates it from those rows —
@@ -569,6 +623,8 @@ class ProgressiveImporter:
                 .returning(Gallery.id)
             )
             self.gallery_id = (await session.execute(stmt)).scalar_one()
+            if is_work:
+                await record_locked_title_source(session, self.gallery_id, title)
             if is_work and tags:
                 await upsert_metadata_gallery_tags(session, self.gallery_id, tags)
 
@@ -704,6 +760,7 @@ class ProgressiveImporter:
                 .returning(Gallery.id)
             )
             self.gallery_id = (await session.execute(stmt)).scalar_one()
+            await record_locked_title_source(session, self.gallery_id, data.title)
 
             # tags_array above is a denormalised view of gallery_tags, and
             # rebuild_gallery_tags_array() regenerates it from those rows —

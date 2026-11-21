@@ -93,6 +93,7 @@ export interface DownloadJob {
   gallery_id?: number | null
   gallery_source?: string
   gallery_source_id?: string
+  gallery_title?: string | null
   subscription_id?: number | null
   options?: Record<string, unknown>
   progress: {

@@ -38,6 +38,7 @@ from worker.constants import (
     logger,
 )
 from worker.helpers import _sha256, _validate_image_magic
+from worker.progressive import lock_aware_title_set, record_locked_title_source
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
 
@@ -227,7 +228,7 @@ async def import_job(
             .on_conflict_do_update(
                 index_elements=["source", "source_id"],
                 set_={
-                    "title": pg_insert(Gallery).excluded.title,
+                    "title": lock_aware_title_set(pg_insert(Gallery).excluded),
                     "tags_array": pg_insert(Gallery).excluded.tags_array,
                     "download_status": "importing",
                     "metadata_updated_at": func.now(),
@@ -253,6 +254,8 @@ async def import_job(
                 "source": gallery_values["source"],
                 "source_id": gallery_values["source_id"],
             }
+
+        await record_locked_title_source(session, gallery_id, gallery_values.get("title"))
 
         # Load excluded blob hashes for this gallery
         excluded_rows = (

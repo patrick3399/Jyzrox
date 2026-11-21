@@ -107,7 +107,13 @@ async def list_galleries(
         else:
             stmt = stmt.where(Gallery.category == category)
     if q:
-        stmt = stmt.where(Gallery.title.ilike(f"%{escape_like(q)}%", escape="\\"))
+        pattern = f"%{escape_like(q)}%"
+        stmt = stmt.where(
+            or_(
+                Gallery.title.ilike(pattern, escape="\\"),
+                Gallery.title_jpn.ilike(pattern, escape="\\"),
+            )
+        )
     if collection is not None:
         from db.models import CollectionGallery
 

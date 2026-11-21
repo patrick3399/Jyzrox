@@ -324,11 +324,31 @@ const FOOTER_ACTION = 'sm:size-auto sm:rounded sm:p-1.5'
 const FOOTER_ICON = 18
 const FOOTER_ICON_CLASS = 'sm:size-3.5'
 
-function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
-  const source = latestJob?.gallery_source ?? sub.gallery_source
-  const sourceId = latestJob?.gallery_source_id ?? sub.gallery_source_id
-  if (!source || !sourceId) return null
-  return `/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`
+function subscriptionGallery(
+  sub: Subscription,
+  latestJob: DownloadJob | null,
+): { href: string | null; title: string | undefined } {
+  const href = (source: string, id: string) =>
+    `/library/${encodeURIComponent(source)}/${encodeURIComponent(id)}`
+  const subTitle = sub.gallery_title?.trim()
+  const progressTitle = latestJob?.progress?.title?.trim()
+  const jobSource = latestJob?.gallery_source
+  const jobId = latestJob?.gallery_source_id
+  if (jobSource && jobId) {
+    const sameGallery = sub.gallery_source === jobSource && sub.gallery_source_id === jobId
+    return {
+      href: href(jobSource, jobId),
+      title:
+        latestJob?.gallery_title?.trim() || (sameGallery ? subTitle : undefined) || progressTitle,
+    }
+  }
+  return {
+    href:
+      sub.gallery_source && sub.gallery_source_id
+        ? href(sub.gallery_source, sub.gallery_source_id)
+        : null,
+    title: subTitle || progressTitle,
+  }
 }
 
 export function SubscriptionCard({
@@ -371,8 +391,7 @@ export function SubscriptionCard({
   const group = groups.find((g) => g.id === sub.group_id) ?? null
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState('')
-  const galleryHref = subscriptionGalleryHref(sub, latestJob)
-  const galleryTitle = sub.gallery_title?.trim() || latestJob?.progress?.title?.trim()
+  const { href: galleryHref, title: galleryTitle } = subscriptionGallery(sub, latestJob)
   const isRunning = latestJob?.status === 'running'
   // The card knows its latest job only; a subscription with a job in flight can be stopped.
   const hasActiveJob = run
