@@ -23,6 +23,7 @@ import {
 import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { Button } from '@/components/ui/button'
+import { sourceColorClass, sourceDisplayName } from '@/lib/sourceStyle'
 
 function getGalleryColCount() {
   if (typeof window === 'undefined') return 4
@@ -36,12 +37,6 @@ function getGalleryColCount() {
 }
 
 type ViewTab = 'galleries' | 'images'
-
-const SOURCE_COLORS: Record<string, string> = {
-  pixiv: 'bg-blue-500/20 text-blue-400',
-  ehentai: 'bg-orange-500/20 text-orange-400',
-  twitter: 'bg-sky-500/20 text-sky-400',
-}
 
 const GALLERY_PAGE_SIZE = 48
 const IMAGE_PAGE_SIZE = 40
@@ -125,9 +120,9 @@ function ArtistDetailPageInner() {
               </h1>
               {summary?.source && (
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${SOURCE_COLORS[summary.source] ?? 'bg-vault-text-secondary/20 text-vault-text-secondary'}`}
+                  className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase ${sourceColorClass(summary.source)}`}
                 >
-                  {summary.source}
+                  {sourceDisplayName(summary.source)}
                 </span>
               )}
             </div>

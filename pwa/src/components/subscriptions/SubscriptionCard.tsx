@@ -34,6 +34,7 @@ import {
 import { MediaPolicyFields } from '@/components/download/MediaPolicyFields'
 import { isDefaultMediaPolicy, mediaPolicyFromOptions, withMediaPolicy } from '@/lib/mediaPolicy'
 import { CRON_PRESETS } from './constants'
+import { sourceColorClass } from '@/lib/sourceStyle'
 import { sourceLabel } from './sourceGrouping'
 import type {
   DownloadJob,
@@ -43,17 +44,12 @@ import type {
   SubscriptionRun,
 } from '@/lib/types'
 
-const SOURCE_COLORS: Record<string, string> = {
-  pixiv: 'bg-blue-500/20 text-blue-400',
-  twitter: 'bg-sky-500/20 text-sky-400',
-  ehentai: 'bg-purple-500/20 text-purple-400',
-  weibo: 'bg-red-500/20 text-red-300',
-}
-
-function sourceBadge(source: string | null) {
-  const cls = SOURCE_COLORS[source || ''] || 'bg-vault-border text-vault-text-muted'
+function SourceBadge({ source }: { source: string | null }) {
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>
+    <span
+      data-testid="subscription-source-badge"
+      className={`shrink-0 whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-medium ${sourceColorClass(source)}`}
+    >
       {sourceLabel(source)}
     </span>
   )
@@ -423,77 +419,79 @@ export function SubscriptionCard({
 
   return (
     <div className="bg-vault-bg border border-vault-border/50 rounded-lg p-3">
-      {/* Top row: name + badges on left, toggle on right */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-          {editingName ? (
-            <input
-              autoFocus
-              value={nameValue}
-              placeholder={t('subscriptions.namePlaceholder')}
-              onChange={(e) => setNameValue(e.target.value)}
-              onBlur={() => {
-                const next = nameValue.trim()
-                if (next !== (sub.name ?? '')) onRename(sub, next)
-                setEditingName(false)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-                if (e.key === 'Escape') setEditingName(false)
-              }}
-              className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setNameValue(sub.name ?? '')
-                setEditingName(true)
-              }}
-              className="min-w-0 max-w-full truncate text-left text-sm font-medium text-vault-text cursor-pointer hover:text-vault-accent transition-colors"
-              title={t('subscriptions.editName')}
-            >
-              {sub.name || sub.url}
-            </button>
-          )}
-          {sourceBadge(sub.source)}
-          {showGroup && isGrouped && (
-            <span
-              data-testid="subscription-group-badge"
-              className="flex min-w-0 items-center gap-1 rounded bg-vault-accent/15 px-1.5 py-0.5 text-[10px] text-vault-accent"
-              title={t('subscriptions.intervalFromGroup', {
-                name: group?.name ?? String(sub.group_id),
-                schedule: group?.schedule ?? '',
-              })}
-            >
-              <Users size={10} className="shrink-0" />
-              <span className="truncate">{group?.name ?? `#${sub.group_id}`}</span>
-              {group && <span className="shrink-0 font-mono">{group.schedule}</span>}
-            </span>
-          )}
+      {/* Top row never wraps: site badge, name (truncates), toggle — so the site
+          sits in the same corner of every card. */}
+      <div className="flex items-center gap-2">
+        <SourceBadge source={sub.source} />
+        {editingName ? (
+          <input
+            autoFocus
+            value={nameValue}
+            placeholder={t('subscriptions.namePlaceholder')}
+            onChange={(e) => setNameValue(e.target.value)}
+            onBlur={() => {
+              const next = nameValue.trim()
+              if (next !== (sub.name ?? '')) onRename(sub, next)
+              setEditingName(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === 'Escape') setEditingName(false)
+            }}
+            className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
+          />
+        ) : (
           <button
-            onClick={() => onAutoDownloadToggle(sub)}
-            className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
-            title={
-              sub.auto_download
-                ? t('subscriptions.autoDownloadOn')
-                : t('subscriptions.autoDownloadOff')
-            }
+            type="button"
+            onClick={() => {
+              setNameValue(sub.name ?? '')
+              setEditingName(true)
+            }}
+            className="min-w-0 flex-1 truncate text-left text-sm font-medium text-vault-text cursor-pointer hover:text-vault-accent transition-colors"
+            title={t('subscriptions.editName')}
           >
-            {t('subscriptions.autoDownload')}
+            {sub.name || sub.url}
           </button>
-        </div>
-
+        )}
         <button
           onClick={() => onToggle(sub)}
           role="switch"
           aria-checked={sub.enabled}
           aria-label={sub.name || sub.url}
-          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 mt-0.5 ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
+          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
         >
           <span
             className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`}
           />
+        </button>
+      </div>
+
+      {/* Schedule group and auto-download sit on their own row under the name. */}
+      <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+        {showGroup && isGrouped && (
+          <span
+            data-testid="subscription-group-badge"
+            className="flex min-w-0 items-center gap-1 rounded bg-vault-accent/15 px-1.5 py-0.5 text-[10px] text-vault-accent"
+            title={t('subscriptions.intervalFromGroup', {
+              name: group?.name ?? String(sub.group_id),
+              schedule: group?.schedule ?? '',
+            })}
+          >
+            <Users size={10} className="shrink-0" />
+            <span className="truncate">{group?.name ?? `#${sub.group_id}`}</span>
+            {group && <span className="shrink-0 font-mono">{group.schedule}</span>}
+          </span>
+        )}
+        <button
+          onClick={() => onAutoDownloadToggle(sub)}
+          className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
+          title={
+            sub.auto_download
+              ? t('subscriptions.autoDownloadOn')
+              : t('subscriptions.autoDownloadOff')
+          }
+        >
+          {t('subscriptions.autoDownload')}
         </button>
       </div>
 

@@ -1,5 +1,6 @@
 import { t } from '@/lib/i18n'
 import { sortActiveFirst } from '@/lib/downloadJobFilters'
+import { sourceDisplayName } from '@/lib/sourceStyle'
 import type { Subscription } from '@/lib/types'
 
 /** How the subscriptions page lays out its list: by schedule group, by site, or by last check. */
@@ -25,19 +26,10 @@ export function writeSubscriptionView(view: SubscriptionView): void {
   }
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  pixiv: 'Pixiv',
-  twitter: 'Twitter',
-  ehentai: 'E-Hentai',
-  weibo: 'Weibo',
-  instagram: 'Instagram',
-  facebook: 'Facebook',
-}
-
 /** Display name of a subscription source; unknown (null) sources read as "Other". */
 export function sourceLabel(source: string | null): string {
   if (!source) return t('subscriptions.sourceOther')
-  return SOURCE_LABELS[source] ?? source
+  return sourceDisplayName(source)
 }
 
 export interface SourceSection {
