@@ -1,7 +1,7 @@
 /**
- * Feature test: the site badge leads the subscription card's first row, on the
- * same line as the name and the enable switch, with the group and
- * auto-download badges on the row below.
+ * Feature test: the site badge sits in the card's right column, under the
+ * enable switch and centred in the space above the footer, apart from the
+ * name and the group / auto-download badges.
  *
  * Guards: the badge used to follow the name inside a wrapping row, so it moved
  * with the name's length and dropped to a second line beside the group badge.
@@ -80,19 +80,23 @@ function renderCard(sub: Subscription) {
 }
 
 describe('SubscriptionCard site badge', () => {
-  it('leads a non-wrapping first row shared only with the name and the switch', () => {
+  it('sits under the switch in a right column of its own, centred in the space left', () => {
     const sub = makeSub()
     renderCard(sub)
     const badge = screen.getByTestId('subscription-source-badge')
-    const row = badge.parentElement as HTMLElement
+    const centre = badge.parentElement as HTMLElement
+    const column = centre.parentElement as HTMLElement
+    const toggle = screen.getByRole('switch')
 
-    expect(row.firstElementChild).toBe(badge)
-    expect(row.className).not.toContain('flex-wrap')
-    expect(badge.className).toContain('shrink-0')
-    expect(row.contains(screen.getByText(sub.name as string))).toBe(true)
-    expect(row.contains(screen.getByRole('switch'))).toBe(true)
-    expect(row.contains(screen.getByTestId('subscription-group-badge'))).toBe(false)
-    expect(row.contains(screen.getByText(t('subscriptions.autoDownload')))).toBe(false)
+    expect(centre.className).toContain('flex-1')
+    expect(centre.className).toContain('items-center')
+    expect(column.className).toContain('flex-col')
+    expect(column.className).toContain('shrink-0')
+    expect(column.firstElementChild).toBe(toggle)
+    expect(column.lastElementChild).toBe(centre)
+    expect(column.contains(screen.getByText(sub.name as string))).toBe(false)
+    expect(column.contains(screen.getByTestId('subscription-group-badge'))).toBe(false)
+    expect(column.contains(screen.getByText(t('subscriptions.autoDownload')))).toBe(false)
   })
 
   it('uses the shared site colour', () => {

@@ -419,147 +419,156 @@ export function SubscriptionCard({
 
   return (
     <div className="bg-vault-bg border border-vault-border/50 rounded-lg p-3">
-      {/* Top row never wraps: site badge, name (truncates), toggle — so the site
-          sits in the same corner of every card. */}
-      <div className="flex items-center gap-2">
-        <SourceBadge source={sub.source} />
-        {editingName ? (
-          <input
-            autoFocus
-            value={nameValue}
-            placeholder={t('subscriptions.namePlaceholder')}
-            onChange={(e) => setNameValue(e.target.value)}
-            onBlur={() => {
-              const next = nameValue.trim()
-              if (next !== (sub.name ?? '')) onRename(sub, next)
-              setEditingName(false)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur()
-              if (e.key === 'Escape') setEditingName(false)
-            }}
-            className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setNameValue(sub.name ?? '')
-              setEditingName(true)
-            }}
-            className="min-w-0 flex-1 truncate text-left text-sm font-medium text-vault-text cursor-pointer hover:text-vault-accent transition-colors"
-            title={t('subscriptions.editName')}
-          >
-            {sub.name || sub.url}
-          </button>
-        )}
-        <button
-          onClick={() => onToggle(sub)}
-          role="switch"
-          aria-checked={sub.enabled}
-          aria-label={sub.name || sub.url}
-          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`}
-          />
-        </button>
-      </div>
-
-      {/* Schedule group and auto-download sit on their own row under the name. */}
-      <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
-        {showGroup && isGrouped && (
-          <span
-            data-testid="subscription-group-badge"
-            className="flex min-w-0 items-center gap-1 rounded bg-vault-accent/15 px-1.5 py-0.5 text-[10px] text-vault-accent"
-            title={t('subscriptions.intervalFromGroup', {
-              name: group?.name ?? String(sub.group_id),
-              schedule: group?.schedule ?? '',
-            })}
-          >
-            <Users size={10} className="shrink-0" />
-            <span className="truncate">{group?.name ?? `#${sub.group_id}`}</span>
-            {group && <span className="shrink-0 font-mono">{group.schedule}</span>}
-          </span>
-        )}
-        <button
-          onClick={() => onAutoDownloadToggle(sub)}
-          className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
-          title={
-            sub.auto_download
-              ? t('subscriptions.autoDownloadOn')
-              : t('subscriptions.autoDownloadOff')
-          }
-        >
-          {t('subscriptions.autoDownload')}
-        </button>
-      </div>
-
-      {/* Gallery identity + compact terminal status */}
-      {(galleryTitle || galleryHref || (latestJob && !isRunning)) && (
-        <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <div className="min-w-0 flex-1 basis-48">
-            {galleryTitle && galleryHref ? (
-              <Link
-                href={galleryHref}
-                className="block truncate text-xs font-medium text-vault-accent hover:underline"
-                title={galleryTitle}
+      {/* Body: details on the left; the switch and, centred below it, the site
+          badge on the right — so the site sits between the switch and the
+          footer menu on every card, whatever the name's length. */}
+      <div className="flex gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0">
+            {editingName ? (
+              <input
+                autoFocus
+                value={nameValue}
+                placeholder={t('subscriptions.namePlaceholder')}
+                onChange={(e) => setNameValue(e.target.value)}
+                onBlur={() => {
+                  const next = nameValue.trim()
+                  if (next !== (sub.name ?? '')) onRename(sub, next)
+                  setEditingName(false)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                  if (e.key === 'Escape') setEditingName(false)
+                }}
+                className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setNameValue(sub.name ?? '')
+                  setEditingName(true)
+                }}
+                className="min-w-0 flex-1 truncate text-left text-sm font-medium text-vault-text cursor-pointer hover:text-vault-accent transition-colors"
+                title={t('subscriptions.editName')}
               >
-                {galleryTitle}
-              </Link>
-            ) : galleryTitle ? (
-              <p className="truncate text-xs font-medium text-vault-text" title={galleryTitle}>
-                {galleryTitle}
-              </p>
-            ) : galleryHref ? (
-              <Link href={galleryHref} className="text-xs text-vault-accent hover:underline">
-                {t('subscriptions.viewGallery')}
-              </Link>
-            ) : null}
+                {sub.name || sub.url}
+              </button>
+            )}
           </div>
-          {latestJob && !isRunning && (
-            <div className="min-w-0 max-w-full shrink-0">
+
+          {/* Schedule group and auto-download sit on their own row under the name. */}
+          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+            {showGroup && isGrouped && (
+              <span
+                data-testid="subscription-group-badge"
+                className="flex min-w-0 items-center gap-1 rounded bg-vault-accent/15 px-1.5 py-0.5 text-[10px] text-vault-accent"
+                title={t('subscriptions.intervalFromGroup', {
+                  name: group?.name ?? String(sub.group_id),
+                  schedule: group?.schedule ?? '',
+                })}
+              >
+                <Users size={10} className="shrink-0" />
+                <span className="truncate">{group?.name ?? `#${sub.group_id}`}</span>
+                {group && <span className="shrink-0 font-mono">{group.schedule}</span>}
+              </span>
+            )}
+            <button
+              onClick={() => onAutoDownloadToggle(sub)}
+              className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
+              title={
+                sub.auto_download
+                  ? t('subscriptions.autoDownloadOn')
+                  : t('subscriptions.autoDownloadOff')
+              }
+            >
+              {t('subscriptions.autoDownload')}
+            </button>
+          </div>
+
+          {/* Gallery identity + compact terminal status */}
+          {(galleryTitle || galleryHref || (latestJob && !isRunning)) && (
+            <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <div className="min-w-0 flex-1 basis-48">
+                {galleryTitle && galleryHref ? (
+                  <Link
+                    href={galleryHref}
+                    className="block truncate text-xs font-medium text-vault-accent hover:underline"
+                    title={galleryTitle}
+                  >
+                    {galleryTitle}
+                  </Link>
+                ) : galleryTitle ? (
+                  <p className="truncate text-xs font-medium text-vault-text" title={galleryTitle}>
+                    {galleryTitle}
+                  </p>
+                ) : galleryHref ? (
+                  <Link href={galleryHref} className="text-xs text-vault-accent hover:underline">
+                    {t('subscriptions.viewGallery')}
+                  </Link>
+                ) : null}
+              </div>
+              {latestJob && !isRunning && (
+                <div className="min-w-0 max-w-full shrink-0">
+                  <JobStatusBadge job={latestJob} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Running progress and errors expand only while relevant. */}
+          {latestJob && isRunning && (
+            <div className="mt-1">
               <JobStatusBadge job={latestJob} />
             </div>
           )}
+          {run && run.total > 1 && (
+            <p
+              data-testid="subscription-run"
+              className="mt-1 truncate text-[10px] text-vault-text-muted"
+            >
+              {t('subscriptions.runProgress', { done: String(run.done), total: String(run.total) })}
+            </p>
+          )}
+          {sub.checking && (
+            <span className="mt-1 inline-block rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-400">
+              {t('subscriptions.checking')}
+            </span>
+          )}
+          {isPaused && (
+            <p className="mt-1 truncate text-[10px] text-amber-400">
+              {sub.paused_reason === 'rate_limited'
+                ? t('subscriptions.pausedRateLimited', {
+                    time: sub.paused_until ? new Date(sub.paused_until).toLocaleTimeString() : '',
+                  })
+                : sub.paused_reason === 'auth'
+                  ? t('subscriptions.pausedAuth')
+                  : t('subscriptions.pausedManual')}
+            </p>
+          )}
+          {sub.last_error && !latestJob && (
+            <p className="mt-1 truncate text-[10px] text-red-400" title={sub.last_error}>
+              {sub.last_error}
+            </p>
+          )}
         </div>
-      )}
-
-      {/* Running progress and errors expand only while relevant. */}
-      {latestJob && isRunning && (
-        <div className="mt-1">
-          <JobStatusBadge job={latestJob} />
+        <div className="flex shrink-0 flex-col items-end">
+          <button
+            onClick={() => onToggle(sub)}
+            role="switch"
+            aria-checked={sub.enabled}
+            aria-label={sub.name || sub.url}
+            className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`}
+            />
+          </button>
+          <div className="flex flex-1 items-center pt-1.5">
+            <SourceBadge source={sub.source} />
+          </div>
         </div>
-      )}
-      {run && run.total > 1 && (
-        <p
-          data-testid="subscription-run"
-          className="mt-1 truncate text-[10px] text-vault-text-muted"
-        >
-          {t('subscriptions.runProgress', { done: String(run.done), total: String(run.total) })}
-        </p>
-      )}
-      {sub.checking && (
-        <span className="mt-1 inline-block rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-400">
-          {t('subscriptions.checking')}
-        </span>
-      )}
-      {isPaused && (
-        <p className="mt-1 truncate text-[10px] text-amber-400">
-          {sub.paused_reason === 'rate_limited'
-            ? t('subscriptions.pausedRateLimited', {
-                time: sub.paused_until ? new Date(sub.paused_until).toLocaleTimeString() : '',
-              })
-            : sub.paused_reason === 'auth'
-              ? t('subscriptions.pausedAuth')
-              : t('subscriptions.pausedManual')}
-        </p>
-      )}
-      {sub.last_error && !latestJob && (
-        <p className="mt-1 truncate text-[10px] text-red-400" title={sub.last_error}>
-          {sub.last_error}
-        </p>
-      )}
+      </div>
 
       {/* Compact footer: recency on the left, frequent actions on the right. */}
       <div className="mt-2 flex min-h-7 items-center justify-between gap-2 border-t border-vault-border/50 pt-2">
