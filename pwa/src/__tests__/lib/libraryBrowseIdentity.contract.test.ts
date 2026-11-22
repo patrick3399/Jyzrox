@@ -6,9 +6,29 @@ import {
   isSearchGalleryItem,
   LIBRARY_BROWSE_SCHEMA_VERSION,
   libraryBrowseIdentityKey,
+  libraryBrowseSearchQuery,
 } from '@/lib/browse/library'
 
 describe('Library browse-session canonical identity contract', () => {
+  it('stores dir only when it differs from the sort default', () => {
+    expect(canonicalLibraryBrowseIdentity('sort:title dir:asc').dir).toBeNull()
+    expect(canonicalLibraryBrowseIdentity('dir:desc').dir).toBeNull()
+    expect(canonicalLibraryBrowseIdentity('sort:title dir:desc').dir).toBe('desc')
+    expect(canonicalLibraryBrowseIdentity('dir:asc').dir).toBe('asc')
+    expect(canonicalLibraryBrowseIdentity('dir:sideways').dir).toBeNull()
+    expect(libraryBrowseIdentityKey('sort:title dir:asc')).toBe(
+      libraryBrowseIdentityKey('sort:title'),
+    )
+    expect(libraryBrowseIdentityKey('sort:rating dir:asc')).not.toBe(
+      libraryBrowseIdentityKey('sort:rating'),
+    )
+  })
+
+  it('keeps dir out of the q string sent to the API (it is a separate param)', () => {
+    const identity = canonicalLibraryBrowseIdentity('rem sort:pages dir:asc')
+    expect(libraryBrowseSearchQuery(identity)).toBe('rem')
+  })
+
   it('normalizes every URL field that changes Library results', () => {
     expect(
       canonicalLibraryBrowseIdentity(
@@ -33,6 +53,7 @@ describe('Library browse-session canonical identity contract', () => {
       excludeCategories: [],
       importMode: 'link',
       sort: 'rating',
+      dir: null,
     })
   })
 
@@ -57,8 +78,8 @@ describe('Library browse-session canonical identity contract', () => {
     expect(canonicalLibraryBrowseIdentity(a).categories).toEqual(['A', 'B'])
   })
 
-  it('schema_version_is_bumped_so_v1_snapshots_are_dropped', () => {
-    expect(LIBRARY_BROWSE_SCHEMA_VERSION).toBe(2)
+  it('schema_version_is_bumped_so_pre_dir_snapshots_are_dropped', () => {
+    expect(LIBRARY_BROWSE_SCHEMA_VERSION).toBe(3)
   })
 
   it('uses the effective default sort when the URL omits sort', () => {

@@ -3,7 +3,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, desc, func, not_, or_, select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import gallery_access_filter, require_auth
@@ -21,6 +21,12 @@ from db.models import (
     UserFavorite,
     UserRating,
     UserReadingList,
+)
+from services.gallery_sort import (
+    SORT_SPECS,
+    keyset_after,
+    order_by,
+    parse_cursor_value,
 )
 from services.library_helpers import decode_cursor as _decode_cursor
 from services.library_helpers import encode_cursor as _encode_cursor
@@ -67,6 +73,18 @@ async def list_galleries(
       - page-based (legacy): pass page= integer. Capped at page 500.
     """
     stmt = select(Gallery)
+    spec = SORT_SPECS[sort]
+    # "rating" is the viewer's own rating (user_ratings), not the source rating column.
+    # PK (user_id, gallery_id): the join never duplicates galleries.
+    if sort == "rating":
+        stmt = stmt.outerjoin(
+            UserRating,
+            and_(UserRating.gallery_id == Gallery.id, UserRating.user_id == auth["user_id"]),
+        )
+        sort_col = UserRating.rating
+    else:
+        sort_col = getattr(Gallery, sort)
+    order = order_by(spec, sort_col, Gallery.id, "desc")
 
     # Data isolation: non-admin users only see own + system + public galleries
     stmt = stmt.where(gallery_access_filter(auth))
@@ -127,81 +145,25 @@ async def list_galleries(
     if blocked_tags:
         stmt = stmt.where(not_(Gallery.tags_array.overlap(blocked_tags)))
 
-    sort_col = {
-        "added_at": Gallery.added_at,
-        "content_updated_at": Gallery.content_updated_at,
-        "rating": Gallery.rating,
-        "pages": Gallery.pages,
-    }[sort]
-
     if cursor is not None:
         # Keyset pagination — no COUNT(*), no OFFSET
         c = _decode_cursor(cursor)
         if c.get("s") != sort:
             raise HTTPException(status_code=400, detail="Cursor sort key does not match current sort parameter")
 
-        cursor_id = c["id"]
-        cursor_val = c["v"]
+        try:
+            cursor_id = int(c["id"])
+            cursor_val = parse_cursor_value(spec, str(c["v"]))
+        except KeyError, TypeError, ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor value")
 
-        # For all supported sorts we use DESC order, so "next page" means
-        # (sort_val, id) strictly less than cursor values (tie-break on id DESC).
-        if sort == "added_at":
-            from datetime import datetime as _dt
-
-            try:
-                parsed = _dt.fromisoformat(cursor_val)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid cursor value")
-            stmt = stmt.where(
-                or_(
-                    Gallery.added_at < parsed,
-                    and_(Gallery.added_at == parsed, Gallery.id < cursor_id),
-                )
-            )
-        elif sort == "content_updated_at":
-            from datetime import datetime as _dt
-
-            try:
-                parsed = _dt.fromisoformat(cursor_val)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid cursor value")
-            stmt = stmt.where(
-                or_(
-                    Gallery.content_updated_at < parsed,
-                    and_(Gallery.content_updated_at == parsed, Gallery.id < cursor_id),
-                )
-            )
-        elif sort == "rating":
-            try:
-                cv = int(cursor_val)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid cursor value")
-            stmt = stmt.where(
-                or_(
-                    Gallery.rating < cv,
-                    and_(Gallery.rating == cv, Gallery.id < cursor_id),
-                )
-            )
-        else:  # pages
-            try:
-                cv = int(cursor_val)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid cursor value")
-            stmt = stmt.where(
-                or_(
-                    Gallery.pages < cv,
-                    and_(Gallery.pages == cv, Gallery.id < cursor_id),
-                )
-            )
-
-        stmt = stmt.order_by(desc(sort_col), desc(Gallery.id)).limit(limit + 1)
+        stmt = stmt.where(keyset_after(spec, sort_col, Gallery.id, "desc", cursor_val, cursor_id))
+        stmt = stmt.order_by(*order).limit(limit + 1)
         rows = (await db.execute(stmt)).scalars().all()
 
         has_next = len(rows) > limit
         if has_next:
             rows = rows[:limit]
-
-        next_cursor = _encode_cursor(rows[-1], sort) if has_next and rows else None
 
         gallery_ids = [g.id for g in rows]
         source_map = {g.id: g.source or "" for g in rows}
@@ -209,6 +171,12 @@ async def list_galleries(
 
         fav_set = await _get_favorite_set(db, auth["user_id"], gallery_ids)
         rating_map = await _get_rating_map(db, auth["user_id"], gallery_ids)
+        next_cursor = None
+        if has_next and rows:
+            last = rows[-1]
+            next_cursor = _encode_cursor(
+                last, sort, rating_map.get(last.id) if sort == "rating" else getattr(last, sort)
+            )
         rl_set = await _get_reading_list_set(db, auth["user_id"], gallery_ids)
 
         return {
@@ -233,7 +201,7 @@ async def list_galleries(
 
         total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
 
-        stmt = stmt.order_by(desc(sort_col), desc(Gallery.id)).offset(page * limit).limit(limit)
+        stmt = stmt.order_by(*order).offset(page * limit).limit(limit)
         galleries = (await db.execute(stmt)).scalars().all()
 
         gallery_ids = [g.id for g in galleries]

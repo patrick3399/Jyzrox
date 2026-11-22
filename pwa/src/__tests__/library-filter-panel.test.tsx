@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/i18n', async (importOriginal) => ({
@@ -42,6 +42,8 @@ function baseProps(): Props {
       { value: 'rating', label: 'Rating' },
     ],
     onSortChange: vi.fn(),
+    sortDirection: 'desc',
+    onSortDirectionToggle: vi.fn(),
     onReset: vi.fn(),
     hasActiveFilters: false,
   }
@@ -58,6 +60,26 @@ const pill = (section: LibraryFilterSection) =>
 const openSection = () => screen.getByTestId('library-filter-section')
 
 describe('LibraryFilterPanel', () => {
+  it('filter_panel_sort_section_direction_toggle_calls_back_and_shows_direction', () => {
+    const props = setup({ section: 'sort', sortDirection: 'asc' })
+    const toggle = within(openSection()).getByTestId('library-sort-direction')
+    expect(toggle).toHaveTextContent('library.sortAscending')
+    fireEvent.click(toggle)
+    expect(props.onSortDirectionToggle).toHaveBeenCalledTimes(1)
+  })
+
+  it('filter_panel_sort_pill_is_active_for_non_default_direction_on_default_sort', () => {
+    setup({ sort: 'added_at', sortDirection: 'asc' })
+    expect(pill('sort')).toHaveTextContent('↑')
+    cleanup()
+    setup({ sort: 'added_at', sortDirection: 'desc' })
+    expect(pill('sort')).not.toHaveTextContent('↑')
+    expect(pill('sort')).not.toHaveTextContent('↓')
+    cleanup()
+    setup({ sort: 'title', sortDirection: 'asc' })
+    expect(pill('sort')).not.toHaveTextContent('↑')
+  })
+
   it('filter_panel_shows_only_the_pill_row_until_a_pill_is_tapped', () => {
     const props = setup()
     expect(screen.queryByTestId('library-filter-section')).toBeNull()

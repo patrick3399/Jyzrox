@@ -16,6 +16,7 @@ from db.models import (
     Image,
     SavedSearch,
     UserFavorite,
+    UserRating,
     UserReadingList,
 )
 from services.gallery_lifecycle import trash_scope
@@ -144,10 +145,19 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
         elif token.startswith("language:"):
             filters.append(Gallery.language == _value(token))
         elif token.startswith("rating:"):
+            # The viewer's own rating (user_ratings), not the source rating column.
             try:
-                filters.append(Gallery.rating >= int(_value(token).lstrip("><=")))
+                minimum = int(_value(token).lstrip("><="))
             except ValueError:
                 continue
+            filters.append(
+                Gallery.id.in_(
+                    select(UserRating.gallery_id).where(
+                        UserRating.user_id == auth["user_id"],
+                        UserRating.rating >= minimum,
+                    )
+                )
+            )
         elif token.startswith("favorited:") and _value(token).lower() == "true":
             filters.append(
                 Gallery.id.in_(select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"]))
@@ -195,7 +205,13 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
         "content_updated_at": Gallery.content_updated_at,
         "posted_at": Gallery.posted_at,
         "title": Gallery.title,
-        "rating": Gallery.rating,
+        # The viewer's own rating (user_ratings); unrated galleries have no row -> NULL.
+        "rating": (
+            select(UserRating.rating)
+            .where(UserRating.gallery_id == Gallery.id, UserRating.user_id == auth["user_id"])
+            .correlate(Gallery)
+            .scalar_subquery()
+        ),
         "pages": Gallery.pages,
     }
     if spec.sort == "size":
@@ -212,8 +228,8 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
         )
     sort_column = sort_columns.get(spec.sort, Gallery.added_at)
     order = asc(sort_column) if spec.direction == "asc" else desc(sort_column)
-    if spec.sort == "posted_at":
-        # Nullable, unindexed column: undated galleries go last in both directions
+    if spec.sort in ("posted_at", "rating"):
+        # Nullable, unindexed: undated / unrated galleries go last in both directions
         # (PostgreSQL would otherwise list them first on DESC).
         order = order.nulls_last()
     return select(Gallery).where(*filters).order_by(order, desc(Gallery.id))

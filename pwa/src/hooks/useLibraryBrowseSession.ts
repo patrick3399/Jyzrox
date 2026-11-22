@@ -102,6 +102,7 @@ export function useLibraryBrowseSession({
           cursor: cursor ?? undefined,
           limit: PAGE_SIZE,
           sort: requestIdentity.sort,
+          dir: requestIdentity.dir ?? undefined,
         },
         { signal },
       )

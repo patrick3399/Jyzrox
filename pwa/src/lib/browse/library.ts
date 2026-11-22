@@ -1,9 +1,9 @@
 import type { SearchGalleryItem } from '@/lib/api'
 import { canonicalIdentityKey } from './identity'
-import { buildQuery, parseQuery, type ParsedFilters } from '../queryParser'
+import { buildQuery, defaultSortDirection, parseQuery, type ParsedFilters } from '../queryParser'
 
 export const LIBRARY_BROWSE_SOURCE_ID = 'library'
-export const LIBRARY_BROWSE_SCHEMA_VERSION = 2
+export const LIBRARY_BROWSE_SCHEMA_VERSION = 3
 export const LEGACY_LIBRARY_SCROLL_KEY = 'library_scrollY'
 
 export type LibraryBrowseIdentity = ParsedFilters & {
@@ -17,6 +17,7 @@ function uniqueSorted(values: string[]): string[] {
 
 export function canonicalLibraryBrowseIdentity(rawQuery: string): LibraryBrowseIdentity {
   const parsed = parseQuery(rawQuery.trim())
+  const sort = parsed.sort ?? 'added_at'
   return {
     surface: LIBRARY_BROWSE_SOURCE_ID,
     tags: uniqueSorted(parsed.tags),
@@ -33,7 +34,9 @@ export function canonicalLibraryBrowseIdentity(rawQuery: string): LibraryBrowseI
     categories: uniqueSorted(parsed.categories),
     excludeCategories: uniqueSorted(parsed.excludeCategories),
     importMode: parsed.importMode,
-    sort: parsed.sort ?? 'added_at',
+    sort,
+    // Only a non-default direction is identity; `sort:title dir:asc` equals `sort:title`.
+    dir: parsed.dir && parsed.dir !== defaultSortDirection(sort) ? parsed.dir : null,
   }
 }
 
@@ -58,6 +61,7 @@ export function libraryBrowseSearchQuery(identity: LibraryBrowseIdentity): strin
     excludeCategories: identity.excludeCategories,
     importMode: identity.importMode,
     sort: null,
+    dir: null,
   })
 }
 

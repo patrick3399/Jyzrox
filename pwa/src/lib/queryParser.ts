@@ -1,6 +1,6 @@
 import { formatValue, parseQuery, tokenize, type ParsedFilters } from './queryParserCore'
 
-export { parseQuery, tagNameSearchTerm } from './queryParserCore'
+export { defaultSortDirection, parseQuery, tagNameSearchTerm } from './queryParserCore'
 export type { ParsedFilters } from './queryParserCore'
 
 export type FacetKey = 'source' | 'category'
@@ -94,6 +94,9 @@ export function buildQuery(filters: Partial<ParsedFilters>): string {
   if (filters.sort) {
     parts.push(`sort:${filters.sort}`)
   }
+  if (filters.dir) {
+    parts.push(`dir:${filters.dir}`)
+  }
 
   // Exclude tags last
   if (filters.excludeTags) {
@@ -145,6 +148,11 @@ export function updateFilter(query: string, key: string, value: string | null): 
       break
     case 'sort':
       parsed.sort = value
+      // A direction is only meaningful for the sort it was picked on.
+      parsed.dir = null
+      break
+    case 'dir':
+      parsed.dir = value === 'asc' || value === 'desc' ? value : null
       break
     default:
       break
@@ -164,6 +172,7 @@ const FILTER_KEYS = new Set([
   'category',
   'import',
   'sort',
+  'dir',
 ])
 
 /** True for a `key:value` token whose key is one of the structured filters. */
@@ -210,6 +219,7 @@ export function withText(q: string, text: string): string {
     excludeCategories: typedCategory ? typed.excludeCategories : base.excludeCategories,
     importMode: typedSource ? typed.importMode : (typed.importMode ?? base.importMode),
     sort: typed.sort ?? base.sort,
+    dir: typed.dir ?? base.dir,
   })
 }
 

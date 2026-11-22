@@ -42,7 +42,7 @@ export type SearchGalleriesResponse = {
 export const search = {
   galleries: (
     q: string,
-    options?: { cursor?: string; page?: number; limit?: number; sort?: string },
+    options?: { cursor?: string; page?: number; limit?: number; sort?: string; dir?: string },
     init?: RequestInit,
   ): Promise<SearchGalleriesResponse> => {
     const params = new URLSearchParams({ q })
@@ -50,6 +50,7 @@ export const search = {
     if (options?.page) params.set('page', String(options.page))
     if (options?.limit) params.set('limit', String(options.limit))
     if (options?.sort) params.set('sort', options.sort)
+    if (options?.dir) params.set('dir', options.dir)
     return apiFetch(`/api/search/?${params}`, init)
   },
 }

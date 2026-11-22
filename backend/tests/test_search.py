@@ -270,16 +270,20 @@ class TestSearchGalleries:
         assert "cursor" in resp.json()["detail"].lower()
 
     async def test_search_sort_by_rating(self, client, db_session):
-        """sort:rating token should order by rating DESC."""
-        await _insert_gallery(db_session, source_id="sr1", title="Rated 3", rating=3)
-        await _insert_gallery(db_session, source_id="sr2", title="Rated 5", rating=5)
-        await _insert_gallery(db_session, source_id="sr3", title="Rated 1", rating=1)
+        """sort:rating token should order by the viewer's rating (user_ratings) DESC."""
+        for sid, title, mine in [("sr1", "Rated 3", 3), ("sr2", "Rated 5", 5), ("sr3", "Rated 1", 1)]:
+            gid = await _insert_gallery(db_session, source_id=sid, title=title)
+            await db_session.execute(
+                text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :g, :r)"),
+                {"g": gid, "r": mine},
+            )
+        await db_session.commit()
 
         resp = await client.get("/api/search/", params={"q": "sort:rating"})
         assert resp.status_code == 200
         items = resp.json()["items"]
-        ratings = [i["rating"] for i in items]
-        assert ratings == sorted(ratings, reverse=True)
+        ratings = [i["my_rating"] for i in items]
+        assert ratings == [5, 3, 1]
 
     async def test_search_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
@@ -644,13 +648,17 @@ class TestCursorPagination:
         are reachable via cursor pagination.
         """
         for rating, sid in [(5, "cr5"), (3, "cr3"), (1, "cr1")]:
-            await _insert_gallery(
+            gid = await _insert_gallery(
                 db_session,
                 source_id=sid,
                 title=f"Rated {rating}",
-                rating=rating,
                 source="cursor_rating_src",
             )
+            await db_session.execute(
+                text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :g, :r)"),
+                {"g": gid, "r": rating},
+            )
+        await db_session.commit()
 
         start_cursor = _make_cursor(gallery_id=999999999, sort_value="999", sort_key="rating")
         resp1 = await client.get(
@@ -659,7 +667,7 @@ class TestCursorPagination:
         )
         assert resp1.status_code == 200
         data1 = resp1.json()
-        assert data1["items"][0]["rating"] == 5
+        assert data1["items"][0]["my_rating"] == 5
         assert data1["has_next"] is True
 
         resp2 = await client.get(
@@ -672,7 +680,7 @@ class TestCursorPagination:
         )
         assert resp2.status_code == 200
         data2 = resp2.json()
-        assert data2["items"][0]["rating"] == 3
+        assert data2["items"][0]["my_rating"] == 3
 
     async def test_cursor_pagination_sort_by_pages(self, client, db_session):
         """Cursor pagination with sort:pages returns pages in DESC page-count order.
@@ -713,13 +721,14 @@ class TestCursorPagination:
         """Cursor pagination with sort:title returns items in ASC alphabetical order.
 
         For ASC (title) sort the keyset condition is title > cursor_val, so a
-        bootstrap cursor with sort_value="" (empty string) returns everything.
+        bootstrap cursor below every title returns everything. (An empty value
+        means "the cursor row has a NULL sort value", so "!" is used instead.)
         """
         for title, sid in [("Alpha", "ct_a"), ("Beta", "ct_b"), ("Gamma", "ct_g")]:
             await _insert_gallery(db_session, source_id=sid, title=title, source="cursor_title_src")
 
-        # Bootstrap cursor: empty string < "Alpha" in ASC order
-        start_cursor = _make_cursor(gallery_id=0, sort_value="", sort_key="title")
+        # Bootstrap cursor: "!" < "Alpha" in ASC order
+        start_cursor = _make_cursor(gallery_id=0, sort_value="!", sort_key="title")
         resp1 = await client.get(
             "/api/search/",
             params={"q": "sort:title source:cursor_title_src", "limit": 1, "cursor": start_cursor},

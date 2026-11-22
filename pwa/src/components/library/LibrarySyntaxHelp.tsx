@@ -14,6 +14,7 @@ export function LibrarySyntaxHelpLines() {
       <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
       <p>favorited:true — {t('library.syntaxFavorited')}</p>
       <p>sort:rating — {t('library.syntaxSort')}</p>
+      <p>dir:asc — {t('library.syntaxSortDir')}</p>
       <p>collection:5 — {t('library.syntaxCollection')}</p>
       <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
       <p>category:doujinshi — {t('library.syntaxCategory')}</p>

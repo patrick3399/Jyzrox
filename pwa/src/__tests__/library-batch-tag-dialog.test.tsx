@@ -22,6 +22,7 @@ const emptyParsed = {
   excludeCategories: [],
   importMode: null,
   sort: null,
+  dir: null,
 } as Record<string, unknown>
 
 const search = vi.hoisted(() => ({

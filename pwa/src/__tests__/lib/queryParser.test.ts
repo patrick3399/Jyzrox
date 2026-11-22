@@ -147,6 +147,43 @@ describe('withText', () => {
   })
 })
 
+describe('dir token', () => {
+  it('parseQuery_dir_accepts_only_asc_and_desc', () => {
+    expect(parseQuery('dir:asc').dir).toBe('asc')
+    expect(parseQuery('DIR:Desc').dir).toBe('desc')
+    expect(parseQuery('dir:up').dir).toBeNull()
+    expect(parseQuery('rem').dir).toBeNull()
+  })
+
+  it('buildQuery_round_trips_dir_after_sort', () => {
+    const q = buildQuery(parseQuery('rem dir:asc sort:pages'))
+    expect(q).toBe('rem sort:pages dir:asc')
+    expect(parseQuery(q).dir).toBe('asc')
+  })
+
+  it('dir_is_a_filter_token_and_not_free_text', () => {
+    expect(isFilterToken('dir:asc')).toBe(true)
+    expect(queryText('rem dir:asc')).toBe('rem')
+    expect(withoutFilters('rem dir:asc')).toBe('rem')
+  })
+
+  it('withText_keeps_base_dir_and_lets_typed_dir_win', () => {
+    expect(withText('sort:pages dir:asc', 'rem')).toBe('rem sort:pages dir:asc')
+    expect(withText('sort:pages dir:asc', 'rem dir:desc')).toBe('rem sort:pages dir:desc')
+  })
+
+  it('updateFilter_sets_and_clears_dir', () => {
+    expect(updateFilter('rem', 'dir', 'asc')).toBe('rem dir:asc')
+    expect(updateFilter('rem dir:asc', 'dir', null)).toBe('rem')
+  })
+
+  it('updateFilter_changing_or_clearing_sort_clears_dir', () => {
+    expect(updateFilter('sort:pages dir:asc', 'sort', 'rating')).toBe('sort:rating')
+    expect(updateFilter('sort:pages dir:asc', 'sort', null)).toBe('')
+    expect(updateFilter('dir:asc', 'sort', null)).toBe('')
+  })
+})
+
 describe('withoutFilters', () => {
   it('test_withoutFilters_textAndFilters_keepsText', () => {
     expect(withoutFilters('rem source:pixiv favorited:true')).toBe('rem')

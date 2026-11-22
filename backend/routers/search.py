@@ -7,7 +7,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, asc, desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 
 from core.auth import gallery_access_filter, require_auth
 from core.database import async_session
@@ -28,6 +28,14 @@ from db.models import (
     UserFavorite,
     UserRating,
     UserReadingList,
+)
+from services.gallery_sort import (
+    SORT_SPECS,
+    encode_value,
+    keyset_after,
+    order_by,
+    parse_cursor_value,
+    resolve_direction,
 )
 
 router = APIRouter(tags=["search"])
@@ -100,20 +108,15 @@ def _cursor_secret() -> bytes:
     return cursor_hmac_key()
 
 
-def _encode_cursor(row: Gallery, sort: str) -> str:
+def _encode_cursor(row: Gallery, sort: str, direction: str, value) -> str:
     """Encode sort key + id into a signed URL-safe base64 cursor string.
+
+    ``value`` is the row's sort value (the viewer's rating for ``rating``);
+    None is stored as "" (NULL row). Payload: {"id", "v", "s", "d"}.
 
     Format: <base64url(json)>.<hmac-sha256-hex>
     """
-    sort_val = {
-        "added_at": row.added_at.isoformat() if row.added_at else "",
-        "content_updated_at": row.content_updated_at.isoformat() if row.content_updated_at else "",
-        "rating": row.rating,
-        "pages": row.pages if row.pages is not None else 0,
-        "posted_at": row.posted_at.isoformat() if row.posted_at else "",
-        "title": row.title or "",
-    }[sort]
-    payload = {"id": row.id, "v": str(sort_val), "s": sort}
+    payload = {"id": row.id, "v": encode_value(value), "s": sort, "d": direction}
     encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
     return f"{encoded}.{sig}"
@@ -158,13 +161,14 @@ async def search_galleries(
         description=(
             "Search query: tags (character:rem), exclude (-general:sketch), "
             'title (title:"re zero"), source (source:ehentai), rating (rating:>=4), '
-            "favorited (favorited:true), sort (sort:rating), "
+            "favorited (favorited:true), sort (sort:rating), direction (dir:asc), "
             "collection (collection:N), artist_id (artist_id:X), "
             "category (category:doujinshi), import (import:manual), "
             "reading list (rl:true)"
         ),
     ),
     sort: str = "added_at",
+    dir: str | None = Query(default=None, description="Sort direction: asc or desc (default depends on sort)"),
     page: int = 1,
     limit: int = 24,
     cursor: str | None = Query(default=None),
@@ -179,7 +183,8 @@ async def search_galleries(
       rating:>=4                        → minimum rating
       favorited:true                    → favorited only
       sort:rating                       → override sort order (added_at, content_updated_at, rating,
-                                          pages, posted_at, title)
+                                          pages, posted_at, title); rating = the viewer's own rating
+      dir:asc                           → sort direction (asc|desc); default desc, title asc
       collection:5                      → galleries in collection #5
       artist_id:pixiv123                → galleries by artist_id
       category:doujinshi                → galleries in category
@@ -226,6 +231,8 @@ async def search_galleries(
             favorited_filter = _token_value(t, "favorited:").lower() == "true"
         elif t.startswith("sort:"):
             sort = _token_value(t, "sort:")
+        elif t.startswith("dir:"):
+            dir = _token_value(t, "dir:")
         elif t.startswith("collection:"):
             try:
                 collection_filter = int(_token_value(t, "collection:"))
@@ -291,19 +298,28 @@ async def search_galleries(
     if import_filter is not None:
         filters.append(Gallery.import_mode == import_filter)
 
-    # Sort — DESC for numeric/date columns, ASC for title
-    sort_map = {
-        "added_at": desc(Gallery.added_at),
-        "content_updated_at": desc(Gallery.content_updated_at),
-        "rating": desc(Gallery.rating),
-        "pages": desc(Gallery.pages),
-        # posted_at is nullable (local / social-media galleries have none) and
-        # PostgreSQL sorts NULLs first on DESC: keep undated galleries at the end.
-        "posted_at": desc(Gallery.posted_at).nulls_last(),
-        "title": asc(Gallery.title),
-    }
-    order = sort_map.get(sort, desc(Gallery.added_at))
-    effective_sort = sort if sort in sort_map else "added_at"
+    # Sort: spec (column, default direction, NULL policy) + direction. Unknown sort -> added_at.
+    effective_sort = sort if sort in SORT_SPECS else "added_at"
+    spec = SORT_SPECS[effective_sort]
+    direction = resolve_direction(spec, dir)
+    # "rating" is the viewer's own rating (user_ratings), not the source rating column.
+    sort_expr = UserRating.rating if effective_sort == "rating" else getattr(Gallery, effective_sort)
+    order = order_by(spec, sort_expr, Gallery.id, direction)
+
+    def _data_select():
+        stmt = select(Gallery)
+        if effective_sort == "rating":
+            # PK (user_id, gallery_id): the join never duplicates galleries.
+            stmt = stmt.outerjoin(
+                UserRating,
+                and_(UserRating.gallery_id == Gallery.id, UserRating.user_id == auth["user_id"]),
+            )
+        return stmt
+
+    def _cursor_value(row: Gallery, rating_map: dict[int, int]):
+        if effective_sort == "rating":
+            return rating_map.get(row.id)
+        return getattr(row, effective_sort)
 
     def _row_to_item(
         r: Gallery,
@@ -515,92 +531,19 @@ async def search_galleries(
             if c.get("s") != effective_sort:
                 raise HTTPException(status_code=400, detail="Cursor sort key does not match current sort parameter")
 
-            cursor_id = c["id"]
-            cursor_val = c["v"]
+            cursor_dir = c.get("d", spec.default_dir)
+            if cursor_dir != direction:
+                raise HTTPException(status_code=400, detail="Cursor sort direction does not match")
 
-            base_stmt = select(Gallery).where(*filters, gallery_access_filter(auth))
+            try:
+                cursor_id = int(c["id"])
+                cursor_val = parse_cursor_value(spec, str(c["v"]))
+            except KeyError, TypeError, ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor value")
 
-            if effective_sort == "added_at":
-                from datetime import datetime as _dt
-
-                try:
-                    parsed = _dt.fromisoformat(cursor_val)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid cursor value")
-                base_stmt = base_stmt.where(
-                    or_(
-                        Gallery.added_at < parsed,
-                        and_(Gallery.added_at == parsed, Gallery.id < cursor_id),
-                    )
-                )
-            elif effective_sort == "content_updated_at":
-                from datetime import datetime as _dt
-
-                try:
-                    parsed = _dt.fromisoformat(cursor_val)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid cursor value")
-                base_stmt = base_stmt.where(
-                    or_(
-                        Gallery.content_updated_at < parsed,
-                        and_(Gallery.content_updated_at == parsed, Gallery.id < cursor_id),
-                    )
-                )
-            elif effective_sort == "posted_at":
-                from datetime import datetime as _dt
-
-                # Order is posted_at DESC NULLS LAST, id DESC. An empty cursor value
-                # means the previous page ended inside the undated (NULL) tail.
-                if cursor_val == "":
-                    base_stmt = base_stmt.where(Gallery.posted_at.is_(None), Gallery.id < cursor_id)
-                else:
-                    try:
-                        parsed = _dt.fromisoformat(cursor_val)
-                    except ValueError:
-                        raise HTTPException(status_code=400, detail="Invalid cursor value")
-                    base_stmt = base_stmt.where(
-                        or_(
-                            Gallery.posted_at < parsed,
-                            and_(Gallery.posted_at == parsed, Gallery.id < cursor_id),
-                            Gallery.posted_at.is_(None),
-                        )
-                    )
-            elif effective_sort == "rating":
-                try:
-                    cv = int(cursor_val)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid cursor value")
-                base_stmt = base_stmt.where(
-                    or_(
-                        Gallery.rating < cv,
-                        and_(Gallery.rating == cv, Gallery.id < cursor_id),
-                    )
-                )
-            elif effective_sort == "pages":
-                try:
-                    cv = int(cursor_val)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid cursor value")
-                base_stmt = base_stmt.where(
-                    or_(
-                        Gallery.pages < cv,
-                        and_(Gallery.pages == cv, Gallery.id < cursor_id),
-                    )
-                )
-            else:
-                # title: ASC sort — next page means title > cursor_val, tie-break id ASC
-                base_stmt = base_stmt.where(
-                    or_(
-                        Gallery.title > cursor_val,
-                        and_(Gallery.title == cursor_val, Gallery.id > cursor_id),
-                    )
-                )
-
-            # For DESC sorts tie-break on id DESC; ASC (title) tie-break on id ASC
-            if effective_sort == "title":
-                data_query = base_stmt.order_by(asc(Gallery.title), asc(Gallery.id)).limit(limit + 1)
-            else:
-                data_query = base_stmt.order_by(order, desc(Gallery.id)).limit(limit + 1)
+            base_stmt = _data_select().where(*filters, gallery_access_filter(auth))
+            base_stmt = base_stmt.where(keyset_after(spec, sort_expr, Gallery.id, direction, cursor_val, cursor_id))
+            data_query = base_stmt.order_by(*order).limit(limit + 1)
 
             rows = (await session.execute(data_query)).scalars().all()
             has_next = len(rows) > limit
@@ -615,7 +558,11 @@ async def search_galleries(
             rl_set = await get_reading_list_set(session, auth["user_id"], gallery_ids)
             cover_map = await build_cover_map(session, gallery_ids, source_map)
 
-            next_cursor = _encode_cursor(rows[-1], effective_sort) if has_next and rows else None
+            next_cursor = (
+                _encode_cursor(rows[-1], effective_sort, direction, _cursor_value(rows[-1], rating_map))
+                if has_next and rows
+                else None
+            )
             return {
                 "query": q,
                 "items": [_row_to_item(r, fav_set, rating_map, rl_set, cover_map) for r in rows],
@@ -636,9 +583,9 @@ async def search_galleries(
             total = (await session.execute(count_query)).scalar()
 
             data_query = (
-                select(Gallery)
+                _data_select()
                 .where(*filters, gallery_access_filter(auth))
-                .order_by(order, asc(Gallery.id) if effective_sort == "title" else desc(Gallery.id))
+                .order_by(*order)
                 .limit(limit + 1)
                 .offset(offset)
             )
@@ -660,7 +607,11 @@ async def search_galleries(
                 "page": page,
                 "query": q,
                 "items": [_row_to_item(r, fav_set, rating_map, rl_set, cover_map) for r in rows],
-                "next_cursor": _encode_cursor(rows[-1], effective_sort) if has_next and rows else None,
+                "next_cursor": (
+                    _encode_cursor(rows[-1], effective_sort, direction, _cursor_value(rows[-1], rating_map))
+                    if has_next and rows
+                    else None
+                ),
                 "has_next": has_next,
             }
 

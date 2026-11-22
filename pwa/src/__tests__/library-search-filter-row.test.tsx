@@ -20,6 +20,7 @@ const emptyParsed = {
   excludeCategories: [],
   importMode: null,
   sort: null,
+  dir: null,
 } as Record<string, unknown>
 
 const search = vi.hoisted(() => ({
@@ -115,6 +116,29 @@ beforeEach(() => {
   search.parsed = { ...emptyParsed }
   search.selectMode = false
   search.total = 0
+})
+
+describe('Library sort direction toggle', () => {
+  it('toggle_writes_the_opposite_direction_for_a_non_default_result', () => {
+    search.parsed = { ...emptyParsed, sort: 'rating' }
+    render(<LibraryPage />)
+    fireEvent.click(screen.getAllByTestId('library-sort-direction')[0])
+    expect(search.setFilter).toHaveBeenCalledWith('dir', 'asc')
+  })
+
+  it('toggle_writes_null_when_the_new_direction_equals_the_sort_default', () => {
+    search.parsed = { ...emptyParsed, sort: 'rating', dir: 'asc' }
+    render(<LibraryPage />)
+    fireEvent.click(screen.getAllByTestId('library-sort-direction')[0])
+    expect(search.setFilter).toHaveBeenCalledWith('dir', null)
+  })
+
+  it('toggle_uses_ascending_as_the_title_default', () => {
+    search.parsed = { ...emptyParsed, sort: 'title' }
+    render(<LibraryPage />)
+    fireEvent.click(screen.getAllByTestId('library-sort-direction')[0])
+    expect(search.setFilter).toHaveBeenCalledWith('dir', 'desc')
+  })
 })
 
 describe('Library header', () => {

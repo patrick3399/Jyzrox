@@ -77,6 +77,37 @@ describe('useLibraryBrowseSession adapter', () => {
     )
   })
 
+  it('sends a non-default dir as its own param and strips it from q', async () => {
+    const storage = new MemoryStorage()
+    renderHook(() =>
+      useLibraryBrowseSession({
+        query: 'artist:a sort:rating dir:asc',
+        enabled: true,
+        userId: 'member-42',
+        tabId: 'tab-a',
+        storage,
+      }),
+    )
+    await waitFor(() => expect(galleries).toHaveBeenCalledOnce())
+    expect(galleries.mock.calls[0][0]).toBe('artist:a')
+    expect(galleries.mock.calls[0][1]).toMatchObject({ sort: 'rating', dir: 'asc' })
+  })
+
+  it('omits dir when it equals the sort default', async () => {
+    const storage = new MemoryStorage()
+    renderHook(() =>
+      useLibraryBrowseSession({
+        query: 'sort:title dir:asc',
+        enabled: true,
+        userId: 'member-42',
+        tabId: 'tab-a',
+        storage,
+      }),
+    )
+    await waitFor(() => expect(galleries).toHaveBeenCalledOnce())
+    expect(galleries.mock.calls[0][1].dir).toBeUndefined()
+  })
+
   it('maps the search cursor response without SWR ownership', async () => {
     const storage = new MemoryStorage()
     galleries.mockResolvedValueOnce({

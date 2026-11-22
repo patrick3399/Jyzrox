@@ -14,6 +14,12 @@ export interface ParsedFilters {
   excludeCategories: string[] // -category:xxx tokens
   importMode: string | null // import:xxx token
   sort: string | null // sort:xxx token
+  dir: 'asc' | 'desc' | null // dir:asc|desc token (null = the sort's default direction)
+}
+
+/** Direction a sort uses when no `dir:` is given (mirrors the backend). */
+export function defaultSortDirection(sort: string | null | undefined): 'asc' | 'desc' {
+  return sort === 'title' ? 'asc' : 'desc'
 }
 
 /**
@@ -106,6 +112,7 @@ export function parseQuery(q: string): ParsedFilters {
     excludeCategories: [],
     importMode: null,
     sort: null,
+    dir: null,
   }
 
   if (!q.trim()) return result
@@ -183,6 +190,11 @@ export function parseQuery(q: string): ParsedFilters {
       case 'sort':
         result.sort = value || null
         break
+      case 'dir': {
+        const dir = value.toLowerCase()
+        result.dir = dir === 'asc' || dir === 'desc' ? dir : null
+        break
+      }
       default:
         // Has colon but not a known filter prefix → namespace:name tag
         result.tags.push(token)

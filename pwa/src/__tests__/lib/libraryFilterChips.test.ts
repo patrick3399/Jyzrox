@@ -45,6 +45,14 @@ describe('libraryFilterChips', () => {
     expect(chips('source:pixiv')[0].label).toContain('SRC<pixiv>')
   })
 
+  it('sort_chip_shows_direction_and_appears_for_dir_alone', () => {
+    expect(chips('sort:pages dir:asc')[0].label).toBe('library.sort: SORT<pages> ↑')
+    expect(chips('sort:pages dir:desc')[0].label).toBe('library.sort: SORT<pages> ↓')
+    expect(chips('sort:pages')[0].label).toBe('library.sort: SORT<pages>')
+    expect(keys('dir:asc')).toEqual(['sort'])
+    expect(chips('dir:asc')[0].label).toBe('library.sort: SORT<added_at> ↑')
+  })
+
   it('test_default_added_at_sort_produces_no_chip', () => {
     expect(keys('sort:added_at')).toEqual([])
   })

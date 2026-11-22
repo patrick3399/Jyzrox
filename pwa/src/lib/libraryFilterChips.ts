@@ -61,8 +61,13 @@ export function libraryFilterChips(
     const value = ctx.collectionName(parsed.collection) ?? `#${parsed.collection}`
     chips.push({ key: 'collection', label: `${t('collections.filterByCollection')}: ${value}` })
   }
-  if (parsed.sort && parsed.sort !== 'added_at') {
-    chips.push({ key: 'sort', label: `${t('library.sort')}: ${ctx.sortLabel(parsed.sort)}` })
+  if ((parsed.sort && parsed.sort !== 'added_at') || parsed.dir) {
+    const sort = parsed.sort ?? 'added_at'
+    const arrow = parsed.dir ? ` ${parsed.dir === 'asc' ? '↑' : '↓'}` : ''
+    chips.push({
+      key: 'sort',
+      label: `${t('library.sort')}: ${ctx.sortLabel(sort)}${arrow}`,
+    })
   }
   if (parsed.artistId) {
     chips.push({ key: 'artist_id', label: `${t('library.artistFilter')}: ${parsed.artistId}` })

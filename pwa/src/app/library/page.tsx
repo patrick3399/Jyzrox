@@ -26,7 +26,7 @@ import {
   type LibraryFilterSection,
 } from '@/components/library/LibraryFilterPanel'
 import type { FacetOption } from '@/components/library/LibraryFacetList'
-import { facetSelection } from '@/lib/queryParser'
+import { defaultSortDirection, facetSelection } from '@/lib/queryParser'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { t, formatNumber } from '@/lib/i18n'
@@ -210,6 +210,11 @@ function LibraryContent() {
 
   // Derive sort from parsed filters (default 'added_at')
   const sortValue = parsed.sort ?? 'added_at'
+  const sortDirection = parsed.dir ?? defaultSortDirection(sortValue)
+  const toggleSortDirection = () => {
+    const next = sortDirection === 'asc' ? 'desc' : 'asc'
+    setFilter('dir', next === defaultSortDirection(sortValue) ? null : next)
+  }
 
   const sourceDisplayLabel = (value: string, fallback: string) =>
     value === 'local:link'
@@ -263,6 +268,7 @@ function LibraryContent() {
 
   const handleRemoveChip = (key: LibraryFilterChipKey) => {
     setFilter(key, null)
+    if (key === 'sort') setFilter('dir', null)
     if (key === 'source') setFilter('import', null)
   }
 
@@ -873,6 +879,8 @@ function LibraryContent() {
                 sort={sortValue}
                 sortOptions={SORT_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label() }))}
                 onSortChange={(value) => setFilter('sort', value)}
+                sortDirection={sortDirection}
+                onSortDirectionToggle={toggleSortDirection}
                 onReset={clearFilters}
                 hasActiveFilters={filterChips.length > 0}
               />
@@ -965,6 +973,20 @@ function LibraryContent() {
                       </option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    data-testid="library-sort-direction"
+                    aria-label={t('library.sortDirection')}
+                    title={
+                      sortDirection === 'asc'
+                        ? t('library.sortAscending')
+                        : t('library.sortDescending')
+                    }
+                    onClick={toggleSortDirection}
+                    className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm hover:border-vault-accent focus:outline-none"
+                  >
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </button>
                 </div>
 
                 <button

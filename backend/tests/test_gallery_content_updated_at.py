@@ -40,7 +40,9 @@ def _start_cursor(module, sort="content_updated_at"):
     row = SimpleNamespace(
         id=10**9, content_updated_at=future, added_at=future, posted_at=future, rating=0, pages=0, title=""
     )
-    return module._encode_cursor(row, sort)
+    if module.__name__ == "routers.search":
+        return module._encode_cursor(row, sort, "desc", getattr(row, sort))
+    return module._encode_cursor(row, sort, getattr(row, sort))
 
 
 async def _g(db, sid, added, updated, pages=10, artist=None, source="cua"):

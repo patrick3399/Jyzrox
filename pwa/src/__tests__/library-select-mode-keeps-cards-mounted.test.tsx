@@ -48,6 +48,7 @@ vi.mock('@/hooks/useUnifiedSearch', () => ({
         excludeCategories: [],
         importMode: null,
         sort: null,
+        dir: null,
       },
       setFilter: vi.fn(),
       setFacet: vi.fn(),

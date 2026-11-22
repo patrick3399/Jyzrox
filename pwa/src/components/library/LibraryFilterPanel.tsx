@@ -3,7 +3,7 @@
 import { HelpCircle, RotateCcw } from 'lucide-react'
 import { formatNumber, t } from '@/lib/i18n'
 import { resolveCategoryColors } from '@/lib/categoryPalette'
-import type { FacetKey, FacetSelection } from '@/lib/queryParser'
+import { defaultSortDirection, type FacetKey, type FacetSelection } from '@/lib/queryParser'
 import type { GalleryCategoryDef } from '@/lib/types'
 import { LibrarySyntaxHelpLines } from './LibrarySyntaxHelp'
 import {
@@ -46,6 +46,9 @@ interface LibraryFilterPanelProps {
   sort: string
   sortOptions: SelectOption[]
   onSortChange: (value: string | null) => void
+  /** Effective direction of the current sort. */
+  sortDirection: 'asc' | 'desc'
+  onSortDirectionToggle: () => void
   /** Drops every filter but keeps the typed search text. */
   onReset: () => void
   /** Shows the Reset pill. */
@@ -74,6 +77,8 @@ export function LibraryFilterPanel({
   sort,
   sortOptions,
   onSortChange,
+  sortDirection,
+  onSortDirectionToggle,
   onReset,
   hasActiveFilters,
 }: LibraryFilterPanelProps) {
@@ -93,7 +98,7 @@ export function LibraryFilterPanel({
     facetSelectionLabel(sourceSelection, labelOf(sourceOptions)) ?? t('library.source')
   const collectionText =
     collections.find((c) => c.value === collection)?.label ?? t('collections.filterByCollection')
-  const sortActive = sort !== 'added_at'
+  const sortActive = sort !== 'added_at' || sortDirection !== defaultSortDirection(sort)
   const sortLabel = sortOptions.find((o) => o.value === sort)?.label
 
   const toggleCategory = (value: string) => {
@@ -136,7 +141,9 @@ export function LibraryFilterPanel({
           </Pill>
         )}
         <Pill section="sort" current={section} active={sortActive} onToggle={toggle}>
-          {sortActive && sortLabel ? `${t('library.sort')} · ${sortLabel}` : t('library.sort')}
+          {sortActive && sortLabel
+            ? `${t('library.sort')} · ${sortLabel} ${sortDirection === 'asc' ? '↑' : '↓'}`
+            : t('library.sort')}
         </Pill>
         {hasActiveFilters && (
           <button
@@ -259,14 +266,28 @@ export function LibraryFilterPanel({
           )}
 
           {section === 'sort' && (
-            <OptionRows
-              options={sortOptions}
-              value={sort}
-              onPick={(value) => {
-                onSortChange(value === 'added_at' ? null : String(value))
-                onSectionChange(null)
-              }}
-            />
+            <>
+              <button
+                type="button"
+                data-testid="library-sort-direction"
+                aria-label={t('library.sortDirection')}
+                onMouseDown={keepFocus}
+                onClick={onSortDirectionToggle}
+                className={`${PILL} ${PILL_IDLE} mb-2`}
+              >
+                {sortDirection === 'asc'
+                  ? `↑ ${t('library.sortAscending')}`
+                  : `↓ ${t('library.sortDescending')}`}
+              </button>
+              <OptionRows
+                options={sortOptions}
+                value={sort}
+                onPick={(value) => {
+                  onSortChange(value === 'added_at' ? null : String(value))
+                  onSectionChange(null)
+                }}
+              />
+            </>
           )}
 
           {section === 'help' && (

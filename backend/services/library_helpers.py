@@ -24,6 +24,7 @@ from db.models import (
 from services.gallery_lifecycle import (
     trash_scope,
 )
+from services.gallery_sort import encode_value
 
 _build_cover_map = build_cover_map
 
@@ -54,18 +55,15 @@ def cursor_secret() -> bytes:
     return cursor_hmac_key()
 
 
-def encode_cursor(gallery: Gallery, sort: str) -> str:
+def encode_cursor(gallery: Gallery, sort: str, value) -> str:
     """Encode sort key + id into a signed URL-safe base64 cursor string.
+
+    ``value`` is the row's sort value (the viewer's rating for ``rating``); None
+    encodes as "" (NULL row).
 
     Format: <base64url(json)>.<hmac-sha256-hex>
     """
-    sort_val = {
-        "added_at": gallery.added_at.isoformat() if gallery.added_at else "",
-        "content_updated_at": gallery.content_updated_at.isoformat() if gallery.content_updated_at else "",
-        "rating": gallery.rating,
-        "pages": gallery.pages if gallery.pages is not None else 0,
-    }[sort]
-    payload = {"id": gallery.id, "v": str(sort_val), "s": sort}
+    payload = {"id": gallery.id, "v": encode_value(value), "s": sort}
     encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
     return f"{encoded}.{sig}"
