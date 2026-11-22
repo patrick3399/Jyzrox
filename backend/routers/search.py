@@ -112,7 +112,7 @@ def _encode_cursor(row: Gallery, sort: str, direction: str, value) -> str:
     """Encode sort key + id into a signed URL-safe base64 cursor string.
 
     ``value`` is the row's sort value (the viewer's rating for ``rating``);
-    None is stored as "" (NULL row). Payload: {"id", "v", "s", "d"}.
+    None is stored as JSON null (NULL row). Payload: {"id", "v", "s", "d"}.
 
     Format: <base64url(json)>.<hmac-sha256-hex>
     """
@@ -537,7 +537,10 @@ async def search_galleries(
 
             try:
                 cursor_id = int(c["id"])
-                cursor_val = parse_cursor_value(spec, str(c["v"]))
+                raw_v = c["v"]
+                if raw_v is not None and not isinstance(raw_v, str):
+                    raise ValueError("cursor value must be str or null")
+                cursor_val = parse_cursor_value(spec, raw_v)
             except KeyError, TypeError, ValueError:
                 raise HTTPException(status_code=400, detail="Invalid cursor value")
 

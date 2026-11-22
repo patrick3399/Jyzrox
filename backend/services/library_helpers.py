@@ -59,7 +59,7 @@ def encode_cursor(gallery: Gallery, sort: str, value) -> str:
     """Encode sort key + id into a signed URL-safe base64 cursor string.
 
     ``value`` is the row's sort value (the viewer's rating for ``rating``); None
-    encodes as "" (NULL row).
+    encodes as JSON null (NULL row).
 
     Format: <base64url(json)>.<hmac-sha256-hex>
     """

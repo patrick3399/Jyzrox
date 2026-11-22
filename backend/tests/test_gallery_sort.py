@@ -29,10 +29,11 @@ def _where_sql(key: str, direction: str, value) -> str:
     return str(cond.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
 
-def test_order_by_natural_policy_emits_no_nulls_last_in_either_direction():
+def test_order_by_natural_policy_emits_postgres_default_nulls_clauses():
     for key in ("added_at", "content_updated_at"):
-        assert _order_sql(key, "desc") == "g.v DESC, g.id DESC"
-        assert _order_sql(key, "asc") == "g.v ASC, g.id ASC"
+        assert _order_sql(key, "desc") == "g.v DESC NULLS FIRST, g.id DESC"
+        assert _order_sql(key, "asc") == "g.v ASC NULLS LAST, g.id ASC"
+        assert "DESC NULLS LAST" not in _order_sql(key, "desc")
 
 
 def test_order_by_last_policy_puts_nulls_last_in_both_directions():
@@ -61,7 +62,7 @@ def test_parse_cursor_value_by_kind():
 
 
 def test_encode_value():
-    assert encode_value(None) == ""
+    assert encode_value(None) is None
     assert encode_value(3) == "3"
     assert encode_value(datetime(2024, 1, 2, 3, 4, 5)) == "2024-01-02T03:04:05"
 

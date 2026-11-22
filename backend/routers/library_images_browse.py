@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, exists, func, not_, or_, select
+from sqlalchemy import ARRAY, Text, cast, desc, exists, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +24,13 @@ from services.cas import (
     existing_base_thumbs,
     image_file_url,
 )
+from services.gallery_sort import (
+    IMAGE_ADDED_AT_SPEC,
+    encode_value,
+    keyset_after,
+    order_by,
+    parse_cursor_value,
+)
 from services.library_helpers import cursor_secret as _cursor_secret
 from services.library_helpers import get_image_favorite_set as _get_image_favorite_set
 from services.library_serializers import media_type as _media_type
@@ -35,7 +42,7 @@ router = APIRouter()
 def _encode_image_cursor(img: Image) -> str:
     payload = json.dumps(
         {
-            "added_at": img.added_at.isoformat() if img.added_at else "",
+            "added_at": encode_value(img.added_at),
             "id": img.id,
         }
     )
@@ -231,38 +238,22 @@ async def browse_images(
         else:
             stmt = stmt.where(Image.added_at >= jump_at_dt)
 
-    # Sort direction
-    if sort == "newest":
-        order_cols = [desc(Image.added_at), desc(Image.id)]
-    else:
-        order_cols = [asc(Image.added_at), asc(Image.id)]
+    # Sort direction (NULL added_at follows PostgreSQL's natural placement)
+    direction = "desc" if sort == "newest" else "asc"
+    order_cols = order_by(IMAGE_ADDED_AT_SPEC, Image.added_at, Image.id, direction)
 
     # Keyset cursor
     if cursor:
         try:
             cursor_data = _decode_image_cursor(cursor)
-            cursor_at = datetime.fromisoformat(cursor_data["added_at"]) if cursor_data.get("added_at") else None
-            cursor_id = cursor_data["id"]
-            if sort == "newest":
-                if cursor_at:
-                    stmt = stmt.where(
-                        or_(
-                            Image.added_at < cursor_at,
-                            and_(Image.added_at == cursor_at, Image.id < cursor_id),
-                        )
-                    )
-                else:
-                    stmt = stmt.where(Image.id < cursor_id)
-            else:
-                if cursor_at:
-                    stmt = stmt.where(
-                        or_(
-                            Image.added_at > cursor_at,
-                            and_(Image.added_at == cursor_at, Image.id > cursor_id),
-                        )
-                    )
-                else:
-                    stmt = stmt.where(Image.id > cursor_id)
+            raw_at = cursor_data.get("added_at")
+            if raw_at is not None and not isinstance(raw_at, str):
+                raise ValueError("bad added_at")
+            cursor_at = parse_cursor_value(IMAGE_ADDED_AT_SPEC, raw_at)  # legacy "" -> NULL
+            cursor_id = int(cursor_data["id"])
+            stmt = stmt.where(
+                keyset_after(IMAGE_ADDED_AT_SPEC, Image.added_at, Image.id, direction, cursor_at, cursor_id)
+            )
         except Exception:
             raise HTTPException(400, "Invalid cursor")
 

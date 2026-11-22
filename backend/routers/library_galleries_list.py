@@ -153,7 +153,10 @@ async def list_galleries(
 
         try:
             cursor_id = int(c["id"])
-            cursor_val = parse_cursor_value(spec, str(c["v"]))
+            raw_v = c["v"]
+            if raw_v is not None and not isinstance(raw_v, str):
+                raise ValueError("cursor value must be str or null")
+            cursor_val = parse_cursor_value(spec, raw_v)
         except KeyError, TypeError, ValueError:
             raise HTTPException(status_code=400, detail="Invalid cursor value")
 

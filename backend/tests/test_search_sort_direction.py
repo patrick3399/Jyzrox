@@ -223,7 +223,7 @@ async def test_search_cursor_payload_carries_direction_and_null_marker(client, d
 
     r = await client.get("/api/search/", params={"q": "source:sd", "sort": "rating", "dir": "asc", "limit": 5})
     payload = json.loads(base64.urlsafe_b64decode(r.json()["next_cursor"].split(".")[0] + "=="))
-    assert payload["v"] == ""  # NULL (unrated) row
+    assert payload["v"] is None  # NULL (unrated) row
 
 
 async def test_search_added_at_asc_emits_index_compatible_order(client, db_session, db_engine):
@@ -262,11 +262,11 @@ async def test_search_added_at_asc_emits_index_compatible_order(client, db_sessi
         if "galleries.added_at" in s.split("ORDER BY")[-1] or "content_updated_at" in s.split("ORDER BY")[-1]
     ]
     assert len(ordered) == 8, statements
-    assert all("NULLS" not in s.split("ORDER BY")[-1] for s in ordered), ordered
-    assert sum("added_at ASC, galleries.id ASC" in s for s in ordered) == 2
-    assert sum("added_at DESC, galleries.id DESC" in s for s in ordered) == 2
-    assert sum("content_updated_at ASC, galleries.id ASC" in s for s in ordered) == 2
-    assert sum("content_updated_at DESC, galleries.id DESC" in s for s in ordered) == 2
+    assert all("DESC NULLS LAST" not in s.split("ORDER BY")[-1] for s in ordered), ordered
+    assert sum("added_at ASC NULLS LAST, galleries.id ASC" in s for s in ordered) == 2
+    assert sum("added_at DESC NULLS FIRST, galleries.id DESC" in s for s in ordered) == 2
+    assert sum("content_updated_at ASC NULLS LAST, galleries.id ASC" in s for s in ordered) == 2
+    assert sum("content_updated_at DESC NULLS FIRST, galleries.id DESC" in s for s in ordered) == 2
 
 
 async def test_search_rating_sort_joins_user_ratings_on_data_query_only(client, db_session, db_engine):
