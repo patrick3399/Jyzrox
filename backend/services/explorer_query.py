@@ -212,4 +212,8 @@ def build_explorer_gallery_query(spec: ExplorerQuerySpec, auth: dict):
         )
     sort_column = sort_columns.get(spec.sort, Gallery.added_at)
     order = asc(sort_column) if spec.direction == "asc" else desc(sort_column)
+    if spec.sort == "posted_at":
+        # Nullable, unindexed column: undated galleries go last in both directions
+        # (PostgreSQL would otherwise list them first on DESC).
+        order = order.nulls_last()
     return select(Gallery).where(*filters).order_by(order, desc(Gallery.id))

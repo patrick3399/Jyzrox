@@ -297,7 +297,9 @@ async def search_galleries(
         "content_updated_at": desc(Gallery.content_updated_at),
         "rating": desc(Gallery.rating),
         "pages": desc(Gallery.pages),
-        "posted_at": desc(Gallery.posted_at),
+        # posted_at is nullable (local / social-media galleries have none) and
+        # PostgreSQL sorts NULLs first on DESC: keep undated galleries at the end.
+        "posted_at": desc(Gallery.posted_at).nulls_last(),
         "title": asc(Gallery.title),
     }
     order = sort_map.get(sort, desc(Gallery.added_at))
@@ -547,16 +549,22 @@ async def search_galleries(
             elif effective_sort == "posted_at":
                 from datetime import datetime as _dt
 
-                try:
-                    parsed = _dt.fromisoformat(cursor_val)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid cursor value")
-                base_stmt = base_stmt.where(
-                    or_(
-                        Gallery.posted_at < parsed,
-                        and_(Gallery.posted_at == parsed, Gallery.id < cursor_id),
+                # Order is posted_at DESC NULLS LAST, id DESC. An empty cursor value
+                # means the previous page ended inside the undated (NULL) tail.
+                if cursor_val == "":
+                    base_stmt = base_stmt.where(Gallery.posted_at.is_(None), Gallery.id < cursor_id)
+                else:
+                    try:
+                        parsed = _dt.fromisoformat(cursor_val)
+                    except ValueError:
+                        raise HTTPException(status_code=400, detail="Invalid cursor value")
+                    base_stmt = base_stmt.where(
+                        or_(
+                            Gallery.posted_at < parsed,
+                            and_(Gallery.posted_at == parsed, Gallery.id < cursor_id),
+                            Gallery.posted_at.is_(None),
+                        )
                     )
-                )
             elif effective_sort == "rating":
                 try:
                     cv = int(cursor_val)
