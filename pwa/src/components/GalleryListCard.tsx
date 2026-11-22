@@ -215,8 +215,8 @@ export function GalleryListCard({
             </span>
 
             {/* Rating — gives way to the download badge, which would not fit beside it on phones */}
-            {!isDownloading && (
-              <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
+            {!isDownloading && (gallery.my_rating ?? 0) > 0 && (
+              <RatingStars rating={gallery.my_rating ?? 0} readonly />
             )}
 
             {/* Pages */}

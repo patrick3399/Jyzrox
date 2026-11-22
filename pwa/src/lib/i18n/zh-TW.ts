@@ -387,6 +387,7 @@ const zhTW: Record<string, string> = {
   'library.metaPosted': '發佈時間',
   'library.metaUpdated': '更新時間',
   'library.metaRating': '評分：',
+  'library.sourceRatingLabel': '{source} 評分：{rating} / 5',
   'library.metadataFieldsUpdated': '已從來源更新 {fields}',
   'library.metadataPagesChanged': '頁數變更：{old} → {new}',
   'library.checkingMetadata': '檢查更新中...',

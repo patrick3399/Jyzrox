@@ -763,6 +763,7 @@ const ja: Record<string, string> = {
   'library.metaPosted': '投稿日',
   'library.metaUpdated': '更新日',
   'library.metaRating': '評価:',
+  'library.sourceRatingLabel': '{source} の評価: 5 点中 {rating} 点',
   'library.statusComplete': '完全',
   'library.statusPartial': '部分',
   'library.statusProxyOnly': 'プロキシのみ',

@@ -842,6 +842,7 @@ const zhCN: Record<string, string> = {
   'library.metaPosted': '发布时间',
   'library.metaUpdated': '更新时间',
   'library.metaRating': '评分：',
+  'library.sourceRatingLabel': '{source} 评分：{rating} / 5',
   'library.statusComplete': '完整',
   'library.statusPartial': '部分',
   'library.statusProxyOnly': '仅代理',

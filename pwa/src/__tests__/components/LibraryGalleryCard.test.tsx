@@ -113,10 +113,20 @@ describe('LibraryGalleryCard info block', () => {
     expect(screen.getByText('10p')).toBeInTheDocument()
   })
 
-  it('test_card_without_my_rating_falls_back_to_the_rounded_source_rating', () => {
-    render(<LibraryGalleryCard gallery={{ ...gallery, rating: 3.6 }} onClick={() => {}} />)
+  it('test_card_with_only_a_source_rating_shows_no_rating_badge', () => {
+    const { container } = render(
+      <LibraryGalleryCard gallery={{ ...gallery, rating: 3.6 }} onClick={() => {}} />,
+    )
 
-    expect(screen.getByText('★4')).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/[★☆]/)
+  })
+
+  it('test_card_rating_badge_uses_my_rating_even_when_a_source_rating_exists', () => {
+    render(
+      <LibraryGalleryCard gallery={{ ...gallery, rating: 5, my_rating: 2 }} onClick={() => {}} />,
+    )
+
+    expect(screen.getByText('★2')).toBeInTheDocument()
   })
 
   it('test_card_title_is_a_single_truncated_line_so_the_fixed_row_has_no_empty_second_line', () => {

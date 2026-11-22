@@ -607,6 +607,7 @@ const en: Record<string, string> = {
   'library.metaPosted': 'Posted',
   'library.metaUpdated': 'Updated',
   'library.metaRating': 'Rating:',
+  'library.sourceRatingLabel': '{source} rating: {rating} out of 5',
   'library.statusComplete': 'Complete',
   'library.statusPartial': 'Partial',
   'library.statusProxyOnly': 'Proxy Only',

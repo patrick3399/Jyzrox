@@ -85,3 +85,19 @@ describe('GalleryListCard fixed height', () => {
     expect(pages.parentElement?.textContent).not.toContain('☆')
   })
 })
+
+describe('GalleryListCard rating', () => {
+  it('shows no stars when only the source rating is set', () => {
+    const { container } = render(
+      <GalleryListCard gallery={gallery({ rating: 4 })} onClick={() => {}} />,
+    )
+    expect(container.textContent).not.toMatch(/[★☆]/)
+  })
+
+  it('shows the viewer rating, ignoring the source rating', () => {
+    const { container } = render(
+      <GalleryListCard gallery={gallery({ rating: 5, my_rating: 2 })} onClick={() => {}} />,
+    )
+    expect(container.textContent?.match(/★/g)).toHaveLength(2)
+  })
+})

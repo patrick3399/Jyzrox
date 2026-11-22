@@ -16,6 +16,7 @@ import { pollingRefreshInterval } from '@/lib/wsPolling'
 import { createRequestCoalescer } from '@/lib/requestCoalescer'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import { galleryStatusAction } from '@/lib/galleryUtils'
+import { sourceDisplayName } from '@/lib/sourceStyle'
 import { detailHotkey } from '@/lib/detailHotkeys'
 import { smartBack } from '@/lib/navBack'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
@@ -1144,6 +1145,23 @@ function GalleryDetailPageInner() {
             <span className="text-xs md:text-sm text-vault-text-secondary">
               {(gallery.my_rating ?? 0).toFixed(1)}
             </span>
+            {/* The site's own rating (E-Hentai only): secondary to the viewer's stars, compact on phones */}
+            {gallery.rating > 0 && (
+              <span
+                data-testid="source-rating"
+                role="img"
+                aria-label={t('library.sourceRatingLabel', {
+                  source: sourceDisplayName(gallery.source),
+                  rating: String(Math.round(gallery.rating)),
+                })}
+                className={`ml-auto shrink-0 whitespace-nowrap text-xs text-vault-text-muted ${
+                  canEdit ? 'pr-1 md:pr-0' : ''
+                }`}
+              >
+                <span className="hidden md:inline">{sourceDisplayName(gallery.source)} </span>★
+                {Math.round(gallery.rating)}
+              </span>
+            )}
           </div>
 
           {/* Action row — labels collapse to icons on phones */}

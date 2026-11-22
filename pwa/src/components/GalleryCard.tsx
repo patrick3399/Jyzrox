@@ -65,7 +65,7 @@ export function LibraryGalleryCard({
   const sourceStyle = getSourceStyle(gallery)
   const title = gallery.title || gallery.title_jpn
   // Most library galleries are unrated: show a compact "★4" only when there is one.
-  const rating = Math.round(gallery.my_rating ?? gallery.rating ?? 0)
+  const rating = Math.round(gallery.my_rating ?? 0)
 
   const contextItems = useMemo(() => {
     if (!menuOpen) return []

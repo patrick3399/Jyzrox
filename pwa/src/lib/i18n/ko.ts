@@ -345,6 +345,7 @@ const ko: Record<string, string> = {
   'library.metaPosted': '게시일',
   'library.metaUpdated': '업데이트일',
   'library.metaRating': '평점:',
+  'library.sourceRatingLabel': '{source} 평점: 5점 만점에 {rating}점',
   'library.statusComplete': '완료',
   'library.statusPartial': '부분',
   'library.statusProxyOnly': '프록시만',
