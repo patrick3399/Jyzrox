@@ -29,6 +29,16 @@ interface ReaderImgProps {
 // latching the terminal failure UI.
 const AUTO_RETRY_DELAYS_MS = [1000, 2000, 3000, 5000, 8000]
 
+// iOS WebKit (standalone PWA) can keep showing the frame it decoded while an
+// image was still downloading — an early progressive-JPEG scan, or the top of
+// a baseline JPEG — after the whole file has arrived and `load` has fired.
+// Pinch zoom and turning away and back reuse that frame. Only a page painted
+// during its own download is exposed: pages the prefetcher fetched first never
+// are. So the paged views keep the <img> invisible (no paint, so no decode of
+// partial data) until it has loaded and decoded. Webtoon passes
+// loading="lazy" and keeps native lazy loading.
+const HIDDEN_STYLE: React.CSSProperties = { visibility: 'hidden' }
+
 export function ReaderImg({
   image,
   className,
@@ -45,9 +55,26 @@ export function ReaderImg({
   const [attempt, setAttempt] = useState(0)
   const [autoRetriesUsed, setAutoRetriesUsed] = useState(0)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // The src whose load has been decoded and may be painted.
+  const [revealedSrc, setRevealedSrc] = useState<string | null>(null)
 
   // Reset error/retry state whenever the underlying image changes.
   const url = image.url
+  // Cache-buster forces a real network re-request on retry.
+  const src =
+    attempt > 0 && url ? `${url}${url.includes('?') ? '&' : '?'}_r=${attempt}` : (url ?? '')
+  const holdUntilDecoded = loading !== 'lazy'
+  const revealed = !holdUntilDecoded || revealedSrc === src
+
+  // The src currently rendered, read by decode callbacks that settle after the
+  // page changed or the element unmounted.
+  const currentSrcRef = useRef<string | null>(src)
+  useEffect(() => {
+    currentSrcRef.current = src
+    return () => {
+      currentSrcRef.current = null
+    }
+  }, [src])
   useEffect(() => {
     clearTimeout(retryTimerRef.current)
     retryTimerRef.current = undefined
@@ -108,9 +135,6 @@ export function ReaderImg({
     )
   }
 
-  // Cache-buster forces a real network re-request on retry.
-  const src =
-    attempt > 0 && url ? `${url}${url.includes('?') ? '&' : '?'}_r=${attempt}` : (url ?? '')
   const canAutoRetry = Boolean(url?.startsWith('/api/eh/image-proxy/'))
 
   return (
@@ -119,11 +143,25 @@ export function ReaderImg({
       src={src}
       alt={`Page ${image.pageNum}`}
       className={className}
-      style={style}
+      style={revealed ? style : { ...style, ...HIDDEN_STYLE }}
       draggable={draggable}
       loading={loading}
       data-page={dataPage}
-      onLoad={onLoad}
+      onLoad={(e) => {
+        if (!holdUntilDecoded) {
+          onLoad?.()
+          return
+        }
+        const loadedSrc = src
+        const reveal = () => {
+          if (currentSrcRef.current !== loadedSrc) return
+          setRevealedSrc(loadedSrc)
+          onLoad?.()
+        }
+        const el = e.currentTarget
+        if (typeof el.decode === 'function') el.decode().then(reveal, reveal)
+        else reveal()
+      }}
       onError={() => {
         if (canAutoRetry && autoRetriesUsed < AUTO_RETRY_DELAYS_MS.length) {
           const delay = AUTO_RETRY_DELAYS_MS[autoRetriesUsed]

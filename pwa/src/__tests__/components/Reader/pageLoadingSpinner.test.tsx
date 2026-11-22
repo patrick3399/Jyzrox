@@ -133,6 +133,31 @@ describe('Reader single-page loading spinner', () => {
     expect(screen.queryByTestId('reader-page-loading')).not.toBeNull()
   })
 
+  // The page-change effect skipped the page the Reader opened on, so while the
+  // first page was still loading (or stuck) the screen showed no spinner.
+  it('shows the spinner while the page the reader opened on is still loading', () => {
+    render(
+      <Reader
+        source="local"
+        sourceId="1"
+        backHref="/library"
+        downloadStatus="complete"
+        images={makeGalleryImages(20)}
+        totalPages={20}
+      />,
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(200)
+    })
+
+    expect(screen.queryByTestId('reader-page-loading')).not.toBeNull()
+
+    finishLoading(1)
+
+    expect(screen.queryByTestId('reader-page-loading')).toBeNull()
+  })
+
   it('control: shows the spinner on the first visit to a page that is still loading', () => {
     render(
       <Reader

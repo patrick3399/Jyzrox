@@ -217,7 +217,10 @@ export default function Reader({
 
   // Track image loading state for single/double page views
   const [pageLoading, setPageLoading] = useState(false)
-  const loadingPageRef = useRef(state.currentPage)
+  // Starts empty so the page-change effect also arms the spinner for the page
+  // the Reader opens on; seeding it with that page skipped it, and a slow or
+  // stuck first page showed no loading state at all.
+  const loadingPageRef = useRef<number | null>(null)
   const loadedPagesRef = useRef<Set<number>>(new Set())
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
