@@ -6,7 +6,8 @@ import { usePinchZoom } from './hooks'
 import { Spinner } from './Spinner'
 import { getScaleImageClass } from './scaleClasses'
 import { RetryLayerContext } from './ReaderImg'
-import { MediaElement } from './MediaElement'
+import { PageSlot } from './PageSlot'
+import { useSlotSettlement, waitsForDecode } from './slotSettlement'
 import type { ImageLongPressHandlers } from './viewTypes'
 
 interface DoublePageViewProps {
@@ -83,6 +84,32 @@ export function DoublePageView({
   )
   const edgeZones = !isZoomed && (!playerMounted || !showOverlay)
 
+  // Hold the outgoing pair on screen until both incoming pages can be painted.
+  // Each half mounts one element per page, and a new element stays invisible
+  // until it has loaded and decoded (FE-T34); swapping straight away showed
+  // the black background on every turn. Each half tracks its own elements: a
+  // page that moves to the other half (RTL toggle) is a new element there.
+  const firstSettlement = useSlotSettlement()
+  const secondSettlement = useSlotSettlement()
+  const pairReady =
+    sideReady(firstImage, firstSettlement.isSettled) &&
+    sideReady(secondImage, secondSettlement.isSettled)
+  const [shownPair, setShownPair] = useState<ShownPair | null>(null)
+  if (
+    pairReady &&
+    (shownPair == null ||
+      !samePage(shownPair.first, firstImage) ||
+      !samePage(shownPair.second, secondImage))
+  ) {
+    setShownPair({ first: firstImage, second: secondImage })
+  }
+  const holding =
+    !pairReady &&
+    shownPair != null &&
+    (shownPair.first != null || shownPair.second != null) &&
+    sideHoldable(shownPair.first, firstSettlement.isSettled) &&
+    sideHoldable(shownPair.second, secondSettlement.isSettled)
+
   return (
     <div
       ref={containerRef}
@@ -101,72 +128,32 @@ export function DoublePageView({
         }}
         className="flex h-full w-full flex-row"
       >
-        <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
-          {firstImage ? (
-            (() => {
-              const lp =
-                imageLongPress && firstImage.url
-                  ? imageLongPress(firstImage.pageNum, firstImage.url)
-                  : undefined
-              return (
-                <div
-                  className="w-full h-full flex items-center justify-center"
-                  onTouchStart={lp?.onTouchStart}
-                  onTouchMove={lp?.onTouchMove}
-                  onTouchEnd={lp?.onTouchEnd}
-                  onContextMenu={lp?.onContextMenu}
-                >
-                  <RetryLayerContext.Provider value={firstRetryLayer}>
-                    <MediaElement
-                      image={firstImage}
-                      className={imgClass}
-                      draggable={false}
-                      onLoad={onImageLoaded}
-                      onError={onImageError}
-                      onToggleOverlay={onToggleOverlay}
-                      overlayVisible={showOverlay}
-                    />
-                  </RetryLayerContext.Provider>
-                </div>
-              )
-            })()
-          ) : (
-            <div className="h-full w-full" />
-          )}
-        </div>
-        <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
-          {secondImage ? (
-            (() => {
-              const lp =
-                imageLongPress && secondImage.url
-                  ? imageLongPress(secondImage.pageNum, secondImage.url)
-                  : undefined
-              return (
-                <div
-                  className="w-full h-full flex items-center justify-center"
-                  onTouchStart={lp?.onTouchStart}
-                  onTouchMove={lp?.onTouchMove}
-                  onTouchEnd={lp?.onTouchEnd}
-                  onContextMenu={lp?.onContextMenu}
-                >
-                  <RetryLayerContext.Provider value={secondRetryLayer}>
-                    <MediaElement
-                      image={secondImage}
-                      className={imgClass}
-                      draggable={false}
-                      onLoad={onImageLoaded}
-                      onError={onImageError}
-                      onToggleOverlay={onToggleOverlay}
-                      overlayVisible={showOverlay}
-                    />
-                  </RetryLayerContext.Provider>
-                </div>
-              )
-            })()
-          ) : (
-            <div className="h-full w-full" />
-          )}
-        </div>
+        <DoubleHalf
+          current={firstImage}
+          holding={holding}
+          held={shownPair?.first ?? null}
+          settlement={firstSettlement}
+          retryLayer={firstRetryLayer}
+          imgClass={imgClass}
+          onImageLoaded={onImageLoaded}
+          onImageError={onImageError}
+          onToggleOverlay={onToggleOverlay}
+          showOverlay={showOverlay}
+          imageLongPress={imageLongPress}
+        />
+        <DoubleHalf
+          current={secondImage}
+          holding={holding}
+          held={shownPair?.second ?? null}
+          settlement={secondSettlement}
+          retryLayer={secondRetryLayer}
+          imgClass={imgClass}
+          onImageLoaded={onImageLoaded}
+          onImageError={onImageError}
+          onToggleOverlay={onToggleOverlay}
+          showOverlay={showOverlay}
+          imageLongPress={imageLongPress}
+        />
       </div>
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
@@ -261,6 +248,98 @@ export function DoublePageView({
         <div ref={setFirstRetryLayer} className="flex h-full w-1/2 items-center justify-center" />
         <div ref={setSecondRetryLayer} className="flex h-full w-1/2 items-center justify-center" />
       </div>
+    </div>
+  )
+}
+
+interface ShownPair {
+  first: ReaderImage | null
+  second: ReaderImage | null
+}
+
+type IsSettled = (image: ReaderImage) => boolean
+
+function samePage(a: ReaderImage | null, b: ReaderImage | null): boolean {
+  if (a == null || b == null) return a === b
+  return a.pageNum === b.pageNum && a.url === b.url
+}
+
+/** The incoming page of a half no longer needs the outgoing pair held. */
+function sideReady(image: ReaderImage | null, isSettled: IsSettled): boolean {
+  return !waitsForDecode(image) || isSettled(image)
+}
+
+/** The outgoing page of a half can still be painted (or the half was empty). */
+function sideHoldable(image: ReaderImage | null, isSettled: IsSettled): boolean {
+  return image == null || (waitsForDecode(image) && isSettled(image))
+}
+
+function DoubleHalf({
+  current,
+  holding,
+  held,
+  settlement,
+  retryLayer,
+  imgClass,
+  onImageLoaded,
+  onImageError,
+  onToggleOverlay,
+  showOverlay,
+  imageLongPress,
+}: {
+  current: ReaderImage | null
+  /** Show `held` (the outgoing pair's page, null if the half was empty) instead of `current`. */
+  holding: boolean
+  held: ReaderImage | null
+  settlement: ReturnType<typeof useSlotSettlement>
+  retryLayer: HTMLDivElement | null
+  imgClass: string
+  onImageLoaded: () => void
+  onImageError: () => void
+  onToggleOverlay: () => void
+  showOverlay: boolean
+  imageLongPress?: (pageNum: number, imageUrl: string) => ImageLongPressHandlers
+}) {
+  const slots: ReaderImage[] = current ? [current] : []
+  if (holding && held && held.pageNum !== current?.pageNum) slots.push(held)
+  const visiblePage = holding ? (held?.pageNum ?? null) : (current?.pageNum ?? null)
+  const lp =
+    imageLongPress && current?.url ? imageLongPress(current.pageNum, current.url) : undefined
+
+  return (
+    <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
+      {slots.length > 0 ? (
+        <div
+          className="w-full h-full flex items-center justify-center"
+          onTouchStart={lp?.onTouchStart}
+          onTouchMove={lp?.onTouchMove}
+          onTouchEnd={lp?.onTouchEnd}
+          onContextMenu={lp?.onContextMenu}
+        >
+          {slots.map((slot) => (
+            // Only the current page may put its notice in the layer.
+            <RetryLayerContext.Provider
+              key={slot.pageNum}
+              value={slot === current ? retryLayer : null}
+            >
+              <PageSlot
+                image={slot}
+                isCurrent={slot === current}
+                visible={slot.pageNum === visiblePage}
+                className={imgClass}
+                onCurrentLoaded={onImageLoaded}
+                onCurrentError={onImageError}
+                onSlotSettled={settlement.markSettled}
+                onSlotUnmounted={settlement.forget}
+                onToggleOverlay={onToggleOverlay}
+                overlayVisible={showOverlay}
+              />
+            </RetryLayerContext.Provider>
+          ))}
+        </div>
+      ) : (
+        <div className="h-full w-full" />
+      )}
     </div>
   )
 }

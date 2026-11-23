@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReaderImage } from './types'
 import { MediaElement } from './MediaElement'
 
@@ -10,26 +10,36 @@ const RETAINED_SLOT_STYLE: React.CSSProperties = { display: 'none' }
 interface PageSlotProps {
   image: ReaderImage
   isCurrent: boolean
+  /** Painted on screen. Usually the current page; see SinglePageView for the hold. */
+  visible: boolean
   className: string
   onCurrentLoaded: () => void
   onCurrentError: () => void
-  onSlotLoaded: (pageNum: number) => void
+  onSlotLoaded?: (pageNum: number) => void
+  /** This slot's element finished with `url`: loaded and decoded, or failed for good. */
+  onSlotSettled: (pageNum: number, url: string | null) => void
+  onSlotUnmounted: (pageNum: number) => void
   onToggleOverlay: () => void
   overlayVisible: boolean
 }
 
 /**
- * One page of the single-page view. The view keeps the previous and next page
- * mounted next to the current one, hidden, so turning back reuses an element
- * that already holds its image instead of requesting it again.
+ * One page of a paged view. The single-page view keeps the previous and next
+ * page mounted next to the current one, hidden, so turning back reuses an
+ * element that already holds its image instead of requesting it again. Both
+ * paged views also keep the outgoing page shown here until the incoming one
+ * has settled.
  */
 export function PageSlot({
   image,
   isCurrent,
+  visible,
   className,
   onCurrentLoaded,
   onCurrentError,
   onSlotLoaded,
+  onSlotSettled,
+  onSlotUnmounted,
   onToggleOverlay,
   overlayVisible,
 }: PageSlotProps) {
@@ -51,17 +61,29 @@ export function PageSlot({
     else if (status === 'error') onCurrentError()
   }, [isCurrent, status, onCurrentLoaded, onCurrentError])
 
+  // The element goes with the slot, so the view must stop counting it as settled.
+  const pageNum = image.pageNum
+  const onSlotUnmountedRef = useRef(onSlotUnmounted)
+  useEffect(() => {
+    onSlotUnmountedRef.current = onSlotUnmounted
+  }, [onSlotUnmounted])
+  useEffect(() => () => onSlotUnmountedRef.current(pageNum), [pageNum])
+
   return (
     <MediaElement
       image={image}
       className={className}
-      style={isCurrent ? undefined : RETAINED_SLOT_STYLE}
+      style={visible ? undefined : RETAINED_SLOT_STYLE}
       draggable={false}
       onLoad={() => {
         setSettled({ url: image.url, status: 'loaded' })
-        onSlotLoaded(image.pageNum)
+        onSlotLoaded?.(image.pageNum)
+        onSlotSettled(image.pageNum, image.url)
       }}
-      onError={() => setSettled({ url: image.url, status: 'error' })}
+      onError={() => {
+        setSettled({ url: image.url, status: 'error' })
+        onSlotSettled(image.pageNum, image.url)
+      }}
       onToggleOverlay={onToggleOverlay}
       overlayVisible={overlayVisible}
     />

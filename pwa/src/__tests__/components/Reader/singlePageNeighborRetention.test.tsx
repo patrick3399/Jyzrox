@@ -165,6 +165,8 @@ describe('Reader single-page neighbour retention', () => {
     const page1 = pageImg(1)
 
     turn('ArrowRight')
+    // Page 1 stays painted until page 2 can be shown (singlePageHoldOutgoing).
+    finishLoading(2)
 
     expect(pageImg(1)).toBe(page1)
     expect(pageImg(1)?.style.display).toBe('none')
@@ -209,6 +211,7 @@ describe('Reader single-page neighbour retention', () => {
     finishLoading(2)
 
     turn('ArrowRight')
+    finishLoading(3)
 
     expect(pageImg(1)).toBeNull()
     expect(pageImg(2)?.style.display).toBe('none')
@@ -288,6 +291,7 @@ describe('Reader single-page neighbour retention', () => {
     const page1 = pageImg(1)
 
     turn('ArrowRight')
+    finishLoading(2)
 
     expect(pageImg(1)).toBe(page1)
     expect(pageImg(1)?.style.display).toBe('none')

@@ -7,6 +7,7 @@ import { Spinner } from './Spinner'
 import { getScaleContainerClass, getScaleImageClass } from './scaleClasses'
 import { RetryLayerContext } from './ReaderImg'
 import { PageSlot } from './PageSlot'
+import { useSlotSettlement, waitsForDecode } from './slotSettlement'
 import type { ImageLongPressHandlers } from './viewTypes'
 
 interface SinglePageViewProps {
@@ -93,9 +94,34 @@ export function SinglePageView({
     candidate.mediaType === 'image' &&
     candidate.url != null &&
     (loadedPages.has(candidate.pageNum) || prefetchedPages.has(candidate.pageNum))
+
+  const settlement = useSlotSettlement()
+
+  // Hold the outgoing page on screen until the incoming one can be painted.
+  // A page the view had not mounted yet (always the case in proxy mode, see
+  // FE-T20) mounts a new element that stays invisible until decoded (FE-T34),
+  // so swapping straight away showed the black background for every first
+  // visit to a page.
+  const currentReady = !waitsForDecode(image) || settlement.isSettled(image)
+  const [shown, setShown] = useState<ReaderImage | null>(null)
+  if (currentReady && (shown?.pageNum !== image.pageNum || shown.url !== image.url)) {
+    setShown(image)
+  }
+  const held =
+    !currentReady &&
+    shown != null &&
+    shown.pageNum !== image.pageNum &&
+    waitsForDecode(shown) &&
+    settlement.isSettled(shown)
+      ? shown
+      : null
+  const visiblePage = held ? held.pageNum : image.pageNum
+
   const slots = [prevImage, image, nextImage].filter(
     (slot): slot is ReaderImage => slot === image || retainable(slot),
   )
+  // A jump leaves the outgoing page outside prev/next; keep it for the hold.
+  if (held && !slots.some((slot) => slot.pageNum === held.pageNum)) slots.push(held)
   const [retryLayer, setRetryLayer] = useState<HTMLDivElement | null>(null)
 
   return (
@@ -121,16 +147,19 @@ export function SinglePageView({
         className="w-full h-full flex items-center justify-center"
       >
         {slots.map((slot) => (
-          // Only the page on screen may put its notice in the layer; a retained
+          // Only the current page may put its notice in the layer; a retained
           // neighbour is hidden and keeps its own inside its hidden box.
           <RetryLayerContext.Provider key={slot.pageNum} value={slot === image ? retryLayer : null}>
             <PageSlot
               image={slot}
               isCurrent={slot === image}
+              visible={slot.pageNum === visiblePage}
               className={getScaleImageClass(scaleMode)}
               onCurrentLoaded={onImageLoaded}
               onCurrentError={onImageError}
               onSlotLoaded={markSlotLoaded}
+              onSlotSettled={settlement.markSettled}
+              onSlotUnmounted={settlement.forget}
               onToggleOverlay={onToggleOverlay}
               overlayVisible={showOverlay}
             />
